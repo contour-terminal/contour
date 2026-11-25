@@ -13,10 +13,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <functional>
 #include <memory>
+#include <system_error>
 #include <vector>
 
 #include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
@@ -43,20 +47,28 @@ inline constexpr std::size_t ExecutorStackBytes = MaxCallDepth * (MaxRuntimeStac
 static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
               "a host runs the stack the parent gives");
 
+/// Starts the thread a lane's executor runs on, with the stack it asks for, as ExecutorThread::start does.
+using ExecutorStarter =
+    std::function<std::expected<ExecutorThread, std::error_code>(std::size_t, std::function<void()>)>;
+
 /// How a host server runs.
 struct HostServerConfig
 {
     remote::proto::PduLimits limits {}; ///< The caps of the PDUs it receives, and sends.
     /// How far the host confined itself, as its Hello states.
     remote::proto::LockdownState lockdown = remote::proto::LockdownState::Unsandboxed;
+    /// How each lane's executor thread is started: the operating system's threads, but in a test that
+    /// makes one fail.
+    ExecutorStarter startExecutor = &ExecutorThread::start;
 };
 
 /// Why a host server stopped serving.
 enum class ServerExit : uint8_t
 {
-    ProtocolViolation, ///< The parent sent what the protocol does not allow, on any channel.
-    PeerClosed,        ///< The parent closed a channel, or a channel failed.
-    Stopped,           ///< stop() was called.
+    ProtocolViolation,   ///< The parent sent what the protocol does not allow, on any channel.
+    PeerClosed,          ///< The parent closed a channel, or a channel failed.
+    Stopped,             ///< stop() was called.
+    ExecutorUnavailable, ///< A lane's executor thread could not be started.
 };
 
 /// Serves one engine over a control channel and its lanes.
@@ -80,7 +92,8 @@ class HostServer
     /// Sends Hello, starts one executor thread per lane (of ExecutorStackBytes), serves control on the
     /// calling thread until EOF, a violation or stop(); then stops, joins the executors, releases every
     /// instance, module, runtime. Called once.
-    /// @return Why it stopped serving: the first of the reasons that came up, on any channel.
+    /// @return Why it stopped serving: the first of the reasons that came up, on any channel;
+    ///         `ExecutorUnavailable` if a lane's thread could not be started, serving nothing then.
     [[nodiscard]] ServerExit run();
 
     /// Thread-safe, idempotent: interrupts every live instance, shuts every channel down. Callable before,

@@ -6,8 +6,10 @@
 /// needs, since the guest calls it nests run on its stack.
 
 #include <cstddef>
+#include <expected>
 #include <functional>
 #include <memory>
+#include <system_error>
 
 namespace vtextension::wasm::host
 {
@@ -23,8 +25,10 @@ class ExecutorThread
     /// Starts @p body on a new thread.
     /// @param stackBytes The least stack the thread gets; the platform's minimum if that is larger.
     /// @param body What the thread runs. Must not throw.
-    /// @throws std::system_error if the thread could not be started, as std::thread does.
-    ExecutorThread(std::size_t stackBytes, std::function<void()> body);
+    /// @return The running thread; why the platform could not start it, @p body then never running.
+    [[nodiscard]] static std::expected<ExecutorThread, std::error_code> start(std::size_t stackBytes,
+                                                                              std::function<void()> body);
+
     ExecutorThread(ExecutorThread&&) noexcept;
     ExecutorThread& operator=(ExecutorThread&&) noexcept;
     ExecutorThread(ExecutorThread const&) = delete;
@@ -36,6 +40,8 @@ class ExecutorThread
     void join() noexcept;
 
   private:
+    explicit ExecutorThread(std::unique_ptr<State> state) noexcept;
+
     std::unique_ptr<State> _state;
 };
 

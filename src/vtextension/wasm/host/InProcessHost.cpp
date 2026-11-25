@@ -62,7 +62,7 @@ InProcessHost::InProcessHost(std::shared_ptr<InProcessHostRegistry> registry,
                              HostServerConfig config):
     _registry { std::move(registry) },
     _engine { std::move(engine) },
-    _server { *_engine, std::move(lanes), std::move(control), config },
+    _server { *_engine, std::move(lanes), std::move(control), std::move(config) },
     _thread { [this] {
         std::ignore = _server.run();
         _state.store(ServingState::Ended);
@@ -96,7 +96,7 @@ InProcessHost::ServingState InProcessHost::state() const noexcept
 
 InProcessHostConnector::InProcessHostConnector(EngineFactory engines, HostServerConfig config):
     _engines { std::move(engines) },
-    _config { config },
+    _config { std::move(config) },
     _registry { std::make_shared<InProcessHostRegistry>() },
     _connects { 0 }
 {

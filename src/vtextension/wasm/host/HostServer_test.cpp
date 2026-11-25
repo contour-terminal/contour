@@ -5,15 +5,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <future>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -22,6 +25,7 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/testing/TestModules.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
 #include <vtextension/wasm/host/InProcessHost.hpp>
@@ -36,6 +40,7 @@ using vtextension::ExtensionError;
 using vtextension::testing::toModule;
 using vtextension::wasm::CallFailure;
 using vtextension::wasm::ModuleIdentity;
+using vtextension::wasm::host::ExecutorThread;
 using vtextension::wasm::host::HostServer;
 using vtextension::wasm::host::HostServerConfig;
 using vtextension::wasm::host::InProcessHostConnector;
@@ -673,6 +678,26 @@ TEST_CASE("HostServer.runtimeHoldsTheParentsTableCap", "[vtextension][host]")
               == proto::Pdu { proto::RuntimeCreated { .runtimeId = runtimeId,
                                                       .error = ExtensionError::RuntimeUnavailable } });
     }
+}
+
+TEST_CASE("HostServer.executorThatCannotStartEndsTheServer", "[vtextension][host]")
+{
+    // The second lane's thread cannot start: the server says why it ends instead of throwing, and the first
+    // lane's thread is joined on the way out.
+    auto starts = std::make_shared<std::atomic<int>>(0);
+    auto config = HostServerConfig {};
+    config.startExecutor =
+        [starts](std::size_t stackBytes,
+                 std::function<void()> body) -> std::expected<ExecutorThread, std::error_code> {
+        if (starts->fetch_add(1) == 1)
+            return std::unexpected(std::make_error_code(std::errc::resource_unavailable_try_again));
+        return ExecutorThread::start(stackBytes, std::move(body));
+    };
+    auto parent = ScriptedParent { std::move(config) };
+    parent.skipHello();
+    CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);
+    CHECK(parent.control->receive() == std::unexpected(StreamError::Closed));
+    CHECK(starts->load() == 2);
 }
 
 TEST_CASE("HostServer.malformedFrameEndsTheConnection", "[vtextension][host]")

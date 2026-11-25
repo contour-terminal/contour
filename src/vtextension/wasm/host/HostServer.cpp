@@ -209,6 +209,9 @@ class HostServer::Impl
     /// every channel down, so that every thread blocked on one returns. Repeating it is harmless.
     void finish(ServerExit reason) noexcept;
 
+    /// Serves the control channel until the connection ends, and ends it for the reason it does.
+    void serveControl();
+
     /// Releases every instance, module and runtime the parent did not, then the control thread's guard; on
     /// the control thread, once every executor is joined.
     void release() noexcept;
@@ -275,8 +278,8 @@ HostServer::Impl::Impl(IHostedEngine& engine,
                        Channel control,
                        HostServerConfig config):
     _engine { engine },
-    _config { config },
-    _control { std::move(control), proto::ChannelKind::Control, proto::Direction::ToHelper, config.limits }
+    _config { std::move(config) },
+    _control { std::move(control), proto::ChannelKind::Control, proto::Direction::ToHelper, _config.limits }
 {
     _lanes.reserve(lanes.size());
     for (auto&& [index, channel]: core::views::enumerate(lanes))
@@ -284,7 +287,7 @@ HostServer::Impl::Impl(IHostedEngine& engine,
                                 .stream = PduStream { std::move(channel),
                                                       proto::ChannelKind::Lane,
                                                       proto::Direction::ToHelper,
-                                                      config.limits },
+                                                      _config.limits },
                                 .tag = static_cast<uint32_t>(index) + 1,
                                 .ended = std::nullopt,
                                 .calls = {},
@@ -306,22 +309,16 @@ ServerExit HostServer::Impl::run()
     {
         executors.reserve(_lanes.size());
         for (auto& lane: _lanes)
-            executors.emplace_back(ExecutorStackBytes, [this, &lane] { runLane(lane); });
-        while (true)
         {
-            auto request = _control.receive();
-            if (!request)
-            {
-                finish(exitOf(request.error()));
+            auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane] { runLane(lane); });
+            if (!started)
                 break;
-            }
-            auto const served = std::visit([&](auto& pdu) { return serve(pdu); }, *request);
-            if (!served)
-            {
-                finish(served.error());
-                break;
-            }
+            executors.push_back(std::move(*started));
         }
+        if (executors.size() == _lanes.size())
+            serveControl();
+        else
+            finish(ServerExit::ExecutorUnavailable);
     }
     else
         finish(hello.error());
@@ -332,6 +329,25 @@ ServerExit HostServer::Impl::run()
     releaseAll.run();
     auto const lock = std::scoped_lock { _mutex };
     return _exit.value_or(ServerExit::Stopped);
+}
+
+void HostServer::Impl::serveControl()
+{
+    while (true)
+    {
+        auto request = _control.receive();
+        if (!request)
+        {
+            finish(exitOf(request.error()));
+            return;
+        }
+        auto const served = std::visit([&](auto& pdu) { return serve(pdu); }, *request);
+        if (!served)
+        {
+            finish(served.error());
+            return;
+        }
+    }
 }
 
 void HostServer::Impl::release() noexcept
@@ -709,7 +725,7 @@ HostServer::HostServer(IHostedEngine& engine,
                        std::vector<Channel> lanes,
                        Channel control,
                        HostServerConfig config):
-    _impl { std::make_unique<Impl>(engine, std::move(lanes), std::move(control), config) }
+    _impl { std::make_unique<Impl>(engine, std::move(lanes), std::move(control), std::move(config)) }
 {
 }
 

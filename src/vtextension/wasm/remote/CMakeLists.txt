@@ -64,6 +64,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     # (vtextension_wasmtime_hosted_engine).
     add_executable(vtextension_remote_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+        ../host/ExecutorThread_test.cpp
         ../host/HostServer_test.cpp
     )
     target_link_libraries(vtextension_remote_test PRIVATE
