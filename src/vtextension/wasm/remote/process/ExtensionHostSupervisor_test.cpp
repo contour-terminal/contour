@@ -300,6 +300,9 @@ TEST_CASE("Supervisor.helperExitingWithinTheGraceIsNotKilled", "[vtextension]")
     }
     rig.supervisor->sync();
     rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+    // Reaped before the clock moves on: a turn of the loop already under way could otherwise see the exit
+    // only after it saw the grace run out.
+    rig.supervisor->sync();
     rig.advance(1h);
     CHECK(rig.fake->kills().empty());
     CHECK(rig.supervisor->counters().reaped == 1);
