@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <orchestrator/core/WorkItems.hpp>
@@ -550,4 +551,154 @@ TEST_CASE("WorkItems: the filter matches number, key, title, repository and URL"
         CHECK_FALSE(matchesFilter(flaky, filter));
     }
     CHECK_FALSE(matchesFilter(bump, "!2375"));
+}
+
+namespace
+{
+
+/// A configuration of one repository with @p workers (a `"workers": [...],` member, or empty) and @p tasks.
+Config configOf(std::string const& workers, std::string const& tasks)
+{
+    auto const json = "{ \"worktree_root\": \"~/worktrees\"," + workers
+                      + " \"repos\": [ { \"path\": \"~/repo/contour\", \"forge\": \"github\" } ],"
+                        " \"tasks\": [ "
+                      + tasks + " ] }";
+    auto const host = HostInfo { .home = "/home/u",
+                                 .worktreeRoot = "/home/u/worktrees",
+                                 .repoPaths = { "/home/u/repo/contour" },
+                                 .utcOffsetMinutes = 60 };
+    auto config = Config::parse(json, host, sourceTables());
+    if (!config)
+        FAIL(message(config.error(), sourceTables()));
+    return std::move(*config);
+}
+
+/// A task row as the configuration spells it: `applies_to` is `pr` or `issue`, and @p extra adds members.
+std::string taskJson(std::string_view id, char key, std::string_view appliesTo, std::string_view extra = {})
+{
+    return std::string { "{ \"id\": \"" } + std::string { id } + "\", \"key\": \"" + key + "\", \"label\": \""
+           + std::string { id } + "\", \"applies_to\": \"" + std::string { appliesTo }
+           + "\", \"model\": \"opus\", \"prompt\": \"/x {url}\"" + std::string { extra } + " }";
+}
+
+/// A work item for an MR row, grouped as groupOf() groups it.
+WorkItem mrRowOf(ChangeRequest mr)
+{
+    auto const group = groupOf(mr);
+    auto const number = mr.number;
+    return WorkItem {
+        .group = group, .repo = "contour", .changeRequest = std::move(mr), .item = ChangeRequestRef { number }
+    };
+}
+
+/// A work item for a ticket row of progress @p progress.
+WorkItem ticketRowOf(std::string const& key, Progress progress)
+{
+    return WorkItem { .group = groupOf(progress),
+                      .repo = "contour",
+                      .ticket = jiraOf(key, progress).issue,
+                      .ticketKey = key,
+                      .item = JiraRef { key } };
+}
+
+/// The id of the suggested task, or "" when none applies.
+std::string suggestedIdOf(Config const& config, WorkItem const& item)
+{
+    auto const suggestion = suggestTask(config, item);
+    return suggestion.task != nullptr ? suggestion.task->id : std::string {};
+}
+
+/// The tasks the suggestion tests configure: the role-bearing ones, and one by id alone.
+constexpr auto SuggestionTasks = R"(
+{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "opus", "prompt": "/x {url}" },
+{ "id": "mend", "key": "g", "label": "mend", "applies_to": "pr", "model": "opus", "prompt": "/x {url}",
+  "role": "resolve_conflicts" },
+{ "id": "address_review", "key": "r", "label": "address review", "applies_to": "pr", "model": "opus",
+  "prompt": "/x {url}" },
+{ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
+  "prompt": "/x {url}", "role": "work_on_issue" })"sv;
+
+} // namespace
+
+TEST_CASE("WorkItems: the suggested task follows the row's state", "[orchestrator][work][suggest]")
+{
+    auto const config = configOf("", std::string { SuggestionTasks });
+
+    auto failing = mrOf(2375, "PRJ-1234: fix", CiState::Failing, ReviewState::None);
+    failing.failingChecks = { "test-windows" };
+    auto const failingItem = mrRowOf(failing);
+    auto const failingSuggestion = suggestTask(config, failingItem);
+    CHECK(suggestedIdOf(config, failingItem) == "fix_ci");
+    CHECK(failingSuggestion.reason == "pipeline fails: test-windows");
+
+    auto failingAndConflicting = failing;
+    failingAndConflicting.conflicts = Conflicts::Conflicting;
+    CHECK(suggestedIdOf(config, mrRowOf(failingAndConflicting)) == "fix_ci");
+
+    auto conflicting = mrOf(2376, "fix", CiState::None, ReviewState::None);
+    conflicting.conflicts = Conflicts::Conflicting;
+    auto const conflictingSuggestion = suggestTask(config, mrRowOf(conflicting));
+    CHECK(conflictingSuggestion.task != nullptr);
+    CHECK(suggestedIdOf(config, mrRowOf(conflicting)) == "mend");
+    CHECK(conflictingSuggestion.reason == "conflicts with master");
+
+    auto const changesRequested = mrOf(2377, "fix", CiState::Passing, ReviewState::ChangesRequested);
+    CHECK(suggestedIdOf(config, mrRowOf(changesRequested)) == "address_review");
+    CHECK(suggestTask(config, mrRowOf(changesRequested)).reason == "changes requested");
+
+    auto const inProgress = ticketRowOf("PRJ-1300", Progress::InProgress);
+    CHECK(suggestedIdOf(config, inProgress) == "issue");
+    CHECK(suggestTask(config, inProgress).reason == "ticket in progress");
+
+    auto const notStarted = ticketRowOf("PRJ-1301", Progress::NotStarted);
+    CHECK(suggestTask(config, notStarted).reason == "ticket");
+
+    auto const pending = mrOf(2378, "fix", CiState::Pending, ReviewState::None);
+    CHECK(suggestedIdOf(config, mrRowOf(pending)) == "fix_ci");
+    CHECK(suggestTask(config, mrRowOf(pending)).reason == "first task for a merge request");
+
+    // No task has role fix_ci: the failing row falls through to the first merge request task.
+    auto const noFixCi = configOf("", taskJson("lint", 'l', "pr") + ", " + taskJson("issue", 'w', "issue"));
+    CHECK(suggestedIdOf(noFixCi, failingItem) == "lint");
+    CHECK(suggestTask(noFixCi, failingItem).reason == "first task for a merge request");
+}
+
+TEST_CASE("WorkItems: the worker defaults to the task's, else the least busy",
+          "[orchestrator][work][suggest]")
+{
+    auto const workers = std::string { R"( "workers": [ { "id": "a", "agent": "claude" },
+  { "id": "b", "agent": "claude" }, { "id": "c", "agent": "claude" } ],)" };
+    auto const config = configOf(workers, taskJson("issue", 'w', "issue", R"(, "worker": "a")"));
+    auto const issue = IssueRef { 5 };
+    auto const runOn = [&](std::string id, std::string worker) {
+        return runOf(std::move(id), "contour", issue, std::move(worker), Running {});
+    };
+    auto const idOf = [&](std::vector<Run> const& runs) {
+        return std::string { defaultWorker(config, runs, "issue").id };
+    };
+
+    CHECK(idOf({}) == "a");
+    CHECK(idOf({ runOn("1", "a") }) == "b");
+    CHECK(idOf({ runOn("1", "a"), runOn("2", "b") }) == "c");
+    CHECK(idOf({ runOn("1", "a"), runOn("2", "a"), runOn("3", "b"), runOn("4", "c") }) == "b");
+    CHECK(activeRunsOn(config, std::vector<Run> { runOn("1", "a") }, "a") == 1);
+
+    auto finished = runOf("1", "contour", issue, "a", Finished {});
+    CHECK(activeRunsOn(config, std::vector<Run> { finished }, "a") == 0);
+    CHECK(idOf({ finished }) == "a");
+
+    // Without `workers` the one worker is the implicit `claude`; a run with no worker counts for it.
+    auto const implicit = configOf("", taskJson("issue", 'w', "issue"));
+    auto const implicitRuns = std::vector<Run> { runOf("1", "contour", issue, "", Running {}) };
+    CHECK(activeRunsOn(implicit, implicitRuns, ImplicitWorkerId) == 1);
+    CHECK(defaultWorker(implicit, implicitRuns, "issue").id == ImplicitWorkerId);
+
+    // A run with no worker counts for claude, not for the first worker x.
+    auto const withClaude = configOf(
+        R"( "workers": [ { "id": "x", "agent": "claude" }, { "id": "claude", "agent": "claude" } ],)",
+        taskJson("issue", 'w', "issue", R"(, "worker": "x")"));
+    auto const emptyWorkerRuns = std::vector<Run> { runOf("1", "contour", issue, "", Running {}) };
+    CHECK(activeRunsOn(withClaude, emptyWorkerRuns, "x") == 0);
+    CHECK(activeRunsOn(withClaude, emptyWorkerRuns, ImplicitWorkerId) == 1);
+    CHECK(defaultWorker(withClaude, emptyWorkerRuns, "issue").id == "x");
 }

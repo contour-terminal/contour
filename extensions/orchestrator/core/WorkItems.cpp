@@ -15,6 +15,7 @@
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Naming.hpp>
 #include <orchestrator/core/Overloaded.hpp>
+#include <orchestrator/core/TaskRoles.hpp>
 
 namespace orchestrator
 {
@@ -596,6 +597,82 @@ bool matchesFilter(WorkItem const& item, std::string_view filter)
         fields.insert(fields.end(), { item.ticket->title, item.ticket->url });
     return std::ranges::any_of(fields,
                                [&](std::string_view field) { return lowerCased(field).contains(folded); });
+}
+
+namespace
+{
+
+    /// @return The first task of @p config that has @p role and applies to @p kind; nullptr: none.
+    [[nodiscard]] TaskDef const* taskWithRole(Config const& config, TaskRole role, AppliesTo kind) noexcept
+    {
+        auto const tasks = config.tasks();
+        auto const found = std::ranges::find_if(
+            tasks, [&](TaskDef const& task) { return task.role == role && task.appliesTo == kind; });
+        return found != tasks.end() ? &*found : nullptr;
+    }
+
+    /// @return The reason a failing merge request's suggestion gives: its failing checks, `, `-joined.
+    [[nodiscard]] std::string failingReason(ChangeRequest const& mr)
+    {
+        auto reason = std::string { "pipeline fails" };
+        auto separator = std::string_view { ": " };
+        for (auto const& check: mr.failingChecks)
+        {
+            reason += separator;
+            reason += check;
+            separator = ", ";
+        }
+        return reason;
+    }
+
+} // namespace
+
+TaskSuggestion suggestTask(Config const& config, WorkItem const& item)
+{
+    auto const kind = appliesToOf(item.item);
+    if (item.changeRequest)
+    {
+        auto const& mr = *item.changeRequest;
+        if (mr.ci == CiState::Failing)
+        {
+            if (auto const* const task = taskWithRole(config, TaskRole::FixCi, kind))
+                return { .task = task, .reason = failingReason(mr) };
+        }
+        if (mr.conflicts == Conflicts::Conflicting)
+        {
+            if (auto const* const task = taskWithRole(config, TaskRole::ResolveConflicts, kind))
+                return { .task = task, .reason = "conflicts with " + mr.base };
+        }
+        if (mr.review == ReviewState::ChangesRequested)
+        {
+            if (auto const* const task = taskWithRole(config, TaskRole::AddressReview, kind))
+                return { .task = task, .reason = "changes requested" };
+        }
+    }
+    else if (auto const* const task = taskWithRole(config, TaskRole::WorkOnIssue, kind))
+    {
+        return { .task = task, .reason = item.group == WorkGroup::NoMrYet ? "ticket in progress" : "ticket" };
+    }
+    return { .task = config.firstTaskFor(kind),
+             .reason = item.changeRequest ? "first task for a merge request" : "first task for a ticket" };
+}
+
+std::size_t activeRunsOn(Config const& /*config*/,
+                         std::span<Run const> runs,
+                         std::string_view workerId) noexcept
+{
+    return static_cast<std::size_t>(std::ranges::count_if(
+        runs, [&](Run const& run) { return countsAsActive(run) && workerIdOf(run) == workerId; }));
+}
+
+WorkerDef const& defaultWorker(Config const& config, std::span<Run const> runs, std::string_view taskId)
+{
+    auto const& own = config.workerFor(taskId);
+    if (activeRunsOn(config, runs, own.id) == 0)
+        return own;
+    auto const workers = config.workers();
+    return *std::ranges::min_element(
+        workers, {}, [&](WorkerDef const& worker) { return activeRunsOn(config, runs, worker.id); });
 }
 
 } // namespace orchestrator

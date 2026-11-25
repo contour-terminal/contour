@@ -203,4 +203,40 @@ enum class WorkSort : uint8_t
 ///         title, repository or URL contains it; an empty filter matches everything.
 [[nodiscard]] bool matchesFilter(WorkItem const& item, std::string_view filter);
 
+/// The task the start dialog suggests, and why.
+struct TaskSuggestion
+{
+    TaskDef const* task = nullptr; ///< nullptr: no task applies to the item.
+    std::string reason;            ///< Shown beside it.
+};
+
+/// First match: ci Failing → FixCi, reason `pipeline fails: <failing checks, ", "-joined>` (or `pipeline
+/// fails`); Conflicting → ResolveConflicts, `conflicts with <base>`; ChangesRequested → AddressReview,
+/// `changes requested`; a ticket row → WorkOnIssue, `ticket in progress` / `ticket`; then the first task that
+/// applies to the item, reason `first task for a merge request` / `first task for a ticket`. A role no
+/// applicable task has falls through to the next rule.
+/// @param config The configuration: its tasks.
+/// @param item A Work board row.
+/// @return The suggested task and its reason.
+[[nodiscard]] TaskSuggestion suggestTask(Config const& config, WorkItem const& item);
+
+/// @param config The configuration; unused, since each run carries its worker's id (kept for the callers'
+/// signature).
+/// @param runs Every run; only active ones (countsAsActive) count.
+/// @param workerId A worker's id.
+/// @return How many active runs run on @p workerId, each counted by workerIdOf() (Decision 15).
+[[nodiscard]] std::size_t activeRunsOn(Config const& config,
+                                       std::span<Run const> runs,
+                                       std::string_view workerId) noexcept;
+
+/// @param config The configuration: its tasks and workers.
+/// @param runs Every run; only active ones (countsAsActive) count.
+/// @param taskId A task id.
+/// @return The task's own worker; when it runs at least one agent, the worker with the fewest active runs,
+/// ties
+///         in configuration order.
+[[nodiscard]] WorkerDef const& defaultWorker(Config const& config,
+                                             std::span<Run const> runs,
+                                             std::string_view taskId);
+
 } // namespace orchestrator
