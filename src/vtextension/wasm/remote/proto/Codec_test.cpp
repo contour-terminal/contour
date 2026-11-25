@@ -82,7 +82,7 @@ namespace
                                              .signature = {},
                                              .initialPages = 17 } },
         },
-        Instantiate { .moduleId = 9, .instanceId = 11 },
+        Instantiate { .moduleId = 9, .instanceId = 11, .interruptSlot = 1023 },
         Instantiated { .instanceId = 11, .error = std::nullopt, .callableExports = { 0, 3, 70000 } },
         Release { .target = ReleaseTarget::Runtime, .id = 7 },
         Call { .instanceId = 11, .exportOrdinal = 2, .argv = { 1, 0xFFFFFFFF, 300 } },

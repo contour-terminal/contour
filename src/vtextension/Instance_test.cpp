@@ -765,7 +765,10 @@ TEST_CASE("Instance.hostile.frameFlood", "[vtextension][guest]")
     #ifndef _WIN32
 using vtextension::testing::StandardStreamsCapture;
 
-TEST_CASE("Instance.hostile.print", "[vtextension][guest]")
+// [in-process]: an extension host process inherits this process's standard error, which it writes its own
+// diagnostics to (in a sanitizer build, that it applies no caps): the capture would see the host's line, not
+// the guest's.
+TEST_CASE("Instance.hostile.print", "[vtextension][guest][in-process]")
 {
     // The guest's standard output and error lead nowhere: nothing it prints reaches the host's.
     auto capture = StandardStreamsCapture {};

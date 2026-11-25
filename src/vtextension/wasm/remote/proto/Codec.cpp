@@ -203,7 +203,7 @@ namespace
     }
     constexpr auto members(Of<Instantiate> auto& value) noexcept
     {
-        return fields(value.moduleId, value.instanceId);
+        return fields(value.moduleId, value.instanceId, value.interruptSlot);
     }
     constexpr auto members(Of<Instantiated> auto& value) noexcept
     {

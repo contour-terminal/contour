@@ -23,6 +23,8 @@ add_library(vtextension_host STATIC
     IHostedEngine.hpp
     InProcessHost.cpp
     InProcessHost.hpp
+    InterruptListener.cpp
+    InterruptListener.hpp
     ../remote/HostConnector.hpp
 )
 target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire PRIVATE core::base)

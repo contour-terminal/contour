@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/process/HostTimers.hpp>
 
 namespace vtextension::wasm::remote::process
@@ -40,6 +41,10 @@ namespace
     /// How often a supervisor that can no longer wait on its set looks for ended helpers. The one wait that
     /// is not the injected clock's: it is a broken system's fallback, never a timeout anyone relies on.
     constexpr auto DegradedPollPeriod = std::chrono::milliseconds { 100 };
+
+    /// How often an armed lane is looked at, at most: a grace of under 10 ms would otherwise have the
+    /// supervisor spin.
+    constexpr auto MinimumLaneLookPeriod = std::chrono::milliseconds { 1 };
 
     /// How a process ends when the supervisor kills it: SIGKILL (9) on POSIX, KilledExitCode on Windows.
     constexpr auto KillStatuses = std::array {
@@ -387,6 +392,14 @@ class SupervisorLoop
         Watched, ///< The set reports it.
     };
 
+    /// What the backstop last saw of one lane, and so what its grace timer does.
+    struct LaneTrack
+    {
+        uint64_t epoch = 0;                       ///< The arming its grace timer runs for.
+        LaneArming arming = LaneArming::Disarmed; ///< Whether a grace timer runs, or is paused, for it.
+        LanePlace place = LanePlace::Idle;        ///< Who it waited on: the timer is paused while the parent.
+    };
+
     /// One helper.
     struct Supervised
     {
@@ -396,7 +409,10 @@ class SupervisorLoop
         Holding holding = Holding::Held;
         KillState killed = KillState::None;
         Watching watching = Watching::Watched;
-        std::map<uint32_t, HostStep> steps; ///< The steps its armed watches watch, by serial.
+        std::map<uint32_t, HostStep> steps;               ///< The steps its armed watches watch, by serial.
+        std::shared_ptr<LaneWatchSet const> lanes;        ///< The attachment's; null: no backstop.
+        std::chrono::milliseconds interruptGrace {};      ///< The attachment's.
+        std::array<LaneTrack, MaxLaneChannels> tracks {}; ///< What the backstop saw of each lane.
     };
 
     void launch(LaunchCommand& command);
@@ -408,6 +424,16 @@ class SupervisorLoop
 
     /// Reaps every helper that ended. @param observation Whether the loop still runs.
     void reapEnded(Observation observation);
+
+    /// Looks at the lanes of every helper that has a backstop: a newly armed lane's grace starts, an ended
+    /// arming's goes, and a lane's grace is paused while it serves a host call.
+    void observeLanes();
+
+    /// Brings @p helper's grace timer of lane @p index in line with @p observed.
+    void track(uint64_t key, Supervised& helper, std::size_t index, LaneObservation observed);
+
+    /// Forgets every grace @p helper's lanes have, and stops watching them.
+    void forgetLanes(uint64_t key, Supervised& helper) noexcept;
 
     /// Kills each helper whose timer is due.
     void expireTimers();
@@ -452,7 +478,8 @@ class SupervisorLoop
     std::chrono::milliseconds _teardownGrace;
     SupervisorMailbox& _mailbox;
     IExitWaitSet& _waitSet;
-    HostTimers _timers;
+    HostTimers _timers;      ///< The steps' and the teardowns'.
+    HostTimers _graceTimers; ///< The lanes' graces, one per lane: TimerKey::serial is the lane's index.
     std::map<uint64_t, Supervised> _helpers;
     uint64_t _nextKey = 1;
     WaitState _wait = WaitState::Working;
@@ -484,6 +511,7 @@ void SupervisorLoop::run()
                        command.value);
         // What ended or fell due by now is part of this batch: a sync() returns after it.
         reapEnded(Observation::Running);
+        observeLanes();
         expireTimers();
         reapEnded(Observation::Running);
         publish();
@@ -523,7 +551,10 @@ void SupervisorLoop::launch(LaunchCommand& command)
                                                   .holding = Holding::Dropped,
                                                   .killed = KillState::None,
                                                   .watching = Watching::Polled,
-                                                  .steps = {} })
+                                                  .steps = {},
+                                                  .lanes = nullptr,
+                                                  .interruptGrace = {},
+                                                  .tracks = {} })
                             .first->second;
         killProcess(refused, KillReason::Shutdown);
         command.launched.set_value(std::unexpected(watched.error()));
@@ -537,7 +568,10 @@ void SupervisorLoop::launch(LaunchCommand& command)
                                   .holding = Holding::Held,
                                   .killed = KillState::None,
                                   .watching = Watching::Watched,
-                                  .steps = {} });
+                                  .steps = {},
+                                  .lanes = nullptr,
+                                  .interruptGrace = {},
+                                  .tracks = {} });
     command.launched.set_value(LaunchedProcess { .key = key, .processId = processId });
 }
 
@@ -567,6 +601,8 @@ void SupervisorLoop::attach(AttachCommand& command)
     if (supervised.notice == DeathNotice::Alive)
     {
         supervised.onDeath = std::move(command.attachment.onDeath);
+        supervised.lanes = std::move(command.attachment.lanes);
+        supervised.interruptGrace = command.attachment.interruptGrace;
         return;
     }
     supervised.notice = DeathNotice::Given;
@@ -589,6 +625,8 @@ void SupervisorLoop::drop(DropCommand const& command)
     supervised.onDeath = nullptr;
     supervised.steps.clear();
     _timers.disarmHelper(command.helper);
+    // No call of its runs any more: its lanes' parent ends close with its holder.
+    forgetLanes(command.helper, supervised);
     if (!supervised.process)
     {
         _helpers.erase(helper);
@@ -620,6 +658,7 @@ void SupervisorLoop::reapEnded(Observation observation)
         helper.process.reset();
         helper.steps.clear();
         _timers.disarmHelper(key);
+        forgetLanes(key, helper);
         ++_counters.reaped;
         if (observation == Observation::Running)
             ++_counters.deathsObserved;
@@ -636,8 +675,73 @@ void SupervisorLoop::reapEnded(Observation observation)
     }
 }
 
+void SupervisorLoop::observeLanes()
+{
+    for (auto& [key, helper]: _helpers)
+    {
+        if (!helper.lanes)
+            continue;
+        // A helper that is gone, or dying, has nothing left to stop.
+        if (!helper.process || helper.killed == KillState::Sent)
+        {
+            forgetLanes(key, helper);
+            continue;
+        }
+        for (auto const [index, lane]:
+             std::views::zip(std::views::iota(std::size_t { 0 }), helper.lanes->lanes()))
+            track(key, helper, index, lane.observe());
+    }
+}
+
+void SupervisorLoop::track(uint64_t key, Supervised& helper, std::size_t index, LaneObservation observed)
+{
+    auto& tracked = helper.tracks.at(index);
+    auto const timer = TimerKey { .helper = key, .serial = static_cast<uint32_t>(index) };
+    auto const now = _clock.now();
+    if (observed.arming == LaneArming::Disarmed)
+    {
+        // The interrupted frame ended, as it should have.
+        if (tracked.arming == LaneArming::Armed)
+            _graceTimers.disarm(timer);
+        tracked = LaneTrack {};
+        return;
+    }
+    if (tracked.arming == LaneArming::Disarmed || tracked.epoch != observed.epoch)
+    {
+        // Another frame was interrupted: its grace is its own, from when the supervisor first saw it.
+        _graceTimers.arm(timer, now, helper.interruptGrace);
+        tracked =
+            LaneTrack { .epoch = observed.epoch, .arming = LaneArming::Armed, .place = LanePlace::InHelper };
+    }
+    // While the frame serves a host call, the parent is the slow one.
+    auto const wasServing = tracked.place == LanePlace::ServingHost;
+    auto const isServing = observed.place == LanePlace::ServingHost;
+    if (isServing && !wasServing)
+        _graceTimers.pause(timer, now);
+    else if (!isServing && wasServing)
+        _graceTimers.resume(timer, now);
+    tracked.place = observed.place;
+}
+
+void SupervisorLoop::forgetLanes(uint64_t key, Supervised& helper) noexcept
+{
+    _graceTimers.disarmHelper(key);
+    helper.lanes = nullptr;
+    helper.tracks = {};
+}
+
 void SupervisorLoop::expireTimers()
 {
+    for (auto const& timer: _graceTimers.expire(_clock.now()))
+    {
+        auto const helper = _helpers.find(timer.helper);
+        if (helper == _helpers.end())
+            continue;
+        errorLog()("An extension host did not stop an interrupted call in time; it was stopped.");
+        killProcess(helper->second, KillReason::Grace);
+        forgetLanes(timer.helper, helper->second);
+        announceDeath(helper->second);
+    }
     for (auto const& timer: _timers.expire(_clock.now()))
     {
         auto const helper = _helpers.find(timer.helper);
@@ -665,7 +769,7 @@ void SupervisorLoop::waitForWork()
     if (_wait == WaitState::Broken)
     {
         // Nothing left to poll for: only a command can change anything.
-        auto const isIdle = liveCount() == 0 && _timers.armed() == 0;
+        auto const isIdle = liveCount() == 0 && _timers.armed() == 0 && _graceTimers.armed() == 0;
         _mailbox.waitForCommands(isIdle ? std::nullopt : std::optional { DegradedPollPeriod });
         return;
     }
@@ -717,15 +821,25 @@ void SupervisorLoop::reapUntil(core::SteadyTimePoint deadline)
 
 std::optional<core::SteadyTimePoint> SupervisorLoop::nextWake() const
 {
-    auto wake = _timers.nextDeadline();
+    auto wake = std::optional<core::SteadyTimePoint> {};
+    auto const earliest = [&wake](std::optional<core::SteadyTimePoint> candidate) {
+        if (candidate)
+            wake = wake ? std::min(*wake, *candidate) : candidate;
+    };
+    earliest(_timers.nextDeadline());
+    earliest(_graceTimers.nextDeadline());
     auto const isPolled = [](auto const& entry) {
         return entry.second.process && entry.second.watching == Watching::Polled;
     };
     if (std::ranges::any_of(_helpers, isPolled))
-    {
-        auto const poll = _clock.now() + DegradedPollPeriod;
-        wake = wake ? std::min(*wake, poll) : poll;
-    }
+        earliest(_clock.now() + DegradedPollPeriod);
+    // An armed lane is looked at again every tenth of its grace, paused or not: whether it parks in a host
+    // call, comes back from one, or ends. An idle helper, or one whose lanes no interrupt armed, costs
+    // nothing.
+    for (auto const& [key, helper]: _helpers)
+        if (std::ranges::any_of(helper.tracks,
+                                [](LaneTrack const& lane) { return lane.arming == LaneArming::Armed; }))
+            earliest(_clock.now() + std::max(helper.interruptGrace / 10, MinimumLaneLookPeriod));
     return wake;
 }
 

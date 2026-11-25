@@ -51,6 +51,10 @@ struct HostServerConfig
     /// How each lane's executor thread is started: the operating system's threads, but in a test that
     /// makes one fail.
     ExecutorStarter startExecutor = &ExecutorThread::start;
+    /// Whether an interrupt slot is raised on the interrupt page, as interruptSlot() asks before it
+    /// interrupts: what tells the instance a slot was raised for from one that holds the slot since. Null:
+    /// every interruptSlot() interrupts.
+    std::function<bool(uint32_t slot)> isInterruptRaised {};
 };
 
 /// Why a host server stopped serving.
@@ -92,9 +96,11 @@ class HostServer
     /// during and after run(); run() then returns `Stopped`, unless it had stopped for another reason first.
     void stop() noexcept;
 
-    /// Interrupts one instance; a brief mutex over the instance map, no I/O. Unknown id: ignored.
-    /// @param instanceId The parent-chosen id of the instance.
-    void interrupt(uint32_t instanceId) noexcept;
+    /// Interrupts the live instance instantiated with an interrupt slot, if the slot is still raised
+    /// (HostServerConfig::isInterruptRaised); a brief mutex over the instance map, no I/O. A slot no live
+    /// instance holds is ignored.
+    /// @param slot The slot, as Instantiate named it.
+    void interruptSlot(uint32_t slot) noexcept;
 
   private:
     class Impl;

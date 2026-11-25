@@ -17,10 +17,13 @@
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/host/HostProcess.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/WakeSignal.hpp>
 
 namespace vtextension::wasm::host
 {
@@ -28,8 +31,10 @@ namespace vtextension::wasm::host
 /// The hosts one connector started that are still alive; shared with each of them.
 class InProcessHostRegistry;
 
-/// One host serving in this process: an engine, the server driving it, and the thread the server runs on, in
-/// that order, so that the thread is joined before the server goes, and the server before its engine.
+/// One host serving in this process: an engine, the host process's serving side driving it over in-memory
+/// endpoints, and the thread it runs on, in that order, so that the thread is joined before the host goes,
+/// and the host before its engine. It is interrupted as a host process is: through the interrupt page and
+/// the wake signal, which it holds the parent's ends of.
 class InProcessHost final: public remote::IHostHandle
 {
   public:
@@ -43,13 +48,15 @@ class InProcessHost final: public remote::IHostHandle
     /// Starts serving.
     /// @param registry Where the host is listed while it lives.
     /// @param engine What it runs modules on.
-    /// @param lanes The helper's ends of the lanes.
-    /// @param control The helper's end of the control channel.
+    /// @param endpoints The helper's ends of the channels, the page and the wake signal.
+    /// @param page The parent's mapping of the interrupt page.
+    /// @param wake The wake signal's sending end.
     /// @param config How its server runs.
     InProcessHost(std::shared_ptr<InProcessHostRegistry> registry,
                   std::unique_ptr<IHostedEngine> engine,
-                  std::vector<remote::transport::Channel> lanes,
-                  remote::transport::Channel control,
+                  HostEndpoints endpoints,
+                  remote::transport::ControlPage page,
+                  remote::transport::WakeSender wake,
                   HostServerConfig config);
     InProcessHost(InProcessHost const&) = delete;
     InProcessHost(InProcessHost&&) = delete;
@@ -61,8 +68,11 @@ class InProcessHost final: public remote::IHostHandle
     /// then let go, as it touches nothing of the host after onDeath.
     ~InProcessHost() override;
 
-    /// Interrupts the instance directly, under the server's brief instance-map lock.
-    void interrupt(uint32_t instanceId) noexcept override;
+    /// Raises @p interruptSlot and wakes the host's listener, as a host process is interrupted.
+    void interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept override;
+
+    /// Lowers @p interruptSlot.
+    void clearInterrupt(uint32_t interruptSlot) noexcept override;
 
     /// Stops the server: its channels close, and its thread winds down.
     void terminate() noexcept override;
@@ -95,7 +105,9 @@ class InProcessHost final: public remote::IHostHandle
     RunState _run = RunState::Running; ///< Guarded by _attachmentMutex.
     std::function<void()> _onDeath;    ///< Guarded by _attachmentMutex.
     std::unique_ptr<IHostedEngine> _engine;
-    HostServer _server;
+    remote::transport::ControlPage _page; ///< The parent's mapping: raised and lowered here.
+    remote::transport::WakeSender _wake;  ///< The parent's end.
+    HostProcess _host;
     std::jthread _thread;
 };
 

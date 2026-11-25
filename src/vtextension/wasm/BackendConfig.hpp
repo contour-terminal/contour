@@ -24,7 +24,8 @@ struct HostTimeouts
     std::chrono::milliseconds load { 10'000 };       ///< To load a module.
     std::chrono::milliseconds instantiate { 1'000 }; ///< To instantiate one.
     std::chrono::milliseconds handshake { 2'000 };   ///< To say Hello once started.
-    std::chrono::milliseconds interruptGrace { 50 }; ///< To stop a call once interrupted.
+    /// To stop a call once interrupted, the time the parent spends serving its host calls not counted.
+    std::chrono::milliseconds interruptGrace { 50 };
 };
 
 /// Which extension hosts the backend drives, by what they report of their confinement in their Hello.
@@ -38,8 +39,9 @@ enum class LockdownRequirement : uint8_t
 struct BackendConfig
 {
     std::filesystem::path helper; ///< The extension host executable.
-    /// How long a host may take: a host overstaying its handshake, a load or an instantiation is stopped.
-    /// `interruptGrace` is not enforced yet.
+    /// How long a host may take: a host overstaying its handshake, a load or an instantiation is stopped, and
+    /// so is one whose interrupted call runs on past `interruptGrace` of its own time. A host serving in this
+    /// process has no such backstop.
     HostTimeouts timeouts {};
     /// How hosts are started. Null leaves it to the composition root: the remote backend itself needs one,
     /// and fails every load `HostUnavailable` without it, while a composition that can run hosts in this

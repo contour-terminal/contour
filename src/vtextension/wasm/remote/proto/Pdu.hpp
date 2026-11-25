@@ -24,7 +24,7 @@ namespace vtextension::wasm::remote::proto
 {
 
 /// The protocol version both ends must speak; the helper states it in its Hello.
-inline constexpr uint32_t ProtocolVersion = 1;
+inline constexpr uint32_t ProtocolVersion = 2;
 
 /// The most values a Call carries as arguments, or a CallResult as results.
 inline constexpr std::size_t MaxCallValues = 64;
@@ -206,6 +206,9 @@ struct Instantiate
 {
     uint32_t moduleId = 0;   ///< The module to instantiate.
     uint32_t instanceId = 0; ///< The parent-chosen id the instance is known by.
+    /// The interrupt page's slot the parent raises to interrupt the instance: below InterruptSlotCount, and
+    /// held by no other live instance.
+    uint32_t interruptSlot = 0;
 
     bool operator==(Instantiate const&) const = default;
 };

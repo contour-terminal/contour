@@ -14,6 +14,16 @@ if(TARGET vtextension_wasmtime)
     elseif(NOT CONTOUR_MACOS_APP_BUNDLE)
         install(TARGETS contour-extension-host RUNTIME DESTINATION "${CONTOUR_EXTENSION_HOST_INSTALL_DIR}")
     endif()
+
+    if(VTEXTENSION_TESTING)
+        # The extension host misbehaving on purpose, one way per --hostile=<name> (testing/HostileModes.hpp): what
+        # the crash and hostility tests start. No test mode ships in contour-extension-host itself. Never installed.
+        add_executable(contour-extension-host-hostile testing/HostileHost.cpp testing/HostileModes.hpp)
+        target_link_libraries(contour-extension-host-hostile PRIVATE
+            vtextension_host vtextension_remote_wire vtextension_wasmtime_helper_engine contour::wasmtime)
+        target_include_directories(contour-extension-host-hostile PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        set_target_properties(contour-extension-host-hostile PROPERTIES WIN32_EXECUTABLE OFF)
+    endif()
 else()
     message(STATUS "contour-extension-host is not built: it needs Wasmtime until its WAMR engine lands")
 endif()

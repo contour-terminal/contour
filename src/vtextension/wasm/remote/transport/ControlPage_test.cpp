@@ -55,6 +55,20 @@ TEST_CASE("ControlPage.raiseIsSeenThroughASecondMapping", "[vtextension]")
     CHECK(moved.isRaised(vtextension::wasm::remote::transport::InterruptSlotCount - 1));
 }
 
+TEST_CASE("ControlPage.helperViewSeesTheRaise", "[vtextension]")
+{
+    // A host in this process maps the page as a host process does: a second mapping, of its own handle.
+    auto parent = ControlPage::create();
+    REQUIRE(parent.has_value());
+    auto helper = parent->openHelperView();
+    REQUIRE(helper.has_value());
+    CHECK(helper->nativeHandle() != parent->nativeHandle());
+    parent->raise(9);
+    CHECK(helper->isRaised(9));
+    parent->clear(9);
+    CHECK_FALSE(helper->isRaised(9));
+}
+
 #ifndef _WIN32
 TEST_CASE("ControlPage.adoptRefusesAWrongSize", "[vtextension]")
 {

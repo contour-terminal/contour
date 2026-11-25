@@ -148,6 +148,17 @@ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle ha
     });
 }
 
+std::expected<ControlPage, SharedObjectError> ControlPage::openHelperView() const
+{
+    auto const copy = ::fcntl(_handle, F_DUPFD_CLOEXEC, 0);
+    if (copy == -1)
+        return std::unexpected(SharedObjectError::Io);
+    auto view = adopt(copy);
+    if (!view)
+        ::close(copy);
+    return view;
+}
+
 ControlPage::ControlPage(ControlPage&& other) noexcept:
     _handle { std::exchange(other._handle, -1) }, _flags { std::exchange(other._flags, nullptr) }
 {

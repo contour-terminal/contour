@@ -157,6 +157,12 @@ void RemoteKindState::releaseLane(std::size_t lane) noexcept
     _lanes.at(lane) = LaneState::Free;
 }
 
+std::size_t RemoteKindState::lanesInUse() const noexcept
+{
+    auto const lock = std::scoped_lock { _mutex };
+    return static_cast<std::size_t>(std::ranges::count(_lanes, LaneState::Held));
+}
+
 std::shared_ptr<RemoteKindState> makeRemoteKindState()
 {
     return std::make_shared<RemoteKindState>();

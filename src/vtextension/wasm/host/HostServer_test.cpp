@@ -34,6 +34,7 @@
 #include <vtextension/wasm/remote/HostConnector.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/ControlPage.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/DecoratedEngine.hpp>
@@ -58,6 +59,7 @@ using vtextension::wasm::remote::proto::MaxCallDepth;
 using vtextension::wasm::remote::proto::MaxRuntimeStackBytes;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::ChannelError;
+using vtextension::wasm::remote::transport::InterruptSlotCount;
 using vtextension::wasm::remote::transport::makeChannelPair;
 using vtextension::wasm::remote::transport::PduStream;
 using vtextension::wasm::remote::transport::StreamError;
@@ -71,6 +73,9 @@ namespace
 
 /// How long a test waits for the server to stop before it fails.
 constexpr auto StopDeadline = std::chrono::seconds { 1 };
+
+/// How long an interrupted call may take to return.
+constexpr auto InterruptDeadline = std::chrono::seconds { 5 };
 
 /// How lane 0's parent end is held.
 enum class LaneZero : uint8_t
@@ -195,21 +200,41 @@ class ScriptedParent
         return loaded;
     }
 
-    /// @return What instantiating module @p moduleId as instance @p instanceId is answered with.
-    [[nodiscard]] proto::Instantiated instantiate(uint32_t moduleId, uint32_t instanceId)
+    /// @return What instantiating module @p moduleId as instance @p instanceId, with interrupt slot
+    ///         @p interruptSlot, is answered with.
+    [[nodiscard]] proto::Instantiated instantiate(uint32_t moduleId,
+                                                  uint32_t instanceId,
+                                                  uint32_t interruptSlot)
     {
-        sendControl(proto::Instantiate { .moduleId = moduleId, .instanceId = instanceId });
+        sendControl(proto::Instantiate {
+            .moduleId = moduleId, .instanceId = instanceId, .interruptSlot = interruptSlot });
         auto answer = receiveControl();
         REQUIRE(std::holds_alternative<proto::Instantiated>(answer));
         return std::get<proto::Instantiated>(std::move(answer));
     }
 
-    /// Instantiates module @p moduleId as instance @p instanceId, which must succeed.
-    void instantiateOk(uint32_t moduleId, uint32_t instanceId)
+    /// @return What instantiating module @p moduleId as instance @p instanceId is answered with; its
+    /// interrupt
+    ///         slot is its id.
+    [[nodiscard]] proto::Instantiated instantiate(uint32_t moduleId, uint32_t instanceId)
     {
-        auto const instantiated = instantiate(moduleId, instanceId);
+        return instantiate(moduleId, instanceId, instanceId);
+    }
+
+    /// Instantiates module @p moduleId as instance @p instanceId, with interrupt slot @p interruptSlot, which
+    /// must succeed.
+    void instantiateOk(uint32_t moduleId, uint32_t instanceId, uint32_t interruptSlot)
+    {
+        auto const instantiated = instantiate(moduleId, instanceId, interruptSlot);
         REQUIRE(instantiated.instanceId == instanceId);
         REQUIRE(!instantiated.error.has_value());
+    }
+
+    /// Instantiates module @p moduleId as instance @p instanceId, which must succeed; its interrupt slot is
+    /// its id.
+    void instantiateOk(uint32_t moduleId, uint32_t instanceId)
+    {
+        instantiateOk(moduleId, instanceId, instanceId);
     }
 
     /// Sends @p pdu on lane @p lane, which must take it.
@@ -219,6 +244,21 @@ class ScriptedParent
     [[nodiscard]] proto::Pdu receive(std::size_t lane)
     {
         auto pdu = lanes.at(lane).receive();
+        REQUIRE(pdu.has_value());
+        return std::move(*pdu);
+    }
+
+    /// @return The next PDU on lane @p lane, which must arrive within InterruptDeadline: a case waiting on an
+    ///         interrupt that never comes stops the server instead, which ends the wait, and fails.
+    [[nodiscard]] proto::Pdu receiveInterrupted(std::size_t lane)
+    {
+        auto received = std::async(std::launch::async, [this, lane] { return lanes.at(lane).receive(); });
+        if (received.wait_for(InterruptDeadline) != std::future_status::ready)
+        {
+            FAIL_CHECK("no answer within the deadline");
+            server->stop();
+        }
+        auto pdu = received.get();
         REQUIRE(pdu.has_value());
         return std::move(*pdu);
     }
@@ -934,26 +974,95 @@ TEST_CASE("HostServer.stopBeforeRun", "[vtextension][host]")
           == std::unexpected(StreamError::Closed));
 }
 
-TEST_CASE("HostServer.interruptStopsOneInstance", "[vtextension][host]")
+TEST_CASE("HostServer.interruptSlotInterruptsItsInstance", "[vtextension][host]")
 {
     auto parent = ScriptedParent {};
     parent.skipHello();
     parent.createRuntime(1);
     auto const loaded = parent.loadOk(1, 1, toModule(contract::InstanceModule));
-    parent.instantiateOk(1, 1);
-    parent.instantiateOk(1, 2);
+    parent.instantiateOk(1, 1, 5);
+    parent.instantiateOk(1, 2, 7);
 
     parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "spin"), .argv = {} });
     std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
-    parent.server->interrupt(99); // unknown: ignored
-    parent.server->interrupt(1);
-    CHECK(parent.receive(0)
+    parent.server->interruptSlot(6); // no instance holds it: ignored
+    parent.server->interruptSlot(5);
+    CHECK(parent.receiveInterrupted(0)
           == proto::Pdu { proto::CallResult { .failure = CallFailure::Interrupted, .argv = {} } });
 
     // The other instance runs on.
     parent.send(1,
                 proto::Call { .instanceId = 2, .exportOrdinal = ordinalOf(loaded, "add"), .argv = { 1, 1 } });
     CHECK(parent.receive(1) == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 2 } } });
+}
+
+TEST_CASE("HostServer.slotOutOfRangeIsAViolation", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    parent.createRuntime(1);
+    std::ignore = parent.loadOk(1, 1, toModule(contract::InstanceModule));
+    parent.instantiateOk(1, 1, InterruptSlotCount - 1);
+    parent.sendControl(
+        proto::Instantiate { .moduleId = 1, .instanceId = 2, .interruptSlot = InterruptSlotCount });
+    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+}
+
+TEST_CASE("HostServer.slotInUseIsAViolation", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    parent.createRuntime(1);
+    std::ignore = parent.loadOk(1, 1, toModule(contract::InstanceModule));
+    parent.instantiateOk(1, 1, 3);
+    parent.sendControl(proto::Instantiate { .moduleId = 1, .instanceId = 2, .interruptSlot = 3 });
+    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+}
+
+TEST_CASE("HostServer.releasedSlotIsHandedOn", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    parent.createRuntime(1);
+    auto const loaded = parent.loadOk(1, 1, toModule(contract::InstanceModule));
+    parent.instantiateOk(1, 1, 3);
+    parent.sendControl(proto::Release { .target = proto::ReleaseTarget::Instance, .id = 1 });
+    parent.instantiateOk(1, 2, 3);
+
+    // The slot is the new instance's now.
+    parent.send(0, proto::Call { .instanceId = 2, .exportOrdinal = ordinalOf(loaded, "spin"), .argv = {} });
+    std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
+    parent.server->interruptSlot(3);
+    CHECK(parent.receiveInterrupted(0)
+          == proto::Pdu { proto::CallResult { .failure = CallFailure::Interrupted, .argv = {} } });
+}
+
+TEST_CASE("HostServer.slotLoweredSinceIsNotInterrupted", "[vtextension][host]")
+{
+    // The listener read the slot raised, for an instance whose slot was lowered and handed on meanwhile: the
+    // page, asked again, saves the instance holding it now.
+    auto raised = std::make_shared<std::atomic<bool>>(false);
+    auto config = HostServerConfig {};
+    config.isInterruptRaised = [raised](uint32_t slot) {
+        return slot == 4 && raised->load();
+    };
+    auto parent = ScriptedParent { std::move(config) };
+    parent.skipHello();
+    parent.createRuntime(1);
+    auto const loaded = parent.loadOk(1, 1, toModule(contract::InstanceModule));
+    parent.instantiateOk(1, 1, 4);
+    auto const add =
+        proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "add"), .argv = { 2, 3 } };
+
+    parent.server->interruptSlot(4);
+    parent.send(0, add);
+    CHECK(parent.receive(0) == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 5 } } });
+
+    raised->store(true);
+    parent.server->interruptSlot(4);
+    parent.send(0, add);
+    CHECK(parent.receive(0)
+          == proto::Pdu { proto::CallResult { .failure = CallFailure::Interrupted, .argv = {} } });
 }
 
 TEST_CASE("HostServer.releaseDropsTheInstance", "[vtextension][host]")
@@ -1107,7 +1216,8 @@ TEST_CASE("InProcessHost.handleInterrupts", "[vtextension][host]")
     auto const loaded = control.receive();
     REQUIRE(loaded.has_value());
     REQUIRE(std::holds_alternative<proto::Loaded>(*loaded));
-    REQUIRE(control.send(proto::Instantiate { .moduleId = 1, .instanceId = 7 }).has_value());
+    REQUIRE(
+        control.send(proto::Instantiate { .moduleId = 1, .instanceId = 7, .interruptSlot = 9 }).has_value());
     REQUIRE(control.receive().has_value());
 
     REQUIRE(lane.send(proto::Call { .instanceId = 7,
@@ -1115,8 +1225,16 @@ TEST_CASE("InProcessHost.handleInterrupts", "[vtextension][host]")
                                     .argv = {} })
                 .has_value());
     std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
-    connection->handle->interrupt(7);
-    CHECK(lane.receive()
+    // Through the interrupt page and the wake signal, as a host process is interrupted.
+    connection->handle->interrupt(7, 9);
+    auto received = std::async(std::launch::async, [&lane] { return lane.receive(); });
+    if (received.wait_for(InterruptDeadline) != std::future_status::ready)
+    {
+        // The interrupt was lost: the host is stopped, which ends the wait.
+        FAIL_CHECK("the interrupted call did not return");
+        std::ignore = connector.terminateAll();
+    }
+    CHECK(received.get()
           == proto::Pdu { proto::CallResult { .failure = CallFailure::Interrupted, .argv = {} } });
 }
 

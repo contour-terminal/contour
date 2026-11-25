@@ -8,7 +8,9 @@
 #include <expected>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -87,10 +89,17 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
     auto incarnation = std::make_shared<HelperIncarnation>(std::move(*connection), policy.timeouts);
     // A host that ends is declared dead at once, rather than by the next request that finds its channel
     // closed; one that is gone already, at once.
-    incarnation->_handle->attach(HostAttachment { .onDeath = [weak = std::weak_ptr { incarnation }] {
-        if (auto const self = weak.lock())
-            self->markDead();
-    } });
+    // Its lanes are watched from now on: an interrupted call that does not end within the grace has the host
+    // stopped, and so the incarnation dead.
+    incarnation->_handle->attach(HostAttachment {
+        .onDeath =
+            [weak = std::weak_ptr { incarnation }] {
+                if (auto const self = weak.lock())
+                    self->markDead();
+            },
+        .lanes = incarnation->_laneWatches,
+        .interruptGrace = policy.timeouts.interruptGrace,
+    });
 
     // The host speaks first, unasked; a request then creates the runtime. Both within the handshake's budget.
     auto const handshake = [&]() -> bool {
@@ -177,10 +186,41 @@ void HelperIncarnation::markDead() noexcept
         lane.shutdown();
 }
 
-void HelperIncarnation::interrupt(uint32_t instanceId) noexcept
+void HelperIncarnation::interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept
 {
-    if (isAlive())
-        _handle->interrupt(instanceId);
+    if (!isAlive())
+        return;
+    // Armed before the backstop is woken to look.
+    std::ignore = _laneWatches->interrupt(instanceId);
+    _handle->interrupt(instanceId, interruptSlot);
+}
+
+void HelperIncarnation::clearInterrupt(uint32_t interruptSlot) noexcept
+{
+    _handle->clearInterrupt(interruptSlot);
+}
+
+std::optional<uint32_t> InterruptSlots::acquire()
+{
+    auto const lock = std::scoped_lock { _mutex };
+    for (auto const offset: std::views::iota(uint32_t { 0 }, transport::InterruptSlotCount))
+    {
+        auto const slot = (_cursor + offset) % transport::InterruptSlotCount;
+        if (_slots[slot] == SlotState::Free)
+        {
+            _slots[slot] = SlotState::Held;
+            _cursor = (slot + 1) % transport::InterruptSlotCount;
+            return slot;
+        }
+    }
+    return std::nullopt;
+}
+
+void InterruptSlots::release(uint32_t slot) noexcept
+{
+    auto const lock = std::scoped_lock { _mutex };
+    if (slot < transport::InterruptSlotCount)
+        _slots[slot] = SlotState::Free;
 }
 
 } // namespace vtextension::wasm::remote

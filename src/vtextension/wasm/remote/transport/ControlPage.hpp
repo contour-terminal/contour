@@ -49,6 +49,11 @@ class ControlPage
     ///         mapped. On failure @p handle stays the caller's.
     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> adopt(NativeHandle handle);
 
+    /// Maps this page a second time, read-only, on a handle of its own, as adopt() maps an inherited one:
+    /// the helper's side of a host that serves in this process.
+    /// @return The second mapping; `Io` if the handle could not be duplicated or the page mapped.
+    [[nodiscard]] std::expected<ControlPage, SharedObjectError> openHelperView() const;
+
     ControlPage(ControlPage&& other) noexcept;
     ControlPage& operator=(ControlPage&& other) noexcept;
     ControlPage(ControlPage const&) = delete;

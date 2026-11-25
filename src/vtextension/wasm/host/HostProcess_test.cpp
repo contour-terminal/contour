@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <expected>
 #include <future>
 #include <memory>
@@ -13,9 +16,12 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 #include <vtextension/wasm/host/HostProcess.hpp>
 #include <vtextension/wasm/host/HostServer.hpp>
@@ -27,6 +33,7 @@
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
 #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+#include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 
 #ifdef _WIN32
@@ -39,6 +46,8 @@
     #include <unistd.h>
 #endif
 
+using vtextension::testing::toModule;
+using vtextension::wasm::CallFailure;
 using vtextension::wasm::host::BootstrapError;
 using vtextension::wasm::host::CapPolicy;
 using vtextension::wasm::host::capResources;
@@ -66,6 +75,7 @@ using vtextension::wasm::remote::transport::testing::duplicate;
 using vtextension::wasm::testing::makeHostedEngine;
 
 namespace proto = vtextension::wasm::remote::proto;
+namespace contract = vtextension::wasm::testing::contract;
 
 namespace
 {
@@ -196,7 +206,148 @@ void closeAll(HelperArguments const& arguments) noexcept
     };
 }
 
+/// A host serving over a parent's ends on a thread of its own, the contract's InstanceModule instantiated in
+/// it as instance 1 with interrupt slot InstanceSlot: what the interrupt cases drive.
+struct ServingHost
+{
+    static constexpr auto InstanceSlot = uint32_t { 17 };
+
+    ParentEnds parent = makeParentEnds();
+    std::shared_ptr<Confined> confined = std::make_shared<Confined>();
+    std::vector<std::string> arguments = formatHelperArguments(parent.arguments);
+    std::packaged_task<int()> task { [this] {
+        return runHost(arguments, [] { return makeHostedEngine(); }, testConfinement(confined));
+    } };
+    std::future<int> exitCode = task.get_future();
+    std::jthread host { std::move(task) };
+    /// Ends the connection as it goes, before the host's thread is joined: however the case ends, a failed
+    /// REQUIRE included, the host stops serving rather than keep the join waiting.
+    struct ConnectionEnd
+    {
+        explicit ConnectionEnd(PduStream& stream) noexcept: control { stream } {}
+        ConnectionEnd(ConnectionEnd const&) = delete;
+        ConnectionEnd(ConnectionEnd&&) = delete;
+        ConnectionEnd& operator=(ConnectionEnd const&) = delete;
+        ConnectionEnd& operator=(ConnectionEnd&&) = delete;
+        ~ConnectionEnd() { control.shutdown(); }
+
+        PduStream& control;
+    } end { parent.control };
+    PduStream lane { std::move(parent.lanes.front()),
+                     proto::ChannelKind::Lane,
+                     proto::Direction::ToParent,
+                     proto::PduLimits {} };
+    proto::Loaded loaded = [this] {
+        REQUIRE(std::holds_alternative<proto::Hello>(receive()));
+        auto functions = std::vector<proto::WireHostFunction> {};
+        for (auto const& function: contract::HostFunctions)
+            functions.push_back(proto::WireHostFunction { .module = std::string { function.module },
+                                                          .name = std::string { function.name },
+                                                          .parameterCount = function.parameterCount });
+        send(proto::CreateRuntime { .runtimeId = 1,
+                                    .memoryBytes = contract::Limits.memoryBytes,
+                                    .stackBytes = contract::Limits.stackBytes,
+                                    .tableElements = contract::Limits.tableElements,
+                                    .functions = std::move(functions) });
+        REQUIRE(std::holds_alternative<proto::RuntimeCreated>(receive()));
+        send(proto::Load { .runtimeId = 1, .moduleId = 1, .bytes = toModule(contract::InstanceModule) });
+        auto answer = receive();
+        REQUIRE(std::holds_alternative<proto::Loaded>(answer));
+        send(proto::Instantiate { .moduleId = 1, .instanceId = 1, .interruptSlot = InstanceSlot });
+        auto const instantiated = receive();
+        REQUIRE(std::holds_alternative<proto::Instantiated>(instantiated));
+        REQUIRE_FALSE(std::get<proto::Instantiated>(instantiated).error.has_value());
+        return std::get<proto::Loaded>(std::move(answer));
+    }();
+
+    ServingHost() = default;
+    ServingHost(ServingHost const&) = delete;
+    ServingHost(ServingHost&&) = delete;
+    ServingHost& operator=(ServingHost const&) = delete;
+    ServingHost& operator=(ServingHost&&) = delete;
+
+    /// Ends the connection, and checks the host ends as having served.
+    ~ServingHost()
+    {
+        parent.control.shutdown();
+        if (exitCode.wait_for(HostPatience) == std::future_status::ready)
+            CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+        else
+        {
+            // Joining its thread would wait forever: the run ends here, rather than hang.
+            FAIL_CHECK("the host did not end with its connection");
+            std::fputs("HostProcess: the host did not end with its connection\n", stderr);
+            std::abort();
+        }
+    }
+
+    void send(proto::Pdu const& pdu) { REQUIRE(parent.control.send(pdu).has_value()); }
+
+    [[nodiscard]] proto::Pdu receive()
+    {
+        auto pdu = parent.control.receive();
+        REQUIRE(pdu.has_value());
+        return std::move(*pdu);
+    }
+
+    /// Calls the instance's export @p name with @p argv on lane 0.
+    void call(std::string_view name, std::vector<uint32_t> argv)
+    {
+        auto const named =
+            std::ranges::find(loaded.exports, name, &vtextension::wasm::ExportDescription::name);
+        REQUIRE(named != loaded.exports.end());
+        auto const ordinal = static_cast<uint32_t>(named - loaded.exports.begin());
+        // Sent outside the assertion, which may spell its expression twice.
+        auto const sent =
+            lane.send(proto::Call { .instanceId = 1, .exportOrdinal = ordinal, .argv = std::move(argv) });
+        REQUIRE(sent.has_value());
+    }
+
+    /// @return The next PDU on lane 0, which must arrive within HostPatience: a case waiting on an answer
+    /// that
+    ///         never comes ends the connection instead, which ends the wait, and fails.
+    [[nodiscard]] proto::Pdu receiveOnLane()
+    {
+        auto received = std::async(std::launch::async, [this] { return lane.receive(); });
+        if (received.wait_for(HostPatience) != std::future_status::ready)
+        {
+            FAIL_CHECK("no answer on the lane within the deadline");
+            parent.control.shutdown();
+        }
+        auto pdu = received.get();
+        REQUIRE(pdu.has_value());
+        return std::move(*pdu);
+    }
+};
+
 } // namespace
+
+TEST_CASE("HostProcess.raisedFlagAndWakeInterrupt", "[vtextension][host]")
+{
+    auto serving = ServingHost {};
+    serving.call("spin", {});
+    std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
+
+    // What Contour does to interrupt: raise the slot, then wake the host to look.
+    auto const raisedAt = std::chrono::steady_clock::now();
+    serving.parent.page.raise(ServingHost::InstanceSlot);
+    std::ignore = serving.parent.wake.signal();
+    CHECK(serving.receiveOnLane()
+          == proto::Pdu { proto::CallResult { .failure = CallFailure::Interrupted, .argv = {} } });
+    CHECK(std::chrono::steady_clock::now() - raisedAt < std::chrono::seconds { 1 });
+}
+
+TEST_CASE("HostProcess.wakeWithoutAFlagInterruptsNothing", "[vtextension][host]")
+{
+    auto serving = ServingHost {};
+    std::ignore = serving.parent.wake.signal();
+    serving.parent.page.raise(ServingHost::InstanceSlot + 1); // no instance holds it
+    std::ignore = serving.parent.wake.signal();
+    std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
+    serving.call("add", { 2, 3 });
+    CHECK(serving.receiveOnLane()
+          == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 5 } } });
+}
 
 TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
 {

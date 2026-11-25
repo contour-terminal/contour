@@ -64,10 +64,16 @@ if(_process_source AND NOT WIN32)
     # What the POSIX launchers share.
     list(APPEND _process_source process/PosixLaunch.cpp process/PosixLaunch.hpp)
 endif()
+# What every system has of it: the lanes' watch, which the remote backend keeps and the supervisor reads.
+add_library(vtextension_remote_process STATIC
+    LaneWatch.cpp
+    LaneWatch.hpp
+)
+target_link_libraries(vtextension_remote_process PUBLIC vtextension_remote_wire core::base)
 if(_process_source)
     # The supervisor and the process connector sit on the launcher: they name the connector's vocabulary
     # (HostConnector.hpp), which is header-only and std-only, and log through core::log.
-    add_library(vtextension_remote_process STATIC
+    target_sources(vtextension_remote_process PRIVATE
         process/ExtensionHostSupervisor.cpp
         process/ExtensionHostSupervisor.hpp
         process/HelperLocation.cpp
@@ -79,8 +85,7 @@ if(_process_source)
         process/ProcessLauncher.hpp
         ${_process_source}
     )
-    target_link_libraries(vtextension_remote_process PUBLIC
-        vtextension_remote_wire core::base core::log core::platform)
+    target_link_libraries(vtextension_remote_process PUBLIC core::log core::platform)
     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
     target_compile_definitions(vtextension_remote_process PUBLIC
         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
@@ -96,6 +101,7 @@ if(_process_source)
         # no engine, so that it cross-builds and runs under wine.
         add_executable(vtextension_process_test
             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+            LaneWatch_test.cpp
             process/ExtensionHostSupervisor_test.cpp
             process/HelperLocation_test.cpp
             process/HostTimers_test.cpp
@@ -135,7 +141,7 @@ add_library(vtextension_remote STATIC
     RemoteKindState.cpp
     RemoteKindState.hpp
 )
-target_link_libraries(vtextension_remote PUBLIC vtextension vtextension_remote_wire)
+target_link_libraries(vtextension_remote PUBLIC vtextension vtextension_remote_wire vtextension_remote_process)
 
 option(VTEXTENSION_FUZZING "Builds the extension host protocol's libFuzzer target (Clang only) [default: OFF]" OFF)
 if(VTEXTENSION_FUZZING)
@@ -200,23 +206,49 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     endif()
 endif()
 
-if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND TARGET vtextension_remote_process)
+if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
     # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
     # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host
     # only for the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
+    #
+    # Beside them, the contract and the suites vtextension_test runs on the default backend, here composed by
+    # testing/ProcessDefaultBackend.cpp as the remote backend over real helper processes: their real guests
+    # run through a process boundary. Cases that cannot are tagged [in-process], and are left out of a run
+    # with ~[in-process].
     add_executable(vtextension_helper_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         Helper_test.cpp
+        ProcessBackend_test.cpp
+        ReviewFocusProcess_test.cpp
+        process/testing/HelperComposition.cpp
+        process/testing/HelperComposition.hpp
         process/testing/LaunchedHelper.cpp
         process/testing/LaunchedHelper.hpp
+        testing/ProcessDefaultBackend.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/ControlImports_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/Engine_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionHost_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionWorkerPool_test.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/Instance_test.cpp
     )
     target_link_libraries(vtextension_helper_test PRIVATE
         vtextension vtextension_host vtextension_remote vtextension_remote_process vtextension_remote_wire
         glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
-    add_dependencies(vtextension_helper_test contour-extension-host)
+    add_dependencies(vtextension_helper_test contour-extension-host contour-extension-host-hostile)
     target_compile_definitions(vtextension_helper_test PRIVATE
-        VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>")
-    add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
+        VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>"
+        VTEXTENSION_HOSTILE_HELPER_PATH="$<TARGET_FILE:contour-extension-host-hostile>")
+    if(CONTOUR_WASM_GUESTS)
+        # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
+        foreach(_guest IN ITEMS echo hostile sleeper spawner)
+            add_dependencies(vtextension_helper_test ${_guest}_wasm)
+        endforeach()
+        add_dependencies(vtextension_helper_test contour_bundled_extensions)
+        target_compile_definitions(vtextension_helper_test PRIVATE
+            VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+    endif()
+    add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test "~[in-process]")
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)

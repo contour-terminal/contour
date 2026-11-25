@@ -71,18 +71,20 @@ struct HostEndpoints
 [[nodiscard]] std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(
     remote::transport::HelperArguments const& arguments);
 
-/// A host's whole serving side over its endpoints: the server.
+/// A host's whole serving side over its endpoints: the server, and the listener that hands it the interrupts
+/// raised on the page.
 class HostProcess
 {
   public:
     /// @param engine What runtimes are created on; must outlive the host.
     /// @param endpoints What it serves over.
-    /// @param config How its server runs.
+    /// @param config How its server runs; whether a slot is raised is the page's to say.
     HostProcess(IHostedEngine& engine, HostEndpoints endpoints, HostServerConfig config);
 
-    /// Serves until Contour closes the connection, it violates the protocol, or stop() is called; then
-    /// releases every engine object. Called once.
-    /// @return Why it stopped serving.
+    /// Starts listening for interrupts, serves until Contour closes the connection, it violates the protocol,
+    /// or stop() is called; then releases every engine object, and stops listening. Called once.
+    /// @return Why it stopped serving; `ExecutorUnavailable` if the listener's thread could not be started,
+    ///         nothing being served then.
     [[nodiscard]] ServerExit run();
 
     /// Thread-safe, idempotent: ends run().

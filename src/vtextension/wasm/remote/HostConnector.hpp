@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
@@ -67,12 +68,19 @@ class StepWatch
     std::function<void()> _disarm;
 };
 
-/// What the parent wants to hear of a host's end.
+/// What the parent wants to hear of a host's end, and what it wants watched while the host lives.
 struct HostAttachment
 {
     /// Called once when the host is gone or was stopped, from whichever thread observed it; at once if it was
     /// gone before it was attached. It must not block.
     std::function<void()> onDeath;
+    /// The host's lanes, for the backstop: a host whose interrupted frame does not end within
+    /// `interruptGrace` of the host's own time is stopped, and onDeath runs. Null: no backstop, as a host in
+    /// this process has none.
+    std::shared_ptr<LaneWatchSet const> lanes;
+    /// How long an interrupted frame may run on in the host before it is stopped; the time the parent spends
+    /// serving the frame's host call does not count.
+    std::chrono::milliseconds interruptGrace { 50 };
 };
 
 /// One incarnation of a host process, as its parent holds it.
@@ -88,9 +96,15 @@ class IHostHandle
     /// reaped by its supervisor, after the handle is gone.
     virtual ~IHostHandle() = default;
 
-    /// Interrupts one instance's running call, for good. Never blocks on the host.
-    /// @param instanceId The parent-chosen id of the instance; an id the host does not know is ignored.
-    virtual void interrupt(uint32_t instanceId) noexcept = 0;
+    /// Interrupts one instance's running call, for good: raises its interrupt slot, wakes the host to look,
+    /// and has the backstop look at the lanes. Wait-free: no lock, no allocation, no I/O that waits.
+    /// @param instanceId The parent-chosen id of the instance.
+    /// @param interruptSlot The slot it was instantiated with; one the host has no instance at is ignored.
+    virtual void interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept = 0;
+
+    /// Lowers an interrupt slot, before it is handed to another instance. Wait-free.
+    /// @param interruptSlot The slot, whose instance was released.
+    virtual void clearInterrupt(uint32_t interruptSlot) noexcept = 0;
 
     /// Makes the host stop serving: its channels close, and every receive on the parent's ends fails. Does
     /// not wait for it to be gone.

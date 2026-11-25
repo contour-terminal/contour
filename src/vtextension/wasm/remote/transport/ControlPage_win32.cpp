@@ -91,6 +91,18 @@ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle ha
     return ControlPage { handle, mapped->first };
 }
 
+std::expected<ControlPage, SharedObjectError> ControlPage::openHelperView() const
+{
+    auto copy = HANDLE { nullptr };
+    if (!::DuplicateHandle(
+            ::GetCurrentProcess(), _handle, ::GetCurrentProcess(), &copy, FILE_MAP_READ, FALSE, 0))
+        return std::unexpected(SharedObjectError::Io);
+    auto view = adopt(copy);
+    if (!view)
+        ::CloseHandle(copy);
+    return view;
+}
+
 ControlPage::ControlPage(ControlPage&& other) noexcept:
     _handle { std::exchange(other._handle, nullptr) }, _flags { std::exchange(other._flags, nullptr) }
 {

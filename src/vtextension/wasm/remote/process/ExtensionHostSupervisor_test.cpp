@@ -24,6 +24,7 @@
 
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
@@ -31,6 +32,7 @@
 using vtextension::wasm::HostTimeouts;
 using vtextension::wasm::remote::HostAttachment;
 using vtextension::wasm::remote::HostStep;
+using vtextension::wasm::remote::LaneWatchSet;
 using vtextension::wasm::remote::process::ExitKind;
 using vtextension::wasm::remote::process::ExitStatus;
 using vtextension::wasm::remote::process::ExtensionHostSupervisor;
@@ -89,7 +91,19 @@ struct Rig
     /// @return An attachment counting its helper's deaths in `deaths`.
     [[nodiscard]] HostAttachment countingDeaths() const
     {
-        return HostAttachment { .onDeath = [deaths = deaths] { deaths->fetch_add(1); } };
+        return HostAttachment { .onDeath = [deaths = deaths] { deaths->fetch_add(1); },
+                                .lanes = nullptr,
+                                .interruptGrace = 50ms };
+    }
+
+    /// @return An attachment counting its helper's deaths in `deaths`, whose backstop watches @p lanes with
+    ///         a grace of @p grace.
+    [[nodiscard]] HostAttachment watchingLanes(std::shared_ptr<LaneWatchSet const> lanes,
+                                               std::chrono::milliseconds grace = 50ms) const
+    {
+        return HostAttachment { .onDeath = [deaths = deaths] { deaths->fetch_add(1); },
+                                .lanes = std::move(lanes),
+                                .interruptGrace = grace };
     }
 
     /// Moves the clock on by @p delta, and lets the supervisor see it.
@@ -505,4 +519,146 @@ TEST_CASE("Supervisor.moveHandsTheHelperOn", "[vtextension]")
     rig.supervisor->sync();
     CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 1);
     CHECK(rig.supervisor->liveProcesses() == 1);
+}
+
+namespace
+{
+/// A helper attached to a lane set, as an incarnation attaches it, with a grace of 50 ms.
+struct GraceRig
+{
+    Rig rig {};
+    std::shared_ptr<LaneWatchSet> lanes = std::make_shared<LaneWatchSet>();
+    SupervisedHelper helper = [this] {
+        auto launched = rig.launch();
+        launched.attach(rig.watchingLanes(lanes));
+        rig.supervisor->sync();
+        return launched;
+    }();
+
+    /// Interrupts instance @p instanceId, as RemoteInstance::interrupt() does: arms its frame and wakes the
+    /// supervisor; then lets the supervisor see it before the test moves the clock on.
+    void interrupt(uint32_t instanceId)
+    {
+        std::ignore = lanes->interrupt(instanceId);
+        helper.nudge();
+        rig.supervisor->sync();
+    }
+
+    /// Changes lane 0 by @p change, and lets the supervisor see it before the clock moves on: the supervisor
+    /// looks at the lanes only when it wakes, which a test's clock does not do by itself.
+    template <typename Change>
+    void onLane(Change const& change)
+    {
+        change(lanes->lane(0));
+        rig.supervisor->sync();
+    }
+
+    [[nodiscard]] std::size_t graceKills() const { return killsFor(*rig.supervisor, KillReason::Grace); }
+};
+} // namespace
+
+TEST_CASE("Supervisor.graceKillsAfterHelperSideTime", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(49ms);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.deaths->load() == 0);
+    grace.rig.advance(1ms);
+    CHECK(grace.graceKills() == 1);
+    CHECK(grace.rig.fake->kills() == std::vector<std::size_t> { 0 });
+    CHECK(grace.rig.deaths->load() == 1);
+    grace.rig.advance(1h);
+    CHECK(grace.rig.deaths->load() == 1);
+}
+
+TEST_CASE("Supervisor.graceIsPausedWhileServingCallHost", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(10ms);
+    grace.onLane([](auto& lane) { lane.beginHostCall(); });
+    grace.rig.advance(5000ms); // the parent's time
+    CHECK(grace.graceKills() == 0);
+    grace.onLane([](auto& lane) { lane.endHostCall(); });
+    grace.rig.advance(39ms);
+    CHECK(grace.graceKills() == 0);
+    grace.rig.advance(1ms);
+    CHECK(grace.graceKills() == 1);
+    CHECK(grace.rig.deaths->load() == 1);
+}
+
+TEST_CASE("Supervisor.graceEndsWithTheCall", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(20ms);
+    grace.onLane([](auto& lane) { lane.leave(); });
+    grace.rig.advance(1000ms);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.fake->kills().empty());
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.graceRestartsForAnotherFrame", "[vtextension]")
+{
+    // The armed frame ended, and another was interrupted: its grace is its own.
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(40ms);
+    grace.onLane([](auto& lane) {
+        lane.leave();
+        lane.enter(7);
+    });
+    grace.interrupt(7);
+    grace.rig.advance(40ms);
+    CHECK(grace.graceKills() == 0);
+    grace.rig.advance(10ms);
+    CHECK(grace.graceKills() == 1);
+}
+
+TEST_CASE("Supervisor.noGraceWithoutAFrame", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.interrupt(7); // nothing of it runs
+    grace.lanes->lane(1).enter(8);
+    grace.interrupt(7); // another instance runs
+    grace.rig.advance(1h);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.fake->kills().empty());
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.armedLaneTicksAtATenthOfTheGrace", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.settle();
+    // An armed lane is looked at again every tenth of the grace: whether it parks, or its frame ends.
+    CHECK(grace.rig.fake->lastDeadline() == core::SteadyTimePoint {} + 5ms);
+    grace.rig.advance(5ms);
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == core::SteadyTimePoint {} + 10ms);
+}
+
+TEST_CASE("Supervisor.graceIsForgottenWithTheHelper", "[vtextension]")
+{
+    // A helper that ends with an armed lane takes its grace with it: nothing is due any more.
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+    grace.rig.supervisor->sync(); // reaped before the clock moves on (helperExitingWithinTheGraceIsNotKilled)
+    grace.rig.advance(1h);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.deaths->load() == 1);
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == std::nullopt);
 }

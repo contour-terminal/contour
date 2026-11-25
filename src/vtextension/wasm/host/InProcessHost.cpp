@@ -12,12 +12,15 @@
 #include <mutex>
 #include <ranges>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/ControlPage.hpp>
+#include <vtextension/wasm/remote/transport/WakeSignal.hpp>
 
 namespace vtextension::wasm::host
 {
@@ -59,14 +62,17 @@ class InProcessHostRegistry
 
 InProcessHost::InProcessHost(std::shared_ptr<InProcessHostRegistry> registry,
                              std::unique_ptr<IHostedEngine> engine,
-                             std::vector<Channel> lanes,
-                             Channel control,
+                             HostEndpoints endpoints,
+                             remote::transport::ControlPage page,
+                             remote::transport::WakeSender wake,
                              HostServerConfig config):
     _registry { std::move(registry) },
     _engine { std::move(engine) },
-    _server { *_engine, std::move(lanes), std::move(control), std::move(config) },
+    _page { std::move(page) },
+    _wake { std::move(wake) },
+    _host { *_engine, std::move(endpoints), std::move(config) },
     _thread { [this] {
-        std::ignore = _server.run();
+        std::ignore = _host.run();
         _state.store(ServingState::Ended);
         // Last: onDeath may drop the last reference to this host (~InProcessHost()).
         if (auto const onDeath = runReturned())
@@ -86,15 +92,21 @@ InProcessHost::~InProcessHost()
         _thread.join();
 }
 
-void InProcessHost::interrupt(uint32_t instanceId) noexcept
+void InProcessHost::interrupt(uint32_t /*instanceId*/, uint32_t interruptSlot) noexcept
 {
-    _server.interrupt(instanceId);
+    _page.raise(interruptSlot);
+    std::ignore = _wake.signal();
+}
+
+void InProcessHost::clearInterrupt(uint32_t interruptSlot) noexcept
+{
+    _page.clear(interruptSlot);
 }
 
 void InProcessHost::terminate() noexcept
 {
     _state.store(ServingState::Ended);
-    _server.stop();
+    _host.stop();
 }
 
 remote::StepWatch InProcessHost::watch(remote::HostStep /*step*/, std::chrono::milliseconds /*budget*/)
@@ -142,7 +154,12 @@ std::expected<remote::HostConnection, ExtensionError> InProcessHostConnector::co
     if (!engine)
         return std::unexpected(ExtensionError::HostUnavailable);
     auto control = makeChannelPair();
-    if (!control)
+    auto page = remote::transport::ControlPage::create();
+    auto wake = remote::transport::makeWakePair();
+    if (!control || !page || !wake)
+        return std::unexpected(ExtensionError::HostUnavailable);
+    auto helperPage = page->openHelperView();
+    if (!helperPage)
         return std::unexpected(ExtensionError::HostUnavailable);
     auto parentLanes = std::vector<Channel> {};
     auto helperLanes = std::vector<Channel> {};
@@ -154,8 +171,15 @@ std::expected<remote::HostConnection, ExtensionError> InProcessHostConnector::co
         parentLanes.push_back(std::move(lane->parent));
         helperLanes.push_back(std::move(lane->helper));
     }
-    auto handle = std::make_unique<InProcessHost>(
-        _registry, std::move(engine), std::move(helperLanes), std::move(control->helper), _config);
+    auto handle = std::make_unique<InProcessHost>(_registry,
+                                                  std::move(engine),
+                                                  HostEndpoints { .control = std::move(control->helper),
+                                                                  .lanes = std::move(helperLanes),
+                                                                  .controlPage = *std::move(helperPage),
+                                                                  .wake = std::move(wake->helper) },
+                                                  *std::move(page),
+                                                  std::move(wake->parent),
+                                                  _config);
     _connects.fetch_add(1);
     return remote::HostConnection { .control = std::move(control->parent),
                                     .lanes = std::move(parentLanes),

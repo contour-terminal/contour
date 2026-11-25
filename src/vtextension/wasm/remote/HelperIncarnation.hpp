@@ -5,18 +5,22 @@
 /// One incarnation of an extension host, as the parent drives it: its control channel, its lanes and the
 /// handle on it, from the handshake until it dies or is let go.
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
+#include <vtextension/wasm/remote/transport/ControlPage.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
 namespace vtextension::wasm::remote
@@ -34,6 +38,33 @@ struct HelperPolicy
 {
     HostTimeouts timeouts {};                                              ///< How long each step may take.
     LockdownRequirement lockdown = LockdownRequirement::RequireLockedDown; ///< Which hosts are driven at all.
+};
+
+/// The interrupt slots of one incarnation: one per live instance, InterruptSlotCount in all. Thread-safe.
+///
+/// A slot released is handed out again only once every other free one was: the later a slot comes back, the
+/// longer an interrupt raised on it before has had to be taken by its host.
+class InterruptSlots
+{
+  public:
+    /// Takes a free slot.
+    /// @return The slot; nothing if every slot is held.
+    [[nodiscard]] std::optional<uint32_t> acquire();
+
+    /// Gives a slot back. @param slot A slot acquire() handed out, lowered by now.
+    void release(uint32_t slot) noexcept;
+
+  private:
+    /// Whether a slot is held.
+    enum class SlotState : uint8_t
+    {
+        Free,
+        Held,
+    };
+
+    std::mutex _mutex;                                              ///< Guards what follows.
+    std::array<SlotState, transport::InterruptSlotCount> _slots {}; ///< Each slot's state.
+    uint32_t _cursor = 0;                                           ///< Where the next search begins.
 };
 
 /// One incarnation of a host: started, handshaken, and holding the one runtime its parent created in it.
@@ -98,9 +129,22 @@ class HelperIncarnation
     /// only the first call does anything.
     void markDead() noexcept;
 
-    /// Interrupts one of its instances, for good, without waiting on the host.
-    /// @param instanceId The instance's id; ignored by the host if unknown.
-    void interrupt(uint32_t instanceId) noexcept;
+    /// Interrupts one of its instances, for good, without waiting on the host: arms the backstop on the lane
+    /// a frame of it runs on, then raises its slot and wakes the host (IHostHandle::interrupt()). Wait-free.
+    /// @param instanceId The instance's id.
+    /// @param interruptSlot The slot it was instantiated with.
+    void interrupt(uint32_t instanceId, uint32_t interruptSlot) noexcept;
+
+    /// Lowers an instance's interrupt slot, once it is released, before the slot goes back to
+    /// interruptSlots().
+    /// @param interruptSlot The slot.
+    void clearInterrupt(uint32_t interruptSlot) noexcept;
+
+    /// @return The slots its instances are interrupted by.
+    [[nodiscard]] InterruptSlots& interruptSlots() noexcept { return _interruptSlots; }
+
+    /// @return Lane @p index's watch: the frames the thread holding the lane runs, for the backstop.
+    [[nodiscard]] LaneWatch& laneWatch(std::size_t index) noexcept { return _laneWatches->lane(index); }
 
     /// @return A module id never used in this incarnation.
     [[nodiscard]] uint32_t nextModuleId() noexcept { return _nextModuleId.fetch_add(1); }
@@ -122,6 +166,10 @@ class HelperIncarnation
     std::atomic<IncarnationState> _state { IncarnationState::Alive };
     std::atomic<uint32_t> _nextModuleId { 1 };
     std::atomic<uint32_t> _nextInstanceId { 1 };
+    InterruptSlots _interruptSlots;
+    /// Shared with the handle's backstop (HostAttachment::lanes), which may look at it after the incarnation
+    /// went.
+    std::shared_ptr<LaneWatchSet> _laneWatches = std::make_shared<LaneWatchSet>();
     // Last, so that it goes first: the host is gone before its channels' parent ends close.
     std::unique_ptr<IHostHandle> _handle;
 };

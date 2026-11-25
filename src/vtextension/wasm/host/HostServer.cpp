@@ -23,6 +23,7 @@
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
+#include <vtextension/wasm/remote/transport/ControlPage.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
 namespace vtextension::wasm::host
@@ -121,6 +122,7 @@ namespace
         std::shared_ptr<ModuleSlot> module; ///< Declared first, so released after the instance.
         std::unique_ptr<IWasmInstance> instance;
         std::unordered_map<uint32_t, CallableExport> exports; ///< By ordinal; fixed once instantiated.
+        uint32_t interruptSlot = 0; ///< The slot of the interrupt page it is interrupted by.
         /// The tag of the lane using it (its index + 1), NoLane if none: a call or memory access holds it,
         /// and a lane's nested calls into it share it.
         std::atomic<uint32_t> lane { NoLane };
@@ -178,7 +180,7 @@ class HostServer::Impl
 
     [[nodiscard]] ServerExit run();
     void stop() noexcept { finish(ServerExit::Stopped); }
-    void interrupt(uint32_t instanceId) noexcept;
+    void interruptSlot(uint32_t slot) noexcept;
 
   private:
     /// One lane, served by an executor thread of its own; only that thread touches it, but for shutdown().
@@ -268,6 +270,7 @@ class HostServer::Impl
     std::unordered_map<uint32_t, std::shared_ptr<RuntimeSlot>> _runtimes;
     std::unordered_map<uint32_t, std::shared_ptr<ModuleSlot>> _modules;
     std::unordered_map<uint32_t, std::shared_ptr<InstanceSlot>> _instances;
+    std::unordered_map<uint32_t, uint32_t> _slotInstances; ///< The live instance at each slot held, by slot.
     std::optional<ServerExit> _exit; ///< Why the connection ended; nothing while it serves.
 };
 
@@ -364,6 +367,7 @@ void HostServer::Impl::release() noexcept
         runtimes = std::exchange(_runtimes, {});
         modules = std::exchange(_modules, {});
         instances = std::exchange(_instances, {});
+        _slotInstances.clear();
     }
     instances.clear();
     modules.clear();
@@ -385,10 +389,18 @@ void HostServer::Impl::finish(ServerExit reason) noexcept
         lane.stream.shutdown();
 }
 
-void HostServer::Impl::interrupt(uint32_t instanceId) noexcept
+void HostServer::Impl::interruptSlot(uint32_t slot) noexcept
 {
     auto const lock = std::scoped_lock { _mutex };
-    if (auto const found = _instances.find(instanceId); found != _instances.end())
+    auto const held = _slotInstances.find(slot);
+    if (held == _slotInstances.end())
+        return;
+    // The slot may have been read raised for an instance released since, whose slot the parent lowered
+    // before it released it, and handed to this one: asked again under the lock that bound it, the page
+    // tells this instance's interrupt from that one's.
+    if (_config.isInterruptRaised && !_config.isInterruptRaised(slot))
+        return;
+    if (auto const found = _instances.find(held->second); found != _instances.end())
         found->second->instance->interrupt();
 }
 
@@ -492,7 +504,13 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
         if (auto const found = _modules.find(request.moduleId); found != _modules.end())
             module = found->second;
     }
-    if (!module || !_instanceIds.insert(request.instanceId).second)
+    // A slot past the page, or one a live instance holds, could interrupt no instance, or the wrong one.
+    auto const isSlotFree = [&] {
+        auto const lock = std::scoped_lock { _mutex };
+        return request.interruptSlot < remote::transport::InterruptSlotCount
+               && !_slotInstances.contains(request.interruptSlot);
+    };
+    if (!module || !isSlotFree() || !_instanceIds.insert(request.instanceId).second)
         return std::unexpected(ServerExit::ProtocolViolation);
 
     // A start function runs here, on the control thread, where a host call finds no lane and fails.
@@ -506,6 +524,7 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
     auto slot = std::make_shared<InstanceSlot>();
     slot->module = module;
     slot->instance = std::move(*instance);
+    slot->interruptSlot = request.interruptSlot;
     auto callable = std::vector<uint32_t> {};
     for (auto const [ordinal, description]: core::views::enumerate(module->module->exports()))
     {
@@ -527,6 +546,7 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
         if (_exit)
             slot->instance->interrupt();
         _instances.emplace(request.instanceId, slot);
+        _slotInstances.emplace(request.interruptSlot, request.instanceId);
     }
     auto const answer = proto::Pdu { proto::Instantiated {
         .instanceId = request.instanceId, .error = std::nullopt, .callableExports = std::move(callable) } };
@@ -540,6 +560,7 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
         auto const lock = std::scoped_lock { _mutex };
         slot->instance->interrupt();
         _instances.erase(request.instanceId);
+        _slotInstances.erase(request.interruptSlot);
     });
 }
 
@@ -559,9 +580,13 @@ Served HostServer::Impl::serve(proto::Release const& request)
         switch (request.target)
         {
             case proto::ReleaseTarget::Instance:
-                // Stopped for good, should a lane still run a call of it: the parent holds it no more.
+                // Stopped for good, should a lane still run a call of it: the parent holds it no more, and
+                // hands its slot to the next instance.
                 if (auto const found = _instances.find(request.id); found != _instances.end())
+                {
                     found->second->instance->interrupt();
+                    _slotInstances.erase(found->second->interruptSlot);
+                }
                 take(_instances);
                 break;
             case proto::ReleaseTarget::Module: take(_modules); break;
@@ -743,9 +768,9 @@ void HostServer::stop() noexcept
     _impl->stop();
 }
 
-void HostServer::interrupt(uint32_t instanceId) noexcept
+void HostServer::interruptSlot(uint32_t slot) noexcept
 {
-    _impl->interrupt(instanceId);
+    _impl->interruptSlot(slot);
 }
 
 } // namespace vtextension::wasm::host

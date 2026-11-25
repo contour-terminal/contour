@@ -28,6 +28,7 @@
 #include <vtextension/wasm/remote/CopyPathMemory.hpp>
 #include <vtextension/wasm/remote/HelperIncarnation.hpp>
 #include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/LaneWatch.hpp>
 #include <vtextension/wasm/remote/RemoteKindState.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
@@ -67,6 +68,41 @@ namespace
     {
         Running,     ///< Not interrupted: its calls run.
         Interrupted, ///< Interrupted, for good: no call of it runs again.
+    };
+
+    /// A frame of the parent's on a lane, as the backstop sees it (LaneWatch): from a call's or a memory
+    /// read's first byte sent until its last byte received.
+    class LaneFrame
+    {
+      public:
+        LaneFrame(LaneWatch& watch, uint32_t instanceId) noexcept: _watch { watch }
+        {
+            _watch.enter(instanceId);
+        }
+        LaneFrame(LaneFrame const&) = delete;
+        LaneFrame(LaneFrame&&) = delete;
+        LaneFrame& operator=(LaneFrame const&) = delete;
+        LaneFrame& operator=(LaneFrame&&) = delete;
+        ~LaneFrame() { _watch.leave(); }
+
+      private:
+        LaneWatch& _watch;
+    };
+
+    /// The innermost frame of a lane running a host call in the parent: time the backstop's grace does not
+    /// count, since the parent is the slow one then.
+    class HostCallFrame
+    {
+      public:
+        explicit HostCallFrame(LaneWatch& watch) noexcept: _watch { watch } { _watch.beginHostCall(); }
+        HostCallFrame(HostCallFrame const&) = delete;
+        HostCallFrame(HostCallFrame&&) = delete;
+        HostCallFrame& operator=(HostCallFrame const&) = delete;
+        HostCallFrame& operator=(HostCallFrame&&) = delete;
+        ~HostCallFrame() { _watch.endHostCall(); }
+
+      private:
+        LaneWatch& _watch;
     };
 
     /// A module as one incarnation describes it, under the id it was loaded with there.
@@ -302,11 +338,13 @@ namespace
         RemoteInstance(std::shared_ptr<RemoteModule> module,
                        std::shared_ptr<HelperIncarnation> incarnation,
                        uint32_t instanceId,
+                       uint32_t interruptSlot,
                        std::vector<uint32_t> callableExports,
                        IHostContext& context):
             _module { std::move(module) },
             _incarnation { std::move(incarnation) },
             _instanceId { instanceId },
+            _interruptSlot { interruptSlot },
             _callableExports { std::move(callableExports) },
             _context { context },
             _memory { instanceId,
@@ -322,8 +360,12 @@ namespace
 
         ~RemoteInstance() override
         {
+            // Lowered before it is released, and given back only once the host was told: the next instance
+            // its slot is handed to is instantiated after the host let this one go.
+            _incarnation->clearInterrupt(_interruptSlot);
             _incarnation->post(
                 proto::Release { .target = proto::ReleaseTarget::Instance, .id = _instanceId });
+            _incarnation->interruptSlots().release(_interruptSlot);
         }
 
         [[nodiscard]] std::optional<ExportFunction> function(std::string_view name) const override
@@ -351,18 +393,21 @@ namespace
             return _memory.view(address, size);
         }
 
+        /// Wait-free: stores the sticky flag, then arms the backstop and raises the slot
+        /// (HelperIncarnation::interrupt()). A call that enters its frame after the flag is stored sees it
+        /// (call()), and one that entered it before is armed.
         void interrupt() noexcept override
         {
             _interrupt.store(InterruptState::Interrupted);
-            _incarnation->interrupt(_instanceId);
+            _incarnation->interrupt(_instanceId, _interruptSlot);
         }
 
       private:
-        /// @return The calling thread's lane of the host; null if the thread has none.
-        [[nodiscard]] PduStream* laneOfCurrentThread()
+        /// @return The index of the calling thread's lane of the host; nothing if the thread has none.
+        [[nodiscard]] std::optional<std::size_t> laneOfCurrentThread()
         {
             auto const lane = _module->runtime().kind().laneOfCurrentThread();
-            return lane ? &_incarnation->lane(*lane) : nullptr;
+            return lane ? std::optional { *lane } : std::nullopt;
         }
 
         /// Kills the host: anything out of place on a channel means it can no longer be trusted.
@@ -383,13 +428,15 @@ namespace
         /// is about to run.
         [[nodiscard]] std::expected<void, CallFailure> flushTo(PduStream& lane);
 
-        /// Runs the host call @p request asks for, and answers it on @p lane.
+        /// Runs the host call @p request asks for, and answers it on @p lane, whose watch is @p watch.
         [[nodiscard]] std::expected<void, CallFailure> serveHostCall(PduStream& lane,
+                                                                     LaneWatch& watch,
                                                                      proto::CallHost const& request);
 
         std::shared_ptr<RemoteModule> _module;
         std::shared_ptr<HelperIncarnation> _incarnation;
         uint32_t _instanceId;
+        uint32_t _interruptSlot; ///< The slot of the host's interrupt page it is interrupted by.
         std::vector<uint32_t> _callableExports; ///< The export ordinals the host offers to call.
         IHostContext& _context;
         std::atomic<InterruptState> _interrupt { InterruptState::Running };
@@ -454,11 +501,23 @@ namespace
             _moduleId = reloaded->moduleId;
         }
 
+        // Every live instance holds a slot of the host's interrupt page; with none left, the host takes no
+        // more instances, which is no fault of the host's.
+        auto const interruptSlot = host.interruptSlots().acquire();
+        if (!interruptSlot)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        auto const refused = [&](ExtensionError error) {
+            host.interruptSlots().release(*interruptSlot);
+            return std::unexpected(error);
+        };
+
         auto const instanceId = host.nextInstanceId();
-        auto reply = host.request(proto::Instantiate { .moduleId = _moduleId, .instanceId = instanceId },
+        auto reply = host.request(proto::Instantiate { .moduleId = _moduleId,
+                                                       .instanceId = instanceId,
+                                                       .interruptSlot = *interruptSlot },
                                   HostStep::Instantiate);
         if (!reply)
-            return std::unexpected(ExtensionError::HostUnavailable);
+            return refused(ExtensionError::HostUnavailable);
         auto* const instantiated = std::get_if<proto::Instantiated>(&*reply);
         auto const callable = [&](uint32_t ordinal) {
             return ordinal < _exports.size() && _exports[ordinal].kind == ExternKind::Function
@@ -470,13 +529,14 @@ namespace
             || !std::ranges::all_of(instantiated->callableExports, callable))
         {
             host.markDead();
-            return std::unexpected(ExtensionError::HostUnavailable);
+            return refused(ExtensionError::HostUnavailable);
         }
         if (instantiated->error)
-            return std::unexpected(*instantiated->error);
+            return refused(*instantiated->error);
         return std::make_unique<RemoteInstance>(shared_from_this(),
                                                 std::move(*incarnation),
                                                 instanceId,
+                                                *interruptSlot,
                                                 std::move(instantiated->callableExports),
                                                 context);
     }
@@ -494,10 +554,17 @@ namespace
             return std::unexpected(CallFailure::Trap);
         // A thread past the lanes the host serves cannot call (RemoteKindState logged it), nor can one that
         // was never prepared.
-        auto* const lane = laneOfCurrentThread();
-        if (!lane)
+        auto const laneIndex = laneOfCurrentThread();
+        if (!laneIndex)
             return std::unexpected(CallFailure::Trap);
+        auto* const lane = &_incarnation->lane(*laneIndex);
+        auto& watch = _incarnation->laneWatch(*laneIndex);
 
+        // The frame is the backstop's to see before the flag is read again: an interrupt() racing this either
+        // stored the flag before, and the call does not start, or finds the frame, and arms it.
+        auto const frame = LaneFrame { watch, _instanceId };
+        if (_interrupt.load() == InterruptState::Interrupted)
+            return std::unexpected(CallFailure::Interrupted);
         if (auto const flushed = flushTo(*lane); !flushed)
             return flushed;
         auto const arguments = argv.first(signature.parameters.size());
@@ -512,7 +579,7 @@ namespace
                 return crashed();
             if (auto const* const hostCall = std::get_if<proto::CallHost>(&*reply))
             {
-                if (auto const served = serveHostCall(*lane, *hostCall); !served)
+                if (auto const served = serveHostCall(*lane, watch, *hostCall); !served)
                     return served;
                 continue;
             }
@@ -529,13 +596,19 @@ namespace
     }
 
     std::expected<void, CallFailure> RemoteInstance::serveHostCall(PduStream& lane,
+                                                                   LaneWatch& watch,
                                                                    proto::CallHost const& request)
     {
         auto const functions = _module->runtime().functions();
         if (request.functionIndex >= functions.size()
             || request.arguments.size() != functions[request.functionIndex].parameterCount)
             return crashed();
-        auto const result = _context.callHost(request.functionIndex, request.arguments);
+        // The parent's own time: only the host function. Answering it is the host's again, as a host that
+        // stops reading must not hold the lane past the grace.
+        auto const result = [&] {
+            auto const parked = HostCallFrame { watch };
+            return _context.callHost(request.functionIndex, request.arguments);
+        }();
         // What the host function wrote reaches the guest before it runs on.
         if (auto const flushed = flushTo(lane); !flushed)
             return flushed;
@@ -559,9 +632,12 @@ namespace
                                                                                uint32_t size)
     {
         // A thread that cannot call cannot read either: as a call from it traps, its read is refused.
-        auto* const lane = laneOfCurrentThread();
-        if (!lane)
+        auto const laneIndex = laneOfCurrentThread();
+        if (!laneIndex)
             return std::unexpected(MemoryFailure::OutOfBounds);
+        auto* const lane = &_incarnation->lane(*laneIndex);
+        // A read is a frame of its own: a host that stalls in its answer is the backstop's, once interrupted.
+        auto const frame = LaneFrame { _incarnation->laneWatch(*laneIndex), _instanceId };
         if (!lane->send(proto::MemoryRead { .instanceId = _instanceId, .address = address, .size = size }))
         {
             _incarnation->markDead();

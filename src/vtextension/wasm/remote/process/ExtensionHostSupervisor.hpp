@@ -56,7 +56,7 @@ enum class KillReason : uint8_t
 {
     Requested,   ///< Its holder asked (SupervisedHelper::kill()).
     StepTimeout, ///< It overstayed a step's watch.
-    Grace,       ///< It did not stop a call within the grace after an interrupt.
+    Grace,       ///< An interrupted call of its did not end within the grace, by its own time.
     Dropped,     ///< Its holder let it go.
     Shutdown,    ///< The supervisor stopped, or can no longer wait for its helpers.
 };
@@ -104,9 +104,12 @@ class SupervisedHelper
     /// @return What disarms it when destroyed; inert once the supervisor stopped.
     [[nodiscard]] remote::StepWatch watch(remote::HostStep step, std::chrono::milliseconds budget);
 
-    /// Tells the supervisor what to do when the helper ends. Posts, and returns.
+    /// Tells the supervisor what to do when the helper ends, and which lanes to watch. Posts, and returns.
     /// @param attachment Its onDeath runs once, on the supervisor's thread, once the helper ended or was
-    ///        killed for a timeout; at once there if that happened already.
+    ///        killed for a timeout; at once there if that happened already. Its lanes are looked at whenever
+    ///        the supervisor wakes, and every tenth of the grace while one is armed: a frame that stays armed
+    ///        for the grace, the time its innermost frame serves a host call not counted, has the helper
+    ///        killed (KillReason::Grace).
     void attach(remote::HostAttachment attachment);
 
     /// Wakes the supervisor. Wait-free.

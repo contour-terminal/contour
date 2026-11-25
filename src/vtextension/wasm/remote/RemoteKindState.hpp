@@ -66,6 +66,10 @@ class RemoteKindState: public std::enable_shared_from_this<RemoteKindState>
     /// @param lane The lane's index.
     void releaseLane(std::size_t lane) noexcept;
 
+    /// Test hook.
+    /// @return How many lanes a thread holds.
+    [[nodiscard]] std::size_t lanesInUse() const noexcept;
+
     /// @return The kind's serial, unique in the process.
     [[nodiscard]] uint64_t serial() const noexcept { return _serial; }
 

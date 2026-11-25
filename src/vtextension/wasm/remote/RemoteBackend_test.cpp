@@ -13,6 +13,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <expected>
 #include <functional>
 #include <future>
@@ -39,6 +41,7 @@
 #include <vtextension/wasm/remote/proto/Codec.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/ControlPage.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 #include <vtextension/wasm/testing/RenderMeasurement.hpp>
@@ -389,7 +392,8 @@ class CountingHandle final: public IHostHandle
     {
     }
 
-    void interrupt(uint32_t /*instanceId*/) noexcept override {}
+    void interrupt(uint32_t /*instanceId*/, uint32_t /*interruptSlot*/) noexcept override {}
+    void clearInterrupt(uint32_t /*interruptSlot*/) noexcept override {}
     void terminate() noexcept override { _records->terminations.fetch_add(1); }
 
     [[nodiscard]] StepWatch watch(HostStep step, std::chrono::milliseconds budget) override
@@ -1095,6 +1099,103 @@ TEST_CASE("RemoteBackend.interruptIsWaitFreeOfTheHelper", "[vtextension][remote]
     CHECK(interruptTook < 1s);
     REQUIRE(spun.has_value());
     CHECK(*spun == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
+}
+
+TEST_CASE("RemoteBackend.slotsAreReused", "[vtextension][remote]")
+{
+    // Nearly twice as many instances as a host has slots, one after the other: each gives its slot back.
+    auto const connector = makeConnector();
+    auto const backend = makeBackend(connector);
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = contract::RecordingHostContext {};
+    auto failures = std::size_t { 0 };
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 2000))
+        if (!module->instantiate(context))
+            ++failures;
+    CHECK(failures == 0);
+    CHECK(connector->connects() == 1);
+    auto const instance = contract::instantiate(*module, context);
+    auto argv = std::array<uint32_t, 2> { 2, 3 };
+    REQUIRE(instance->call(contract::functionOf(*instance, "add"), argv).has_value());
+    CHECK(argv[0] == 5);
+}
+
+TEST_CASE("RemoteBackend.slotExhaustionIsRuntimeUnavailable", "[vtextension][remote]")
+{
+    auto const connector = makeConnector();
+    auto const backend = makeBackend(connector);
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = contract::RecordingHostContext {};
+    auto instances = std::vector<std::unique_ptr<IWasmInstance>> {};
+    for ([[maybe_unused]] auto const index:
+         std::views::iota(uint32_t { 0 }, vtextension::wasm::remote::transport::InterruptSlotCount))
+    {
+        auto instance = module->instantiate(context);
+        REQUIRE(instance.has_value());
+        instances.push_back(*std::move(instance));
+    }
+
+    // Every slot is held: the host takes no more instances, and is no worse for it.
+    auto const refused = module->instantiate(context);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error() == ExtensionError::RuntimeUnavailable);
+    auto argv = std::array<uint32_t, 2> { 2, 3 };
+    REQUIRE(instances.front()->call(contract::functionOf(*instances.front(), "add"), argv).has_value());
+    CHECK(argv[0] == 5);
+    CHECK(connector->connects() == 1);
+
+    // One let go, its slot is another's.
+    instances.pop_back();
+    CHECK(module->instantiate(context).has_value());
+}
+
+TEST_CASE("RemoteBackend.releasedSlotIsLowered", "[vtextension][remote][threading]")
+{
+    // An instance interrupted, then let go: the next to hold its slot is not interrupted by it, at the next
+    // wake of the host's listener.
+    using namespace std::chrono_literals;
+    auto const backend = makeBackend(makeConnector());
+    auto const runtime = contract::createRuntime(*backend);
+    auto const guard = contract::enterThread(*backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = contract::RecordingHostContext {};
+    {
+        auto const interrupted = contract::instantiate(*module, context);
+        interrupted->interrupt();
+    }
+    // Slots are handed out round the page: every other one is taken before the released one comes back.
+    auto instances = std::vector<std::unique_ptr<IWasmInstance>> {};
+    for ([[maybe_unused]] auto const index:
+         std::views::iota(uint32_t { 0 }, vtextension::wasm::remote::transport::InterruptSlotCount))
+        instances.push_back(contract::instantiate(*module, context));
+    auto& heir = *instances.back();
+
+    // A wake: interrupting a spinning instance has the listener scan the whole page.
+    auto& spinner = *instances.front();
+    auto spun = std::async(std::launch::async, [&] {
+        auto const spinGuard = backend->enterThread();
+        return spinGuard ? spinner.call(contract::functionOf(spinner, "spin"), {})
+                         : std::expected<void, CallFailure> { std::unexpected(CallFailure::Trap) };
+    });
+    std::this_thread::sleep_for(100ms);
+    spinner.interrupt();
+    if (spun.wait_for(5s) != std::future_status::ready)
+    {
+        // The future's destructor would wait for the spinning call forever: the run ends here, rather than
+        // hang.
+        FAIL_CHECK("the interrupted call did not return");
+        std::fputs("RemoteBackend.releasedSlotIsLowered: the interrupted call did not return\n", stderr);
+        std::abort();
+    }
+    CHECK(spun.get() == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
+
+    auto argv = std::array<uint32_t, 2> { 2, 3 };
+    CHECK(heir.call(contract::functionOf(heir, "add"), argv).has_value());
+    CHECK(argv[0] == 5);
 }
 
 TEST_CASE("RemoteBackend.preparedGenerationFollowsTheOutermostGuard", "[vtextension][remote]")

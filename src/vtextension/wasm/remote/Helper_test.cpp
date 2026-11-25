@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The extension host executable itself, started as Contour starts it.
-#include <core/Clock.hpp>
-#include <core/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,6 +29,7 @@
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
@@ -48,7 +47,6 @@ using process::testing::launchHelper;
 using process::testing::ownProcessId;
 using vtextension::ExtensionError;
 using vtextension::testing::toModule;
-using vtextension::wasm::BackendConfig;
 using vtextension::wasm::HostTimeouts;
 using vtextension::wasm::IWasmBackend;
 using vtextension::wasm::LockdownRequirement;
@@ -60,21 +58,6 @@ namespace contract = vtextension::wasm::testing::contract;
 namespace
 {
 
-/// The sanitizer variables a helper is handed when this process has them, so that it reports as the tests do.
-constexpr auto SanitizerVariables =
-    std::array<std::string_view, 4> { "ASAN_OPTIONS", "LSAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS" };
-
-/// @return The helper's environment: the launcher's default, and this process's sanitizer variables.
-[[nodiscard]] std::vector<std::pair<std::string, std::string>> helperEnvironment()
-{
-    auto environment = process::defaultHelperEnvironment();
-    auto const live = core::LiveEnvironment {};
-    for (auto const name: SanitizerVariables)
-        if (auto value = live.get(name))
-            environment.emplace_back(std::string { name }, *std::move(value));
-    return environment;
-}
-
 /// @return A launch of the extension host executable with @p leading arguments before its own.
 [[nodiscard]] HelperLaunch helperLaunch(std::vector<std::string> leading = {},
                                         process::ProcessId parentProcessId = ownProcessId())
@@ -84,7 +67,7 @@ constexpr auto SanitizerVariables =
                           .trailing = {},
                           .parentProcessId = parentProcessId,
                           .dataBytes = process::DefaultDataBytes,
-                          .environment = helperEnvironment() };
+                          .environment = process::testing::helperEnvironment() };
 }
 
 #ifdef __linux__
@@ -133,29 +116,10 @@ struct LimitValues
     return control;
 }
 
-/// How long a teardown may take: the helpers exit on their own once their channels close (D57's grace).
-constexpr auto TeardownGrace = std::chrono::milliseconds { 2000 };
-
-/// The binary's supervisor, as a hosting process has one: it starts the real helper, recorded.
-struct ProcessRig
+/// @return The binary's composition: one supervisor, as a hosting process has.
+[[nodiscard]] process::testing::HelperComposition& processRig()
 {
-    std::shared_ptr<process::testing::RecordingLauncher> recording =
-        std::make_shared<process::testing::RecordingLauncher>(process::makeSystemProcessLauncher());
-    std::unique_ptr<process::ExtensionHostSupervisor> supervisor = [this] {
-        auto started = process::ExtensionHostSupervisor::start(process::SupervisorConfig {
-            .launcher = recording, .clock = &core::defaultSteadyClock(), .teardownGrace = TeardownGrace });
-        REQUIRE(started.has_value());
-        return std::move(*started);
-    }();
-    std::shared_ptr<vtextension::wasm::remote::RemoteKindState> kind =
-        vtextension::wasm::remote::makeRemoteKindState();
-};
-
-/// @return The binary-wide rig.
-[[nodiscard]] ProcessRig& processRig()
-{
-    static auto rig = ProcessRig {};
-    return rig;
+    return process::testing::binaryComposition();
 }
 
 /// @return A remote backend whose hosts are real helper processes, under @p timeouts, driving those
@@ -163,39 +127,24 @@ struct ProcessRig
 [[nodiscard]] std::unique_ptr<IWasmBackend> processBackend(LockdownRequirement lockdown,
                                                            HostTimeouts timeouts = {})
 {
-    auto& rig = processRig();
-    auto connector = std::make_shared<process::ProcessHostConnector>(
-        rig.supervisor->mailbox(),
-        process::ProcessHostConfig { .helper = VTEXTENSION_HELPER_PATH,
-                                     .environment = helperEnvironment(),
-                                     .extraArguments = {},
-                                     .caps = {} });
-    return vtextension::wasm::remote::makeRemoteBackend(rig.kind,
-                                                        BackendConfig { .helper = VTEXTENSION_HELPER_PATH,
-                                                                        .timeouts = timeouts,
-                                                                        .connector = connector,
-                                                                        .lockdown = lockdown });
+    return processRig().backend(process::testing::HelperBackendConfig { .helper = VTEXTENSION_HELPER_PATH,
+                                                                        .extraArguments = {},
+                                                                        .lockdown = lockdown,
+                                                                        .timeouts = timeouts });
 }
 
-/// @return How many kills the binary's supervisor sent for @p reason so far, as of everything it was told
-///         and everything that fell due by now: a kill's onDeath runs before its batch's counters publish.
+/// @return How many kills the binary's supervisor sent for @p reason so far.
 [[nodiscard]] std::size_t killsFor(process::KillReason reason)
 {
-    auto& supervisor = *processRig().supervisor;
-    supervisor.sync();
-    return supervisor.counters().kills.at(std::to_underlying(reason));
+    return processRig().killsFor(reason);
 }
 
 /// Waits until every helper of the binary's supervisor was reaped -- those let go exit on their own -- and
 /// checks that none ended uncleanly: how a helper's sanitizer report fails a case.
 void checkHelpersEndedCleanly()
 {
-    auto const& supervisor = *processRig().supervisor;
-    auto const deadline = std::chrono::steady_clock::now() + TeardownGrace + 3s;
-    while (supervisor.liveProcesses() != 0 && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(10ms);
-    CHECK(supervisor.liveProcesses() == 0);
-    CHECK(supervisor.counters().uncleanExits == 0);
+    CHECK(processRig().awaitEveryHelperReaped());
+    CHECK(processRig().supervisor().counters().uncleanExits == 0);
 }
 
 } // namespace
@@ -292,7 +241,7 @@ TEST_CASE("Process.unsandboxedIsRefusedUnlessAccepted", "[vtextension]")
 TEST_CASE("Process.startFunctionThatNeverReturnsIsKilledAtTheInstantiateTimeout", "[vtextension]")
 {
     auto const timeouts = killsFor(process::KillReason::StepTimeout);
-    auto const launches = processRig().recording->launches();
+    auto const launches = processRig().recording().launches();
     {
         auto const backend =
             processBackend(LockdownRequirement::AcceptUnsandboxed, HostTimeouts { .instantiate = 200ms });
@@ -318,7 +267,7 @@ TEST_CASE("Process.startFunctionThatNeverReturnsIsKilledAtTheInstantiateTimeout"
         auto argv = std::array<uint32_t, 2> { 20, 22 };
         REQUIRE(instance->call(contract::functionOf(*instance, "add"), argv).has_value());
         CHECK(argv[0] == 42);
-        CHECK(processRig().recording->launches() == launches + 2);
+        CHECK(processRig().recording().launches() == launches + 2);
     }
     checkHelpersEndedCleanly();
 }

@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/wasm/host/InterruptListener.hpp>
+
 namespace vtextension::wasm::host
 {
 
@@ -135,12 +137,23 @@ std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(transport::HelperAr
 HostProcess::HostProcess(IHostedEngine& engine, HostEndpoints endpoints, HostServerConfig config):
     _controlPage { std::move(endpoints.controlPage) },
     _wake { std::move(endpoints.wake) },
-    _server { engine, std::move(endpoints.lanes), std::move(endpoints.control), std::move(config) }
+    _server { engine, std::move(endpoints.lanes), std::move(endpoints.control), [&] {
+                 config.isInterruptRaised = [page = &_controlPage](uint32_t slot) {
+                     return page->isRaised(slot);
+                 };
+                 return std::move(config);
+             }() }
 {
 }
 
 ServerExit HostProcess::run()
 {
+    // Listening before the server confines the host, which may forbid new threads from then on; stopped and
+    // joined once the server is done.
+    auto const listener =
+        InterruptListener::start(_controlPage, _wake, [this](uint32_t slot) { _server.interruptSlot(slot); });
+    if (!listener)
+        return ServerExit::ExecutorUnavailable;
     return _server.run();
 }
 
