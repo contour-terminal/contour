@@ -3188,16 +3188,18 @@ void Screen::sixelImage(ImageSize pixelSize, LineOffset lastBandTop, Image::Data
 
     // With sixel scrolling enabled, leaving sixel mode sets "the text cursor ... to the current sixel
     // cursor position" (VT340 manual, vol. 2, §14.4.1,
-    // https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.4.1): the row the top of the final sixel band falls
-    // in. The manual names no column; the image's first column is Windows Terminal's choice, the reference
-    // implementation here. renderImage() left the cursor on the image's last row, which an image that
-    // scrolled has moved to the bottom margin, so the image's top is found from there. A trailing Graphics
-    // New Line puts that band below the image; the cursor then goes on down to it, scrolling at the bottom
-    // margin, as sixel scrolling does (§14.4.1).
+    // https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.4.1). The sixel cursor sits at the top of the
+    // last band, so the cursor goes to the row where that band begins, in the image's first column (the
+    // manual names no column). Windows Terminal does the same.
     //
-    // A real VT340 puts the cursor one row too high for some image heights
-    // (https://github.com/hackerb9/vt340test/blob/main/glitches.md). That is a hardware glitch, not
-    // the documented behaviour, and it is deliberately not reproduced; Windows Terminal does not either.
+    // A band can begin a row above the image's bottom edge: with 20-pixel cells, a 21-pixel image covers
+    // two rows, but its last band begins at pixel 18, in the first. The cursor then ends a row higher,
+    // as measured on a real VT340 (https://github.com/hackerb9/vt340test/blob/main/glitches.md).
+    //
+    // renderImage() left the cursor on the image's last row, which scrolling may have moved to the bottom
+    // margin, so the image's top is found from there. After a trailing Graphics New Line the last band
+    // begins below the image, and the cursor moves down to it with line feeds, scrolling at the bottom
+    // margin as sixel scrolling does.
     auto const lastImageRow = logicalCursorPosition().line;
     auto const imageTop = lastImageRow - (boxed_cast<LineOffset>(extent->lines) - 1);
     auto const bandRow = LineOffset::cast_from(unbox(lastBandTop) / unbox(_terminal->cellPixelSize().height));

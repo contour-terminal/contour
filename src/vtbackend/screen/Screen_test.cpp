@@ -5107,6 +5107,19 @@ std::string chessBoardEndingInItsLastBand()
     return sixel;
 }
 
+/// A 10-pixel-wide sixel image exactly @p height pixels tall at a 1:1 aspect ratio, with no trailing Graphics
+/// New Line.
+std::string sixelOfHeight(int height)
+{
+    auto sixel = std::string { "\033Pq\"1;1#0;2;0;0;0#0" };
+    for (auto const band: std::views::iota(0, (height + 5) / 6))
+    {
+        auto const bits = std::min(6, height - (band * 6));
+        sixel += std::format("{}!10{}", band == 0 ? "" : "-", static_cast<char>('?' + (1 << bits) - 1));
+    }
+    return sixel + "\033\\";
+}
+
 /// Where the cursor is after @p sixel, written after @p prefix to a 20x20 page of @p cellSize cells.
 CellLocation cursorAfterSixel(ImageSize cellSize, std::string_view prefix, std::string_view sixel)
 {
@@ -5149,6 +5162,20 @@ TEST_CASE("Sixel.cursor_ends_on_the_row_of_the_last_band", "[screen][sixel]")
         // Six rows of 18 pixels: both are in the sixth.
         CHECK(cursorAfterSixel(Cells18, Origin, lastBandAt96) == at(5));
         CHECK(cursorAfterSixel(Cells18, Origin, lastBandAt102) == at(5));
+    }
+    SECTION("the last band can begin a row above the image's bottom row")
+    {
+        // With the VT340's 20-pixel cells a 21- to 24-pixel image covers two rows, but its last band begins
+        // at pixel 18, in the first, so that is where the cursor goes; likewise 41 and 42 pixels, whose last
+        // band begins at pixel 36. These are the heights hackerb9/vt340test measured on a VT340
+        // (https://github.com/hackerb9/vt340test/blob/main/glitches.md).
+        CHECK(cursorAfterSixel(Cells20, Origin, sixelOfHeight(20)) == at(0));
+        CHECK(cursorAfterSixel(Cells20, Origin, sixelOfHeight(21)) == at(0));
+        CHECK(cursorAfterSixel(Cells20, Origin, sixelOfHeight(24)) == at(0));
+        CHECK(cursorAfterSixel(Cells20, Origin, sixelOfHeight(25)) == at(1));
+        CHECK(cursorAfterSixel(Cells20, Origin, sixelOfHeight(41)) == at(1));
+        CHECK(cursorAfterSixel(Cells20, Origin, sixelOfHeight(42)) == at(1));
+        CHECK(cursorAfterSixel(Cells20, Origin, sixelOfHeight(43)) == at(2));
     }
     SECTION("a declared raster height neither moves the cursor nor stops a band")
     {
