@@ -53,6 +53,9 @@
 #include <vtextension/wasm/remote/proto/Codec.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
+#ifndef _WIN32
+    #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+#endif
 
 namespace process = vtextension::wasm::remote::process;
 namespace transport = vtextension::wasm::remote::transport;
@@ -296,6 +299,7 @@ enum class Operation : uint8_t
     Load,         ///< `runtime->load(...)`.
     Instantiate,  ///< `module->instantiate(...)`.
     ReleaseFlood, ///< FloodInstances instances dropped at once, then `module->instantiate(...)`.
+    Grow,         ///< `call("grow")`: its memory grows by 4 pages, under the watchdog.
 };
 
 /// How many instances Operation::ReleaseFlood drops.
@@ -374,6 +378,12 @@ constexpr auto HostileRows = std::array {
                  Failure::HostUnavailable,
                  HelperEnd::StepOverran,
                  HostStep::Instantiate },
+    HostileRow { "grow-past-cap", Operation::Grow, Failure::CallCrashed, HelperEnd::Refused },
+    HostileRow { "grow-shrinks", Operation::Grow, Failure::CallCrashed, HelperEnd::Refused },
+    HostileRow { "grow-unaligned", Operation::Grow, Failure::CallCrashed, HelperEnd::Refused },
+    HostileRow { "grow-wrong-instance", Operation::Grow, Failure::CallCrashed, HelperEnd::Refused },
+    // Granted memory it cannot open ends the host, as a crash of its own: not a violation Contour refused.
+    HostileRow { "memory-unusable", Operation::Grow, Failure::CallCrashed, HelperEnd::OnItsOwn },
     HostileRow { "stop-reading-at-release",
                  Operation::ReleaseFlood,
                  Failure::HostUnavailable,
@@ -537,6 +547,7 @@ void flood(IWasmModule& module, contract::RecordingHostContext& context)
         {
             case Operation::Add: return callUnderWatchdog(backend, *instance, "add");
             case Operation::PingThenAdd: return callUnderWatchdog(backend, *instance, "ping-then-add");
+            case Operation::Grow: return callUnderWatchdog(backend, *instance, "grow");
             case Operation::Read:
                 return contract::onPreparedThread(backend,
                                                   [&] {
@@ -812,6 +823,106 @@ TEST_CASE("Hostility.hangingLoadOpensTheBreaker", "[vtextension][process][hostil
         REQUIRE_FALSE(fourth.has_value());
         CHECK(fourth.error() == ExtensionError::HostUnavailable);
         CHECK(composition.recording().launches() == 3);
+    }
+    checkEveryHelperEnded(composition, 0);
+}
+
+namespace
+{
+
+/// How long the renders through a host that scribbles on memory may take, all of them.
+constexpr auto ScribbledRendersBound = std::chrono::seconds { 10 };
+
+/// How many renders run through a host that scribbles on memory.
+constexpr auto ScribbledRenders = 200;
+
+} // namespace
+
+#ifndef _WIN32
+TEST_CASE("Hostility.descriptorUpIsNeverInstalled", "[vtextension][process][hostility]")
+{
+    // The host attaches a descriptor to its CallResult: Contour reads its lanes with plain receives, so the
+    // system drops it, and the call is answered as if nothing came with it.
+    auto const deadline = CaseDeadline { "Hostility.descriptorUpIsNeverInstalled" };
+    auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+    {
+        auto const backend = composition.backend(hostileHelper("descriptor-up"));
+        auto const runtime = contract::createRuntime(*backend);
+        auto loaded = loadInstanceModule(*runtime);
+        REQUIRE(loaded.has_value());
+        auto const module = *std::move(loaded);
+        auto context = contract::RecordingHostContext {};
+        auto const instance = contract::instantiate(*module, context);
+        auto const before = vtextension::wasm::remote::transport::testing::openDescriptorCount();
+        auto const sum = contract::onPreparedThread(*backend, [&]() -> std::optional<uint32_t> {
+            auto argv = std::array<uint32_t, 2> { 2, 3 };
+            if (!instance->call(contract::functionOf(*instance, "add"), argv))
+                return std::nullopt;
+            return argv[0];
+        });
+        CHECK(sum == std::optional { std::optional { uint32_t { 5 } } });
+        CHECK(vtextension::wasm::remote::transport::testing::openDescriptorCount() == before);
+        composition.supervisor().sync();
+        CHECK(composition.supervisor().counters().deathsObserved == 0);
+        CHECK(composition.recording().launches() == 1);
+    }
+    checkEveryHelperEnded(composition, 0);
+}
+#endif
+
+TEST_CASE("hostile memory through a real host", "[vtextension][process][hostility]")
+{
+    // A host that flips the bytes of every memory Contour grants it, all the time: renders succeed, or fail
+    // with an error of the extension's; none ends Contour, nor waits past the deadline.
+    auto const deadline = CaseDeadline { "hostile memory through a real host" };
+    auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+    {
+        auto extension = HostileExtension { composition, "scribble-memory" };
+        auto const began = std::chrono::steady_clock::now();
+        auto rendered = 0;
+        auto failed = 0;
+        for ([[maybe_unused]] auto const render: std::views::iota(0, ScribbledRenders))
+        {
+            auto const compiled = extension.acquire();
+            auto const failure =
+                compiled ? renderFailure(extension, **compiled) : std::optional { compiled.error() };
+            ++(failure ? failed : rendered);
+        }
+        INFO("rendered " << rendered << ", failed " << failed);
+        CHECK(rendered + failed == ScribbledRenders);
+        CHECK(std::chrono::steady_clock::now() - began < ScribbledRendersBound);
+    }
+    checkEveryHelperEnded(composition, 0);
+}
+
+TEST_CASE("Hostility.copyingHostServes", "[vtextension][process][hostility]")
+{
+    // A host that copies memory where the system could map it: its Hello says so, and Contour reaches memory
+    // through the protocol.
+    auto const deadline = CaseDeadline { "Hostility.copyingHostServes" };
+    auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+    {
+        auto const backend = composition.backend(hostileHelper("copy-memory"));
+        auto const runtime = contract::createRuntime(*backend);
+        auto loaded = loadInstanceModule(*runtime);
+        REQUIRE(loaded.has_value());
+        CHECK(addsOnAFreshInstance(*backend, **loaded));
+        auto const read = contract::onPreparedThread(*backend, [&]() -> std::string {
+            auto context = contract::RecordingHostContext {};
+            auto const instance = (*loaded)->instantiate(context);
+            if (!instance)
+                return {};
+            auto const view = (*instance)->memory(16, 5);
+            if (!view)
+                return {};
+            auto text = std::string {};
+            for (auto const byte: *view)
+                text.push_back(static_cast<char>(byte));
+            return text;
+        });
+        // The "hello" the module's data puts at 16, read through the protocol.
+        CHECK(read == std::optional { std::string { "hello" } });
+        CHECK(composition.recording().launches() == 1);
     }
     checkEveryHelperEnded(composition, 0);
 }

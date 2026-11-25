@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <deque>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -35,6 +36,7 @@
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+#include <vtextension/wasm/remote/transport/SharedObject.hpp>
 #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
 #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 
@@ -43,12 +45,15 @@
     #include <Windows.h>
 #else
     #include <sys/resource.h>
+
+    #include <fcntl.h>
 #endif
 
 namespace proto = vtextension::wasm::remote::proto;
 namespace transport = vtextension::wasm::remote::transport;
 using contour::extension_host::testing::AfterContourEnds;
 using contour::extension_host::testing::GarbageAnswer;
+using contour::extension_host::testing::GrantedMemory;
 using contour::extension_host::testing::HostileAction;
 using contour::extension_host::testing::HostileIncident;
 using contour::extension_host::testing::hostileModeNamed;
@@ -60,8 +65,9 @@ using contour::extension_host::testing::WakeSource;
 namespace
 {
 
-/// The exit code of a hostile host whose own command line is wrong: none of the real host's codes.
-constexpr auto HostileSetupFailed = 76;
+/// The exit code of a hostile host whose own command line is wrong: none of the real host's codes (0, 70 and
+/// up, HostProcess.hpp), nor a sanitizer's.
+constexpr auto HostileSetupFailed = 79;
 
 /// The exit code of a host that ends in the middle of serving (HostileAction::ForwardThenExit).
 constexpr auto AbruptExitCode = 3;
@@ -174,17 +180,87 @@ enum class Verdict : uint8_t
     Hold,    ///< It and everything after it this way are read, and passed on to nobody.
 };
 
+/// @return A Grow decoded from the frame of @p size bytes that @p pending starts with, rewritten by
+///         @p rewrite, as a frame; nothing if it is no Grow.
+[[nodiscard]] std::optional<std::vector<uint8_t>> rewrittenGrow(
+    std::span<uint8_t const> frame,
+    proto::ChannelKind channel,
+    std::function<void(proto::Grow&)> const& rewrite)
+{
+    auto decoded = proto::decodeFrame(frame, proto::Direction::ToParent, channel, Limits);
+    auto* const grow = decoded ? std::get_if<proto::Grow>(&decoded->pdu) : nullptr;
+    if (grow == nullptr)
+        return std::nullopt;
+    rewrite(*grow);
+    auto encoded = proto::encodeFrame(*grow);
+    return encoded ? std::optional { *std::move(encoded) } : std::nullopt;
+}
+
+/// The memory of the latest instance Contour granted, which one thread scribbles on: one at a time, so that a
+/// host making many instances does not run out of address space for its scribbling. The thread starts with
+/// the scribbler, before the host caps how many threads it may start.
+class Scribbler
+{
+  public:
+    Scribbler(): _thread { [this](std::stop_token const& stop) { run(stop); } } {}
+    Scribbler(Scribbler const&) = delete;
+    Scribbler(Scribbler&&) = delete;
+    Scribbler& operator=(Scribbler const&) = delete;
+    Scribbler& operator=(Scribbler&&) = delete;
+    ~Scribbler() = default;
+
+    /// Scribbles on the first @p opened bytes of @p mapping from now on, in place of what it scribbled on
+    /// before.
+    void scribbleOn(transport::SharedMapping mapping, uint64_t opened)
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _mapping = std::move(mapping);
+        _opened = opened;
+    }
+
+  private:
+    /// Flips bytes of the current memory, at places a fixed sequence picks, until @p stop is requested.
+    void run(std::stop_token const& stop)
+    {
+        auto state = uint32_t { 0x5eed };
+        while (!stop.stop_requested())
+        {
+            {
+                auto const lock = std::scoped_lock { _mutex };
+                auto const bytes = _mapping ? _mapping->bytes().first(_opened) : std::span<std::byte> {};
+                for ([[maybe_unused]] auto const flip: std::views::iota(0, bytes.empty() ? 0 : 4096))
+                {
+                    state = (state * 1'664'525U) + 1'013'904'223U;
+                    bytes[state % bytes.size()] ^= std::byte { 0xFF };
+                }
+            }
+            std::this_thread::yield();
+        }
+    }
+
+    std::mutex _mutex;                                ///< Guards what follows.
+    std::optional<transport::SharedMapping> _mapping; ///< The memory scribbled on; nothing before the first.
+    uint64_t _opened = 0;                             ///< How many of its bytes are scribbled on.
+    std::jthread _thread;                             // Last, so that it is joined before the rest goes.
+};
+
 /// Relays every channel between Contour's end and the real host's, both ways, frame by frame -- until the
 /// incident's trigger, once, where its action happens. The descriptor Contour grants with an Instantiate is
-/// forwarded with it.
+/// forwarded with it, and the memory it names is scribbled on if the row says so.
 class Relay
 {
   public:
-    /// @param incident What happens, and where.
+    /// @param incident What happens, and where; nothing if nothing does.
+    /// @param granted What becomes of the memory Contour grants.
     /// @param channels Every channel relayed; the first is the control channel.
-    Relay(HostileIncident incident, std::vector<std::unique_ptr<RelayedChannel>> channels):
-        _incident { incident }, _channels { std::move(channels) }
+    Relay(std::optional<HostileIncident> incident,
+          GrantedMemory granted,
+          std::vector<std::unique_ptr<RelayedChannel>> channels):
+        _incident { incident }, _granted { granted }, _channels { std::move(channels) }
     {
+        // Every thread before the host caps how many it may start.
+        if (_granted == GrantedMemory::Scribbled)
+            _scribbler.emplace();
         for (auto const& channel: _channels)
             for (auto const direction: { proto::Direction::ToHelper, proto::Direction::ToParent })
                 _pumps.emplace_back(
@@ -241,7 +317,9 @@ class Relay
     ///         that matches its trigger.
     [[nodiscard]] bool isIncident(Way const& way, proto::PduKind kind)
     {
-        auto const& trigger = _incident.trigger;
+        if (!_incident)
+            return false;
+        auto const& trigger = _incident->trigger;
         if (way.direction != trigger.direction || way.channel.kind != trigger.channel || kind != trigger.kind)
             return false;
         if (trigger.after && (_passed.load() & bitOf(*trigger.after)) == 0)
@@ -298,7 +376,8 @@ class Relay
     }
 
     /// Forwards the Instantiate whose frame, @p size bytes, @p pending starts with, with the descriptor
-    /// Contour granted with it (POSIX).
+    /// Contour granted with it (POSIX); notes its object's size, and scribbles on the object if the row says
+    /// so.
     /// @return What becomes of the frame.
     [[nodiscard]] Verdict relayInstantiate(Way const& way, std::vector<uint8_t>& pending, std::size_t size)
     {
@@ -309,15 +388,71 @@ class Relay
         auto const* const instantiate = decoded ? std::get_if<proto::Instantiate>(&decoded->pdu) : nullptr;
         if (instantiate == nullptr || instantiate->memory.objectBytes == 0)
             return Verdict::Forward;
+        auto const& grant = instantiate->memory;
+        _objectBytes.store(grant.objectBytes);
 #ifdef _WIN32
-        // The handle's value travels in the frame itself, and is this process's: the real host serves in it.
+        // The handle's value is this process's: the real host serves in it.
+        auto const object = static_cast<transport::NativeHandle>(reinterpret_cast<void*>(grant.handle));
+        if (_granted == GrantedMemory::Scribbled)
+            scribbleOn(object, grant);
         return Verdict::Forward;
 #else
         if (_grantedHandles.empty())
             return Verdict::Forward;
         auto const object = std::move(_grantedHandles.front());
         _grantedHandles.pop_front();
+        if (_granted == GrantedMemory::Scribbled)
+            scribbleOn(object.get(), grant);
         return way.target().sendWithHandle(frame, object.get()) ? Verdict::Discard : Verdict::Stop;
+#endif
+    }
+
+    /// Maps @p object as @p grant describes it, and has the bytes the memory spans at first scribbled on
+    /// until the next grant, or the relay goes.
+    void scribbleOn(transport::NativeHandle object, proto::MemoryGrant const& grant)
+    {
+        auto mapping =
+            transport::SharedMapping::map(object, grant.objectBytes, transport::MapAccess::ReadWrite);
+        if (!mapping || grant.initialBytes == 0 || !mapping->commit(0, grant.initialBytes))
+            return;
+        _scribbler->scribbleOn(*std::move(mapping), grant.initialBytes);
+    }
+
+    /// Forwards the Grow whose frame, @p size bytes, @p pending starts with, rewritten by @p rewrite.
+    /// @return What becomes of the frame.
+    [[nodiscard]] Verdict forwardGrow(Way const& way,
+                                      std::vector<uint8_t>& pending,
+                                      std::size_t size,
+                                      std::function<void(proto::Grow&)> const& rewrite)
+    {
+        if (!complete(way, pending, size))
+            return Verdict::Stop;
+        auto const frame = rewrittenGrow(std::span { pending }.first(size), way.channel.kind, rewrite);
+        return frame && way.sendTo(way.target(), *frame) ? Verdict::Discard : Verdict::Stop;
+    }
+
+    /// Forwards the frame, @p size bytes, @p pending starts with, to Contour with a descriptor of /dev/null
+    /// attached; as it is on Windows, where nothing travels beside a frame.
+    /// @return What becomes of the frame.
+    [[nodiscard]] Verdict forwardWithDescriptor(Way const& way,
+                                                std::vector<uint8_t>& pending,
+                                                std::size_t size)
+    {
+#ifdef _WIN32
+        std::ignore = way;
+        std::ignore = pending;
+        std::ignore = size;
+        return Verdict::Forward;
+#else
+        if (!complete(way, pending, size))
+            return Verdict::Stop;
+        auto const devNull = transport::OwnedHandle { ::open("/dev/null", O_RDONLY | O_CLOEXEC) };
+        if (!devNull)
+            return Verdict::Forward;
+        auto const lock = std::scoped_lock { way.channel.contourSends };
+        return way.target().sendWithHandle(std::span { pending }.first(size), devNull.get())
+                   ? Verdict::Discard
+                   : Verdict::Stop;
 #endif
     }
 
@@ -342,7 +477,8 @@ class Relay
         auto const answer = [&way](std::span<uint8_t const> bytes) {
             return way.sendTo(way.source(), bytes) ? Verdict::Discard : Verdict::Stop;
         };
-        switch (_incident.action)
+        auto const objectBytes = _objectBytes.load();
+        switch (_incident->action)
         {
             case HostileAction::Abort: crashByAbort();
             case HostileAction::Segfault: crashBySegfault();
@@ -388,6 +524,20 @@ class Relay
                 return answer(std::span { frame }.first(header + ((frame.size() - header) / 2)));
             }
             case HostileAction::HoldBack: return Verdict::Hold;
+            case HostileAction::GrowPastTheObject:
+                return forwardGrow(way, pending, size, [objectBytes](proto::Grow& grow) {
+                    grow.bytes = objectBytes + proto::WasmPageBytes;
+                });
+            case HostileAction::GrowToNothing:
+                return forwardGrow(way, pending, size, [](proto::Grow& grow) { grow.bytes = 0; });
+            case HostileAction::GrowUnaligned:
+                return forwardGrow(way, pending, size, [](proto::Grow& grow) { ++grow.bytes; });
+            case HostileAction::GrowAnotherInstance:
+                return forwardGrow(way, pending, size, [](proto::Grow& grow) { ++grow.instanceId; });
+            case HostileAction::ForwardWithDescriptor: return forwardWithDescriptor(way, pending, size);
+            case HostileAction::ExitAsMemoryUnusable:
+                std::_Exit(vtextension::wasm::host::exitCodeOf(
+                    vtextension::wasm::host::HostProcessExit::MemoryUnusable));
         }
         return Verdict::Forward;
     }
@@ -473,10 +623,14 @@ class Relay
         }
     }
 
-    HostileIncident _incident;
+    std::optional<HostileIncident> _incident;
+    GrantedMemory _granted;
     std::vector<std::unique_ptr<RelayedChannel>> _channels;
+    std::atomic<uint64_t> _objectBytes { 0 }; ///< The object size of the latest Instantiate's grant.
     /// Descriptors Contour granted, not forwarded yet: read and taken by the control channel's pump alone.
     std::deque<transport::OwnedHandle> _grantedHandles;
+    /// Scribbles on the latest grant where the row says so; stopped and joined after the pumps.
+    std::optional<Scribbler> _scribbler;
     std::atomic<Progress> _progress { Progress::Pending };
     std::atomic<ContourReads> _contourReads { ContourReads::Open };
     std::atomic<uint32_t> _passed { 0 }; ///< One bit per kind of frame passed so far, either way.
@@ -530,7 +684,7 @@ class Relay
     }
 
     auto relay = std::optional<Relay> {};
-    if (row.incident)
+    if (row.incident || row.granted == GrantedMemory::Scribbled)
     {
         auto channels = std::vector<std::unique_ptr<RelayedChannel>> {};
         channels.push_back(relayed(proto::ChannelKind::Control, parsed->control));
@@ -538,7 +692,7 @@ class Relay
             channels.push_back(relayed(proto::ChannelKind::Lane, lane));
         if (std::ranges::any_of(channels, [](auto const& channel) { return channel == nullptr; }))
             return refuse("a channel cannot be relayed");
-        relay.emplace(*row.incident, std::move(channels));
+        relay.emplace(row.incident, row.granted, std::move(channels));
     }
 
     auto const served = serve(transport::formatHelperArguments(*parsed), row.memory);

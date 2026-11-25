@@ -9,7 +9,8 @@
 /// over, both ways, is split into frames (proto::frameSizeOf()) and forwarded as it came, until the first
 /// frame the row's trigger names -- once per process, so once per incarnation. There the row's action
 /// happens in place of, or after, forwarding it. A descriptor Contour grants with an Instantiate is forwarded
-/// with it. Adding a misbehaviour is adding a row; only a new kind of action needs code (HostileHost.cpp).
+/// with it. A row that scribbles on the memory Contour grants runs the relay too, with or without an
+/// incident. Adding a misbehaviour is adding a row; only a new kind of action needs code (HostileHost.cpp).
 
 #include <algorithm>
 #include <array>
@@ -38,6 +39,13 @@ enum class HostMemory : uint8_t
     Copied,  ///< Copied over the protocol, as a host that cannot map memory does; its Hello says so.
 };
 
+/// What becomes of the memory Contour grants each instance.
+enum class GrantedMemory : uint8_t
+{
+    Untouched, ///< Only the real host touches it, as its guest says.
+    Scribbled, ///< The relay maps it too, and a thread of its own flips its bytes until the host ends.
+};
+
 /// What the host does once it ended because Contour's channels did.
 enum class AfterContourEnds : uint8_t
 {
@@ -61,6 +69,13 @@ enum class HostileAction : uint8_t
     AnswerShortMemory,       ///< Swallows a MemoryRead and answers a well-formed MemoryData one byte short.
     AnswerHalfMemory,        ///< Swallows a MemoryRead and answers a MemoryData header and half its body.
     HoldBack,                ///< Holds the frame, and every one after it that way, back forever.
+    GrowPastTheObject,       ///< Forwards a Grow asking for a page more than the instance's object holds.
+    GrowToNothing,           ///< Forwards a Grow asking for 0 bytes: a shrink.
+    GrowUnaligned,           ///< Forwards a Grow asking for one byte more than it did: not whole pages.
+    GrowAnotherInstance,     ///< Forwards a Grow naming the next instance's id, not the one growing.
+    ForwardWithDescriptor, ///< Forwards the frame to Contour with a descriptor of /dev/null attached (POSIX).
+    ExitAsMemoryUnusable,  ///< Swallows the frame, and exits as the real host does once granted memory
+                           ///< cannot be opened (HostProcessExit::MemoryUnusable).
 };
 
 /// What HostileAction::AnswerGarbage answers: 64 bytes, produced once from `std::mt19937 { 0x5eed }` (the
@@ -99,6 +114,7 @@ struct HostileModeRow
     AfterContourEnds afterEnd = AfterContourEnds::Exit; ///< What it does once Contour's channels ended.
     std::optional<HostileIncident> incident {}; ///< What it does wrong in the protocol; nothing to relay.
     HostMemory memory = HostMemory::AsBuilt;    ///< How the real host reaches memory.
+    GrantedMemory granted = GrantedMemory::Untouched; ///< What becomes of the memory Contour grants.
 };
 
 namespace detail
@@ -107,6 +123,14 @@ namespace detail
     [[nodiscard]] constexpr HostileTrigger contourOnLane(proto::PduKind kind) noexcept
     {
         return HostileTrigger { .direction = proto::Direction::ToHelper,
+                                .channel = proto::ChannelKind::Lane,
+                                .kind = kind };
+    }
+
+    /// @return The trigger of a frame of @p kind, sent by the host on a lane.
+    [[nodiscard]] constexpr HostileTrigger hostOnLane(proto::PduKind kind) noexcept
+    {
+        return HostileTrigger { .direction = proto::Direction::ToParent,
                                 .channel = proto::ChannelKind::Lane,
                                 .kind = kind };
     }
@@ -191,6 +215,26 @@ inline constexpr auto HostileModes = std::array {
                      .incident =
                          HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Instantiated),
                                            .action = HostileAction::HoldBack } },
+    HostileModeRow { .name = "grow-past-cap",
+                     .incident = HostileIncident { .trigger = detail::hostOnLane(proto::PduKind::Grow),
+                                                   .action = HostileAction::GrowPastTheObject } },
+    HostileModeRow { .name = "grow-shrinks",
+                     .incident = HostileIncident { .trigger = detail::hostOnLane(proto::PduKind::Grow),
+                                                   .action = HostileAction::GrowToNothing } },
+    HostileModeRow { .name = "grow-unaligned",
+                     .incident = HostileIncident { .trigger = detail::hostOnLane(proto::PduKind::Grow),
+                                                   .action = HostileAction::GrowUnaligned } },
+    HostileModeRow { .name = "grow-wrong-instance",
+                     .incident = HostileIncident { .trigger = detail::hostOnLane(proto::PduKind::Grow),
+                                                   .action = HostileAction::GrowAnotherInstance } },
+    HostileModeRow { .name = "descriptor-up",
+                     .incident = HostileIncident { .trigger = detail::hostOnLane(proto::PduKind::CallResult),
+                                                   .action = HostileAction::ForwardWithDescriptor } },
+    HostileModeRow { .name = "memory-unusable",
+                     .incident = HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::Grown),
+                                                   .action = HostileAction::ExitAsMemoryUnusable } },
+    HostileModeRow { .name = "scribble-memory", .granted = GrantedMemory::Scribbled },
+    HostileModeRow { .name = "copy-memory", .memory = HostMemory::Copied },
 };
 
 /// The only argument the hostile host takes beyond the real one's. Without it, it serves as the real host
