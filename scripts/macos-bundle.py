@@ -73,6 +73,22 @@ PRUNABLE_PLUGIN_CATEGORIES = frozenset((
     'sqldrivers',
 ))
 
+# Nested code that may need entitlements of its own, by its path inside the bundle, and the file it is signed
+# with by the engine the build runs it on (`sign --helper-engine`, CONTOUR_WASM_RUNTIME): each row's binary is
+# signed before the bundle. Nothing else nested carries any; the bundle carries what `sign` is given. An
+# extension host on a compiling engine (Wasmtime) makes native code executable, which the hardened runtime
+# refuses without allow-unsigned-executable-memory; one on an interpreting engine (WAMR) makes none, and gets
+# no entitlement at all -- and Contour itself must never get that right. The files are relative to the
+# repository, and carry no comments (AMFI rejects them); see docs/internals/macos-code-signing.md.
+_REPOSITORY = Path(__file__).resolve().parent.parent
+NESTED_ENTITLEMENTS: dict[Path, dict[str, Path | None]] = {
+    Path('Contents/Helpers/contour-extension-host'): {
+        'wasmtime': _REPOSITORY / 'support' / 'macOS' / 'contour-extension-host.entitlements',
+        'wamr': None,
+    },
+}
+HELPER_ENGINES = sorted({engine for engines in NESTED_ENTITLEMENTS.values() for engine in engines})
+
 # otool accepts many files per invocation, which turns ~135 process spawns into one.
 # Chunked so a bundle with very long paths cannot overflow the argument list.
 _OTOOL_BATCH = 500
@@ -486,26 +502,66 @@ def signing_targets(bundle: Path) -> Iterator[Path]:
     yield bundle  # The bundle itself, last: its seal covers everything above.
 
 
-def sign(bundle: Path, identity: str, entitlements: Path | None) -> int:
+def entitlements_of(target: Path, bundle: Path, entitlements: Path | None,
+                    engine: str | None) -> Path | None:
+    """The entitlements `target` is signed with: the bundle's for the bundle, a row of
+    NESTED_ENTITLEMENTS for the nested code it names, by the engine it runs on, none for
+    everything else."""
+    if target == bundle:
+        return entitlements
+    try:
+        inside = target.resolve().relative_to(bundle.resolve())
+    except ValueError:
+        return None
+    engines = NESTED_ENTITLEMENTS.get(inside)
+    if engines is None:
+        return None
+    if engine not in engines:
+        raise Failure(f"{inside} is signed by the engine it runs on, but --helper-engine is "
+                      f"{engine!r}; one of: {', '.join(sorted(engines))}")
+    return engines[engine]
+
+
+def signing_commands(bundle: Path, identity: str, entitlements: Path | None,
+                     engine: str | None) -> list[list[str]]:
+    """The codesign command lines that sign the bundle, inside-out, in order."""
+    # Nested code a row names, found anywhere but at its row's path, would be signed
+    # without what it needs -- an extension host on a compiling engine would then be
+    # killed as it runs its first compiled module. A moved binary fails the signing instead.
+    entitled_names = {path.name for path, engines in NESTED_ENTITLEMENTS.items()
+                      if engines.get(engine) is not None}
+    commands = []
+    for target in signing_targets(bundle):
+        argv = ['codesign', '--force', '--timestamp', '--options=runtime']
+        # The outermost signature carries the bundle's entitlements, and only the nested
+        # code NESTED_ENTITLEMENTS names carries its own. Applying the bundle's to nested
+        # code is what `--deep` gets wrong.
+        own = entitlements_of(target, bundle, entitlements, engine)
+        if own is None and target != bundle and target.name in entitled_names:
+            raise Failure(f"{target.relative_to(bundle)} needs entitlements of its own, but no "
+                          f"NESTED_ENTITLEMENTS row names it there")
+        if own is not None:
+            argv += ['--entitlements', str(own)]
+        argv += ['--sign', identity, str(target)]
+        commands.append(argv)
+    return commands
+
+
+def sign(bundle: Path, identity: str, entitlements: Path | None, engine: str | None) -> int:
     """Sign the bundle inside-out with the hardened runtime enabled."""
-    if entitlements is not None and not entitlements.exists():
-        raise Failure(f"entitlements file not found: {entitlements}")
+    nested = [engines.get(engine) for engines in NESTED_ENTITLEMENTS.values()]
+    for required in (entitlements, *nested):
+        if required is not None and not required.exists():
+            raise Failure(f"entitlements file not found: {required}")
 
     # Extended attributes (notably com.apple.quarantine, and the resource forks
     # some build steps leave behind) make codesign fail with "resource fork,
     # Finder information, or similar detritus not allowed".
     run(['xattr', '-cr', str(bundle)])
 
-    targets = list(signing_targets(bundle))
-    log(f"sign: signing {len(targets)} items as {identity!r}")
-
-    for target in targets:
-        argv = ['codesign', '--force', '--timestamp', '--options=runtime']
-        # Only the outermost signature carries entitlements. Applying them to
-        # nested code is what `--deep` gets wrong.
-        if target == bundle and entitlements is not None:
-            argv += ['--entitlements', str(entitlements)]
-        argv += ['--sign', identity, str(target)]
+    commands = signing_commands(bundle, identity, entitlements, engine)
+    log(f"sign: signing {len(commands)} items as {identity!r}")
+    for argv in commands:
         run(argv)
 
     # --deep is wrong for *signing* but is exactly right for verification: here it
@@ -625,11 +681,94 @@ def parse_submission(output: str) -> tuple[str, str]:
 # }}}
 
 
+# {{{ self-test
+
+def self_test() -> int:
+    """Checks the signing commands for a stand-in bundle: an extension host on a compiling
+    engine alone gets its entitlements, one on an interpreting engine none, and it is signed
+    before the bundle, which alone gets the app's. Runs anywhere: nothing it does needs macOS."""
+    failures: list[str] = []
+
+    def check(condition: bool, description: str) -> None:
+        if not condition:
+            failures.append(description)
+
+    row = NESTED_ENTITLEMENTS[Path('Contents/Helpers/contour-extension-host')]
+    helper_file = row['wasmtime']
+    assert helper_file is not None
+    with helper_file.open('rb') as f:
+        check(plistlib.load(f) == {'com.apple.security.cs.allow-unsigned-executable-memory': True},
+              f"{helper_file.name} holds allow-unsigned-executable-memory and nothing else")
+    check(b'<!--' not in helper_file.read_bytes(), f"{helper_file.name} carries no comment")
+    check(row['wamr'] is None, "an interpreting extension host carries no entitlement")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        bundle = Path(scratch) / 'contour.app'
+        contents = bundle / 'Contents'
+        (contents / 'MacOS').mkdir(parents=True)
+        with (contents / 'Info.plist').open('wb') as f:
+            plistlib.dump({'CFBundleExecutable': 'contour'}, f)
+        helper = contents / 'Helpers' / 'contour-extension-host'
+        executable = contents / 'MacOS' / 'contour'
+        library = contents / 'Frameworks' / 'libother.dylib'
+        for binary in (helper, executable, library):
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_bytes(b'\xcf\xfa\xed\xfe')  # MH_MAGIC_64: what find_binaries() looks for
+        app_file = Path(scratch) / 'app.entitlements'
+
+        def entitled(engine: str | None) -> tuple[list[Path], dict[Path, str], list[list[str]]]:
+            commands = signing_commands(bundle, '-', app_file, engine)
+            targets = [Path(argv[-1]) for argv in commands]
+            given = {Path(argv[-1]): argv[argv.index('--entitlements') + 1]
+                     for argv in commands if '--entitlements' in argv}
+            return targets, given, commands
+
+        targets, given, commands = entitled('wasmtime')
+        check(sorted(targets) == sorted([helper, executable, library, bundle]), f"signs every item: {targets}")
+        check(all('--options=runtime' in argv for argv in commands), "every signature has the hardened runtime")
+        check(given == {helper: str(helper_file), bundle: str(app_file)},
+              f"only the compiling helper and the bundle carry entitlements, each its own: {given}")
+        check(targets.index(helper) < targets.index(bundle), "the helper is signed before the bundle")
+        check(targets[-1] == bundle, "the bundle is signed last")
+
+        _, given, commands = entitled('wamr')
+        check(given == {bundle: str(app_file)}, f"an interpreting helper carries no entitlement: {given}")
+        check(all('--options=runtime' in argv for argv in commands), "it has the hardened runtime all the same")
+
+        # A bundle holding an extension host, signed without saying its engine: refused, not guessed.
+        try:
+            signing_commands(bundle, '-', app_file, None)
+            check(False, "an extension host whose engine is not named is refused")
+        except Failure as refusal:
+            check('--helper-engine' in str(refusal), f"the refusal names the option: {refusal}")
+
+        # A compiling extension host anywhere but where its row says: refused, not signed without its
+        # entitlement.
+        moved = contents / 'MacOS' / 'contour-extension-host'
+        helper.rename(moved)
+        try:
+            signing_commands(bundle, '-', app_file, 'wasmtime')
+            check(False, "a moved extension host is refused")
+        except Failure as refusal:
+            check('contour-extension-host' in str(refusal), f"the refusal names the binary: {refusal}")
+
+    for failure in failures:
+        print(f"macos-bundle self-test: FAILED: {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    print("macos-bundle self-test: 12 cases OK.")
+    return 0
+
+# }}}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='macos-bundle.py', description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = parser.add_subparsers(dest='command', required=True)
+    parser.add_argument('--self-test', action='store_true',
+                        help='check how a bundle is signed against a stand-in, without macOS')
+    sub = parser.add_subparsers(dest='command')
 
     p_verify = sub.add_parser('verify', help='check that the bundle is self-contained')
     p_verify.add_argument('bundle', type=Path)
@@ -646,6 +785,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="signing identity, or '-' for an ad-hoc signature")
     p_sign.add_argument('--entitlements', type=Path, default=None,
                         help='entitlements plist, applied to the .app only')
+    p_sign.add_argument('--helper-engine', choices=HELPER_ENGINES, default=None,
+                        help="the engine the bundle's extension host runs on (CONTOUR_WASM_RUNTIME): "
+                             "whether it is signed with the entitlement compiled code needs")
 
     p_notarize = sub.add_parser('notarize', help='notarize and staple an .app or .dmg')
     p_notarize.add_argument('artifact', type=Path)
@@ -655,7 +797,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return self_test()
+    if args.command is None:
+        parser.error('a command is required')
     try:
         if args.command == 'verify':
             ceiling = None
@@ -668,7 +815,7 @@ def main(argv: list[str] | None = None) -> int:
             return prune(args.bundle)
         if args.command == 'sign':
             if args.target.is_dir():
-                return sign(args.target, args.identity, args.entitlements)
+                return sign(args.target, args.identity, args.entitlements, args.helper_engine)
             return sign_file(args.target, args.identity, args.entitlements)
         return notarize(args.artifact, args.keychain_profile)
     except Failure as error:

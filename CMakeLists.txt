@@ -366,6 +366,12 @@ if(CONTOUR_TESTING)
         # build's compile database and binary, is registered beside the binary it reads.
         contour_add_lint_gate(check_production_build_selftest check-production-build.py --self-test)
 
+        # How a macOS bundle is signed (scripts/macos-bundle.py sign): the extension host alone carries its
+        # entitlement, and only on a compiling engine, signed before the bundle, which alone carries the app's.
+        # Checked against a stand-in
+        # bundle, on every platform, without codesign.
+        contour_add_lint_gate(check_macos_bundle_selftest macos-bundle.py --self-test)
+
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.

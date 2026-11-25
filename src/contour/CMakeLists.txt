@@ -2432,6 +2432,13 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
         # this, because the kernel's entitlements parser (AMFI) rejects XML comments outright;
         # docs/internals/macos-code-signing.md has the reasoning.
         set(_entitlements "${CMAKE_SOURCE_DIR}/support/macOS/entitlements.plist")
+        # The bundled extension host is signed by the engine it runs on: on a compiling one with the one
+        # entitlement its compiled code needs, on an interpreting one with none (NESTED_ENTITLEMENTS in
+        # scripts/macos-bundle.py).
+        set(_sign_helper_args)
+        if(TARGET contour-extension-host)
+            set(_sign_helper_args --helper-engine "${CONTOUR_WASM_RUNTIME}")
+        endif()
 
         # Deploy, drop the plugins that cannot load, prove the result is self-contained,
         # then sign it -- in that order, and with every step fatal on failure. macdeployqt
@@ -2494,6 +2501,7 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
             COMMAND \"${Python3_EXECUTABLE}\" \"${CONTOUR_MACOS_BUNDLE_SCRIPT}\" sign \"\${_app}\"
                     --identity \"${CODE_SIGN_CERTIFICATE_ID}\"
                     --entitlements \"${_entitlements}\"
+                    ${_sign_helper_args}
             COMMAND_ERROR_IS_FATAL ANY
         )
     ")
