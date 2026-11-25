@@ -550,3 +550,49 @@ TEST_CASE("a task keyed as a navigation key leaves the key to navigation", "[orc
     typeKeys(std::array { character(U'G', Modifier::Shift) }, interaction, context);
     CHECK(interaction.selected == 2);
 }
+
+TEST_CASE("while a filter is typed, Ctrl+D moves nothing and the arrows still move",
+          "[orchestrator][view][keys]")
+{
+    auto interaction = Interaction { .filtering = Filtering::Typing, .filter = "pr" };
+    auto const context = KeyContext { .selectable = 20, .fleetRows = 10 };
+    typeKeys(std::array { character(U'd', Modifier::Ctrl) }, interaction, context);
+    CHECK(interaction.selected == 0);
+    CHECK(interaction.filter == "pr");
+    typeKeys(std::array { character(U'j') }, interaction, context);
+    CHECK(interaction.selected == 0);
+    CHECK(interaction.filter == "prj");
+    typeKeys(std::array { special(KeyCode::Down) }, interaction, context);
+    CHECK(interaction.selected == 1);
+    CHECK(interaction.filtering == Filtering::Typing);
+}
+
+TEST_CASE("Alt and a page key keep the keys in the message box", "[orchestrator][view][keys]")
+{
+    auto const live = LiveRun {};
+    auto context = live.context(FocusTab::Transcript);
+    context.pages = 3;
+    auto interaction = Interaction { .place = Place::Focus };
+    for (auto const code: { KeyCode::Left, KeyCode::Right, KeyCode::End, KeyCode::PageUp, KeyCode::PageDown })
+    {
+        CAPTURE(static_cast<uint32_t>(code));
+        typeKeys(std::array { special(code, Modifier::Alt) }, interaction, context);
+        CHECK(interaction.place == Place::Focus);
+        CHECK(interaction.page == 0);
+    }
+    typeKeys(std::array { character(U'x') }, interaction, context);
+    CHECK(interaction.drafts.at(std::string { RunId }) == "x");
+}
+
+TEST_CASE("with close rebound to q, esc still closes the timeline", "[orchestrator][view][keys]")
+{
+    auto const engine = bootEngine(World { .keys = R"({ "close": ["q"] })" });
+    REQUIRE(engine.config() != nullptr);
+    auto const context = KeyContext { .selectable = 3, .engine = &engine };
+    auto interaction = Interaction { .overlay = Overlay::Timeline };
+    typeKeys(std::array { special(KeyCode::Escape) }, interaction, context);
+    CHECK(interaction.overlay == Overlay::None);
+    interaction.overlay = Overlay::Timeline;
+    typeKeys(std::array { character(U'q') }, interaction, context);
+    CHECK(interaction.overlay == Overlay::None);
+}

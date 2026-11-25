@@ -524,3 +524,19 @@ TEST_CASE("Work view: the bar names next_value's first key", "[orchestrator][vie
     CHECK(fixture.dashboard.input("w").empty());
     CHECK(fixture.screen().contains("l repository"));
 }
+
+TEST_CASE("Work view: while the filter is typed, Ctrl+D moves nothing and the arrows still move",
+          "[orchestrator][view][work]")
+{
+    auto fixture = DashboardFixture { workWorld(), Wide };
+    CHECK(fixture.dashboard.input("w/").empty());
+    auto const& work = fixture.dashboard.interaction().work;
+    REQUIRE(work.filtering == Filtering::Typing);
+    auto const selected = work.selected;
+    CHECK(fixture.dashboard.input("\x04").empty());
+    CHECK(work.selected == selected);
+    CHECK(work.filtering == Filtering::Typing);
+    CHECK(fixture.dashboard.input("\x1b[B").empty());
+    CHECK(work.selected == selected + 1);
+    CHECK(work.filtering == Filtering::Typing);
+}

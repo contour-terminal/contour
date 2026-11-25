@@ -892,7 +892,10 @@ namespace
     ///         the Focus's tab or turn the transcript's pages, or `tab`, which leaves it.
     [[nodiscard]] bool passesMessageKey(core::tui::KeyEvent const& key)
     {
-        auto const name = keyNameFor(key);
+        // By the key alone, whatever its modifiers, as the box always decided: Alt+← is no Esc here.
+        auto plain = key;
+        plain.modifiers = core::tui::Modifier::None;
+        auto const name = keyNameFor(plain);
         return name == "tab" || std::ranges::contains(messagePassKeys(), name, &MessagePassKey::name);
     }
 
@@ -1010,11 +1013,7 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
     // A key the message box or the filter passed on acts as it would with nothing typed: ← still turns the
     // transcript's pages, ↓ still moves the selection.
     if (fieldContext == NavContext::Typing)
-    {
-        auto none = std::string {};
-        auto const again = navActionOf(key, NavContext::Navigating, keysInForce(context.engine), none);
-        nav = again ? std::optional { *again } : std::nullopt;
-    }
+        nav = passedKeyAction(key, keysInForce(context.engine));
     auto const listCommand = nav ? listCommandOf(*nav, View::Agents) : std::nullopt;
     auto const command = listCommand ? listCommand : commandFor(key);
     if (!interaction.pendingEnd.empty() && command != KeyCommand::EndRun)

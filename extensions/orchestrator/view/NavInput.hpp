@@ -63,6 +63,14 @@ enum class NavMiss : uint8_t
                                                             NavKeys const& keys,
                                                             std::string& pending);
 
+/// Resolves a key a text field did not take, as if nothing were typed: only a special key (an arrow, Home,
+/// End, PgUp, PgDn, ...) without Ctrl or Alt, so that the arrows keep moving while a filter or the message
+/// box is typed. A letter or a chord, `^d` or a configured one, never acts as navigation while typing.
+/// @param key A key the text field did not take.
+/// @param keys The keys in force.
+/// @return The action it does with nothing typed; std::nullopt: none, or it is no plain special key.
+[[nodiscard]] std::optional<NavAction> passedKeyAction(core::tui::KeyEvent const& key, NavKeys const& keys);
+
 /// @return The context of a list surface: Typing while a filter is typed or the message box has the
 ///         keys; else Navigating. The palette is never resolved.
 /// @param interaction Where the user is.

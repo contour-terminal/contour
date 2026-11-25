@@ -779,11 +779,7 @@ std::vector<UiAction> applyWorkKey(core::tui::KeyEvent const& key,
     }
     // A key the filter passed on acts as it would with nothing typed: ↓ still moves the selection.
     if (typing)
-    {
-        auto none = std::string {};
-        auto const again = navActionOf(key, NavContext::Navigating, keysInForce(engine), none);
-        nav = again ? std::optional { *again } : std::nullopt;
-    }
+        nav = passedKeyAction(key, keysInForce(engine));
     auto const listCommand = nav ? listCommandOf(*nav, View::Work) : std::nullopt;
     auto const command = listCommand ? listCommand : workCommandFor(key);
     return command ? applyWorkCommand(*command, interaction, lines, items, engine, pageRows)

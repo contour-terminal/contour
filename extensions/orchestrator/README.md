@@ -439,7 +439,7 @@ defaults, plain then vim (the action bar names an action by its first key):
 | `next_value` | `right` `l` | the transcript's next page; the Work view's chip on |
 | `leave_field` | `esc` | stop typing a text field (acts only while one is typed) |
 | `enter_field` | `enter` `i` | start typing a dialog's text field (`⏎` stays a list row's own key) |
-| `close` | `esc` `q` | close what is open, such as the last 24 hours |
+| `close` | `esc` `q` | close what is open, such as the last 24 hours; `Esc` still closes that popup when `close` is rebound |
 
 A key is a printable character, `^` and a letter for Ctrl (not `^h`, `^i`, `^j` or `^m`, which terminals send as
 Backspace, Tab, LF and CR), two characters such as `gg`, or one of `up down left right home end pgup pgdn enter

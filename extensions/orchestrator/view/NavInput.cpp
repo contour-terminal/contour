@@ -154,6 +154,18 @@ std::expected<NavAction, NavMiss> navActionOf(core::tui::KeyEvent const& key,
     return std::unexpected(NavMiss::NotBound);
 }
 
+std::optional<NavAction> passedKeyAction(core::tui::KeyEvent const& key, NavKeys const& keys)
+{
+    using core::tui::Modifier;
+    if (core::tui::hasModifier(key.modifiers, Modifier::Ctrl)
+        || core::tui::hasModifier(key.modifiers, Modifier::Alt)
+        || keyShapeOf(keyNameFor(key)) != KeyShape::Special)
+        return std::nullopt;
+    auto none = std::string {};
+    auto const action = navActionOf(key, NavContext::Navigating, keys, none);
+    return action ? std::optional { *action } : std::nullopt;
+}
+
 NavContext navContextOf(Interaction const& interaction, KeyContext const& context) noexcept
 {
     if (interaction.view == View::Work)
