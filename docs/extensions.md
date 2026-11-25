@@ -715,14 +715,16 @@ for.
 [manifest]: https://github.com/contour-terminal/contour/tree/master/extensions/manifest
 [corpus]: https://github.com/contour-terminal/contour/tree/master/extensions/orchestrator/contract/manifest-v2
 [orchestrator-workers]: https://github.com/contour-terminal/contour/blob/master/extensions/orchestrator/README.md#workers
+[orchestrator-work]: https://github.com/contour-terminal/contour/blob/master/extensions/orchestrator/README.md#the-work-view
 [cxx-probe]: https://github.com/contour-terminal/contour/tree/master/extensions/testing/cxx-daemon-probe
 [wasi-sdk]: https://github.com/WebAssembly/wasi-sdk
 
 ## The agent orchestrator
 
 The agent orchestrator is a daemon extension for handing pull-request and issue work to Claude Code agents.
-Its tab, `orchestrator://`, lists your open pull requests with their checks and review, the issues your
-searches find, the agents you started and the runs that finished. Starting an agent is a key and a
+Its tab, `orchestrator://`, lists your open merge requests and tickets in its Work view, grouped by what they
+need from you, with their pipeline, review, conflicts and Jira status; and in its Agents view the agents you
+started and the runs that finished. `n` starts a custom task. Starting an agent is a key and a
 confirmation: the orchestrator makes a git worktree on a branch of its own, opens a tab running `claude` in
 it, and removes the worktree when the run ends, unless it still holds work. From the same tab you read what an agent
 reports on its board and page through its transcript, also after the run has finished.
@@ -814,40 +816,50 @@ Key      | Meaning
 `forge`  | Required. Where it lives: `github`, which the orchestrator reaches with `gh`, or `gitlab`, which it reaches with `glab`.
 `remote` | The git remote that points at the forge. Default `origin`.
 `base`   | The branch an issue's worktree starts from. Default: the forge's default branch.
-`issues` | The searches that list the issues offered for work; none lists no issues. `{ source: forge, query: "<search>" }` searches the repository's forge, with `gh issue list --search`, or on GitLab the issues assigned to you, with `glab issue list --search`: there `query` is free text matched against an issue's title and description, always combined with "assigned to you", and a GitHub qualifier such as `assignee:@me` finds nothing. `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists Jira's work items (below).
+`issues` | The searches that list the issues offered for work; none lists no issues. `{ source: forge, query: "<search>" }` searches the repository's forge, with `gh issue list --search`, or on GitLab the issues assigned to you, with `glab issue list --search`: there `query` is free text matched against an issue's title and description, always combined with "assigned to you", and a GitHub qualifier such as `assignee:@me` finds nothing. `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists Jira's work items (below). A Jira source may add `in_progress_jql`, a JQL: a ticket is in progress (the Work view's *No MR yet*) when it matches `(<jql>) AND (<in_progress_jql>)`, a query run once per poll; without it, when Jira's status category is *In Progress*. A failed query keeps that rule and shows a problem line.
 
 **GitLab.** The orchestrator asks `glab` for your open merge requests (`glab mr list --author=@me`), the
 project's default branch and, for a forge search, the issues assigned to you, each with `--output json` (on
 `glab issue list`, `-F` is `--output-format` and prints no JSON). It checks a merge request out with
-`glab mr checkout <n> --branch <branch>`. `glab`'s list carries no pipeline, so a merge request's CI state is
-what GitLab's `detailed_merge_status` says: `ci_still_running` is pending, `ci_must_pass` failing, anything
-else none, and no failing check is named. That status names a single blocker, and it names the pipeline only
-when the project requires pipelines to succeed (or auto-merge is set) and no higher blocker, such as a draft
-or a conflict, outranks it: a blank CI mark means "not known", not "passing", and `ci_must_pass` also covers
-a cancelled, skipped, manual or missing pipeline. Log `glab` in for the host the remote names
+`glab mr checkout <n> --branch <branch>`. `glab`'s list carries no pipeline, so per GitLab repository and
+poll two more calls, `glab api projects/:id/pipelines?per_page=100&order_by=id&sort=desc` and
+`glab api projects/:id/jobs?scope[]=failed&per_page=100`, give each merge request its pipeline and its failed
+jobs: the newest pipeline that ran on its head commit or for its `refs/merge-requests/<iid>/head` or `/merge`
+ref. Review stays inferred from `detailed_merge_status` (`not_approved`, `requested_changes`, `mergeable`). A
+merge request no listed pipeline matches, or every one when the pipeline call fails (with a problem line),
+falls back to what `detailed_merge_status` says: `ci_still_running` is pending, `ci_must_pass` failing,
+anything else none, and no failing check is named. That status names a single blocker, and it names the
+pipeline only when the project requires pipelines to succeed (or auto-merge is set) and no higher blocker,
+such as a draft or a conflict, outranks it: a blank CI mark means "not known", not "passing", and
+`ci_must_pass` also covers a cancelled, skipped, manual or missing pipeline. Log `glab` in for the host the remote names
 (`glab auth status` succeeds; `GITLAB_TOKEN` is passed through); the variables that would point it at another
 host or project are withheld (see [The daemon world](#the-daemon-world) above).
 
 **Jira.** An issue source `{ source: jira, jql: "<JQL>", site: "https://<site>" }` lists the work items its
-JQL finds, through Atlassian's `acli` (`acli jira workitem search --jql <JQL> --limit 100 --json`), which
+JQL finds, through Atlassian's `acli`
+(`acli jira workitem search --jql <JQL> --fields key,summary,status,issuetype --limit 100 --json`), which
 must be logged in (`acli jira auth status` succeeds). Both keys are required: `site` is an `https://` address
 with a host and no path, such as `https://example.atlassian.net`, and each item's link is built from it as
 `<site>/browse/<key>`. That is all `site` does: `acli` searches whichever site it is logged in to
 (`acli jira auth status` shows it), so the two must match.
+`acli`'s search cannot print a ticket's update time, so tickets keep the order the JQL gives them: end it with
+`ORDER BY updated DESC` to list the newest first. Tickets a merge request names but no search listed are read
+with one more search per poll, `key in (PRJ-1234, …)`, so that every merge request shows its ticket's status.
 
 A `tasks` entry:
 
 Key              | Meaning
 -----------------|-----------------------------------------------------------------------------------------------
 `id`             | Required. The task's name, unique among the tasks.
-`key`            | Required. One printable character, none of the dashboard's reserved keys (the configuration names those when it refuses one). It no longer starts the task: the launcher (`n`) does.
+`key`            | Required. One printable character, none of the dashboard's reserved keys (the configuration names those when it refuses one). It no longer starts the task: the Work view's start dialog does.
 `label`          | Required. What the dashboard calls it.
 `applies_to`     | Required. `pr` for a pull request, `issue` for an issue, `topic` for a topic you type in the dashboard (`n`). Without a `topic` task, a built-in one named `topic` uses the text as the whole prompt.
-`model`          | Required. The model it runs with, one of `models`; the launcher can change it.
+`model`          | Required. The model it runs with, one of `models`; the start dialog can change it.
 `prompt`         | Required. What the agent is started with; `{url}` stands for the item's URL and `{key}` for its key -- an issue's Jira key or number, or a pull or merge request's number -- and one of them must be there. A `topic` task's prompt takes `{topic}` for the text instead, and may not use `{key}`; without `{topic}`, the text goes on a line after the prompt.
 `worker`         | The worker that runs it, an `id` of `workers`. Default: the first worker. One that names no worker is a problem line, and the first worker runs the task.
 `permissions`    | The permission profile its runs start with, over `permissions` above; for example `trusted` for a task that pushes its fix. Default: the global one. On a Copilot worker it is a problem line, and the task is not offered.
 `end_done_after` | Its runs' own `end_done_after`, over the global one: a task whose agents rarely ask anything, such as fixing CI, can end itself (`5m`) while the rest wait for you, and `0` keeps its runs waiting whatever the global one says. Default: the global one.
+`role`           | `fix_ci`, `resolve_conflicts`, `address_review` or `work_on_issue`: which state the Work view's start dialog suggests the task for (a failed pipeline, a conflict, a reviewer's changes, a ticket). Without it, a task whose `id` is one of these has that role. Any other value is refused.
 
 An action of the extension opens the dashboard from a key binding, and its summary is a status-line segment;
 [Version 2](#version-2) and [Daemon extensions: what they show](#daemon-extensions-what-they-show) have the two
@@ -863,7 +875,10 @@ input_mapping:
 The dashboard is one screen: the **Fleet** on the left lists your runs, grouped by what they need from you
 (NEEDS YOU, WORKING, TO REVIEW, FINISHED), the run that has waited longest first; the **Focus** on the right
 shows the selected run, its Board, Transcript or Details tab, the latest of what it said, and the box to write
-to it. Pull requests and issues are browsed and started from the launcher (`n`). In a tab narrower than 100
+to it. `w` switches to the Work view, which lists your merge requests and tickets in five groups — Needs you,
+Ready to merge, In review, No MR yet, Everything else — with their pipeline, review, conflicts and Jira status;
+`Enter` on one opens the start dialog (task, worker, model, permission profile, note), and its folds and sort
+are kept across restarts. In a tab narrower than 100
 columns the Focus goes below the Fleet, or, narrower than 60, takes its place while it has the keys. The action
 bar lists what applies to the selected row, `Enter`'s action first; `Ctrl+K` or `?` opens the command palette,
 which lists every action, those that do not apply dimmed with the reason.
@@ -871,11 +886,12 @@ which lists every action, those that do not apply dimmed with the reason.
 Key                     | Does, in the Fleet
 ------------------------|---------------------------------------------------------------------------------------
 `↑` `↓` `j` `k` `Home` `End` | move the selection
-`Enter`                 | the selected row's primary action: write to a live run in the Focus; run a finished one again (the launcher); retry a kept one's removal; unfold a group; on `+ new agent`, open the launcher
+`Enter`                 | the selected row's primary action: write to a live run in the Focus; run a finished one again (the start dialog, or the `n` box for a topic); retry a kept one's removal; unfold a group; on `+ new task`, start a custom task
 `Tab`                   | give the Focus the keys
 `b` `t` `d`             | show the Focus's Board, Transcript or Details tab
 `PgUp` `PgDn`           | scroll the Focus's tab
-`n`                     | open the launcher
+`n`                     | start a custom task: a box for the text, with the repository, worker and model
+`w`                     | show the Work view
 `e`                     | end the selected run; asks once
 `r`                     | show the selected agent's tab
 `o`                     | open the run's link on your machine (`url-open`)
@@ -887,9 +903,10 @@ Key                     | Does, in the Fleet
 `Esc`                   | drop the filter
 
 In the Focus of a live run the message box has the keys: every printable key types, `Enter` sends, `Alt+Enter`
-adds a line, `PgUp` `PgDn` `End` scroll, and `Esc` goes back keeping the draft. The launcher shows the item, the
-task, the model, the permission profile, the worktree and, with `Ctrl+P`, the agent's exact command line.
-`Enter` starts the agent; `Esc` closes it. Nothing starts without it.
+adds a line, `PgUp` `PgDn` `End` scroll, and `Esc` goes back keeping the draft. The start dialog shows the item,
+the task it suggests and why, every worker with its runs, the model, the permission profile, the worktree and,
+with `Ctrl+P`, the agent's exact command line. `Enter` starts the agent; `Esc` closes it. Nothing starts
+without it. The orchestrator's README has the Work view's keys and mouse: [The Work view][orchestrator-work].
 
 ### Boards
 
