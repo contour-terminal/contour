@@ -1660,40 +1660,7 @@ TEST_CASE("Remote.measureRender", "[.measure]")
 
 TEST_CASE("Remote.measureRoundTrip", "[.measure]")
 {
-    // One call of a trivial export is one round trip to the host and back: what every call costs before
-    // the guest does any work. Reported, not asserted.
-    constexpr auto Calls = std::size_t { 10'000 };
+    // Reported, not asserted.
     auto const backend = RemoteTraits::make();
-    auto const runtime = contract::createRuntime(*backend);
-    auto const guard = contract::enterThread(*backend);
-    auto const module = contract::load(*runtime, contract::InstanceModule);
-    auto context = contract::RecordingHostContext {};
-    auto const instance = contract::instantiate(*module, context);
-    auto const add = contract::functionOf(*instance, "add");
-    REQUIRE(addFailure(*instance) == std::nullopt);
-
-    auto& clock = core::defaultSteadyClock();
-    auto durations = std::vector<std::chrono::nanoseconds> {};
-    durations.reserve(Calls);
-    auto const allStart = clock.now();
-    for ([[maybe_unused]] auto const call: std::views::iota(std::size_t { 0 }, Calls))
-    {
-        auto argv = std::array<uint32_t, 2> { 2, 3 };
-        auto const callStart = clock.now();
-        auto const called = instance->call(add, argv);
-        durations.emplace_back(clock.now() - callStart);
-        REQUIRE(called.has_value());
-    }
-    auto const all = clock.now() - allStart;
-    std::ranges::sort(durations);
-
-    using Micros = std::chrono::duration<double, std::micro>;
-    std::println(stdout,
-                 "Remote round trip ({} calls): median {:.1f} us, p90 {:.1f} us, fastest {:.1f} us; "
-                 "{:.1f} ms in all",
-                 Calls,
-                 Micros { durations[durations.size() / 2] }.count(),
-                 Micros { durations[durations.size() * 9 / 10] }.count(),
-                 Micros { durations.front() }.count(),
-                 Micros { all }.count() / 1000.0);
+    vtextension::wasm::testing::measureRoundTrip(*backend, "Remote");
 }

@@ -222,6 +222,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
         Helper_test.cpp
         ProcessBackend_test.cpp
         Hostility_test.cpp
+        ProcessMeasure_test.cpp
         ReviewFocusProcess_test.cpp
         Teardown_test.cpp
         process/testing/HelperComposition.cpp

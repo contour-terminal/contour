@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Test-only: times an extension's `render` on a given backend, so that two backends, which cannot share a
-// test binary, are measured by the same workload, iteration count and timing method. Each backend's suite
-// runs it from a hidden `[.measure]` case; the numbers are reported, never asserted.
+// Test-only: times an extension's `render`, and a bare call, on a given backend, so that backends, which
+// cannot share a test binary, are measured by the same workload, iteration count and timing method. Each
+// backend's suite runs them from hidden `[.measure]` cases; the numbers are reported, never asserted.
 #pragma once
 
 #include <core/Clock.hpp>
@@ -13,6 +13,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <print>
 #include <ranges>
@@ -28,6 +29,7 @@
 #include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/TestModules.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/testing/BackendContract.hpp>
 
 namespace vtextension::wasm::testing
 {
@@ -45,6 +47,25 @@ struct RenderMeasurement
     std::chrono::nanoseconds fastest {}; ///< The fastest of them.
     std::size_t outputBytes = 0;         ///< What the last `render` returned, in bytes.
 };
+
+/// The median, 90th percentile and fastest of some timed operations.
+struct TimeSummary
+{
+    std::chrono::nanoseconds median {};  ///< The median.
+    std::chrono::nanoseconds p90 {};     ///< The 90th percentile.
+    std::chrono::nanoseconds fastest {}; ///< The fastest.
+};
+
+/// @param durations How long each operation took; at least one.
+/// @return Their median, 90th percentile and fastest.
+[[nodiscard]] inline TimeSummary summarize(std::vector<std::chrono::nanoseconds> durations)
+{
+    REQUIRE_FALSE(durations.empty());
+    std::ranges::sort(durations);
+    return TimeSummary { .median = durations[durations.size() / 2],
+                         .p90 = durations[std::min(durations.size() - 1, durations.size() * 9 / 10)],
+                         .fastest = durations.front() };
+}
 
 /// Loads @p module on @p backend, instantiates it and times @p renders calls of its `render`, at each of
 /// @p sizes in turn, after one untimed warm-up call. Compilation is timed apart from the calls.
@@ -101,10 +122,10 @@ struct RenderMeasurement
         REQUIRE(rendered.has_value());
         measurement.outputBytes = rendered->size();
     }
-    std::ranges::sort(durations);
-    measurement.median = durations[durations.size() / 2];
-    measurement.p90 = durations[std::min(durations.size() - 1, durations.size() * 9 / 10)];
-    measurement.fastest = durations.front();
+    auto const times = summarize(std::move(durations));
+    measurement.median = times.median;
+    measurement.p90 = times.p90;
+    measurement.fastest = times.fastest;
     return measurement;
 }
 
@@ -151,6 +172,51 @@ inline void measureBundledRender([[maybe_unused]] IWasmBackend& backend,
 #else
     SKIP("the bundled extensions are not built");
 #endif
+}
+
+/// How many calls measureRoundTrip() times.
+inline constexpr auto MeasuredRoundTrips = std::size_t { 10'000 };
+
+/// Times MeasuredRoundTrips calls of the contract's trivial `add` on @p backend and prints what was
+/// measured: what every call costs before the guest does any work -- through a host, one round trip to it
+/// and back.
+/// @param backend The backend under measurement.
+/// @param backendName What names @p backend in the report.
+inline void measureRoundTrip(IWasmBackend& backend, std::string_view backendName)
+{
+    auto const runtime = contract::createRuntime(backend);
+    auto const guard = contract::enterThread(backend);
+    auto const module = contract::load(*runtime, contract::InstanceModule);
+    auto context = contract::RecordingHostContext {};
+    auto const instance = contract::instantiate(*module, context);
+    auto const add = contract::functionOf(*instance, "add");
+
+    auto& clock = core::defaultSteadyClock();
+    auto durations = std::vector<std::chrono::nanoseconds> {};
+    durations.reserve(MeasuredRoundTrips);
+    auto const allStart = clock.now();
+    for ([[maybe_unused]] auto const call: std::views::iota(std::size_t { 0 }, MeasuredRoundTrips))
+    {
+        auto argv = std::array<uint32_t, 2> { 2, 3 };
+        auto const callStart = clock.now();
+        auto const called = instance->call(add, argv);
+        durations.emplace_back(clock.now() - callStart);
+        REQUIRE(called.has_value());
+        REQUIRE(argv[0] == 5);
+    }
+    auto const all = clock.now() - allStart;
+    auto const times = summarize(std::move(durations));
+
+    using Micros = std::chrono::duration<double, std::micro>;
+    std::println(stdout,
+                 "{} round trip ({} calls): median {:.1f} us, p90 {:.1f} us, fastest {:.1f} us; "
+                 "{:.1f} ms in all",
+                 backendName,
+                 MeasuredRoundTrips,
+                 Micros { times.median }.count(),
+                 Micros { times.p90 }.count(),
+                 Micros { times.fastest }.count(),
+                 Micros { all }.count() / 1000.0);
 }
 
 } // namespace vtextension::wasm::testing
