@@ -107,16 +107,22 @@ struct HostConfinement
     /// bound itself to its parent, before it adopts its endpoints, makes its engine or starts any thread.
     /// What is set per thread and must reach every thread is set here.
     /// @return Nothing if it hardened itself wholly; the first step that failed otherwise, which the host
-    /// tells
-    ///         of on stderr and which makes Hello state `Failed` whatever confine returns.
+    ///         tells of through tell and which makes Hello state `Failed` whatever confine returns.
     std::function<std::expected<void, HardeningFailure>()> beforeThreads;
     /// Caps its resources once its threads run, to the data bytes it is given, as capResources() does.
     /// @return What Hello states, unless beforeThreads failed.
     std::function<remote::proto::LockdownState(uint64_t dataBytes)> confine;
+    /// Tells of a confinement the host could not complete, one line without its end: on stderr, after
+    /// `contour-extension-host: `, as tellOnStandardError() does.
+    std::function<void(std::string_view line)> tell;
 };
 
+/// Writes `contour-extension-host: <line>` to stderr. Never throws: a failed write is no reason to end.
+/// @param line The line, without its end.
+void tellOnStandardError(std::string_view line) noexcept;
+
 /// @return bindToParent(), hardenProcess(), and capResources() under BuildCapPolicy, which under `Skip` says
-///         so once on stderr.
+///         so once on stderr; tellOnStandardError().
 [[nodiscard]] HostConfinement systemConfinement();
 
 /// The executable's body: parse, bind to the parent, harden, adopt, make the engine, serve. Every exit but

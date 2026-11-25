@@ -14,6 +14,7 @@
 #include <future>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <set>
 #include <span>
@@ -137,6 +138,9 @@ struct Confined
     std::atomic<std::size_t> threadsWhenConfined { 0 };
     /// What beforeThreads returns.
     std::expected<void, HardeningFailure> hardening {};
+    /// What the host told, line by line.
+    std::mutex toldLock;
+    std::vector<std::string> told;
 };
 
 /// @return A confinement that touches nothing of this process: it binds to TheParent alone, and hardens and
@@ -164,6 +168,11 @@ struct Confined
                 confined->cappedTo.store(dataBytes);
                 confined->confines.fetch_add(1);
                 return capResources(dataBytes, CapPolicy::Skip);
+            },
+        .tell =
+            [confined](std::string_view line) {
+                auto const lock = std::scoped_lock { confined->toldLock };
+                confined->told.emplace_back(line);
             },
     };
 }
@@ -433,7 +442,9 @@ namespace
 {
 
 /// Runs a host whose hardening ends as @p hardening, and checks what Hello states and when it hardened.
-void checkHardening(std::expected<void, HardeningFailure> hardening, proto::LockdownState expected)
+void checkHardening(std::expected<void, HardeningFailure> hardening,
+                    proto::LockdownState expected,
+                    std::vector<std::string> const& expectedTold)
 {
     auto parent = makeParentEnds();
     auto confined = std::make_shared<Confined>();
@@ -468,6 +479,8 @@ void checkHardening(std::expected<void, HardeningFailure> hardening, proto::Lock
     }
     REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
     CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+    auto const lock = std::scoped_lock { confined->toldLock };
+    CHECK(confined->told == expectedTold);
 }
 
 /// How many times each fake hardening step ran.
@@ -479,15 +492,18 @@ std::atomic<int> thirdStepRuns { 0 };
 
 TEST_CASE("HostProcess.hardensBeforeAnyThreadStarts", "[vtextension][host]")
 {
-    checkHardening({}, proto::LockdownState::Unsandboxed);
+    checkHardening({}, proto::LockdownState::Unsandboxed, {});
 }
 
 TEST_CASE("HostProcess.failedHardeningSaysWhichStep", "[vtextension][host]")
 {
-    // A hardening that failed is what Hello states, whatever the caps did; the host tells which step failed.
-    auto const& row = hardeningSteps().front();
-    checkHardening(std::unexpected(HardeningFailure { .step = row.step, .text = row.text, .code = 1 }),
-                   proto::LockdownState::Failed);
+    // A hardening that failed is what Hello states, whatever the caps did; the host tells which step failed,
+    // in the failing row's own words.
+    auto const failure =
+        HardeningFailure { .step = HardeningStep::Tracing, .text = "the third row", .code = 1 };
+    checkHardening(std::unexpected(failure),
+                   proto::LockdownState::Failed,
+                   { "hardening failed: the third row (" + systemErrorText(1) + ")" });
 }
 
 TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]")

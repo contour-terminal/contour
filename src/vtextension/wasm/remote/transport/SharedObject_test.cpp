@@ -188,4 +188,37 @@ TEST_CASE("SharedObject.reservedSectionCommitsOnlyWhatIsAsked", "[vtextension]")
     mapping->bytes()[GuestBytes - 1] = std::byte { 1 };
     CHECK(mapping->bytes()[GuestBytes - 1] == std::byte { 1 });
 }
+
+namespace
+{
+
+/// Whether this runs under wine, which commits a reserved section per view rather than per section.
+[[nodiscard]] bool runsUnderWine() noexcept
+{
+    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
+    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
+} // namespace
+
+TEST_CASE("SharedObject.pagesCommittedThroughOneViewAreSeenThroughAnother", "[vtextension]")
+{
+    // Contour commits guest memory through its own view only; the helper's view must then reach the same
+    // pages. Windows commits a reserved section's pages for the section, so any view may touch them.
+    if (runsUnderWine())
+        SKIP("wine commits a reserved section per view, unlike Windows");
+
+    auto const object = createSharedObject(MiB, SharedObjectUse::GuestMemory);
+    REQUIRE(object.has_value());
+    auto parentView = SharedMapping::map(object->get(), MiB, MapAccess::ReadWrite);
+    REQUIRE(parentView.has_value());
+    auto const helperView = SharedMapping::map(object->get(), MiB, MapAccess::ReadWrite);
+    REQUIRE(helperView.has_value());
+
+    REQUIRE(parentView->commit(0, GuestBytes).has_value());
+    helperView->bytes().front() = std::byte { 0x5A };
+    helperView->bytes()[GuestBytes - 1] = std::byte { 0xA5 };
+    CHECK(parentView->bytes().front() == std::byte { 0x5A });
+    CHECK(parentView->bytes()[GuestBytes - 1] == std::byte { 0xA5 });
+}
 #endif

@@ -405,11 +405,15 @@ TEST_CASE("ProcessLauncher.unsupportedPidfdWaitsRefuseEveryLaunch", "[vtextensio
     }
     auto readable = pollfd { .fd = control.nativeHandle(), .events = POLLIN, .revents = 0 };
     auto const patience = std::chrono::duration_cast<std::chrono::milliseconds>(ChildPatience);
-    REQUIRE(::poll(&readable, 1, static_cast<int>(patience.count())) == 1);
-    auto buffer = std::array<uint8_t, 16> {};
-    CHECK(control.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
+    auto const ready = ::poll(&readable, 1, static_cast<int>(patience.count()));
+    CHECK(ready == 1);
+    // A child started anyway is ended and reaped whatever the poll said: the handle does not kill it.
     if (launched)
         CHECK(endAndReap(*launcher, **launched));
+    if (ready != 1)
+        return;
+    auto buffer = std::array<uint8_t, 16> {};
+    CHECK(control.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
 }
 
 TEST_CASE("ProcessLauncher.thisKernelWaitsOnPidfds", "[vtextension]")

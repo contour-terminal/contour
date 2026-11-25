@@ -61,23 +61,13 @@ namespace
                                       }),
                   "ExitTable lists every HostProcessExit at its own index");
 
-    /// Writes `contour-extension-host: <text>` to stderr. Never throws: a failed write is no reason to end
-    /// otherwise than the exit table says.
-    void tell(std::string_view text) noexcept
-    {
-        constexpr auto Prefix = std::string_view { "contour-extension-host: " };
-        std::ignore = std::fwrite(Prefix.data(), 1, Prefix.size(), stderr);
-        std::ignore = std::fwrite(text.data(), 1, text.size(), stderr);
-        std::ignore = std::fputc('\n', stderr);
-    }
-
     /// Writes why the host ends to stderr, unless it served.
     /// @return @p exit's code.
     [[nodiscard]] int endWith(HostProcessExit exit) noexcept
     {
         auto const& row = rowOf(exit);
         if (exit != HostProcessExit::Served)
-            tell(row.text);
+            tellOnStandardError(row.text);
         return row.code;
     }
 } // namespace
@@ -163,6 +153,14 @@ void HostProcess::stop() noexcept
     _server.stop();
 }
 
+void tellOnStandardError(std::string_view line) noexcept
+{
+    constexpr auto Prefix = std::string_view { "contour-extension-host: " };
+    std::ignore = std::fwrite(Prefix.data(), 1, Prefix.size(), stderr);
+    std::ignore = std::fwrite(line.data(), 1, line.size(), stderr);
+    std::ignore = std::fputc('\n', stderr);
+}
+
 HostConfinement systemConfinement()
 {
     return HostConfinement {
@@ -171,9 +169,10 @@ HostConfinement systemConfinement()
         .confine =
             [](uint64_t dataBytes) {
                 if constexpr (BuildCapPolicy == CapPolicy::Skip)
-                    tell("resource caps are off in this build");
+                    tellOnStandardError("resource caps are off in this build");
                 return capResources(dataBytes, BuildCapPolicy);
             },
+        .tell = &tellOnStandardError,
     };
 }
 
@@ -190,7 +189,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     // While the main thread is the only one: what is set per thread then reaches every thread started later.
     auto const hardened = confinement.beforeThreads();
     if (!hardened)
-        tell(std::format("hardening failed: {}", hardeningFailureText(hardened.error())));
+        confinement.tell(std::format("hardening failed: {}", hardeningFailureText(hardened.error())));
     auto endpoints = adoptEndpoints(*parsed);
     if (!endpoints)
         return endWith(endpoints.error());
