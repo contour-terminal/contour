@@ -196,6 +196,8 @@ namespace
             {
                 auto const lock = std::scoped_lock { _mutex };
                 _state = RosterState::Closed;
+                // The whole list, expired entries with the rest: none stays behind, and nothing is listed
+                // again once closed (enlist()).
                 listed = std::exchange(_listed, {});
             }
             for (auto const& entry: listed)

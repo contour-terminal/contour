@@ -391,6 +391,9 @@ struct HandleRecords
     std::vector<WatchRecord> watches; ///< Every watch armed, in order.
     std::size_t disarmed = 0;         ///< How many watches were disarmed.
     HostAttachment attachment;        ///< The latest connection's.
+    /// Run once, by the next watch disarmed, outside the mutex: where a request still holds the control
+    /// channel after its last send.
+    std::function<void()> onNextDisarm;
 };
 
 /// A host handle that records what it is told.
@@ -411,8 +414,14 @@ class CountingHandle final: public IHostHandle
         auto const lock = std::scoped_lock { _records->mutex };
         _records->watches.push_back(WatchRecord { .step = step, .budget = budget });
         return StepWatch { [records = _records] {
-            auto const disarmLock = std::scoped_lock { records->mutex };
-            ++records->disarmed;
+            auto hook = std::function<void()> {};
+            {
+                auto const disarmLock = std::scoped_lock { records->mutex };
+                ++records->disarmed;
+                hook = std::exchange(records->onNextDisarm, nullptr);
+            }
+            if (hook)
+                hook();
         } };
     }
 
@@ -486,6 +495,13 @@ class ScriptedConnector final: public IHostConnector
     {
         auto const lock = std::scoped_lock { _records->mutex };
         return _records->disarmed;
+    }
+
+    /// Has the next watch disarmed run @p hook, once.
+    void onNextDisarm(std::function<void()> hook)
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        _records->onNextDisarm = std::move(hook);
     }
 
     /// @return The latest connection's attachment.
@@ -1475,6 +1491,35 @@ TEST_CASE("RemoteBackend.releaseWaitsForTheControlChannel", "[vtextension][remot
     auto const all = transcript.awaitAtLeast(5);
     CHECK(indexOf(all, [&](auto const& pdu) { return releasesInstance(pdu, first.instanceId); }) == 3);
     CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.releaseQueuedWhileARequestEndsIsSent", "[vtextension][remote][threading]")
+{
+    // An instance dropped in the last moment a request holds the control channel -- after its last send,
+    // while its watch is disarmed -- finds the channel taken. The request's thread sends the release once it
+    // let go: the extension then idles, and no later request would carry it.
+    auto transcript = Transcript {};
+    auto arrived = std::promise<void> {};
+    auto const connector =
+        std::make_shared<ScriptedConnector>([&](HelperEnds& ends, std::size_t /*connection*/) {
+            serveGated(ends, transcript, 0, arrived, std::shared_future<void> {}, AfterGate::Answers);
+        });
+    auto const backend = makeBackend(connector);
+    auto const runtime = contract::createRuntime(*backend);
+    auto const module = contract::load(*runtime, PeekModule);
+    auto context = contract::RecordingHostContext {};
+    auto older = contract::instantiate(*module, context);
+
+    connector->onNextDisarm([&] {
+        auto dropping = std::async(std::launch::async, [&] { older.reset(); });
+        readyWithin(dropping, std::chrono::seconds { 5 }, "dropping an instance waited for the channel");
+    });
+    auto const newer = contract::instantiate(*module, context);
+
+    // Recorded: Load, Instantiate, Instantiate, and the release, with nothing more asked of the host.
+    auto const pdus = transcript.awaitAtLeast(4);
+    REQUIRE(pdus.size() >= 4);
+    CHECK(releasesInstance(pdus.at(3), std::get<proto::Instantiate>(pdus.at(1)).instanceId));
 }
 
 TEST_CASE("RemoteBackend.releaseOverflowKillsTheHelper", "[vtextension][remote][threading]")

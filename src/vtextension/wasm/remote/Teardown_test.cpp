@@ -190,7 +190,9 @@ void killChild(ProcessId processId)
 #endif
 
 /// Makes this process the reaper of the processes its children leave behind, once for the binary: an
-/// orphaned helper is then this process's child, which it can wait for (Linux, FreeBSD).
+/// orphaned helper is then this process's child, which it can wait for (Linux, FreeBSD). It holds for the
+/// whole test process from then on: a grandchild a later case orphans becomes this binary's zombie until it
+/// exits, which is harmless.
 void becomeSubreaper()
 {
 #ifdef __linux__

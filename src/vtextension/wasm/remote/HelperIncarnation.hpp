@@ -121,9 +121,12 @@ class HelperIncarnation
                                                                             HostStep step);
 
     /// Tells the host a module or an instance is gone, without ever blocking: the release is queued, and
-    /// sent at once only if no other thread holds the control channel and the channel takes it now. What is
-    /// queued goes out before and after the next request's exchange, in order. Does nothing once the
-    /// incarnation is dead; a host that lets more than MaxPendingReleases pile up kills it.
+    /// sent at once only if no other thread holds the control channel and the channel takes it now; if one
+    /// does, that thread sends it once it lets the channel go. What is queued goes out before and after the
+    /// next request's exchange, in order. Does nothing once the
+    /// incarnation is dead; a host that lets more than MaxPendingReleases pile up kills it. Queuing
+    /// allocates: running out of memory there ends the process (std::terminate), as the destructors calling
+    /// this cannot report it.
     /// @param release What is gone.
     void release(proto::Release release) noexcept;
 
@@ -178,9 +181,24 @@ class HelperIncarnation
     /// @return Whether every one was sent.
     [[nodiscard]] bool sendReleases();
 
+    /// How far trySendReleases() got.
+    enum class ReleaseFlush : uint8_t
+    {
+        Blocked, ///< The channel took no more, or failed: some are left, or the incarnation died.
+        Drained, ///< Every queued release was sent.
+    };
+
     /// Sends queued releases as far as the channel takes them now, its caller holding the control mutex;
     /// kills the incarnation if the channel failed.
-    void trySendReleases() noexcept;
+    /// @return Whether it drained the queue.
+    [[nodiscard]] ReleaseFlush trySendReleases() noexcept;
+
+    /// Sends queued releases as far as that costs no wait: only while the control mutex is free, and the
+    /// channel takes them; again as long as more were queued meanwhile. Called without the control mutex.
+    void offerReleases() noexcept;
+
+    /// @return Whether a release is queued.
+    [[nodiscard]] bool hasQueuedReleases();
 
     /// @return The oldest queued release; nothing if none is queued.
     [[nodiscard]] std::optional<proto::Release> oldestRelease();

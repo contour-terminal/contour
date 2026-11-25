@@ -140,18 +140,24 @@ HelperIncarnation::~HelperIncarnation() = default;
 
 std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu const& pdu, HostStep step)
 {
-    auto const lock = std::scoped_lock { _controlMutex };
-    // Armed only once the channel is this request's: waiting for another's is not the host's time.
-    auto const watch = this->watch(step);
-    if (!isAlive())
-        return std::unexpected(StreamError::Closed);
-    // What was released before goes first -- an interrupt slot given back with an instance is handed to the
-    // next only after the host heard of it -- and what was released meanwhile goes right after.
-    if (!sendReleases())
-        return std::unexpected(StreamError::Closed);
-    auto reply = exchange(pdu);
-    if (reply)
-        std::ignore = sendReleases();
+    auto reply = [&]() -> std::expected<proto::Pdu, StreamError> {
+        auto const lock = std::scoped_lock { _controlMutex };
+        // Armed only once the channel is this request's: waiting for another's is not the host's time.
+        auto const watch = this->watch(step);
+        if (!isAlive())
+            return std::unexpected(StreamError::Closed);
+        // What was released before goes first -- an interrupt slot given back with an instance is handed to
+        // the next only after the host heard of it -- and what was released meanwhile goes right after.
+        if (!sendReleases())
+            return std::unexpected(StreamError::Closed);
+        auto exchanged = exchange(pdu);
+        if (exchanged)
+            std::ignore = sendReleases();
+        return exchanged;
+    }();
+    // A release queued after the last send above, while the channel was still held -- the watch's disarm
+    // runs then -- found it taken: it is this thread's to send.
+    offerReleases();
     return reply;
 }
 
@@ -193,11 +199,26 @@ void HelperIncarnation::release(proto::Release release) noexcept
         markDead();
         return;
     }
-    // Sent now only if that costs no wait: another thread's request sends it after its exchange, and a host
-    // that reads slowly gets it with the next release or request.
-    auto const lock = std::unique_lock { _controlMutex, std::try_to_lock };
-    if (lock.owns_lock() && isAlive())
-        trySendReleases();
+    offerReleases();
+}
+
+void HelperIncarnation::offerReleases() noexcept
+{
+    // Sent now only if that costs no wait. A thread that finds the channel taken leaves its release to the
+    // holder, and every holder looks at the queue again once it let go, so none is left behind for a request
+    // that may never come. One that the channel does not take now waits for the next release or request.
+    while (isAlive() && hasQueuedReleases())
+    {
+        auto const lock = std::unique_lock { _controlMutex, std::try_to_lock };
+        if (!lock.owns_lock() || trySendReleases() == ReleaseFlush::Blocked)
+            return;
+    }
+}
+
+bool HelperIncarnation::hasQueuedReleases()
+{
+    auto const lock = std::scoped_lock { _outboxMutex };
+    return !_outbox.empty();
 }
 
 bool HelperIncarnation::sendReleases()
@@ -214,7 +235,7 @@ bool HelperIncarnation::sendReleases()
     return true;
 }
 
-void HelperIncarnation::trySendReleases() noexcept
+HelperIncarnation::ReleaseFlush HelperIncarnation::trySendReleases() noexcept
 {
     while (auto const next = oldestRelease())
     {
@@ -222,12 +243,13 @@ void HelperIncarnation::trySendReleases() noexcept
         if (!outcome)
         {
             markDead();
-            return;
+            return ReleaseFlush::Blocked;
         }
         if (*outcome == transport::SendOutcome::WouldBlock)
-            return;
+            return ReleaseFlush::Blocked;
         forgetOldestRelease();
     }
+    return ReleaseFlush::Drained;
 }
 
 std::optional<proto::Release> HelperIncarnation::oldestRelease()

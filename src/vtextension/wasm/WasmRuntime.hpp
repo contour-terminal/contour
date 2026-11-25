@@ -386,7 +386,9 @@ class IWasmBackend
     IWasmBackend(IWasmBackend&&) = delete;
     IWasmBackend& operator=(IWasmBackend const&) = delete;
     IWasmBackend& operator=(IWasmBackend&&) = delete;
-    /// Must outlive every runtime created from it.
+    /// Must outlive every runtime created from it. The one exception is the remote backend
+    /// (makeRemoteBackend()), which tolerates being dropped first: it lets its hosts go, and whatever still
+    /// uses one of its runtimes fails `HostUnavailable`.
     virtual ~IWasmBackend() = default;
 
     /// Creates a runtime. The engine is brought up with the first runtime alive and torn down with
