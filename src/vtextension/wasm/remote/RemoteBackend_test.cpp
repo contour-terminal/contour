@@ -724,6 +724,58 @@ TEST_CASE("RemoteBackend.overCapReplyIsTheHostsFault", "[vtextension][remote]")
     CHECK(rig.connector->terminations() == 1);
 }
 
+namespace
+{
+
+/// @return A Load answer refusing the module with @p error.
+[[nodiscard]] std::function<std::vector<uint8_t>(uint32_t)> loadedFailing(ExtensionError error)
+{
+    return [error](uint32_t moduleId) {
+        return frameOf(proto::Loaded { .moduleId = moduleId, .error = error, .imports = {}, .exports = {} });
+    };
+}
+
+/// @return An Instantiate answer refusing the instance with @p error.
+[[nodiscard]] std::function<std::vector<uint8_t>(uint32_t)> instantiatedFailing(ExtensionError error)
+{
+    return [error](uint32_t instanceId) {
+        return frameOf(
+            proto::Instantiated { .instanceId = instanceId, .error = error, .callableExports = {} });
+    };
+}
+
+} // namespace
+
+TEST_CASE("RemoteBackend.honestRefusalsPassThrough", "[vtextension][remote]")
+{
+    // What a host may refuse a module or an instance with reaches the caller as it said, and the host lives.
+    for (auto const error: { ExtensionError::InvalidComponent,
+                             ExtensionError::OutOfMemory,
+                             ExtensionError::RuntimeUnavailable,
+                             ExtensionError::ModuleTooLarge })
+    {
+        INFO(static_cast<int>(error));
+        {
+            auto rig = ScriptedRig { .connector =
+                                         scriptedConnector(HelperScript { .loaded = loadedFailing(error) }) };
+            auto const loaded = rig.runtime->load(ModuleIdentity {}, toModule(PeekModule));
+            REQUIRE_FALSE(loaded.has_value());
+            CHECK(loaded.error() == error);
+            CHECK(rig.connector->terminations() == 0);
+        }
+        {
+            auto rig = ScriptedRig { .connector = scriptedConnector(
+                                         HelperScript { .instantiated = instantiatedFailing(error) }) };
+            auto const module = contract::load(*rig.runtime, PeekModule);
+            auto context = contract::RecordingHostContext {};
+            auto const instance = module->instantiate(context);
+            REQUIRE_FALSE(instance.has_value());
+            CHECK(instance.error() == error);
+            CHECK(rig.connector->terminations() == 0);
+        }
+    }
+}
+
 TEST_CASE("RemoteBackend.wrongRepliesKillTheHelper", "[vtextension][remote]")
 {
     struct Case
@@ -755,6 +807,14 @@ TEST_CASE("RemoteBackend.wrongRepliesKillTheHelper", "[vtextension][remote]")
           .script = HelperScript { .instantiated = instantiatedWith({ 1, 3 }) } },
         { .what = "a callable memory export",
           .script = HelperScript { .instantiated = instantiatedWith({ 0 }) } },
+        { .what = "Loaded failing with what no load fails with",
+          .script = HelperScript { .loaded = loadedFailing(ExtensionError::HostUnavailable) } },
+        { .what = "Loaded failing as a guest trap",
+          .script = HelperScript { .loaded = loadedFailing(ExtensionError::Trapped) } },
+        { .what = "Instantiated failing with what no instantiation fails with",
+          .script = HelperScript { .instantiated = instantiatedFailing(ExtensionError::HostUnavailable) } },
+        { .what = "Instantiated failing as a deadline",
+          .script = HelperScript { .instantiated = instantiatedFailing(ExtensionError::DeadlineExceeded) } },
     };
     for (auto const& [what, script]: cases)
     {

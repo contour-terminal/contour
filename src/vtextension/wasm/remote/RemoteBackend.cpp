@@ -4,6 +4,7 @@
 #include <core/log/LogStore.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +48,20 @@ namespace
     /// reaches past it.
     constexpr auto MaxCopiedBytes = static_cast<std::size_t>(proto::PduLimits {}.maxMemoryBytes);
 
+    /// What a host may refuse a module or an instance with; any other refusal breaks the protocol. What the
+    /// others say (a trap, a deadline, a host gone) cannot be the outcome of loading or instantiating in a
+    /// host that serves, and believing it would let a host blame the extension for its own failure.
+    constexpr auto HostRefusals = std::array { ExtensionError::InvalidComponent,
+                                               ExtensionError::OutOfMemory,
+                                               ExtensionError::RuntimeUnavailable,
+                                               ExtensionError::ModuleTooLarge };
+
+    /// @return Whether a host may refuse a module or an instance with @p error.
+    [[nodiscard]] constexpr bool isHostRefusal(ExtensionError error) noexcept
+    {
+        return std::ranges::contains(HostRefusals, error);
+    }
+
     /// Whether an instance was interrupted (IWasmInstance::interrupt()).
     enum class InterruptState : uint8_t
     {
@@ -64,8 +79,9 @@ namespace
 
     /// Loads @p bytes in @p incarnation, and checks the description against what the module declares: a host
     /// describing more imports or exports than the module has is not believed.
-    /// @return The module's description; the host's own error if it refused the module, `InvalidComponent` if
-    ///         the module is too large to send, `HostUnavailable` if the host died or broke the protocol.
+    /// @return The module's description; the host's own error if it refused the module (one of HostRefusals),
+    ///         `InvalidComponent` if the module is too large to send, `HostUnavailable` if the host died or
+    ///         broke the protocol, a refusal of any other kind included.
     [[nodiscard]] std::expected<LoadedModule, ExtensionError> loadInto(HelperIncarnation& incarnation,
                                                                        std::span<std::byte const> bytes)
     {
@@ -80,7 +96,7 @@ namespace
                                        ? ExtensionError::InvalidComponent
                                        : ExtensionError::HostUnavailable);
         auto* const loaded = std::get_if<proto::Loaded>(&*reply);
-        if (!loaded || loaded->moduleId != moduleId)
+        if (!loaded || loaded->moduleId != moduleId || (loaded->error && !isHostRefusal(*loaded->error)))
         {
             incarnation.markDead();
             return std::unexpected(ExtensionError::HostUnavailable);
@@ -441,6 +457,7 @@ namespace
                    && _exports[ordinal].signature.results.size() <= proto::MaxCallValues;
         };
         if (!instantiated || instantiated->instanceId != instanceId
+            || (instantiated->error && !isHostRefusal(*instantiated->error))
             || !std::ranges::all_of(instantiated->callableExports, callable))
         {
             host.markDead();
