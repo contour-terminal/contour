@@ -23,6 +23,16 @@ file(CONFIGURE
 )
 target_include_directories(vtextension_wasmtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
+if(VTEXTENSION_TESTING)
+    # Test support for the extension host's suite (vtextension_remote_test): the engine a host process drives,
+    # reached through a neutral probe (../testing/HostedEngine.hpp), so that the host's tests name no engine.
+    add_library(vtextension_wasmtime_hosted_engine STATIC
+        HostedEngine.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/testing/HostedEngine.hpp
+    )
+    target_link_libraries(vtextension_wasmtime_hosted_engine PUBLIC vtextension_wasmtime)
+endif()
+
 if(VTEXTENSION_TESTING AND CONTOUR_WASMTIME_MISSING_TEST_FEATURES)
     list(JOIN CONTOUR_WASMTIME_MISSING_TEST_FEATURES ", " _wasmtime_missing_text)
     message(STATUS "vtextension_wasmtime_test is not built: the installed Wasmtime lacks ${_wasmtime_missing_text}, "

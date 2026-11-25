@@ -58,19 +58,17 @@ if(VTEXTENSION_FUZZING)
     target_link_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
 endif()
 
-if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime)
+if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     # The host's server, and (later) the backend that reaches it, driven over real channels on a real engine:
-    # Wasmtime's, the engine a host process runs, reached through a neutral probe (../testing/HostedEngine.hpp)
-    # defined in its directory.
+    # Wasmtime's, the engine a host process runs, reached through its directory's neutral test probe
+    # (vtextension_wasmtime_hosted_engine).
     add_executable(vtextension_remote_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         ../host/HostServer_test.cpp
-        ../testing/HostedEngine.hpp
-        ../wasmtime/HostedEngine.cpp
     )
     target_link_libraries(vtextension_remote_test PRIVATE
-        vtextension vtextension_remote_wire vtextension_host vtextension_wasmtime contour::wasmtime core::testing
-        Catch2::Catch2 contour_test_trace)
+        vtextension vtextension_remote_wire vtextension_host vtextension_wasmtime vtextension_wasmtime_hosted_engine
+        contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

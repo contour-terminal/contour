@@ -5,6 +5,8 @@
 # links Wasmtime's.
 
 add_library(vtextension_host STATIC
+    ExecutorThread.cpp
+    ExecutorThread.hpp
     HostServer.cpp
     HostServer.hpp
     IHostedEngine.hpp

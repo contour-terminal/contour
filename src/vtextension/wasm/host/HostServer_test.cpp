@@ -39,6 +39,8 @@ using vtextension::wasm::ModuleIdentity;
 using vtextension::wasm::host::HostServer;
 using vtextension::wasm::host::HostServerConfig;
 using vtextension::wasm::host::InProcessHostConnector;
+using vtextension::wasm::host::MaxCallDepth;
+using vtextension::wasm::host::MaxRuntimeStackBytes;
 using vtextension::wasm::host::ServerExit;
 using vtextension::wasm::remote::MaxLaneChannels;
 using vtextension::wasm::remote::transport::Channel;
@@ -240,6 +242,31 @@ constexpr auto StartPingModule = std::to_array<uint8_t>({
     0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74, 0x65, 0x73,
     0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00, 0x00, 0x03, 0x02,
     0x01, 0x01, 0x08, 0x01, 0x01, 0x0a, 0x08, 0x01, 0x06, 0x00, 0x41, 0x05, 0x10, 0x00, 0x0b,
+});
+
+/// Exports one function, taking and returning nothing.
+///
+///     (module (func (export "f")))
+constexpr auto OneExportModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
+});
+
+/// Recurses `n` calls deep, then calls `pair(0, 0)`: a host call with `n` guest frames beneath it.
+///
+///     (module
+///       (import "contract:test/host@0" "pair" (func $pair (param i32 i32)))
+///       (func $down (export "down") (param i32)
+///         (if (local.get 0)
+///           (then (call $down (i32.sub (local.get 0) (i32.const 1))))
+///           (else (call $pair (i32.const 0) (i32.const 0))))))
+constexpr auto DeepModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0a, 0x02, 0x60, 0x02, 0x7f, 0x7f,
+    0x00, 0x60, 0x01, 0x7f, 0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61,
+    0x63, 0x74, 0x3a, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04,
+    0x70, 0x61, 0x69, 0x72, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x07, 0x08, 0x01, 0x04, 0x64,
+    0x6f, 0x77, 0x6e, 0x00, 0x01, 0x0a, 0x17, 0x01, 0x15, 0x00, 0x20, 0x00, 0x04, 0x40, 0x20,
+    0x00, 0x41, 0x01, 0x6b, 0x10, 0x01, 0x05, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0b, 0x0b,
 });
 
 /// Appends @p value to @p out as an unsigned LEB128.
@@ -453,6 +480,172 @@ TEST_CASE("HostServer.memoryOpsOnTheLane", "[vtextension][host]")
         CHECK(parent.receive(0)
               == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 3 } } });
     }
+
+    SECTION("a write out of bounds fails its own instance's call, not a nested one's")
+    {
+        parent.instantiateOk(1, 2);
+        parent.send(0,
+                    proto::Call {
+                        .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "ping-then-store"), .argv = {} });
+        CHECK(parent.receive(0)
+              == proto::Pdu { proto::CallHost { .functionIndex = 0, .arguments = { 42 } } });
+        parent.send(0,
+                    proto::MemoryWrite {
+                        .instanceId = 1, .address = contract::PageBytes - 2, .bytes = bytes("abcd") });
+        parent.send(
+            0, proto::Call { .instanceId = 2, .exportOrdinal = ordinalOf(loaded, "add"), .argv = { 2, 3 } });
+        CHECK(parent.receive(0)
+              == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 5 } } });
+        parent.send(0, proto::HostResult { .error = std::nullopt });
+        CHECK(parent.receive(0)
+              == proto::Pdu { proto::CallResult { .failure = CallFailure::HostFailure, .argv = {} } });
+    }
+
+    SECTION("an unknown instance is a violation")
+    {
+        parent.send(0, proto::MemoryRead { .instanceId = 42, .address = 0, .size = 4 });
+        CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+    }
+}
+
+TEST_CASE("HostServer.busyInstanceIsRefusedOnAnotherLane", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    parent.createRuntime(1);
+    auto const loaded = parent.loadOk(1, 1, toModule(contract::PairModule));
+    parent.instantiateOk(1, 1);
+
+    // Lane 0's call is parked in its host call: the instance is lane 0's until that call returns.
+    parent.send(
+        0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "pair"), .argv = { 7, 9 } });
+    CHECK(parent.receive(0) == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 7, 9 } } });
+
+    SECTION("a call")
+    {
+        parent.send(
+            1, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "pair"), .argv = { 1, 2 } });
+    }
+    SECTION("a memory read")
+    {
+        parent.send(1, proto::MemoryRead { .instanceId = 1, .address = 0, .size = 4 });
+    }
+    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+    CHECK(parent.lanes.at(1).receive() == std::unexpected(StreamError::Closed));
+}
+
+TEST_CASE("HostServer.callDepthIsBounded", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    parent.createRuntime(1);
+    auto const loaded = parent.loadOk(1, 1, toModule(contract::PairModule));
+    parent.instantiateOk(1, 1);
+    parent.instantiateOk(1, 2);
+    auto const pair = ordinalOf(loaded, "pair");
+
+    // MaxCallDepth calls, alternating between two instances, each parked in its host call.
+    for (auto const depth: std::views::iota(uint32_t { 0 }, static_cast<uint32_t>(MaxCallDepth)))
+    {
+        parent.send(
+            0, proto::Call { .instanceId = 1 + (depth % 2), .exportOrdinal = pair, .argv = { depth, 0 } });
+        CHECK(parent.receive(0)
+              == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { depth, 0 } } });
+    }
+
+    SECTION("up to the bound, every call returns")
+    {
+        for ([[maybe_unused]] auto const depth: std::views::iota(std::size_t { 0 }, MaxCallDepth))
+        {
+            parent.send(0, proto::HostResult { .error = std::nullopt });
+            CHECK(parent.receive(0)
+                  == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = {} } });
+        }
+    }
+
+    SECTION("one past it is a violation")
+    {
+        parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = pair, .argv = { 1, 1 } });
+        CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+    }
+}
+
+TEST_CASE("HostServer.nestedCallsFitTheExecutorStack", "[vtextension][host]")
+{
+    // Each instance's calls get a stack limit of their own, counted from where the lane's stack stands when
+    // they begin: MaxCallDepth calls into as many instances, each nearly filling the largest stack a runtime
+    // may give, must fit one executor's stack.
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    auto functions = std::vector<proto::WireHostFunction> {};
+    for (auto const& function: contract::HostFunctions)
+        functions.push_back(proto::WireHostFunction { .module = std::string { function.module },
+                                                      .name = std::string { function.name },
+                                                      .parameterCount = function.parameterCount });
+    parent.sendControl(proto::CreateRuntime { .runtimeId = 1,
+                                              .memoryBytes = contract::Limits.memoryBytes,
+                                              .stackBytes = MaxRuntimeStackBytes,
+                                              .functions = std::move(functions) });
+    REQUIRE(parent.receiveControl()
+            == proto::Pdu { proto::RuntimeCreated { .runtimeId = 1, .error = std::nullopt } });
+    auto const loaded = parent.loadOk(1, 1, toModule(DeepModule));
+    auto const down = ordinalOf(loaded, "down");
+    for (auto const instance: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(MaxCallDepth) + 1))
+        parent.instantiateOk(1, instance);
+
+    // How deep one call may recurse before its stack runs out: the deepest that reaches the host call.
+    auto const reachesTheHost = [&](uint32_t depth) {
+        parent.send(1, proto::Call { .instanceId = 1, .exportOrdinal = down, .argv = { depth } });
+        auto const answer = parent.receive(1);
+        if (std::holds_alternative<proto::CallResult>(answer))
+            return false;
+        parent.send(1, proto::HostResult { .error = std::nullopt });
+        std::ignore = parent.receive(1);
+        return true;
+    };
+    auto shallow = uint32_t { 0 };
+    auto deep = uint32_t { 1 } << 22;
+    while (deep - shallow > 1)
+    {
+        auto const middle = shallow + ((deep - shallow) / 2);
+        (reachesTheHost(middle) ? shallow : deep) = middle;
+    }
+    REQUIRE(shallow > 1000);
+    // Within a few frames of the limit: the calls take nearly MaxCallDepth whole stacks between them.
+    auto const depth = shallow - 64;
+
+    for (auto const instance: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(MaxCallDepth) + 1))
+    {
+        parent.send(0, proto::Call { .instanceId = instance, .exportOrdinal = down, .argv = { depth } });
+        REQUIRE(parent.receive(0)
+                == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 0, 0 } } });
+    }
+    for ([[maybe_unused]] auto const instance: std::views::iota(std::size_t { 0 }, MaxCallDepth))
+    {
+        parent.send(0, proto::HostResult { .error = std::nullopt });
+        CHECK(parent.receive(0) == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = {} } });
+    }
+}
+
+TEST_CASE("HostServer.refusesAStackTheLanesCannotHold", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    parent.sendControl(proto::CreateRuntime { .runtimeId = 1,
+                                              .memoryBytes = contract::Limits.memoryBytes,
+                                              .stackBytes = MaxRuntimeStackBytes + 1,
+                                              .functions = {} });
+    CHECK(parent.receiveControl()
+          == proto::Pdu {
+              proto::RuntimeCreated { .runtimeId = 1, .error = ExtensionError::RuntimeUnavailable } });
+
+    // The largest it holds is accepted.
+    parent.sendControl(proto::CreateRuntime { .runtimeId = 2,
+                                              .memoryBytes = contract::Limits.memoryBytes,
+                                              .stackBytes = MaxRuntimeStackBytes,
+                                              .functions = {} });
+    CHECK(parent.receiveControl()
+          == proto::Pdu { proto::RuntimeCreated { .runtimeId = 2, .error = std::nullopt } });
 }
 
 TEST_CASE("HostServer.malformedFrameEndsTheConnection", "[vtextension][host]")
@@ -494,6 +687,34 @@ TEST_CASE("HostServer.stopInterruptsARunningGuest", "[vtextension][host]")
     parent.server->stop();
     CHECK(parent.exitWithinDeadline() == ServerExit::Stopped);
     parent.server->stop(); // idempotent
+}
+
+TEST_CASE("HostServer.stopEndsAParkedCall", "[vtextension][host]")
+{
+    auto parent = ScriptedParent {};
+    parent.skipHello();
+    parent.createRuntime(1);
+    auto const loaded = parent.loadOk(1, 1, toModule(contract::PairModule));
+    parent.instantiateOk(1, 1);
+
+    parent.send(
+        0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "pair"), .argv = { 7, 9 } });
+    CHECK(parent.receive(0) == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 7, 9 } } });
+    parent.server->stop();
+    CHECK(parent.exitWithinDeadline() == ServerExit::Stopped);
+    CHECK(parent.lanes.front().receive() == std::unexpected(StreamError::Closed));
+}
+
+TEST_CASE("HostServer.stopBeforeRun", "[vtextension][host]")
+{
+    auto const engine = makeHostedEngine();
+    auto control = makeChannelPair();
+    REQUIRE(control.has_value());
+    auto server = HostServer { *engine, {}, std::move(control->helper), HostServerConfig {} };
+    server.stop();
+    CHECK(server.run() == ServerExit::Stopped);
+    CHECK(parentControl(std::move(control->parent), proto::PduLimits {}).receive()
+          == std::unexpected(StreamError::Closed));
 }
 
 TEST_CASE("HostServer.interruptStopsOneInstance", "[vtextension][host]")
@@ -585,6 +806,25 @@ TEST_CASE("HostServer.describingPastTheCapFailsTheLoad", "[vtextension][host]")
     // A module never described is never instantiated: the id is not the server's.
     std::ignore = parent.loadOk(1, 2, toModule(contract::InstanceModule));
     parent.instantiateOk(2, 1);
+}
+
+TEST_CASE("HostServer.callablesPastTheCapFailTheInstantiation", "[vtextension][host]")
+{
+    // Under a module cap of three bytes an Instantiated holds at most three, and naming one callable export
+    // takes four; the module itself (31 bytes) still fits the Load's slack, and its description the Loaded's.
+    auto const config =
+        HostServerConfig { .limits = proto::PduLimits { .maxModuleBytes = 3, .maxMemoryBytes = 1024 } };
+    auto parent = ScriptedParent { config };
+    parent.skipHello();
+    parent.createRuntime(1);
+    std::ignore = parent.loadOk(1, 1, toModule(OneExportModule));
+    CHECK(parent.instantiate(1, 1)
+          == proto::Instantiated {
+              .instanceId = 1, .error = ExtensionError::InvalidComponent, .callableExports = {} });
+
+    // The instance went with the refusal: a call of it is not the server's to serve.
+    parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = 0, .argv = {} });
+    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
 }
 
 TEST_CASE("InProcessHost.connectStartsAServingHost", "[vtextension][host]")

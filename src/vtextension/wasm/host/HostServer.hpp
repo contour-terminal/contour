@@ -11,16 +11,37 @@
 /// in, on that lane, before it answers. Ids are the parent's: one the parent never created, or creates twice,
 /// is a protocol violation, as is any PDU out of place. A violation ends the connection.
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
+#include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 
 namespace vtextension::wasm::host
 {
+
+/// The most guest calls one lane runs at once: its outermost call, and those the parent makes back in while
+/// host calls wait. A Call past it is a protocol violation.
+inline constexpr std::size_t MaxCallDepth = 8;
+
+/// The largest stack a runtime may give each instance's calls (RuntimeLimits::stackBytes); a CreateRuntime
+/// asking for more is refused (`RuntimeUnavailable`). Each guest call on a lane sets its own limit from where
+/// the lane's stack stands, so the lane's thread must hold MaxCallDepth of them.
+inline constexpr std::size_t MaxRuntimeStackBytes = std::size_t { 1024 } * 1024;
+
+/// What one guest call on a lane may take of its thread's stack besides the guest's own: the engine's entry,
+/// the host call's way out and the server's frames serving the lane meanwhile, sanitizers included.
+inline constexpr std::size_t HostFrameBytes = std::size_t { 256 } * 1024;
+
+/// The stack each lane's executor thread runs on: MaxCallDepth guest calls at their largest.
+inline constexpr std::size_t ExecutorStackBytes = MaxCallDepth * (MaxRuntimeStackBytes + HostFrameBytes);
+
+static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
+              "a host runs the stack the parent gives");
 
 /// How a host server runs.
 struct HostServerConfig
@@ -56,9 +77,9 @@ class HostServer
     HostServer& operator=(HostServer const&) = delete;
     HostServer& operator=(HostServer&&) = delete;
 
-    /// Sends Hello, starts one executor jthread per lane, serves control on the calling thread until EOF,
-    /// a violation or stop(); then stops, joins the executors, releases every instance, module, runtime.
-    /// Called once.
+    /// Sends Hello, starts one executor thread per lane (of ExecutorStackBytes), serves control on the
+    /// calling thread until EOF, a violation or stop(); then stops, joins the executors, releases every
+    /// instance, module, runtime. Called once.
     /// @return Why it stopped serving: the first of the reasons that came up, on any channel.
     [[nodiscard]] ServerExit run();
 

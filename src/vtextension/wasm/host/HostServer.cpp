@@ -13,7 +13,6 @@
 #include <optional>
 #include <span>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -22,6 +21,7 @@
 
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/host/ExecutorThread.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 
@@ -105,6 +105,13 @@ namespace
         std::size_t results = 0;    ///< How many i32s it returns.
     };
 
+    /// Whether a MemoryWrite failed since the call it belongs to was served.
+    enum class WriteState : uint8_t
+    {
+        Clean,
+        Failed, ///< Fails the instance's next Call, or the HostResult its parked call awaits.
+    };
+
     /// No lane uses an instance.
     constexpr auto NoLane = uint32_t { 0 };
 
@@ -117,20 +124,8 @@ namespace
         /// The tag of the lane using it (its index + 1), NoLane if none: a call or memory access holds it,
         /// and a lane's nested calls into it share it.
         std::atomic<uint32_t> lane { NoLane };
-    };
-
-    /// Whether a lane serves on.
-    enum class LaneState : uint8_t
-    {
-        Serving,
-        Ended,
-    };
-
-    /// Whether a MemoryWrite failed since the call it belongs to was served.
-    enum class WriteState : uint8_t
-    {
-        Clean,
-        Failed, ///< Fails the next Call, or the HostResult awaited, on the lane.
+        /// Whether a MemoryWrite into it failed; touched only by the lane holding it.
+        WriteState write = WriteState::Clean;
     };
 
     /// Whether a lane's hold on an instance is the one that releases it.
@@ -189,11 +184,12 @@ class HostServer::Impl
     /// One lane, served by an executor thread of its own; only that thread touches it, but for shutdown().
     struct Lane
     {
-        Impl* server;                         ///< The server it belongs to.
-        PduStream stream;                     ///< The helper's end.
-        uint32_t tag;                         ///< Its index + 1: what it holds instances with.
-        std::optional<ServerExit> ended;      ///< Why it stopped serving; nothing while it serves.
-        WriteState write = WriteState::Clean; ///< Whether a MemoryWrite failed.
+        Impl* server;                    ///< The server it belongs to.
+        PduStream stream;                ///< The helper's end.
+        uint32_t tag;                    ///< Its index + 1: what it holds instances with.
+        std::optional<ServerExit> ended; ///< Why it stopped serving; nothing while it serves.
+        /// The instances whose calls run on the lane, outermost first: one per guest call on its stack.
+        std::vector<InstanceSlot*> calls;
         /// The executor thread's preparation: entered at its first call, renewed for a later generation.
         std::unique_ptr<IThreadGuard> guard;
     };
@@ -212,6 +208,10 @@ class HostServer::Impl
     /// Ends the connection for @p reason, unless it ended already: interrupts every live instance, then shuts
     /// every channel down, so that every thread blocked on one returns. Repeating it is harmless.
     void finish(ServerExit reason) noexcept;
+
+    /// Releases every instance, module and runtime the parent did not, then the control thread's guard; on
+    /// the control thread, once every executor is joined.
+    void release() noexcept;
 
     /// Prepares the calling thread for the engine's current generation, unless it is.
     /// @param guard The thread's guard, replaced if it is for an earlier generation.
@@ -287,13 +287,17 @@ HostServer::Impl::Impl(IHostedEngine& engine,
                                                       config.limits },
                                 .tag = static_cast<uint32_t>(index) + 1,
                                 .ended = std::nullopt,
-                                .write = WriteState::Clean,
+                                .calls = {},
                                 .guard = nullptr });
 }
 
 ServerExit HostServer::Impl::run()
 {
-    auto executors = std::vector<std::jthread> {};
+    // Destroyed in reverse, on every way out, an exception's included: the connection ends (unblocking every
+    // executor), the executors are joined, then every engine object goes, here on the control thread.
+    auto releaseAll = core::Finally { [this] { release(); } };
+    auto executors = std::vector<ExecutorThread> {};
+    auto endConnection = core::Finally { [this] { finish(ServerExit::ProtocolViolation); } };
     auto const hello = send(_control,
                             proto::Hello { .version = proto::ProtocolVersion,
                                            .memoryMode = _engine.memoryMode(),
@@ -302,7 +306,7 @@ ServerExit HostServer::Impl::run()
     {
         executors.reserve(_lanes.size());
         for (auto& lane: _lanes)
-            executors.emplace_back([this, &lane] { runLane(lane); });
+            executors.emplace_back(ExecutorStackBytes, [this, &lane] { runLane(lane); });
         while (true)
         {
             auto request = _control.receive();
@@ -323,26 +327,30 @@ ServerExit HostServer::Impl::run()
         finish(hello.error());
 
     // Every channel is shut down by now, and every instance interrupted: each executor returns.
+    endConnection.run();
     executors.clear();
+    releaseAll.run();
+    auto const lock = std::scoped_lock { _mutex };
+    return _exit.value_or(ServerExit::Stopped);
+}
 
+void HostServer::Impl::release() noexcept
+{
     // What the parent never released goes here, still on a prepared thread; outside the lock, which an
     // interrupt() racing this takes.
     auto runtimes = decltype(_runtimes) {};
     auto modules = decltype(_modules) {};
     auto instances = decltype(_instances) {};
-    auto exit = ServerExit::Stopped;
     {
         auto const lock = std::scoped_lock { _mutex };
         runtimes = std::exchange(_runtimes, {});
         modules = std::exchange(_modules, {});
         instances = std::exchange(_instances, {});
-        exit = _exit.value_or(ServerExit::Stopped);
     }
     instances.clear();
     modules.clear();
     runtimes.clear();
     _controlGuard.reset();
-    return exit;
 }
 
 void HostServer::Impl::finish(ServerExit reason) noexcept
@@ -389,6 +397,11 @@ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
     // The engine is handed views of the server's own copy of the strings, which outlives the runtime.
     auto slot =
         std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
+    // A stack the executors cannot hold MaxCallDepth of is refused, before the engine sees it.
+    if (request.stackBytes > MaxRuntimeStackBytes)
+        return send(_control,
+                    proto::RuntimeCreated { .runtimeId = request.runtimeId,
+                                            .error = ExtensionError::RuntimeUnavailable });
     auto table = std::vector<HostFunction> {};
     table.reserve(slot->functions.size());
     for (auto const& function: slot->functions)
@@ -503,7 +516,9 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
     return sendOrRefuse(_control, answer, refusal).transform([&](proto::Pdu const* sent) {
         if (sent == &answer)
             return;
+        // Stopped for good, as a released one is, should a lane have reached it meanwhile.
         auto const lock = std::scoped_lock { _mutex };
+        slot->instance->interrupt();
         _instances.erase(request.instanceId);
     });
 }
@@ -566,19 +581,26 @@ Served HostServer::Impl::serve(Lane& lane, proto::Call const& request)
     if (callable == slot->exports.end() || request.argv.size() != callable->second.parameters)
         return std::unexpected(ServerExit::ProtocolViolation);
 
+    // Each guest call on the lane runs on its executor's stack, with a stack limit of its own: the depth
+    // bounds what they take together (ExecutorStackBytes).
+    if (lane.calls.size() >= MaxCallDepth)
+        return std::unexpected(ServerExit::ProtocolViolation);
+
     auto result = proto::CallResult {};
     {
         auto const hold = InstanceHold::take(*slot, lane.tag);
         if (!hold)
             return std::unexpected(ServerExit::ProtocolViolation);
-        if (std::exchange(lane.write, WriteState::Clean) == WriteState::Failed || !prepare(lane.guard))
+        if (std::exchange(slot->write, WriteState::Clean) == WriteState::Failed || !prepare(lane.guard))
             result.failure = CallFailure::Trap;
         else
         {
             auto argv = request.argv;
             argv.resize(std::max(callable->second.parameters, callable->second.results));
             auto const outer = std::exchange(CurrentLane, &lane);
+            lane.calls.push_back(slot.get());
             auto const called = slot->instance->call(callable->second.function, argv);
+            lane.calls.pop_back();
             CurrentLane = outer;
             if (called)
             {
@@ -628,7 +650,7 @@ Served HostServer::Impl::serve(Lane& lane, proto::MemoryWrite const& request)
             slot->instance->memory(request.address, static_cast<uint32_t>(request.bytes.size())))
         std::ranges::copy(request.bytes, view->begin());
     else
-        lane.write = WriteState::Failed;
+        slot->write = WriteState::Failed;
     return {};
 }
 
@@ -656,7 +678,8 @@ std::expected<void, ExtensionError> HostServer::Impl::awaitHost(Lane& lane,
         }
         if (auto const* result = std::get_if<proto::HostResult>(&*request))
         {
-            if (std::exchange(lane.write, WriteState::Clean) == WriteState::Failed)
+            // A write into the parked call's instance that failed fails that call.
+            if (std::exchange(lane.calls.back()->write, WriteState::Clean) == WriteState::Failed)
                 return std::unexpected(ExtensionError::Trapped);
             if (result->error)
                 return std::unexpected(*result->error);
