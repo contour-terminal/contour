@@ -38,146 +38,209 @@ namespace
     template <typename T>
     concept WireEnum = std::is_enum_v<T> && sizeof(T) == 1;
 
-    // The last enumerator of every enumeration the wire carries: a byte naming one past it is BadEnum. A new
-    // enumeration on the wire needs one here, or its read does not compile.
-    constexpr ValueType lastEnumerator(ValueType) noexcept
+    // Whether a byte names an enumerator, for every enumeration the wire carries; a byte that does not is
+    // BadEnum. A switch without a default, so that the pedantic build's -Wswitch stops it compiling when an
+    // enumerator is added and not named here; ExtensionError is checked against its description table, which
+    // its own static_assert keeps complete.
+    constexpr bool isEnumerator(ValueType value) noexcept
     {
-        return ValueType::F64;
+        switch (value)
+        {
+            case ValueType::Other:
+            case ValueType::I32:
+            case ValueType::I64:
+            case ValueType::F32:
+            case ValueType::F64: return true;
+        }
+        return false;
     }
-    constexpr ExternKind lastEnumerator(ExternKind) noexcept
+    constexpr bool isEnumerator(ExternKind value) noexcept
     {
-        return ExternKind::Global;
+        switch (value)
+        {
+            case ExternKind::Function:
+            case ExternKind::Memory:
+            case ExternKind::Table:
+            case ExternKind::Global: return true;
+        }
+        return false;
     }
-    constexpr Linkage lastEnumerator(Linkage) noexcept
+    constexpr bool isEnumerator(Linkage value) noexcept
     {
-        return Linkage::Satisfied;
+        switch (value)
+        {
+            case Linkage::Unsatisfied:
+            case Linkage::Satisfied: return true;
+        }
+        return false;
     }
-    constexpr CallFailure lastEnumerator(CallFailure) noexcept
+    constexpr bool isEnumerator(CallFailure value) noexcept
     {
-        return CallFailure::HostFailure;
+        switch (value)
+        {
+            case CallFailure::Trap:
+            case CallFailure::Interrupted:
+            case CallFailure::MemoryGrowthRefused:
+            case CallFailure::HostFailure: return true;
+        }
+        return false;
     }
-    constexpr ExtensionError lastEnumerator(ExtensionError) noexcept
+    constexpr bool isEnumerator(ExtensionError value) noexcept
     {
-        return ExtensionError::ModuleTooLarge;
+        return std::to_underlying(value) < ExtensionErrorTexts.size();
     }
-    constexpr MemoryMode lastEnumerator(MemoryMode) noexcept
+    constexpr bool isEnumerator(MemoryMode value) noexcept
     {
-        return MemoryMode::Shared;
+        switch (value)
+        {
+            case MemoryMode::Copy:
+            case MemoryMode::Shared: return true;
+        }
+        return false;
     }
-    constexpr LockdownState lastEnumerator(LockdownState) noexcept
+    constexpr bool isEnumerator(LockdownState value) noexcept
     {
-        return LockdownState::LockedDown;
+        switch (value)
+        {
+            case LockdownState::Failed:
+            case LockdownState::Unsandboxed:
+            case LockdownState::LockedDown: return true;
+        }
+        return false;
     }
-    constexpr ReleaseTarget lastEnumerator(ReleaseTarget) noexcept
+    constexpr bool isEnumerator(ReleaseTarget value) noexcept
     {
-        return ReleaseTarget::Runtime;
+        switch (value)
+        {
+            case ReleaseTarget::Instance:
+            case ReleaseTarget::Module:
+            case ReleaseTarget::Runtime: return true;
+        }
+        return false;
     }
-    constexpr MemoryStatus lastEnumerator(MemoryStatus) noexcept
+    constexpr bool isEnumerator(MemoryStatus value) noexcept
     {
-        return MemoryStatus::Ok;
+        switch (value)
+        {
+            case MemoryStatus::OutOfBounds:
+            case MemoryStatus::Ok: return true;
+        }
+        return false;
+    }
+
+    /// A vector field, with the most elements the wire lets it hold. Its count is checked before a single
+    /// element is read: the byte caps bound the body, not what its elements cost once decoded, and a
+    /// description costs a hundred times its smallest encoding.
+    /// @tparam Vector The field's type: a std::vector, const or not.
+    template <typename Vector>
+    struct Capped
+    {
+        Vector& values;       ///< The field.
+        std::size_t maxCount; ///< The most elements it may hold.
+    };
+
+    /// @return @p values, capped at @p maxCount elements.
+    template <typename Vector>
+    constexpr Capped<Vector> capped(Vector& values, std::size_t maxCount) noexcept
+    {
+        return Capped<Vector> { .values = values, .maxCount = maxCount };
+    }
+
+    /// @return The fields a members() lists: references to scalar fields, and Capped vector fields by value.
+    template <typename... Fields>
+    constexpr std::tuple<Fields...> fields(Fields&&... list) noexcept
+    {
+        return std::tuple<Fields...> { std::forward<Fields>(list)... };
     }
 
     // The fields of every struct the wire carries, in wire order. Each takes the struct const or not, so that
-    // the writers and the readers walk the one list.
+    // the writers and the readers walk the one list. A vector is listed Capped, and only so: no reader or
+    // writer takes a plain std::vector of elements, so an uncapped one does not compile.
     constexpr auto members(Of<FunctionSignature> auto& value) noexcept
     {
-        return std::tie(value.parameters, value.results);
+        return fields(capped(value.parameters, MaxSignatureValues),
+                      capped(value.results, MaxSignatureValues));
     }
     constexpr auto members(Of<ImportDescription> auto& value) noexcept
     {
-        return std::tie(value.module, value.name, value.kind, value.signature, value.linkage);
+        return fields(value.module, value.name, value.kind, value.signature, value.linkage);
     }
     constexpr auto members(Of<ExportDescription> auto& value) noexcept
     {
-        return std::tie(value.name, value.kind, value.signature, value.initialPages);
+        return fields(value.name, value.kind, value.signature, value.initialPages);
     }
     constexpr auto members(Of<WireHostFunction> auto& value) noexcept
     {
-        return std::tie(value.module, value.name, value.parameterCount);
+        return fields(value.module, value.name, value.parameterCount);
     }
     constexpr auto members(Of<Hello> auto& value) noexcept
     {
-        return std::tie(value.version, value.memoryMode, value.lockdown);
+        return fields(value.version, value.memoryMode, value.lockdown);
     }
     constexpr auto members(Of<CreateRuntime> auto& value) noexcept
     {
-        return std::tie(value.runtimeId, value.memoryBytes, value.stackBytes, value.functions);
+        return fields(
+            value.runtimeId, value.memoryBytes, value.stackBytes, capped(value.functions, MaxHostFunctions));
     }
     constexpr auto members(Of<RuntimeCreated> auto& value) noexcept
     {
-        return std::tie(value.runtimeId, value.error);
+        return fields(value.runtimeId, value.error);
     }
     constexpr auto members(Of<Load> auto& value) noexcept
     {
-        return std::tie(value.runtimeId, value.moduleId, value.bytes);
+        return fields(value.runtimeId, value.moduleId, value.bytes);
     }
     constexpr auto members(Of<Loaded> auto& value) noexcept
     {
-        return std::tie(value.moduleId, value.error, value.imports, value.exports);
+        return fields(value.moduleId,
+                      value.error,
+                      capped(value.imports, MaxImports),
+                      capped(value.exports, MaxExports));
     }
     constexpr auto members(Of<Instantiate> auto& value) noexcept
     {
-        return std::tie(value.moduleId, value.instanceId);
+        return fields(value.moduleId, value.instanceId);
     }
     constexpr auto members(Of<Instantiated> auto& value) noexcept
     {
-        return std::tie(value.instanceId, value.error, value.callableExports);
+        return fields(value.instanceId, value.error, capped(value.callableExports, MaxExports));
     }
     constexpr auto members(Of<Release> auto& value) noexcept
     {
-        return std::tie(value.target, value.id);
+        return fields(value.target, value.id);
     }
     constexpr auto members(Of<Call> auto& value) noexcept
     {
-        return std::tie(value.instanceId, value.exportOrdinal, value.argv);
+        return fields(value.instanceId, value.exportOrdinal, capped(value.argv, MaxCallValues));
     }
     constexpr auto members(Of<CallHost> auto& value) noexcept
     {
-        return std::tie(value.functionIndex, value.arguments);
+        return fields(value.functionIndex, capped(value.arguments, MaxHostParameters));
     }
     constexpr auto members(Of<HostResult> auto& value) noexcept
     {
-        return std::tie(value.error);
+        return fields(value.error);
     }
     constexpr auto members(Of<CallResult> auto& value) noexcept
     {
-        return std::tie(value.failure, value.argv);
+        return fields(value.failure, capped(value.argv, MaxCallValues));
     }
     constexpr auto members(Of<MemoryRead> auto& value) noexcept
     {
-        return std::tie(value.instanceId, value.address, value.size);
+        return fields(value.instanceId, value.address, value.size);
     }
     constexpr auto members(Of<MemoryData> auto& value) noexcept
     {
-        return std::tie(value.status, value.bytes);
+        return fields(value.status, value.bytes);
     }
     constexpr auto members(Of<MemoryWrite> auto& value) noexcept
     {
-        return std::tie(value.instanceId, value.address, value.bytes);
+        return fields(value.instanceId, value.address, value.bytes);
     }
 
     /// A struct whose fields members() lists.
     template <typename T>
     concept Described = requires(T& value) { members(value); };
-
-    // The element counts a body's byte cap does not bound tightly enough: a one-byte varint per value lets a
-    // Call's cap hold five times MaxCallValues values.
-    [[nodiscard]] constexpr bool withinCounts(auto const&) noexcept
-    {
-        return true;
-    }
-    [[nodiscard]] constexpr bool withinCounts(Call const& value) noexcept
-    {
-        return value.argv.size() <= MaxCallValues;
-    }
-    [[nodiscard]] constexpr bool withinCounts(CallResult const& value) noexcept
-    {
-        return value.argv.size() <= MaxCallValues;
-    }
-    [[nodiscard]] constexpr bool withinCounts(CallHost const& value) noexcept
-    {
-        return value.arguments.size() <= MaxHostParameters;
-    }
 
     // Writers, declared before any is defined, so that each finds the others whatever it nests.
     void write(Writer& writer, uint32_t value);
@@ -189,7 +252,7 @@ namespace
     void write(Writer& writer, std::string const& value);
     void write(Writer& writer, std::vector<std::byte> const& value);
     template <typename T>
-    void write(Writer& writer, std::vector<T> const& values);
+    void write(Writer& writer, Capped<std::vector<T> const> const& field);
     template <Described T>
     void write(Writer& writer, T const& value);
 
@@ -229,17 +292,17 @@ namespace
     }
 
     template <typename T>
-    void write(Writer& writer, std::vector<T> const& values)
+    void write(Writer& writer, Capped<std::vector<T> const> const& field)
     {
-        writer.varint(values.size());
-        for (auto const& value: values)
+        writer.varint(field.values.size());
+        for (auto const& value: field.values)
             write(writer, value);
     }
 
     template <Described T>
     void write(Writer& writer, T const& value)
     {
-        std::apply([&writer](auto const&... fields) { (write(writer, fields), ...); }, members(value));
+        std::apply([&writer](auto const&... list) { (write(writer, list), ...); }, members(value));
     }
 
     // Readers, likewise declared first.
@@ -252,7 +315,7 @@ namespace
     Status read(Reader& reader, std::string& value);
     Status read(Reader& reader, std::vector<std::byte>& value);
     template <typename T>
-    Status read(Reader& reader, std::vector<T>& values);
+    Status read(Reader& reader, Capped<std::vector<T>> const& field);
     template <Described T>
     Status read(Reader& reader, T& value);
 
@@ -270,9 +333,10 @@ namespace
     Status read(Reader& reader, E& value)
     {
         return reader.u8().and_then([&value](uint8_t byte) -> Status {
-            if (byte > std::to_underlying(lastEnumerator(E {})))
+            auto const candidate = static_cast<E>(byte);
+            if (!isEnumerator(candidate))
                 return std::unexpected(DecodeError::BadEnum);
-            value = static_cast<E>(byte);
+            value = candidate;
             return {};
         });
     }
@@ -286,9 +350,10 @@ namespace
                 value.reset();
                 return {};
             }
-            if (byte - 1 > std::to_underlying(lastEnumerator(E {})))
+            auto const candidate = static_cast<E>(byte - 1);
+            if (!isEnumerator(candidate))
                 return std::unexpected(DecodeError::BadEnum);
-            value = static_cast<E>(byte - 1);
+            value = candidate;
             return {};
         });
     }
@@ -312,14 +377,16 @@ namespace
     }
 
     template <typename T>
-    Status read(Reader& reader, std::vector<T>& values)
+    Status read(Reader& reader, Capped<std::vector<T>> const& field)
     {
         auto const count = reader.varint64();
         if (!count)
             return std::unexpected(count.error());
+        if (*count > field.maxCount)
+            return std::unexpected(DecodeError::OverCap);
+        auto& values = field.values;
         values.clear();
         values.reserve(boundedReserveCount<T>(*count, reader.remaining()));
-        // Every element takes at least one byte, so a lying count runs the reader short, not this loop long.
         for ([[maybe_unused]] auto const index: std::views::iota(uint64_t { 0 }, *count))
         {
             auto& element = values.emplace_back();
@@ -333,7 +400,7 @@ namespace
     Status read(Reader& reader, T& value)
     {
         auto status = Status {};
-        std::apply([&](auto&... fields) { static_cast<void>(((status = read(reader, fields)) && ...)); },
+        std::apply([&](auto&&... list) { static_cast<void>(((status = read(reader, list)) && ...)); },
                    members(value));
         return status;
     }
@@ -357,8 +424,6 @@ std::expected<Pdu, DecodeError> decodeBody(std::span<uint8_t const> body)
     return read(reader, value).and_then([&]() -> std::expected<Pdu, DecodeError> {
         if (!reader.atEnd())
             return std::unexpected(DecodeError::TrailingBytes);
-        if (!withinCounts(value))
-            return std::unexpected(DecodeError::OverCap);
         return Pdu { std::move(value) };
     });
 }

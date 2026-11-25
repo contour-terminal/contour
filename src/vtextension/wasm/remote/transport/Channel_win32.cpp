@@ -3,7 +3,12 @@
 // The channel on Windows: the two ends of a byte-mode named pipe, opened for overlapped I/O and waited on, so
 // that shutdown() can cancel a read or write blocked on another thread. The pipe's name is random, the first
 // instance is demanded (so that a pipe someone else created first fails the pair rather than joins it),
-// remote clients are refused, and neither handle is inheritable.
+// remote clients are refused, only the current user may open it, and neither handle is inheritable.
+//
+// A pipe has no half-close: its peer's stream ends only when this end's handle is closed. So shutdown()
+// cancels what is in flight and closes the handle as soon as the last transfer on it has returned. Every
+// transfer is counted while it may touch the handle, and whichever of shutdown() and the last transfer finds
+// the end shut down with nothing in flight closes it, exactly once.
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -15,6 +20,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 
@@ -33,11 +39,12 @@ namespace
     /// The most bytes one ReadFile or WriteFile moves.
     constexpr auto MaxTransferBytes = std::size_t { 1024 } * 1024 * 1024;
 
-    /// Whether an end was shut down.
+    /// Where an end is in its life.
     enum class EndState : uint8_t
     {
-        Open,
-        ShutDown,
+        Open,     ///< Transfers run.
+        ShutDown, ///< Transfers fail `Closed`; the handle is closed once none is in flight.
+        Closed,   ///< The handle is closed.
     };
 
     /// An event an overlapped operation signals, closed with it.
@@ -80,7 +87,8 @@ namespace
     {
         static auto serial = std::atomic<uint64_t> { 0 };
         auto source = std::random_device {};
-        auto const random = (static_cast<uint64_t>(source()) << 32) | source();
+        auto const high = static_cast<uint64_t>(source());
+        auto const random = (high << 32) | source();
         return std::format(L"\\\\.\\pipe\\contour-extension-host-{}-{}-{:016x}",
                            ::GetCurrentProcessId(),
                            serial.fetch_add(1),
@@ -93,20 +101,102 @@ namespace
         void operator()(HANDLE handle) const noexcept { ::CloseHandle(handle); }
     };
     using OwnedHandle = std::unique_ptr<void, HandleCloser>;
+
+    /// @return @p handle owned; nothing if it is INVALID_HANDLE_VALUE, as a failed create returns.
+    [[nodiscard]] OwnedHandle own(HANDLE handle) noexcept
+    {
+        return OwnedHandle { handle == INVALID_HANDLE_VALUE ? nullptr : handle };
+    }
+
+    /// Security attributes that let only the current user open the pipe, and no child inherit it. Not
+    /// movable: the attributes point into the descriptor, and the descriptor into the ACL.
+    class OwnerOnlySecurity
+    {
+        struct Key
+        {
+        };
+
+      public:
+        /// Builds a DACL with one entry, granting the process's user full access.
+        /// @return The attributes; `Io` if the token could not be read or the ACL not made.
+        [[nodiscard]] static std::expected<std::unique_ptr<OwnerOnlySecurity>, ChannelError> create()
+        {
+            auto security = std::make_unique<OwnerOnlySecurity>(Key {});
+            auto token = HANDLE { nullptr };
+            if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
+                return std::unexpected(ChannelError::Io);
+            auto const tokenOwner = OwnedHandle { token };
+            auto size = DWORD { 0 };
+            ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+            if (size == 0)
+                return std::unexpected(ChannelError::Io);
+            // uint64_t storage, so that the TOKEN_USER and the ACL are aligned as their headers need.
+            auto tokenUser = std::vector<uint64_t>((size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
+            if (!::GetTokenInformation(token, TokenUser, tokenUser.data(), size, &size))
+                return std::unexpected(ChannelError::Io);
+            auto* const user = reinterpret_cast<TOKEN_USER const*>(tokenUser.data())->User.Sid;
+
+            auto const aclBytes = sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) + ::GetLengthSid(user);
+            security->_acl.resize((aclBytes + sizeof(uint64_t) - 1) / sizeof(uint64_t));
+            auto* const acl = reinterpret_cast<ACL*>(security->_acl.data());
+            // The ACE copies the SID, so the token's buffer may go once it is added.
+            if (!::InitializeAcl(
+                    acl, static_cast<DWORD>(security->_acl.size() * sizeof(uint64_t)), ACL_REVISION)
+                || !::AddAccessAllowedAce(acl, ACL_REVISION, GENERIC_ALL, user)
+                || !::InitializeSecurityDescriptor(&security->_descriptor, SECURITY_DESCRIPTOR_REVISION)
+                || !::SetSecurityDescriptorDacl(&security->_descriptor, TRUE, acl, FALSE))
+                return std::unexpected(ChannelError::Io);
+            security->_attributes = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
+                                                          .lpSecurityDescriptor = &security->_descriptor,
+                                                          .bInheritHandle = FALSE };
+            return security;
+        }
+
+        /// Constructs empty attributes; only create() can, and it fills them before handing them out.
+        explicit OwnerOnlySecurity(Key /*key*/) noexcept {}
+        OwnerOnlySecurity(OwnerOnlySecurity const&) = delete;
+        OwnerOnlySecurity& operator=(OwnerOnlySecurity const&) = delete;
+        OwnerOnlySecurity(OwnerOnlySecurity&&) = delete;
+        OwnerOnlySecurity& operator=(OwnerOnlySecurity&&) = delete;
+        ~OwnerOnlySecurity() = default;
+
+        /// @return The attributes to create both ends with.
+        [[nodiscard]] SECURITY_ATTRIBUTES* attributes() noexcept { return &_attributes; }
+
+      private:
+        std::vector<uint64_t> _acl;
+        SECURITY_DESCRIPTOR _descriptor {};
+        SECURITY_ATTRIBUTES _attributes {};
+    };
 } // namespace
 
-/// One end of the pipe, closed when it is destroyed.
+/// One end of the pipe: closed by shutdown() once it drained, or else when it is destroyed.
 struct Channel::Native
 {
     HANDLE pipe;
     std::atomic<EndState> state { EndState::Open };
+    std::atomic<uint32_t> inFlight { 0 }; ///< Transfers that may touch the handle.
 
     explicit Native(HANDLE pipe) noexcept: pipe { pipe } {}
-    ~Native() { ::CloseHandle(pipe); }
+    ~Native()
+    {
+        if (state.load() != EndState::Closed)
+            ::CloseHandle(pipe);
+    }
     Native(Native const&) = delete;
     Native& operator=(Native const&) = delete;
     Native(Native&&) = delete;
     Native& operator=(Native&&) = delete;
+
+    /// Closes the handle if the end is shut down and nothing is in flight; whoever gets here first does.
+    void closeIfDrained() noexcept
+    {
+        if (inFlight.load() != 0)
+            return;
+        auto expected = EndState::ShutDown;
+        if (state.compare_exchange_strong(expected, EndState::Closed))
+            ::CloseHandle(pipe);
+    }
 
     /// Runs one overlapped transfer to completion, or until the end is shut down.
     /// @param start Starts it: ReadFile or WriteFile on the pipe with the given OVERLAPPED.
@@ -114,7 +204,21 @@ struct Channel::Native
     template <typename Start>
     [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(Start start)
     {
-        if (state.load() == EndState::ShutDown)
+        // Counted before the state is read, and shutdown() stores the state before it reads the count: either
+        // this sees the end shut down, or shutdown() sees this in flight and leaves the handle to it.
+        inFlight.fetch_add(1);
+        auto const result = transferCounted(start);
+        inFlight.fetch_sub(1);
+        if (state.load() != EndState::Open)
+            closeIfDrained();
+        return result;
+    }
+
+  private:
+    template <typename Start>
+    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(Start start)
+    {
+        if (state.load() != EndState::Open)
             return std::unexpected(ChannelError::Closed);
         auto const event = OverlappedEvent {};
         if (!event.handle())
@@ -129,12 +233,12 @@ struct Channel::Native
         }
         // shutdown() sets the state before it cancels: a transfer started before the cancel is cancelled by
         // it, and one started after sees the state here and cancels itself.
-        if (state.load() == EndState::ShutDown)
+        if (state.load() != EndState::Open)
             ::CancelIoEx(pipe, &overlapped);
         auto moved = DWORD { 0 };
         if (!::GetOverlappedResult(pipe, &overlapped, &moved, TRUE))
             return std::unexpected(channelErrorOf(::GetLastError()));
-        if (state.load() == EndState::ShutDown)
+        if (state.load() != EndState::Open)
             return std::unexpected(ChannelError::Closed);
         return static_cast<std::size_t>(moved);
     }
@@ -180,44 +284,45 @@ void Channel::shutdown() noexcept
 {
     if (!_native)
         return;
-    _native->state.store(EndState::ShutDown);
+    auto expected = EndState::Open;
+    if (!_native->state.compare_exchange_strong(expected, EndState::ShutDown))
+        return;
     ::CancelIoEx(_native->pipe, nullptr);
+    _native->closeIfDrained();
 }
 
 NativeHandle Channel::nativeHandle() const noexcept
 {
-    return _native ? _native->pipe : INVALID_HANDLE_VALUE;
+    return _native && _native->state.load() != EndState::Closed ? _native->pipe : INVALID_HANDLE_VALUE;
 }
 
 std::expected<ChannelPair, ChannelError> makeChannelPair()
 {
+    auto const security = OwnerOnlySecurity::create();
+    if (!security)
+        return std::unexpected(security.error());
+
     auto const name = uniquePipeName();
-    auto server = OwnedHandle { ::CreateNamedPipeW(
-        name.c_str(),
-        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-        1,
-        PipeBufferBytes,
-        PipeBufferBytes,
-        0,
-        nullptr) };
-    if (server.get() == INVALID_HANDLE_VALUE)
-    {
-        static_cast<void>(server.release());
+    auto server =
+        own(::CreateNamedPipeW(name.c_str(),
+                               PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                               PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                               1,
+                               PipeBufferBytes,
+                               PipeBufferBytes,
+                               0,
+                               (*security)->attributes()));
+    if (!server)
         return std::unexpected(ChannelError::Io);
-    }
-    auto client = OwnedHandle { ::CreateFileW(name.c_str(),
-                                              GENERIC_READ | GENERIC_WRITE,
-                                              0,
-                                              nullptr,
-                                              OPEN_EXISTING,
-                                              FILE_FLAG_OVERLAPPED,
-                                              nullptr) };
-    if (client.get() == INVALID_HANDLE_VALUE)
-    {
-        static_cast<void>(client.release());
+    auto client = own(::CreateFileW(name.c_str(),
+                                    GENERIC_READ | GENERIC_WRITE,
+                                    0,
+                                    (*security)->attributes(),
+                                    OPEN_EXISTING,
+                                    FILE_FLAG_OVERLAPPED,
+                                    nullptr));
+    if (!client)
         return std::unexpected(ChannelError::Io);
-    }
     // The client connected when it opened the pipe; the server's connect only confirms it.
     auto const event = OverlappedEvent {};
     if (!event.handle())

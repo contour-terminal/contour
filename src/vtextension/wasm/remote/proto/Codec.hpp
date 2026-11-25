@@ -31,8 +31,8 @@ namespace vtextension::wasm::remote::proto
 [[nodiscard]] PduKind kindOf(Pdu const& pdu) noexcept;
 
 /// Encodes @p pdu as one frame.
-/// @param pdu The PDU to encode. Its element counts are the caller's to keep within MaxCallValues and
-///            MaxHostParameters; a reader refuses a frame that exceeds them.
+/// @param pdu The PDU to encode. Its element counts are the caller's to keep within the caps Pdu.hpp names
+///            (MaxCallValues, MaxImports, ...); a reader refuses a frame that exceeds them.
 /// @return The frame's bytes.
 [[nodiscard]] std::vector<uint8_t> encodeFrame(Pdu const& pdu);
 

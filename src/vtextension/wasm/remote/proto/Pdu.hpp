@@ -32,6 +32,22 @@ inline constexpr std::size_t MaxCallValues = 64;
 /// The most arguments a CallHost carries: the most parameters a host function takes, on every engine.
 inline constexpr std::size_t MaxHostParameters = wasm::MaxHostParameters;
 
+// The most elements each list a PDU carries may hold, checked against its count before any element is read:
+// what a list costs once decoded is far more than its encoding, which is all the byte caps bound. The module
+// limits are those Wasmtime's parser applies, so that no module it loads is described past them.
+
+/// The most imports a Loaded describes.
+inline constexpr std::size_t MaxImports = 100'000;
+
+/// The most exports a Loaded describes, and the most callable exports an Instantiated names.
+inline constexpr std::size_t MaxExports = 100'000;
+
+/// The most parameters, and separately the most results, a described function signature has.
+inline constexpr std::size_t MaxSignatureValues = 1'000;
+
+/// The most host functions a CreateRuntime provides.
+inline constexpr std::size_t MaxHostFunctions = 1'024;
+
 /// How the helper shares an instance's linear memory with the parent.
 enum class MemoryMode : uint8_t
 {
@@ -131,10 +147,11 @@ struct Hello
 /// Creates a runtime in the helper.
 struct CreateRuntime
 {
-    uint32_t runtimeId = 0;                  ///< The parent-chosen id the runtime is known by.
-    uint64_t memoryBytes = 0;                ///< RuntimeLimits::memoryBytes.
-    uint64_t stackBytes = 0;                 ///< RuntimeLimits::stackBytes.
-    std::vector<WireHostFunction> functions; ///< The host functions it provides, indexed by CallHost.
+    uint32_t runtimeId = 0;   ///< The parent-chosen id the runtime is known by.
+    uint64_t memoryBytes = 0; ///< RuntimeLimits::memoryBytes.
+    uint64_t stackBytes = 0;  ///< RuntimeLimits::stackBytes.
+    std::vector<WireHostFunction>
+        functions; ///< Its host functions, indexed by CallHost; at most MaxHostFunctions.
 
     bool operator==(CreateRuntime const&) const = default;
 };
@@ -163,8 +180,8 @@ struct Loaded
 {
     uint32_t moduleId = 0;                  ///< The module it answers for.
     std::optional<ExtensionError> error;    ///< Why it was not loaded; nothing if it was.
-    std::vector<ImportDescription> imports; ///< What the module imports, in declaration order.
-    std::vector<ExportDescription> exports; ///< What the module exports, in declaration order.
+    std::vector<ImportDescription> imports; ///< What the module imports, in order; at most MaxImports.
+    std::vector<ExportDescription> exports; ///< What the module exports, in order; at most MaxExports.
 
     bool operator==(Loaded const&) const = default;
 };
@@ -183,7 +200,7 @@ struct Instantiated
 {
     uint32_t instanceId = 0;               ///< The instance it answers for.
     std::optional<ExtensionError> error;   ///< Why it was not instantiated; nothing if it was.
-    std::vector<uint32_t> callableExports; ///< The ordinals of the exports a Call may name.
+    std::vector<uint32_t> callableExports; ///< The export ordinals a Call may name; at most MaxExports.
 
     bool operator==(Instantiated const&) const = default;
 };

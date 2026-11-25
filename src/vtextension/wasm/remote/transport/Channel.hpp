@@ -5,7 +5,7 @@
 /// A reliable, ordered byte channel between Contour and its extension host process: one end of a connected
 /// pair. A Unix-domain stream socket on POSIX, an overlapped named pipe on Windows.
 ///
-/// Its I/O blocks. shutdown() is what makes a blocked receive return, from any thread.
+/// Its I/O blocks. shutdown() is what makes a blocked receive return, from any thread, on both ends.
 
 #include <cstddef>
 #include <cstdint>
@@ -59,12 +59,18 @@ class Channel
     ///         was shut down.
     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSome(std::span<uint8_t> buffer);
 
-    /// Shuts this end down: a receive or send blocked on it now, from any thread, returns `Closed`, as does
-    /// every later one. The end stays open until the channel is destroyed. Idempotent and thread-safe.
+    /// Ends the stream, both ways and for both ends: a receive or send blocked on this end now, from any
+    /// thread, returns `Closed`, as does every later one; and the peer's stream ends as if this end were
+    /// closed, so that its receives return `Closed` once they drained what was sent before, and its sends
+    /// return `Closed`. Idempotent and thread-safe.
+    ///
+    /// On POSIX the descriptor stays open until the channel is destroyed. On Windows, where nothing short of
+    /// closing a pipe's handle ends the peer's stream, the handle is closed as soon as no transfer on this
+    /// end is in flight, and nativeHandle() no longer names it.
     void shutdown() noexcept;
 
     /// @return The end's descriptor or handle, still owned by the channel: for handing it to a child
-    ///         process, and for inspecting it.
+    ///         process, and for inspecting it. On Windows, INVALID_HANDLE_VALUE once shutdown() closed it.
     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
 
   private:

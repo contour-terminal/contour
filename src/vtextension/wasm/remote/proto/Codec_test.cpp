@@ -14,6 +14,7 @@
 #include <random>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -295,6 +296,60 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
         auto const host = encodeFrame(
             CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters + 1) });
         CHECK(errorOf(host, hostRow) == DecodeError::OverCap);
+    }
+}
+
+TEST_CASE("PduCodec.lyingCountsAreRefusedBeforeReading", "[vtextension]")
+{
+    // Each list's count is checked against its cap before an element is read: a count one past the cap is
+    // OverCap from a body of a few bytes, where at the cap the same body runs short (Truncated).
+    struct Case
+    {
+        std::string_view description;
+        PduKind kind;
+        std::vector<uint64_t> prefix; ///< The varints before the count: ids, statuses, enums.
+        std::size_t cap;              ///< The count's cap.
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "imports", .kind = PduKind::Loaded, .prefix = { 1, 0 }, .cap = MaxImports },
+        { .description = "exports", .kind = PduKind::Loaded, .prefix = { 1, 0, 0 }, .cap = MaxExports },
+        // One import, of module "", name "", kind Function, then its parameters' count.
+        { .description = "signature parameters",
+          .kind = PduKind::Loaded,
+          .prefix = { 1, 0, 1, 0, 0, 0 },
+          .cap = MaxSignatureValues },
+        { .description = "signature results",
+          .kind = PduKind::Loaded,
+          .prefix = { 1, 0, 1, 0, 0, 0, 0 },
+          .cap = MaxSignatureValues },
+        { .description = "callable exports",
+          .kind = PduKind::Instantiated,
+          .prefix = { 1, 0 },
+          .cap = MaxExports },
+        { .description = "host functions",
+          .kind = PduKind::CreateRuntime,
+          .prefix = { 1, 2, 3 },
+          .cap = MaxHostFunctions },
+        { .description = "call values", .kind = PduKind::Call, .prefix = { 1, 2 }, .cap = MaxCallValues },
+        { .description = "host call arguments",
+          .kind = PduKind::CallHost,
+          .prefix = { 1 },
+          .cap = MaxHostParameters },
+        { .description = "call results", .kind = PduKind::CallResult, .prefix = { 0 }, .cap = MaxCallValues },
+    };
+    for (auto const& [description, kind, prefix, cap]: cases)
+    {
+        INFO(description);
+        auto const& row = PduTable.at(std::to_underlying(kind) - 1);
+        auto const bodyWith = [&prefix](uint64_t count) {
+            auto writer = Writer {};
+            for (auto const value: prefix)
+                writer.varint(value);
+            writer.varint(count);
+            return writer.take();
+        };
+        CHECK(errorOf(frameOf(std::to_underlying(kind), bodyWith(cap + 1)), row) == DecodeError::OverCap);
+        CHECK(errorOf(frameOf(std::to_underlying(kind), bodyWith(cap)), row) == DecodeError::Truncated);
     }
 }
 
