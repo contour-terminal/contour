@@ -1623,7 +1623,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param change The block whose record changed, and the newest block that ran a command.
     void commandBlockChanged(vtbackend::CommandBlockChange const& change) override;
     void setTerminalProfile(std::string const& configProfileName) override;
-    void discardImage(vtbackend::Image const&) override;
     void inputModeChanged(vtbackend::ViMode mode) override;
     /// Asks the session's host to place or take off the user mark the user toggled on this mirror's row
     /// (SetUserMark, ClearUserMark), on the GUI thread: the request is raised under the terminal lock, and

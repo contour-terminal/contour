@@ -34,7 +34,7 @@ void ImageRenderer::setRenderTarget(RenderTarget& renderTarget,
 void ImageRenderer::detachRenderTarget() noexcept
 {
     // The textures belong to the render target and die with it, so every id naming one is worthless
-    // from here on. Forgetting them is what keeps a later discard from routing at a scheduler that is
+    // from here on. Forgetting them is what keeps a later release from routing at a scheduler that is
     // gone, and stops the budget being charged for textures that no longer exist.
     _imageTextures.clear();
     _residentBytes = 0;
@@ -152,7 +152,7 @@ void ImageRenderer::releaseOrphanedTextures()
         return;
 
     // An image that shares a key with a dead one -- a status-line copy of a pool image -- simply uploads
-    // again on its next sight, exactly as it would after a discard of the original.
+    // again on its next sight, as any evicted image does.
     std::erase_if(_imageTextures, [this](auto const& kv) {
         auto const& entry = kv.second;
         if (!entry.image.expired())
@@ -186,9 +186,7 @@ void ImageRenderer::evictToBudget()
     {
         if (_residentBytes <= _textureBudgetBytes)
             break;
-        // Exactly what a pool removal does: release the texture and forget the mapping, so the next
-        // sight of this image uploads it again.
-        discardImage(candidate.key);
+        releaseTexture(candidate.key);
     }
 }
 
@@ -326,7 +324,7 @@ void ImageRenderer::endPass()
     flushQuads(_pendingQuadsAboveText);
 }
 
-void ImageRenderer::discardImage(vtbackend::ImageKey imageKey)
+void ImageRenderer::releaseTexture(vtbackend::ImageKey imageKey)
 {
     auto const known = _imageTextures.find(imageKey);
     if (known == _imageTextures.end())

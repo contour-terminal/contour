@@ -945,7 +945,6 @@ class Terminal: public IStatusLinePublishTarget
         /// @param background The new default background.
         virtual void defaultBackgroundColorChanged(DefaultBackground const& /*background*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
-        virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
 
         /// The active search was cleared, by whatever route -- the NoSearchHighlight action, entering
@@ -1028,7 +1027,6 @@ class Terminal: public IStatusLinePublishTarget
         void resetWindowFrameColor() override {}
         void defaultBackgroundColorChanged(DefaultBackground const& /*background*/) override {}
         void setTerminalProfile(std::string const& /*configProfileName*/) override {}
-        void discardImage(Image const&) override {}
         void inputModeChanged(ViMode /*mode*/) override {}
         void updateHighlights() override {}
         void playSound(Sequence::Parameters const&) override {}
@@ -3964,7 +3962,6 @@ class Terminal: public IStatusLinePublishTarget
     }
 
     void forceRedraw(std::function<void()> const& artificialSleep);
-    void discardImage(Image const&);
     void markCellDirty(CellLocation position) noexcept;
     void markRegionDirty(Rect area) noexcept;
     void synchronizedOutput(bool enabled);

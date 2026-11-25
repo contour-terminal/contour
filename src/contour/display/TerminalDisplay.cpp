@@ -2361,11 +2361,6 @@ void TerminalDisplay::bufferChanged(vtbackend::ScreenType type)
     // scheduleRedraw();
 }
 
-void TerminalDisplay::discardImage(vtbackend::Image const& image)
-{
-    _renderer->discardImage(image);
-}
-
 // }}}
 
 QVariantMap TerminalDisplay::rowBand(int first, int last) const

@@ -3492,18 +3492,6 @@ void TerminalSession::setTerminalProfile(string const& configProfileName)
     });
 }
 
-void TerminalSession::discardImage(vtbackend::Image const& image)
-{
-    // A detached session -- a background tab, or one closing while another is on screen -- has no display
-    // to tell, and needs none: the renderer that uploaded the image watches it and releases the texture on
-    // its next frame once the image is gone (ImageRenderer::releaseOrphanedTextures). This call is only the
-    // prompt path for the display that is drawing the session right now.
-    if (!_display)
-        return;
-
-    _display->discardImage(image);
-}
-
 void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
 {
     using vtbackend::ViMode;

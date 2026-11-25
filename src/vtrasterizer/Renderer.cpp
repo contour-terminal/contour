@@ -346,24 +346,6 @@ void Renderer::growAtlasForPage(vtbackend::PageSize pageSize)
     clearCache();
 }
 
-void Renderer::discardImage(vtbackend::Image const& image)
-{
-    // Defer rendering into the renderer thread & render stage, as this call might have
-    // been coming out of bounds from another thread (e.g. the terminal's screen update thread)
-    auto l = scoped_lock { _imageDiscardLock };
-    _discardImageQueue.emplace_back(image.key());
-}
-
-void Renderer::executeImageDiscards()
-{
-    auto l = scoped_lock { _imageDiscardLock };
-
-    for (auto const imageKey: _discardImageQueue)
-        _imageRenderer.discardImage(imageKey);
-
-    _discardImageQueue.clear();
-}
-
 void Renderer::clearCache()
 {
     // Only the render target's own cache needs a target; every renderable's cache is CPU-side. Skipping
@@ -759,8 +741,6 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         return terminal.colorPalette().defaultBackground;
     });
     _backgroundRenderer.setDefaultColor(_pageBackground);
-
-    executeImageDiscards();
 
 #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE) // {{{
     // Windows 10 (ConPTY) workaround. ConPTY can't handle non-blocking I/O,

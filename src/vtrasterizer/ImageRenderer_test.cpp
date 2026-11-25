@@ -610,7 +610,7 @@ TEST_CASE("ImageRenderer.does not evict what an earlier pass of the same frame d
 TEST_CASE("ImageRenderer.forgets its textures when the render target detaches", "[image][renderer]")
 {
     // The textures belong to the render target and die with it, so holding entries that name them
-    // would charge the budget for textures that no longer exist and route later discards at a
+    // would charge the budget for textures that no longer exist and route later releases at a
     // scheduler that is gone.
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -622,9 +622,6 @@ TEST_CASE("ImageRenderer.forgets its textures when the render target detaches", 
     REQUIRE(renderTarget.getMockImageBackend().createCommands.size() == 1);
 
     imageRenderer.detachRenderTarget();
-
-    // A discard draining after the detach must not reach the departed scheduler.
-    imageRenderer.discardImage(image->image().key());
 
     // Re-attached, the image is uploaded to the new target rather than assumed resident on it.
     auto secondTarget = MockRenderTarget {};
@@ -660,33 +657,11 @@ TEST_CASE("ImageRenderer.clearCache releases the textures", "[image][renderer]")
     CHECK(backend.createCommands.size() == 2);
 }
 
-TEST_CASE("ImageRenderer.discardImage releases the texture", "[image][renderer]")
-{
-    auto renderTarget = MockRenderTarget {};
-    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
-    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
-    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
-
-    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(2) });
-    renderRow(imageRenderer, image, 2);
-
-    auto& backend = renderTarget.getMockImageBackend();
-    REQUIRE(backend.createCommands.size() == 1);
-
-    imageRenderer.discardImage(image->image().key());
-    REQUIRE(backend.destroyCommands.size() == 1);
-    CHECK(backend.destroyCommands.front().id == backend.createCommands.front().id);
-
-    // Discarding twice must not double-destroy.
-    imageRenderer.discardImage(image->image().key());
-    CHECK(backend.destroyCommands.size() == 1);
-}
-
 TEST_CASE("ImageRenderer.keeps images of different pools apart under a shared id", "[image][renderer]")
 {
     // One renderer serves every tab its display switches to, and each tab's terminal numbers its images
     // from 1. Keyed on the id alone, the second tab's image 1 was drawn with the first tab's texture,
-    // stretched to its own size -- and a discard from either tab released the other's texture.
+    // stretched to its own size.
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
     auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
@@ -697,7 +672,7 @@ TEST_CASE("ImageRenderer.keeps images of different pools apart under a shared id
     REQUIRE(firstPool.poolId() != secondPool.poolId());
 
     auto const cellSpan = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
-    auto const first = rasterizeImage(
+    auto first = rasterizeImage(
         firstPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x11)), cellSpan);
     auto const second = rasterizeImage(
         secondPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x22)), cellSpan);
@@ -715,23 +690,24 @@ TEST_CASE("ImageRenderer.keeps images of different pools apart under a shared id
     CHECK(backend.quadCommands[0].texture == firstTexture);
     CHECK(backend.quadCommands[1].texture == secondTexture);
 
-    // A discard from the first pool releases only its own texture.
-    imageRenderer.discardImage(first->image().key());
+    // The first pool's image dying releases only its own texture, though the second shares its id.
+    releaseUploadOwners(backend);
+    first.reset();
+    renderRow(imageRenderer, second, 1);
     REQUIRE(backend.destroyCommands.size() == 1);
     CHECK(backend.destroyCommands.front().id == firstTexture);
 
-    // The second pool's image is still resident: drawn again, it reuses its texture.
-    renderRow(imageRenderer, second, 1);
+    // The second pool's image is still resident: drawn again, it reused its texture.
     CHECK(backend.createCommands.size() == 2);
     REQUIRE(backend.quadCommands.size() == 3);
     CHECK(backend.quadCommands[2].texture == secondTexture);
 }
 
-TEST_CASE("ImageRenderer.releases the texture of an image that died without a discard", "[image][renderer]")
+TEST_CASE("ImageRenderer.releases the texture of an image once it dies", "[image][renderer]")
 {
-    // A session forwards discards only to the display it is attached to. An image that dies in a
-    // background tab -- or with its tab closed while another is on screen -- sends none, so the
-    // renderer must notice the death itself rather than keep the texture until LRU pressure reaches it.
+    // Nobody tells the renderer an image is gone -- not the tab on screen, and not a background tab or a
+    // closed one, which have no display to tell. It notices the death itself, on its next frame, rather
+    // than keeping the texture until LRU pressure happens to reach it.
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
     auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };

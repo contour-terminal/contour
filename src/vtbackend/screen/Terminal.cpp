@@ -408,7 +408,6 @@ Terminal::Terminal(Events& eventListener,
     _maxSixelColorRegisters { _settings.maxImageRegisterCount },
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
-    _imagePool { [this](Image const* image) { discardImage(*image); } },
     _imageDecoder { std::move(imageDecoder) },
     _hyperlinks { .cache = HyperlinkCache { _settings.hyperlinkCacheCapacity } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
@@ -8857,11 +8856,6 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     _hostWritableScreenMargin = statuslineMargin;
 
     // verifyState();
-}
-
-void Terminal::discardImage(Image const& image)
-{
-    _eventListener.discardImage(image);
 }
 
 void Terminal::markCellDirty(CellLocation position) noexcept

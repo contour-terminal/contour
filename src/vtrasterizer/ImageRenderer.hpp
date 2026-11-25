@@ -74,14 +74,10 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
     void renderImage(crispy::Point pos, vtbackend::ImageFragment const& fragment);
 
-    /// Releases the texture of an image that is not going to be rendered anymore.
-    /// @param imageKey The image's pool and id; an image of another pool under the same id is left alone.
-    void discardImage(vtbackend::ImageKey imageKey);
-
     void inspect(std::ostream& output) const override;
 
-    /// Opens a new frame: advances what the LRU stamps against, and drops the textures the backend
-    /// failed to create.
+    /// Opens a new frame: advances what the LRU stamps against, drops the textures the backend failed to
+    /// create, and releases those whose image has died.
     ///
     /// Call once per frame, before its first pass. A frame may be drawn in several passes (smooth
     /// scrolling draws the main display and the status line separately), and an image any of them drew
@@ -112,11 +108,16 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
     /// Releases the textures of images that have died.
     ///
-    /// A discard is the prompt path, but not every death reaches it: a session forwards discards only to
-    /// the display it is attached to, so an image that dies in a background tab -- or with a tab closed
-    /// while another was on screen -- sends none, and its texture would sit charged to the budget until
-    /// LRU pressure happened to reach it.
+    /// This is how the renderer learns an image is gone -- nobody tells it. Watching the image rather than
+    /// being notified covers every way one dies: in the tab on screen, in a background tab, with a tab
+    /// closed while another is shown, or in a session that has since moved to another display. A
+    /// notification has to find the renderer that holds the texture, and a detached session has none.
     void releaseOrphanedTextures();
+
+    /// Releases one image's texture and forgets the mapping, so the next sight of the image uploads it
+    /// again.
+    /// @param imageKey The image's pool and id.
+    void releaseTexture(vtbackend::ImageKey imageKey);
 
     /// Paints the part of a cell the image does not reach, in the image's gap colour.
     ///
@@ -155,7 +156,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
         size_t bytes = 0;           ///< GPU bytes the texture occupies.
         uint64_t lastUsedFrame = 0; ///< The frame this was last drawn in; the LRU key.
         /// The image the texture was uploaded from, watched rather than held: once it dies the texture
-        /// names nothing that can be drawn again, discard or no discard. See releaseOrphanedTextures().
+        /// names nothing that can be drawn again. See releaseOrphanedTextures().
         std::weak_ptr<vtbackend::Image const> image;
     };
 

@@ -66,7 +66,6 @@ class FakeDisplaySurface final: public session::DisplaySurface
     int closeCount = 0;
     int releaseSessionCount = 0;
     int inspectCount = 0;
-    int discardedImages = 0;
     int cursorMovedReports = 0;
     int terminalResizeRequests = 0;
     int pageRefits = 0;
@@ -161,7 +160,6 @@ class FakeDisplaySurface final: public session::DisplaySurface
     void scheduleRedraw() override { ++redrawCount; }
     void renderBufferUpdated() override { ++renderBufferUpdateCount; }
     void bufferChanged(vtbackend::ScreenType screenType) override { bufferChanges.push_back(screenType); }
-    void discardImage(vtbackend::Image const& /*image*/) override { ++discardedImages; }
     void setScreenshotOutput(ScreenshotOutput where) override
     {
         screenshotOutputs.push_back(std::move(where));

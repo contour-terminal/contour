@@ -448,9 +448,8 @@ inline bool operator<(ImageFragment const& a, ImageFragment const& b) noexcept
 class ImagePool
 {
   public:
-    using OnImageRemove = std::function<void(Image const*)>;
-
-    ImagePool(OnImageRemove onImageRemove = [](auto) {}, ImageId nextImageId = ImageId(1));
+    /// @param nextImageId The id the first created image receives.
+    explicit ImagePool(ImageId nextImageId = ImageId(1));
 
     /// Creates an RGBA image of given size in pixels.
     std::shared_ptr<Image const> create(ImageFormat format, ImageSize pixelSize, Image::Data&& data);
@@ -526,7 +525,6 @@ class ImagePool
     ImagePoolId _poolId;                       //!< This pool's process-unique identity
     ImageId _nextImageId;                      //!< ID for next image to be put into the pool
     NameToImageIdCache _imageNameToImageCache; //!< keeps mapping from name to raw image
-    OnImageRemove _onImageRemove;              //!< Callback to be invoked when image gets removed from pool.
     std::shared_ptr<IdIndex> _idIndex = std::make_shared<IdIndex>(); //!< id -> live image index
 };
 
