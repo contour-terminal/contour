@@ -121,9 +121,15 @@ if(_process_source)
         # control channel, and exits once that channel ends. Never installed.
         # With --parent it is a hosting process instead: it supervises a helper of its own, for the tests of a
         # helper outliving its parent.
-        add_executable(extension_host_probe process/testing/LaunchProbe.cpp process/testing/RecordingLauncher.hpp)
+        add_executable(extension_host_probe process/testing/LaunchProbe.cpp process/testing/RecordingLauncher.hpp
+            process/testing/SandboxProbe.hpp)
         target_link_libraries(extension_host_probe PRIVATE
             vtextension_host vtextension_remote_process vtextension_remote_wire)
+        # Where the Linux sandbox is built (VTEXTENSION_LINUX_SANDBOX), the probe also locks itself down as the
+        # host does, and process_test proves the sandbox with it and tests its pieces.
+        if(VTEXTENSION_LINUX_SANDBOX)
+            target_sources(extension_host_probe PRIVATE process/testing/SandboxProbe.cpp)
+        endif()
 
         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
         # no engine, so that it cross-builds and runs under wine.
@@ -148,8 +154,18 @@ if(_process_source)
             transport/SharedObject_test.cpp
             transport/WakeSignal_test.cpp
         )
+        # vtextension_host on every system: the launcher's tests read the host's cap policy (HostBootstrap.hpp),
+        # whose header needs the sandbox definition only that target carries.
         target_link_libraries(vtextension_process_test PRIVATE
-            vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2 contour_test_trace)
+            vtextension_host vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2
+            contour_test_trace)
+        if(VTEXTENSION_LINUX_SANDBOX)
+            target_sources(vtextension_process_test PRIVATE
+                ../host/linux/SeccompFilter_test.cpp
+                ../host/linux/testing/BpfEvaluator.hpp
+                process/SandboxProbe_test.cpp
+            )
+        endif()
         add_dependencies(vtextension_process_test extension_host_probe)
         target_compile_definitions(vtextension_process_test PRIVATE
             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")

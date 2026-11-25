@@ -25,6 +25,7 @@
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/HostBootstrap.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/RemoteBackend.hpp>
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
@@ -64,6 +65,12 @@ namespace contract = vtextension::wasm::testing::contract;
 
 namespace
 {
+
+/// How far a helper of this build confines itself: locked down where the build has a sandbox.
+constexpr auto ThisBuildLockdown =
+    vtextension::wasm::host::ThisPlatformSandbox == vtextension::wasm::host::PlatformSandbox::None
+        ? proto::LockdownState::Unsandboxed
+        : proto::LockdownState::LockedDown;
 
 /// @return A launch of the extension host executable with @p leading arguments before its own.
 [[nodiscard]] HelperLaunch helperLaunch(std::vector<std::string> leading = {},
@@ -121,9 +128,8 @@ struct LimitValues
                                 ? proto::MemoryMode::Shared
                                 : proto::MemoryMode::Copy;
     CHECK(*hello
-          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
-                                         .memoryMode = memoryMode,
-                                         .lockdown = proto::LockdownState::Unsandboxed } });
+          == proto::Pdu { proto::Hello {
+              .version = proto::ProtocolVersion, .memoryMode = memoryMode, .lockdown = ThisBuildLockdown } });
     return control;
 }
 
@@ -259,19 +265,42 @@ TEST_CASE("Process.loadsAndCallsThroughARealHelper", "[vtextension]")
     checkHelpersEndedCleanly();
 }
 
+#ifdef __linux__
+TEST_CASE("Helper.locksDown", "[vtextension]")
+{
+    // Locked down before Hello, every step taken.
+    auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch());
+    REQUIRE(helper.has_value());
+    auto control = receiveHello(*helper);
+    STATIC_CHECK(ThisBuildLockdown == proto::LockdownState::LockedDown);
+    {
+        auto const closed = std::move(control);
+    }
+    CHECK(awaitReap(*helper->launcher, *helper->process)
+          == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+}
+#endif
+
 TEST_CASE("Process.unsandboxedIsRefusedUnlessAccepted", "[vtextension]")
 {
     auto const requested = killsFor(process::KillReason::Requested);
     {
-        // The helper runs without a sandbox until it has one, and says so in its Hello.
+        // A helper that locked down is driven when lockdown is required; one without a sandbox is not, and
+        // says so in its Hello.
         auto const backend = processBackend(LockdownRequirement::RequireLockedDown);
         auto const runtime = contract::createRuntime(*backend);
         auto const loaded = runtime->load(ModuleIdentity {}, toModule(contract::InstanceModule));
-        REQUIRE_FALSE(loaded.has_value());
-        CHECK(loaded.error() == ExtensionError::HostUnavailable);
+        if constexpr (ThisBuildLockdown == proto::LockdownState::LockedDown)
+            CHECK(loaded.has_value());
+        else
+        {
+            REQUIRE_FALSE(loaded.has_value());
+            CHECK(loaded.error() == ExtensionError::HostUnavailable);
+        }
     }
     checkHelpersEndedCleanly();
-    CHECK(killsFor(process::KillReason::Requested) == requested + 1);
+    auto const refusedOnes = ThisBuildLockdown == proto::LockdownState::LockedDown ? 0U : 1U;
+    CHECK(killsFor(process::KillReason::Requested) == requested + refusedOnes);
 }
 
 TEST_CASE("Process.startFunctionThatNeverReturnsIsKilledAtTheInstantiateTimeout", "[vtextension]")

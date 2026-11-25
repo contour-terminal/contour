@@ -202,6 +202,13 @@ if(CONTOUR_HAVE_WASMTIME AND NOT CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
     add_subdirectory(wasm/wasmtime)
 endif()
 
+# Whether the extension host locks itself down with the Linux sandbox (wasm/host/Sandbox_linux.cpp): Linux, on the
+# two architectures whose system calls its filter numbers. Read by both directories below.
+set(VTEXTENSION_LINUX_SANDBOX OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|aarch64|arm64)$")
+    set(VTEXTENSION_LINUX_SANDBOX ON)
+endif()
+
 # The protocol and channels between Contour and its extension host process, and the host's server; no engine,
 # always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.
 add_subdirectory(wasm/remote)

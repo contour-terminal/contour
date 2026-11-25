@@ -2,7 +2,6 @@
 #include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
 
 #include <core/Clock.hpp>
-#include <core/Environment.hpp>
 #include <core/log/LogStore.hpp>
 
 #include <array>
@@ -10,6 +9,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 
 #ifdef _WIN32
@@ -34,11 +35,6 @@ namespace vtextension::wasm::remote::process::testing
 
 namespace
 {
-    /// The sanitizer variables a helper is handed when this process has them, so that its sanitizer runtime
-    /// is configured as the tests' is.
-    constexpr auto SanitizerVariables =
-        std::array<std::string_view, 4> { "ASAN_OPTIONS", "LSAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS" };
-
     /// How long past the teardown grace awaitLiveHelpersAtMost() waits: a killed helper's reap included.
     constexpr auto ReapSlack = std::chrono::seconds { 3 };
 
@@ -108,10 +104,7 @@ namespace
 std::vector<std::pair<std::string, std::string>> helperEnvironment()
 {
     auto environment = defaultHelperEnvironment();
-    auto const live = core::LiveEnvironment {};
-    for (auto const name: SanitizerVariables)
-        if (auto value = live.get(name))
-            environment.emplace_back(std::string { name }, *std::move(value));
+    std::ranges::move(sanitizerEnvironment(), std::back_inserter(environment));
     return environment;
 }
 

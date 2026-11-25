@@ -17,8 +17,10 @@ using vtextension::wasm::host::ConfinementFailure;
 using vtextension::wasm::host::confinementFailureText;
 using vtextension::wasm::host::makeSystemSandbox;
 using vtextension::wasm::host::NullSandbox;
+using vtextension::wasm::host::PlatformSandbox;
 using vtextension::wasm::host::SandboxDescriptors;
 using vtextension::wasm::host::systemErrorText;
+using vtextension::wasm::host::ThisPlatformSandbox;
 
 namespace proto = vtextension::wasm::remote::proto;
 
@@ -32,7 +34,10 @@ TEST_CASE("Sandbox.nullSandboxTakesBothStepsUnsandboxed", "[vtextension][host]")
 
 TEST_CASE("Sandbox.systemWithoutOneRunsUnsandboxed", "[vtextension][host]")
 {
-    // No system has a sandbox of its own yet: each makes the null one, which confines nothing.
+    // A system without a sandbox makes the null one, which confines nothing. Where there is one, it would
+    // confine this very process: the probe proves it in a child of its own (SandboxProbe_test.cpp).
+    if constexpr (ThisPlatformSandbox != PlatformSandbox::None)
+        SKIP("this system has a sandbox");
     auto const sandbox = makeSystemSandbox(SandboxDescriptors { .control = {} });
     REQUIRE(sandbox != nullptr);
     CHECK(sandbox->restrictBeforeThreads().has_value());

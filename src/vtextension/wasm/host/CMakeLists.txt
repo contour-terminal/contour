@@ -10,9 +10,20 @@ if(WIN32)
     set(_bootstrap_source HostBootstrap_win32.cpp)
 endif()
 
-# Each system's sandbox (Sandbox.hpp) is a file of its own; a system that has none yet runs the host
-# unsandboxed, and its Hello says so.
+# Each system's sandbox (Sandbox.hpp) is a file of its own, and a value of PlatformSandbox; a system that has none
+# yet runs the host unsandboxed, and its Hello says so. Linux's: where VTEXTENSION_LINUX_SANDBOX (../../CMakeLists.txt).
 set(_sandbox_source Sandbox_none.cpp)
+set(_platform_sandbox 0)
+if(VTEXTENSION_LINUX_SANDBOX)
+    set(_sandbox_source
+        Sandbox_linux.cpp
+        linux/SeccompFilter.cpp
+        linux/SeccompFilter.hpp
+        linux/SystemCallRows.cpp
+        linux/SystemCallRows.hpp
+    )
+    set(_platform_sandbox 1)
+endif()
 
 add_library(vtextension_host STATIC
     ExecutorThread.cpp
@@ -36,6 +47,7 @@ add_library(vtextension_host STATIC
     ../remote/HostConnector.hpp
 )
 target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)
+target_compile_definitions(vtextension_host PUBLIC CONTOUR_PLATFORM_SANDBOX=${_platform_sandbox})
 
 # The memory a host hands the engine an instance runs on (MemoryProvision.hpp): a target of its own, so that an
 # engine's backend, which Contour also links to run extensions in its own process, needs it and not the host.

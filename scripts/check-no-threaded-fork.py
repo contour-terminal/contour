@@ -25,6 +25,10 @@ SOURCE_ROOT = Path("src")
 ALLOWED: dict[str, str] = {
     "src/vtpty/SpawnTrampoline_unix.cpp": "single-threaded trampoline",
     "src/crispy/StackTrace.cpp": "crash path, out of scope",
+    "src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp": (
+        "test-only probe, never shipped: its `fork` op proves the extension host's system call filter kills a "
+        "fork, which it does before any child exists; unsandboxed, the child only _exit()s"
+    ),
     "src/vthost/keeper/PosixPorts.cpp": (
         "the PTY keeper: its child is async-signal-safe up to the exec; PR_SET_PDEATHSIG and the "
         "pthread_sigmask/signalfd setup are what need the keeper single-threaded"

@@ -2,12 +2,14 @@
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 
 #include <core/Clock.hpp>
+#include <core/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -16,6 +18,7 @@
 #include <tuple>
 #include <vector>
 
+#include <vtextension/wasm/BuildInstrumentation.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
 #ifdef _WIN32
@@ -30,6 +33,42 @@ namespace vtextension::wasm::remote::process::testing
 
 using transport::Channel;
 using transport::NativeHandle;
+
+namespace
+{
+    /// A sanitizer variable a helper is handed, and what is appended to it in a sanitizer build.
+    struct SanitizerVariable
+    {
+        std::string_view name;
+        std::string_view appended; ///< Empty: nothing.
+    };
+
+    constexpr auto NoLeakDetection = std::string_view { "detect_leaks=0" };
+
+    constexpr auto SanitizerVariables = std::array {
+        SanitizerVariable { .name = "ASAN_OPTIONS", .appended = NoLeakDetection },
+        SanitizerVariable { .name = "LSAN_OPTIONS", .appended = NoLeakDetection },
+        SanitizerVariable { .name = "UBSAN_OPTIONS", .appended = {} },
+        SanitizerVariable { .name = "TSAN_OPTIONS", .appended = {} },
+    };
+} // namespace
+
+std::vector<std::pair<std::string, std::string>> sanitizerEnvironment()
+{
+    auto environment = std::vector<std::pair<std::string, std::string>> {};
+    auto const live = core::LiveEnvironment {};
+    for (auto const& variable: SanitizerVariables)
+    {
+        auto value = live.get(variable.name);
+        if constexpr (ThisBuildInstrumentation == BuildInstrumentation::Sanitizers)
+            if (!variable.appended.empty())
+                value = value && !value->empty() ? std::format("{}:{}", *value, variable.appended)
+                                                 : std::string { variable.appended };
+        if (value)
+            environment.emplace_back(std::string { variable.name }, *std::move(value));
+    }
+    return environment;
+}
 
 ProcessId ownProcessId() noexcept
 {

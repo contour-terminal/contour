@@ -6,7 +6,8 @@
 //   extension_host_probe --report <helper arguments> [--check-handle=H]…
 //   extension_host_probe --parent <helper arguments> <helper executable> [its extra arguments]…
 //   extension_host_probe --receive-grant <helper arguments>
-//   extension_host_probe --mutate <helper arguments> --seed=N
+//   extension_host_probe --receive-grant [--sandboxed] [--outer-filter=K] [--sandbox-op=OP] <helper
+//   arguments> extension_host_probe --mutate <helper arguments> --seed=N
 //
 // Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
 // as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
@@ -21,6 +22,9 @@
 // writes `probe` at its start. It reports `granted=ok`, or `granted=refused` if any of that failed, and `end`
 // on its first lane; then `heard` and `end` there once another PDU arrives on control, and waits for its
 // control channel to end.
+//
+// With any of --sandboxed, --outer-filter or --sandbox-op (Linux), it locks itself down as the host does and
+// tries one operation from a thread started before: SandboxProbe.hpp says what it reports.
 //
 // With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
 // --receive-grant does, and flips bytes of the whole object at random on a thread of its own while Contour
@@ -64,6 +68,7 @@
 #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
+#include <vtextension/wasm/remote/process/testing/SandboxProbe.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
@@ -491,7 +496,15 @@ int main(int argc, char const* argv[], char const* envp[])
         if (arguments.front() == "--parent")
             return parent(rest);
         if (arguments.front() == "--receive-grant")
+        {
+// Where this build has the Linux sandbox (PlatformSandbox::Linux): what the sandboxed mode is made of.
+#if CONTOUR_PLATFORM_SANDBOX == 1
+            namespace testing = vtextension::wasm::remote::process::testing;
+            if (testing::asksForSandboxProbe(rest))
+                return static_cast<ProbeExit>(testing::runSandboxProbe(rest));
+#endif
             return receiveGrant(rest);
+        }
         if (arguments.front() == "--mutate")
             return mutate(rest);
         return ProbeExit::Usage;

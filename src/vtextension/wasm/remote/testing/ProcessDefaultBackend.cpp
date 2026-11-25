@@ -29,15 +29,16 @@ std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
 {
     // One kind and one supervisor for the binary, as a program composes them.
     auto const& composition = remote::process::testing::binaryComposition();
-    // No connector configured: this composition starts the real helper, which no sandbox confines yet.
+    // No connector configured: this composition starts the real helper, locked down where the build has a
+    // sandbox -- so that every suite here runs in it.
     if (!config.connector)
     {
         config.connector = composition.connector(remote::process::testing::HelperBackendConfig {
             .helper = VTEXTENSION_HELPER_PATH,
             .extraArguments = {},
-            .lockdown = LockdownRequirement::AcceptUnsandboxed,
+            .lockdown = remote::process::testing::HelperLockdown,
             .timeouts = config.timeouts });
-        config.lockdown = LockdownRequirement::AcceptUnsandboxed;
+        config.lockdown = remote::process::testing::HelperLockdown;
     }
     return remote::makeRemoteBackend(composition.kind(), std::move(config));
 }

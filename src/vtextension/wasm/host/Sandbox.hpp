@@ -19,8 +19,26 @@
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 
+#ifndef CONTOUR_PLATFORM_SANDBOX
+    #error "CONTOUR_PLATFORM_SANDBOX is set by linking vtextension_host."
+#endif
+
 namespace vtextension::wasm::host
 {
+
+/// Which system's sandbox makeSystemSandbox() makes in this build.
+enum class PlatformSandbox : uint8_t
+{
+    None,    ///< None: the host runs unsandboxed.
+    Linux,   ///< no_new_privs, Landlock and a seccomp filter.
+    FreeBSD, ///< Capsicum.
+    MacOS,   ///< A Seatbelt profile.
+    Windows, ///< An AppContainer, verified by the host.
+};
+
+/// This build's sandbox, as the build chose its source (CONTOUR_PLATFORM_SANDBOX, a public definition of
+/// vtextension_host): a host of this build says `LockedDown` unless it is `None`.
+inline constexpr auto ThisPlatformSandbox = PlatformSandbox { CONTOUR_PLATFORM_SANDBOX };
 
 /// A step of the host's confinement that failed, and how.
 struct ConfinementFailure

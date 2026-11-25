@@ -16,6 +16,7 @@
 
 #include <vtextension/wasm/BackendConfig.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/host/Sandbox.hpp>
 #include <vtextension/wasm/remote/RemoteBackend.hpp>
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
@@ -32,13 +33,19 @@ inline constexpr auto HelperTeardownGrace = std::chrono::milliseconds { 2000 };
 ///         the helper reports as the tests do.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>> helperEnvironment();
 
+/// What a composition holds its helpers to unless told otherwise: locked down, where this build has a
+/// sandbox.
+inline constexpr auto HelperLockdown = host::ThisPlatformSandbox == host::PlatformSandbox::None
+                                           ? LockdownRequirement::AcceptUnsandboxed
+                                           : LockdownRequirement::RequireLockedDown;
+
 /// Which helper a composition's backend starts, and what it holds it to.
 struct HelperBackendConfig
 {
-    std::filesystem::path helper;                                          ///< The executable.
-    std::vector<std::string> extraArguments {};                            ///< Appended to its command line.
-    LockdownRequirement lockdown = LockdownRequirement::AcceptUnsandboxed; ///< Which helpers are driven.
-    HostTimeouts timeouts {};                                              ///< Its budgets.
+    std::filesystem::path helper;                  ///< The executable.
+    std::vector<std::string> extraArguments {};    ///< Appended to its command line.
+    LockdownRequirement lockdown = HelperLockdown; ///< Which helpers are driven.
+    HostTimeouts timeouts {};                      ///< Its budgets.
 };
 
 /// A supervisor over the system's launcher, recorded, waiting a teardown grace for each helper let go (by
