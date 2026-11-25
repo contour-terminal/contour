@@ -3,7 +3,8 @@
 // The default backend of the extension host process's test binary: the remote backend, over real helper
 // processes the binary's one supervisor starts. Compiled into vtextension_helper_test only, so that the
 // contract and the suites written against the default backend run their real guests through a process
-// boundary, unchanged -- and, through a listener, fail when a helper of theirs ended uncleanly (D57).
+// boundary, unchanged -- and, through a listener, fail when a helper of theirs ended uncleanly: exited
+// non-zero, or died of a signal the supervisor did not send.
 #include <catch2/catch_test_case_info.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
@@ -56,10 +57,10 @@ uint64_t preparedGeneration() noexcept
 namespace
 {
 
-/// D57 for every case of the binary: once a case ended, waits until the helpers it let go were reaped, and
-/// fails the run should any helper of the binary's composition have ended uncleanly meanwhile -- how a
-/// helper's sanitizer report fails the case that caused it. A case's helpers exit once its backends are
-/// gone, which is by the time it ended.
+/// The clean-exit check for every case of the binary: once a case ended, waits until the helpers it let go
+/// were reaped, and fails the run should any helper of the binary's composition have ended uncleanly
+/// meanwhile -- how a helper's sanitizer report fails the case that caused it. A case's helpers exit once its
+/// backends are gone, which is by the time it ended.
 class UncleanHelperExits final: public Catch::EventListenerBase
 {
   public:

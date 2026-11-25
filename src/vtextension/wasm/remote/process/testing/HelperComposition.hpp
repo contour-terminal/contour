@@ -24,7 +24,8 @@
 namespace vtextension::wasm::remote::process::testing
 {
 
-/// How long a helper that was let go may take to exit on its own, its reports written (D57's grace).
+/// How long a helper that was let go may take to exit on its own, its reports written: so that a sanitizer
+/// or coverage report of the helper is not lost to the kill.
 inline constexpr auto HelperTeardownGrace = std::chrono::milliseconds { 2000 };
 
 /// @return A helper's environment: the launcher's default, and this process's sanitizer variables, so that

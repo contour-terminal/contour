@@ -34,7 +34,8 @@ namespace vtextension::wasm::remote::process::testing
 
 namespace
 {
-    /// The sanitizer variables a helper is handed when this process has them (D39).
+    /// The sanitizer variables a helper is handed when this process has them, so that its sanitizer runtime
+    /// is configured as the tests' is.
     constexpr auto SanitizerVariables =
         std::array<std::string_view, 4> { "ASAN_OPTIONS", "LSAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS" };
 
@@ -59,7 +60,8 @@ namespace
     }
 
     /// This process's stderr as it was when the binary started -- before any case captured it -- which every
-    /// helper writes to (D39), so that what a helper reports reaches the test's log and no case's capture.
+    /// helper inherits as its stderr, so that what a helper reports reaches the test's log and no case's
+    /// capture.
     auto const originalStandardError = copyOfStandardError();
 
     /// Writes @p text to originalStandardError, if there is one.

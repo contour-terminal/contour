@@ -3,7 +3,8 @@
 // What a real extension host process must never do to Contour: keep a lane when it dies in the middle of a
 // host call, make an interrupt wait on it, run on past an interrupt, or have each pane start a helper of its
 // own after a crash. Each case composes its own supervisor, so that its counts are its own; each ends by
-// checking that no helper ended otherwise than the case made it end (D57).
+// checking that no helper ended otherwise than the case made it end: a helper that exits non-zero, or dies
+// of a signal the supervisor did not send, ended uncleanly.
 #include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
