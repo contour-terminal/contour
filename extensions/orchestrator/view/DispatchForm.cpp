@@ -72,34 +72,7 @@ namespace
     }
 
     // }}}
-    // {{{ the item
-
-    /// The url and title the engine last listed for an item.
-    struct Listed
-    {
-        std::string url;
-        std::string title;
-    };
-
-    [[nodiscard]] std::optional<Listed> listedItem(Engine const& engine,
-                                                   std::string_view repo,
-                                                   ItemRef const& item)
-    {
-        if (auto const* const request = std::get_if<ChangeRequestRef>(&item))
-        {
-            auto const requests = engine.changeRequests(repo);
-            auto const found = std::ranges::find(requests, request->number, &ChangeRequest::number);
-            if (found != requests.end())
-                return Listed { .url = found->url, .title = found->title };
-            return std::nullopt;
-        }
-        auto const issues = engine.unclaimedIssues(repo);
-        auto const found =
-            std::ranges::find_if(issues, [&](Issue const& issue) { return issue.item == item; });
-        if (found != issues.end())
-            return Listed { .url = found->url, .title = found->title };
-        return std::nullopt;
-    }
+    // {{{ the settings
 
     /// @return The index after (or before, by @p step) @p from among @p count, wrapping around, whose entry
     ///         @p accepts; @p from when no other does.
@@ -124,21 +97,6 @@ namespace
 std::string_view refusalText(DispatchRefusal refusal) noexcept
 {
     return RefusalTexts[std::to_underlying(refusal)];
-}
-
-std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
-                                                  std::string_view repo,
-                                                  ItemRef const& item,
-                                                  std::string_view task,
-                                                  std::string session)
-{
-    if (engine.config() == nullptr)
-        return std::nullopt;
-    auto listed = listedItem(engine, repo, item);
-    if (!listed)
-        return std::nullopt;
-    return openItemForm(
-        engine, repo, item, std::move(listed->url), std::move(listed->title), task, std::move(session));
 }
 
 std::optional<DispatchFormState> openItemForm(Engine const& engine,

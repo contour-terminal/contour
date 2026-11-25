@@ -534,8 +534,8 @@ namespace
         auto const isRetryable = kept && !isChecking && scope != RunScope::Outside;
         auto const look = runLookOf(run);
 
-        // Running it again goes through the launcher, as every dispatch does. Its board went with its
-        // worktree, its transcript did not.
+        // Running it again goes through the start dialog, or a topic's through the `n` box, as every dispatch
+        // does. Its board went with its worktree, its transcript did not.
         auto offers = runOffers(*lists.engine, run);
         if (isRetryable)
             offers.push_back(KeyCommand::RetryRemoval);
@@ -1067,11 +1067,6 @@ std::string cutSanitised(std::string_view sanitised, int columns)
 bool containsIgnoringCase(std::string_view haystack, std::string_view needle) noexcept
 {
     return !std::ranges::search(haystack, needle, {}, asciiLower, asciiLower).empty();
-}
-
-bool equalsIgnoringCase(std::string_view a, std::string_view b) noexcept
-{
-    return std::ranges::equal(a, b, {}, asciiLower, asciiLower);
 }
 
 } // namespace orchestrator::view

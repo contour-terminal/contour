@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -69,6 +70,20 @@ void openOn2375(DashboardFixture& fixture)
 [[nodiscard]] bool isDialogOpen(DashboardFixture const& fixture)
 {
     return fixture.dashboard.interaction().startDialog.has_value();
+}
+
+/// @return A form on #2375, as the Work view lists it, on @p task.
+[[nodiscard]] std::optional<DispatchFormState> formOn2375(Engine const& engine,
+                                                          std::string_view task,
+                                                          std::string session)
+{
+    return openItemForm(engine,
+                        "contour",
+                        ChangeRequestRef { 2375 },
+                        "https://github.com/contour-terminal/contour/pull/2375",
+                        "Fix the parser",
+                        task,
+                        std::move(session));
 }
 
 } // namespace
@@ -356,7 +371,7 @@ TEST_CASE("the forms open on the task's worker, else on the least busy one",
     {
         auto const engine = bootEngine(World { .configJson = std::string { TwoWorkersConfig } });
         REQUIRE(engine.config() != nullptr);
-        auto const form = openDispatchForm(engine, "contour", ChangeRequestRef { 2375 }, "fix_ci", {});
+        auto const form = formOn2375(engine, "fix_ci", {});
         REQUIRE(form.has_value());
         CHECK(form->worker == 1);
         CHECK(workerOf(*form, engine)->id == "b");
@@ -372,7 +387,7 @@ TEST_CASE("the forms open on the task's worker, else on the least busy one",
         auto const engine =
             bootEngine(World { .configJson = std::string { TwoWorkersConfig }, .stored = { busy } });
         REQUIRE(engine.config() != nullptr);
-        auto const form = openDispatchForm(engine, "contour", ChangeRequestRef { 2375 }, "fix_ci", {});
+        auto const form = formOn2375(engine, "fix_ci", {});
         REQUIRE(form.has_value());
         CHECK(form->worker == 0);
         auto const topic = openTopicForm(engine, "contour", "tidy the docs", {});
@@ -386,8 +401,7 @@ TEST_CASE("the worker setting cycles the workers, and the action carries it",
 {
     auto const engine = bootEngine(World { .configJson = std::string { TwoWorkersConfig } });
     REQUIRE(engine.config() != nullptr);
-    auto form = openDispatchForm(
-        engine, "contour", ChangeRequestRef { 2375 }, "fix_ci", "123e4567-e89b-12d3-a456-426614174000");
+    auto form = formOn2375(engine, "fix_ci", "123e4567-e89b-12d3-a456-426614174000");
     REQUIRE(form.has_value());
     CHECK(actionOf(*form, engine, "t1").worker == "b");
     // b, the last, wraps around to a; a step back returns to b.
@@ -402,4 +416,56 @@ TEST_CASE("the worker setting cycles the workers, and the action carries it",
     changeSetting(*form, FormField::Task, 1, engine);
     CHECK(form->worker == 1);
     CHECK(previewOf(*form, engine).has_value());
+}
+
+namespace
+{
+/// Three workers: two Claude workers on their own sets, one of which lacks its hooks, and a Copilot one;
+/// a pull-request task on each.
+constexpr auto SetupByWorkerConfig = R"({ "worktree_root": "~/worktrees", "models": ["opus", "sonnet"],
+  "workers": [ { "id": "complete", "agent": "claude", "env_set": "complete" },
+               { "id": "lacking", "agent": "claude", "env_set": "lacking" },
+               { "id": "pilot", "agent": "copilot" } ],
+  "repos": [ { "name": "contour", "path": "~/projects/contour", "forge": "github", "issues": [] } ],
+  "tasks": [
+    { "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
+      "worker": "complete", "prompt": "/contour-workflows:fix-ci {url}" },
+    { "id": "review", "key": "v", "label": "review", "applies_to": "pr", "model": "sonnet",
+      "worker": "lacking", "prompt": "/contour-workflows:review {url}" },
+    { "id": "pilot", "key": "y", "label": "pilot", "applies_to": "pr", "model": "sonnet",
+      "worker": "pilot", "prompt": "fix the CI of {url}" } ] })"sv;
+} // namespace
+
+TEST_CASE("a dispatch warns only of the setup of the task's own worker",
+          "[orchestrator][view][form][workers]")
+{
+    auto const engine =
+        bootEngine(World { .configJson = std::string { SetupByWorkerConfig },
+                           .hooksBySet = { { "lacking", "contour/setup-hooks-missing.json" } } });
+    REQUIRE(engine.config() != nullptr);
+    REQUIRE(engine.hooks() == HooksState::Missing);
+
+    for (auto const task: { "fix_ci"sv, "pilot"sv })
+    {
+        CAPTURE(task);
+        auto const form = formOn2375(engine, task, {});
+        REQUIRE(form.has_value());
+        CHECK(setupWarningOf(*form, engine) == HooksWarning::None);
+        auto const* const worker = workerOf(*form, engine);
+        REQUIRE(worker != nullptr);
+        CHECK(setupWarnings(engine, *worker).empty());
+        auto hooks = HooksWarning::None;
+        CHECK(passSetupWarning(*form, engine, hooks, HooksWarning::None) == SetupGate::Passed);
+    }
+
+    auto const form = formOn2375(engine, "review", {});
+    REQUIRE(form.has_value());
+    auto hooks = setupWarningOf(*form, engine);
+    CHECK(hooks == HooksWarning::Shown);
+    CHECK(setupWarnings(engine, *workerOf(*form, engine))
+          == std::vector { std::string { HooksMissingWarning } });
+    // The first Enter only confirms the warning; an Enter of a later input passes it.
+    CHECK(passSetupWarning(*form, engine, hooks, HooksWarning::Shown) == SetupGate::Held);
+    CHECK(hooks == HooksWarning::Confirmed);
+    CHECK(passSetupWarning(*form, engine, hooks, HooksWarning::Confirmed) == SetupGate::Passed);
 }

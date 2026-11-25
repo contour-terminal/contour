@@ -198,9 +198,6 @@ template <typename Entry, std::size_t N, typename Enum>
 /// @return Whether @p haystack holds @p needle, ignoring ASCII case.
 [[nodiscard]] bool containsIgnoringCase(std::string_view haystack, std::string_view needle) noexcept;
 
-/// @return Whether @p a and @p b are equal, ignoring ASCII case.
-[[nodiscard]] bool equalsIgnoringCase(std::string_view a, std::string_view b) noexcept;
-
 /// @param item An item.
 /// @return How the dashboard names it: `#2331`, or a Jira key.
 [[nodiscard]] std::string itemLabel(ItemRef const& item);

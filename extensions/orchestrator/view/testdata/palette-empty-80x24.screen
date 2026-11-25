@@ -10,7 +10,7 @@
 ╰───│  switch view                                                       w │───╯
 ╭───│  fold the other groups                                  palette only │───╮
 │ No│  open · no run selected                                 palette only │   │
-│ yo│  run again · no run selected                            palette only │   │
+│ ⏎ │  run again · no run selected                            palette only │   │
 │ On│  end · no run selected                                             e │   │
 │ es│  agent tab · no run selected                                       r │   │
 │ Ev│  open link · no run selected                                       o │   │

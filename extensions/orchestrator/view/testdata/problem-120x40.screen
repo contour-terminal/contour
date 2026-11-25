@@ -2,8 +2,8 @@
  contour: the pull request list failed: You are not logged into any GitHub hosts. To log in, run: gh auth login         
  contour: the pull request list is incomplete                                                                           
 ╭─ Agents 0 ───────────────────────────────────╮ ╭─────────────────────────────────────────────────────────────────────╮
-│▍+ new task                                   │ │ No agents yet. ⏎ or n starts one on a pull request, an issue, or    │
-│                                              │ │ anything you type.                                                  │
+│▍+ new task                                   │ │ No agents yet. w lists your MRs and tickets to start one on.        │
+│                                              │ │ ⏎ or n starts a custom task.                                        │
 │                                              │ │ Once agents run: ⏎ talks to the selected one, 1 2 3 answers one     │
 │                                              │ │ that asks, esc steps back.                                          │
 │                                              │ │ Everything else is in ^K.                                           │

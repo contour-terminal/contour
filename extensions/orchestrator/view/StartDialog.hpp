@@ -33,10 +33,10 @@ enum class DialogPreview : uint8_t
 /// An open start dialog.
 struct StartDialogState
 {
-    DispatchFormState form;                  ///< What ⏎ dispatches.
-    std::string reason;                      ///< Why its task was suggested (TaskSuggestion::reason).
-    FormField setting = FormField::Task;     ///< What ←/→ change.
-    HooksWarning hooks = HooksWarning::None; ///< As the launcher had it: a second ⏎ past an incomplete setup.
+    DispatchFormState form;                       ///< What ⏎ dispatches.
+    std::string reason;                           ///< Why its task was suggested (TaskSuggestion::reason).
+    FormField setting = FormField::Task;          ///< What ←/→ change.
+    HooksWarning hooks = HooksWarning::None;      ///< How far the user got past the incomplete-setup warning.
     DialogPreview preview = DialogPreview::Short; ///< How much it shows.
     [[nodiscard]] bool operator==(StartDialogState const&) const = default;
 };

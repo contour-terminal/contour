@@ -18,29 +18,25 @@ namespace orchestrator::view
 /// What a region of the screen stands for.
 enum class HitKind : uint8_t
 {
-    Popup = 0,  ///< A popup's whole area (the launcher, the palette, the timeline): it covers the dashboard.
-    FleetPane,  ///< The Fleet's box: the wheel moves the selection.
-    FocusPane,  ///< The Focus's box: the wheel scrolls its tab.
-    Row,        ///< A Fleet row; Hit::value is its position among the rows that can be selected.
-    Command,    ///< A tab or a chip; Hit::value is the KeyCommand a click runs, as its key would.
-    MessageBox, ///< The message box: a click gives it the keys.
-    PaletteEntry,      ///< A palette entry; Hit::value is its position among the entries the query matches.
-    LauncherCandidate, ///< A launcher candidate; Hit::value is its position among the candidates.
-    LauncherRepo,      ///< A launcher's repository chip; Hit::value is 0 for every one, else 1 + its position
-                       ///< among scopeRepos().
-    LauncherKind,      ///< A launcher's kind chip; Hit::value is the KindScope.
-    ViewName,          ///< A view's name in the top bar; Hit::value is the View.
-    WorkRow,           ///< A Work line; Hit::value is its index into workLines().
-    WorkMrLink,        ///< An item's MR number cell; Hit::value is its line.
-    WorkTicketLink,    ///< An item's ticket key cell; Hit::value is its line.
-    WorkHeading,       ///< A group heading; Hit::value is the WorkGroup.
-    WorkScrollbar,     ///< The list's right edge; Hit::value is unused (the pointer's line decides).
-    WorkChip,          ///< The filter bar; Hit::value is the WorkFocus (Filter, RepoChip, SortChip).
-    DialogSetting,     ///< A dialog's or the `n` box's setting label; Hit::value is the FormField or the
-                       ///< TaskBoxField.
-    DialogStep,        ///< Its value or `‹ ›`; Hit::value is 2 × the field + (0 back, 1 forward).
-    WorkerChip,        ///< A worker chip; Hit::value is its index in Config::workers().
-    MenuEntry,         ///< A row menu entry; Hit::value is its index in RowMenuEntries.
+    Popup = 0,      ///< A popup's whole area (a dialog, the palette, the timeline): it covers the dashboard.
+    FleetPane,      ///< The Fleet's box: the wheel moves the selection.
+    FocusPane,      ///< The Focus's box: the wheel scrolls its tab.
+    Row,            ///< A Fleet row; Hit::value is its position among the rows that can be selected.
+    Command,        ///< A tab or a chip; Hit::value is the KeyCommand a click runs, as its key would.
+    MessageBox,     ///< The message box: a click gives it the keys.
+    PaletteEntry,   ///< A palette entry; Hit::value is its position among the entries the query matches.
+    ViewName,       ///< A view's name in the top bar; Hit::value is the View.
+    WorkRow,        ///< A Work line; Hit::value is its index into workLines().
+    WorkMrLink,     ///< An item's MR number cell; Hit::value is its line.
+    WorkTicketLink, ///< An item's ticket key cell; Hit::value is its line.
+    WorkHeading,    ///< A group heading; Hit::value is the WorkGroup.
+    WorkScrollbar,  ///< The list's right edge; Hit::value is unused (the pointer's line decides).
+    WorkChip,       ///< The filter bar; Hit::value is the WorkFocus (Filter, RepoChip, SortChip).
+    DialogSetting,  ///< A dialog's or the `n` box's setting label; Hit::value is the FormField or the
+                    ///< TaskBoxField.
+    DialogStep,     ///< Its value or `‹ ›`; Hit::value is 2 × the field + (0 back, 1 forward).
+    WorkerChip,     ///< A worker chip; Hit::value is its index in Config::workers().
+    MenuEntry,      ///< A row menu entry; Hit::value is its index in RowMenuEntries.
 };
 
 /// What a click lands on.

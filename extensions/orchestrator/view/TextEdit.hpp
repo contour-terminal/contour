@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The line-editing keys every text field of the dashboard shares — the launcher's query and note, the message
-// box, the filter and the palette's query. The fields have no cursor, so every edit works backwards from
-// the end of the text, as a shell's line editor does with its cursor at the end.
+// The line-editing keys every text field of the dashboard shares — the start dialog's note, the `n` box's
+// text, the message box, the filters and the palette's query. The fields have no cursor, so every edit works
+// backwards from the end of the text, as a shell's line editor does with its cursor at the end.
 #pragma once
 
 #include <core/tui/InputEvent.hpp>

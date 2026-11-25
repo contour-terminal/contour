@@ -19,7 +19,6 @@
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/HitMap.hpp>
 #include <orchestrator/view/Keys.hpp>
-#include <orchestrator/view/Launcher.hpp>
 
 namespace orchestrator::view
 {
@@ -108,9 +107,6 @@ class Dashboard
     /// @param task The id of the task it starts on, such as a run's; when it no longer applies to the item,
     ///        the one the item's state suggests.
     void openStartDialogOn(std::string_view repo, ItemRef const& item, std::string_view task);
-
-    /// @return The launcher while it is open.
-    [[nodiscard]] std::optional<LauncherState> const& launcher() const noexcept;
 
     /// The engine refused a dispatch confirmed here: the action bar says why, until the next key.
     /// @param refusal Why.

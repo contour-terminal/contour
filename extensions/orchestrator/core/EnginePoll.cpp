@@ -375,7 +375,7 @@ namespace
         return isSetCheckTag(tag) || tag == PluginStepTag || isAuthTag(tag);
     }
 
-    /// What a repository's lists show: on the dashboard, on the Work board, in the launcher and in what a
+    /// What a repository's lists show: on the dashboard, on the Work board, in the start dialog and in what a
     /// dispatch would do.
     struct ShownLists
     {

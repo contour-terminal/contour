@@ -725,7 +725,7 @@ void pasteInto(Interaction& interaction, KeyContext const& context, std::string_
         return;
     }
     // The Work view takes a paste into its filter while it is typed, and drops it anywhere else.
-    if (interaction.view == View::Work && !interaction.launcher)
+    if (interaction.view == View::Work)
     {
         if (interaction.work.filtering == Filtering::Typing)
             interaction.work.filter += pastedText(text);
@@ -748,12 +748,6 @@ void pasteInto(Interaction& interaction, KeyContext const& context, std::string_
             else if (c == '\t' || (static_cast<unsigned char>(c) >= 0x20 && c != '\x7f'))
                 draft += c;
         }
-        return;
-    }
-    if (interaction.launcher)
-    {
-        if (context.engine != nullptr)
-            pasteIntoLauncher(interaction.launcher, *context.engine, pastedText(text));
         return;
     }
     if (interaction.filtering == Filtering::Typing)

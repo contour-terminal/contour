@@ -86,7 +86,8 @@ namespace
 
     /// The primer the Focus shows while the Fleet is empty.
     constexpr auto Primer = std::array {
-        "No agents yet. ⏎ or n starts one on a pull request, an issue, or anything you type."sv,
+        "No agents yet. w lists your MRs and tickets to start one on."sv,
+        "⏎ or n starts a custom task."sv,
         "Once agents run: ⏎ talks to the selected one, 1 2 3 answers one that asks, esc steps back."sv,
         "Everything else is in ^K."sv,
     };

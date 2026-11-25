@@ -9,8 +9,8 @@
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ No agents yet. ⏎ or n starts one on a pull request, an issue, or anything    │
-│ you type.                                                                    │
+│ No agents yet. w lists your MRs and tickets to start one on.                 │
+│ ⏎ or n starts a custom task.                                                 │
 │ Once agents run: ⏎ talks to the selected one, 1 2 3 answers one that asks,   │
 │ esc steps back.                                                              │
 │ Everything else is in ^K.                                                    │

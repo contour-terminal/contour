@@ -144,20 +144,6 @@ enum class SetupGate : uint8_t
 ///         lacks; none for an agent that reads no Claude Code state.
 [[nodiscard]] std::vector<std::string> setupWarnings(Engine const& engine, WorkerDef const& worker);
 
-/// Opens a form on an item the engine lists.
-/// @param engine The engine: its configuration, its lists and whether the hooks are installed.
-/// @param repo The repository's configured name.
-/// @param item The item.
-/// @param task The id of the task the form starts on; it must apply to the item.
-/// @param session The agent's session UUID.
-/// @return The form, on the task's own model and its default worker (defaultWorker()); std::nullopt when the
-///         engine is not configured, does not list the item, or the task does not apply to it.
-[[nodiscard]] std::optional<DispatchFormState> openDispatchForm(Engine const& engine,
-                                                                std::string_view repo,
-                                                                ItemRef const& item,
-                                                                std::string_view task,
-                                                                std::string session);
-
 /// Opens a form on an item as a caller found it listed, such as a Work board row.
 /// @param engine The engine: its configuration and its runs.
 /// @param repo The repository's configured name.
@@ -176,7 +162,7 @@ enum class SetupGate : uint8_t
                                                             std::string_view task,
                                                             std::string session);
 
-/// The choices for a topic: the launcher's topic row.
+/// The choices for a topic: what the `n` box starts.
 /// @param engine The engine: its configuration and whether the hooks are installed.
 /// @param repo The repository's configured name; one the configuration lacks starts on its first.
 /// @param topic The topic's text to start with; empty for a new one.

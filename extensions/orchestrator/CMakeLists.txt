@@ -147,8 +147,6 @@ add_library(orchestrator_view STATIC
     view/Focus.hpp
     view/DispatchForm.cpp
     view/DispatchForm.hpp
-    view/Launcher.cpp
-    view/Launcher.hpp
     view/Keys.cpp
     view/Keys.hpp
     view/LazyLines.hpp
@@ -234,7 +232,6 @@ if(ORCHESTRATOR_TESTING)
         view/HitMap_test.cpp
         view/Dashboard_test.cpp
         view/DispatchForm_test.cpp
-        view/Launcher_test.cpp
         view/Keys_test.cpp
         view/Palette_test.cpp
         view/RowMenu_test.cpp

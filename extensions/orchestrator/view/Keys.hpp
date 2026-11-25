@@ -19,7 +19,6 @@
 #include <orchestrator/core/QuickReplies.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Fleet.hpp>
-#include <orchestrator/view/Launcher.hpp>
 #include <orchestrator/view/RowMenu.hpp>
 #include <orchestrator/view/StartDialog.hpp>
 #include <orchestrator/view/TaskBox.hpp>
@@ -273,7 +272,7 @@ enum class WorkFocus : uint8_t
     SortChip, ///< The sort chip: ⏎ switches the sort.
 };
 
-/// What is shown over the dashboard, besides the launcher and the palette.
+/// What is shown over the dashboard, besides the start dialog, the `n` box and the palette.
 enum class Overlay : uint8_t
 {
     None = 0, ///< Nothing.
@@ -360,12 +359,9 @@ struct Interaction
     Filtering filtering = Filtering::Off; ///< Whether typed text goes to the filter.
     std::string filter = {};              ///< Rows whose text does not hold it are left out; empty: none is.
     std::string pendingEnd = {}; ///< The run whose end waits for a second `e` (D14: asks once); empty: none.
-    std::optional<LauncherState> launcher = {}; ///< The launcher, while it is open: it takes every key.
-    std::optional<PaletteState> palette = {};   ///< The palette, while it is open: it takes every key.
+    std::optional<PaletteState> palette = {}; ///< The palette, while it is open: it takes every key.
     std::string paletteQuery = {}; ///< The query the palette had when esc closed it: it opens with it again.
-    LauncherScope
-        launcherScope = {};  ///< What the launcher's list was narrowed to: it opens narrowed so again.
-    std::string notice = {}; ///< A one-line notice on the action bar, until the next key; empty: none.
+    std::string notice = {};       ///< A one-line notice on the action bar, until the next key; empty: none.
     std::optional<TabChoice>
         chosenTab = {};           ///< The tab the user chose for a run; none: each opens on its own.
     std::size_t scroll = 0;       ///< The first line the Focus's tab shows.
@@ -501,11 +497,11 @@ void dropLastCodepoint(std::string& text) noexcept;
 [[nodiscard]] std::string pastedText(std::string_view text);
 
 /// Applies a paste: into the start dialog's note or the `n` box's text while one is open, into the palette's
-/// or the launcher's query while one is open, into the message box while it has the keys (its line feeds
-/// kept), into the filter while it is typed; dropped anywhere else. A paste is text, never keys: nothing in
-/// it confirms, moves or acts.
+/// query while it is open, into the message box while it has the keys (its line feeds kept), into the filter
+/// while it is typed; dropped anywhere else. A paste is text, never keys: nothing in it confirms, moves or
+/// acts.
 /// @param interaction Where the user is; its query, draft or filter extended.
-/// @param context The engine the launcher lists from, and the selected row.
+/// @param context The engine, and the selected row.
 /// @param text What was pasted.
 void pasteInto(Interaction& interaction, KeyContext const& context, std::string_view text);
 

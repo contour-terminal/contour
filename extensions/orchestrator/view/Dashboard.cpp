@@ -63,12 +63,6 @@ namespace
     /// How often the transcript of a live run the Focus shows is read again.
     constexpr auto TranscriptFollowMs = uint64_t { 5000 };
 
-    /// The widest the launcher is in the Wide band.
-    /// The launcher's width in a wide tab: three quarters of it, at least 80 columns and at most 160, so that
-    /// titles and the repository column fit beside each other.
-    constexpr auto LauncherMinColumns = 80;
-    constexpr auto LauncherMaxColumns = 160;
-    constexpr auto LauncherWidePercent = 75;
     /// The widest the palette is in the Wide band.
     constexpr auto PaletteMaxColumns = 64;
     /// How much of the tab's width a popup takes in the Medium band, in percent.
@@ -238,8 +232,8 @@ struct Dashboard::State
 
     /// Applies the filter to the rows, and keeps the selection as @p keep says.
     void refilter(Keep keep);
-    /// Applies keys the parser decoded: to the start dialog, the `n` box or the launcher while one is open,
-    /// else by the key table.
+    /// Applies keys the parser decoded: to the start dialog or the `n` box while one is open, else by the key
+    /// table.
     /// @param events The keys.
     /// @param hooksAtInput The form's HooksWarning as the input that holds them began.
     /// @return What the engine is asked, in order.
@@ -278,27 +272,23 @@ struct Dashboard::State
     /// @param command The command.
     /// @param actions What the engine is asked, appended to.
     void run(KeyCommand command, std::vector<UiAction>& actions);
-    /// What follows every key and click: a launcher, a start dialog or an `n` box opened gets its session id,
-    /// a view switched to builds its rows, and the selection is kept on the rows of the view shown.
+    /// What follows every key and click: a start dialog or an `n` box opened gets its session id, a view
+    /// switched to builds its rows, and the selection is kept on the rows of the view shown.
     /// @param before The view shown before the command.
     void afterCommand(View before);
-    /// @return Whether a popup is open: the start dialog, the `n` box, the launcher, the palette or the
-    ///         timeline.
+    /// @return Whether a popup is open: the start dialog, the `n` box, the palette, the timeline or the row
+    ///         menu.
     [[nodiscard]] bool popupOpen() const noexcept;
-    /// @return The HooksWarning of the start dialog, the `n` box or the launcher now: what the next input
-    ///         begins with.
-    [[nodiscard]] HooksWarning launcherHooks() const noexcept;
+    /// @return The HooksWarning of the start dialog or the `n` box now: what the next input begins with.
+    [[nodiscard]] HooksWarning dialogHooks() const noexcept;
     /// Resolves a held ESC that waited past EscapeTimeout into the Escape key.
     /// @return What the engine is asked, in order.
     [[nodiscard]] std::vector<UiAction> resolveOverdueEscape();
     /// Shows the panes of the current place and band and hides the others; sets what the Focus draws; places
-    /// the launcher, the palette and the timeline.
+    /// the start dialog, the `n` box, the palette and the timeline.
     void syncLayout();
-    /// Gives a launcher, a start dialog or an `n` box just opened its agent's session id, from the
-    /// dashboard's source.
+    /// Gives a start dialog or an `n` box just opened its agent's session id, from the dashboard's source.
     void mintSession();
-    /// Shows the launcher where the band puts it, or hides it.
-    void syncLauncher();
     /// Shows the start dialog centred, or hides it.
     void syncStartDialog();
     /// Shows the `n` box centred, or hides it.
@@ -380,8 +370,8 @@ struct Dashboard::State
     Size size;
     Interaction interaction;
     std::string selectedKey;          ///< The identity (keyOf()) of the selected row, kept across rebuilds.
-    std::string startedSession;       ///< The session of a run the launcher started, selected once it is
-                                      ///< listed; empty: none.
+    std::string startedSession;       ///< The session of a run the start dialog or the `n` box started,
+                                      ///< selected once it is listed; empty: none.
     std::vector<Row> rows;            ///< Every row.
     std::vector<std::size_t> visible; ///< The indices of the rows the filter keeps.
     std::string visibleFilter;        ///< The filter @ref visible was made with.
@@ -399,7 +389,6 @@ struct Dashboard::State
     std::optional<LastClick> lastClick; ///< The last press of the left button, for a double click.
     /// The Work view's scrollbar while the left button, pressed on it, is held: the list follows the pointer.
     std::optional<Rect> scrollbarDrag;
-    std::unique_ptr<LauncherView> launcherView;       ///< Draws interaction.launcher.
     std::unique_ptr<StartDialogView> startDialogView; ///< Draws interaction.startDialog.
     std::unique_ptr<TaskBoxView> taskBoxView;         ///< Draws interaction.taskBox.
     std::unique_ptr<PaletteView> paletteView;         ///< Draws interaction.palette.
@@ -819,7 +808,6 @@ Dashboard::State::State(Engine const& engine,
     surface { size, [this](std::string_view bytes) { frameBytes.append(bytes); } },
     screen { surface, core::tui::ScreenConfig {}, clock },
     size { size },
-    launcherView { std::make_unique<LauncherView>(engine, interaction.launcher, hits) },
     startDialogView { std::make_unique<StartDialogView>(engine, interaction.startDialog, hits) },
     taskBoxView { std::make_unique<TaskBoxView>(engine, interaction.taskBox, hits) },
     paletteView { std::make_unique<PaletteView>(interaction.palette, hits) },
@@ -840,8 +828,7 @@ Dashboard::State::State(Engine const& engine,
 
 Dashboard::State::~State()
 {
-    for (Component* const overlay: std::array<Component*, 6> { launcherView.get(),
-                                                               startDialogView.get(),
+    for (Component* const overlay: std::array<Component*, 5> { startDialogView.get(),
                                                                taskBoxView.get(),
                                                                paletteView.get(),
                                                                timelineView.get(),
@@ -970,7 +957,7 @@ void Dashboard::State::remindStillAsking()
 
 void Dashboard::State::refilter(Keep keep)
 {
-    // A run the launcher started takes the selection once the engine lists it.
+    // A run the start dialog or the `n` box started takes the selection once the engine lists it.
     if (!startedSession.empty())
         if (auto const run = std::ranges::find(engine.runs(), startedSession, &Run::session);
             run != engine.runs().end())
@@ -1103,9 +1090,9 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
     auto const before = interaction;
     for (auto const& event: events)
     {
-        // A launcher opened by a key of this input confirms nothing an earlier one of it, or of an earlier
-        // input, did: the confirmation belongs to the launcher it was given in.
-        if (!interaction.launcher && !interaction.startDialog && !interaction.taskBox)
+        // A dialog opened by a key of this input confirms nothing an earlier one of it, or of an earlier
+        // input, did: the confirmation belongs to the dialog it was given in.
+        if (!interaction.startDialog && !interaction.taskBox)
             hooksAtInput = HooksWarning::None;
         if (auto const* const paste = std::get_if<core::tui::PasteEvent>(&event))
         {
@@ -1141,20 +1128,6 @@ std::vector<UiAction> Dashboard::State::applyKeys(std::vector<core::tui::InputEv
                 startedSession = dispatched->session;
                 actions.emplace_back(std::move(*dispatched));
             }
-            continue;
-        }
-        if (interaction.launcher)
-        {
-            if (auto dispatched = applyLauncherKey(*key, interaction.launcher, engine, hooksAtInput, tab))
-            {
-                // The run it starts is selected once it is listed: its session is the one the launcher
-                // minted.
-                startedSession = dispatched->session;
-                actions.emplace_back(std::move(*dispatched));
-            }
-            // The launcher opens next time as it was narrowed.
-            if (interaction.launcher)
-                interaction.launcherScope = interaction.launcher->scope;
             continue;
         }
         auto const view = interaction.view;
@@ -1206,8 +1179,7 @@ namespace
     enum class Layer : uint8_t
     {
         Dashboard = 0, ///< The panes beneath.
-        Popup, ///< A popup: the start dialog, the `n` box, the launcher, the palette, the timeline or the row
-               ///< menu.
+        Popup,         ///< A popup: the start dialog, the `n` box, the palette, the timeline or the row menu.
     };
 
     /// Where the pointer is, and the region of the hit it is on.
@@ -1412,47 +1384,6 @@ namespace
                     state.press(core::tui::KeyCode::Enter, actions);
                 },
             .wheel = nullptr },
-        // A launcher candidate is highlighted, its settings shown; a double click starts it.
-        MouseRow { .kind = HitKind::LauncherCandidate,
-                   .layer = Layer::Popup,
-                   .click =
-                       [](State& state,
-                          std::size_t value,
-                          Clicks clicks,
-                          Pointer const&,
-                          std::vector<UiAction>& actions) {
-                           highlightCandidate(*state.interaction.launcher, state.engine, value);
-                           if (clicks == Clicks::Double)
-                               state.press(core::tui::KeyCode::Enter, actions);
-                       },
-                   .wheel = nullptr },
-        // A repository's chip narrows the list to it; the first, to every one.
-        MouseRow { .kind = HitKind::LauncherRepo,
-                   .layer = Layer::Popup,
-                   .click =
-                       [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>&) {
-                           auto const repos = scopeRepos(state.engine);
-                           auto& launcher = *state.interaction.launcher;
-                           scopeLauncherToRepo(launcher,
-                                               state.engine,
-                                               value == 0 || value > repos.size() ? "" : repos[value - 1]);
-                           state.interaction.launcherScope = launcher.scope;
-                       },
-                   .wheel = nullptr },
-        // A kind's chip narrows the list to that kind.
-        MouseRow { .kind = HitKind::LauncherKind,
-                   .layer = Layer::Popup,
-                   .click =
-                       [](State& state, std::size_t value, Clicks, Pointer const&, std::vector<UiAction>&) {
-                           auto& launcher = *state.interaction.launcher;
-                           scopeLauncherToKind(launcher,
-                                               state.engine,
-                                               value <= std::to_underlying(KindScope::Issues)
-                                                   ? static_cast<KindScope>(value)
-                                                   : KindScope::All);
-                           state.interaction.launcherScope = launcher.scope;
-                       },
-                   .wheel = nullptr },
         // A view's name in the top bar switches to it.
         MouseRow {
             .kind = HitKind::ViewName,
@@ -1716,13 +1647,13 @@ namespace
 
 bool Dashboard::State::popupOpen() const noexcept
 {
-    return interaction.startDialog || interaction.taskBox || interaction.launcher || interaction.palette
+    return interaction.startDialog || interaction.taskBox || interaction.palette
            || interaction.overlay != Overlay::None || interaction.work.menu;
 }
 
 void Dashboard::State::press(core::tui::KeyCode key, std::vector<UiAction>& actions)
 {
-    std::ranges::move(applyKeys({ core::tui::KeyEvent { .key = key } }, launcherHooks()),
+    std::ranges::move(applyKeys({ core::tui::KeyEvent { .key = key } }, dialogHooks()),
                       std::back_inserter(actions));
 }
 
@@ -1742,7 +1673,7 @@ void Dashboard::State::run(KeyCommand command, std::vector<UiAction>& actions)
 
 void Dashboard::State::afterCommand(View before)
 {
-    // A launcher a command opened gets its agent's session id now.
+    // A start dialog or an `n` box a command opened gets its agent's session id now.
     mintSession();
     // A view switched to builds what it shows.
     if (interaction.view != before)
@@ -1940,16 +1871,14 @@ std::vector<UiAction> Dashboard::State::resolveOverdueEscape()
         return {};
     escapeHeldSince.reset();
     ensureRows();
-    return applyKeys(parser.timeout(), launcherHooks());
+    return applyKeys(parser.timeout(), dialogHooks());
 }
 
-HooksWarning Dashboard::State::launcherHooks() const noexcept
+HooksWarning Dashboard::State::dialogHooks() const noexcept
 {
     if (interaction.startDialog)
         return interaction.startDialog->hooks;
-    if (interaction.taskBox)
-        return interaction.taskBox->hooks;
-    return interaction.launcher ? interaction.launcher->hooks : HooksWarning::None;
+    return interaction.taskBox ? interaction.taskBox->hooks : HooksWarning::None;
 }
 
 void Dashboard::State::syncLayout()
@@ -2008,7 +1937,6 @@ void Dashboard::State::syncLayout()
             panel->setVisible(shown);
     if (problems != nullptr)
         problems->refresh();
-    syncLauncher();
     syncStartDialog();
     syncTaskBox();
     syncPalette();
@@ -2095,32 +2023,6 @@ void Dashboard::State::mintSession()
         dialog->form.session = formatUuidV4(ids.next());
     if (auto& box = interaction.taskBox; box && box->form.session.empty())
         box->form.session = formatUuidV4(ids.next());
-    if (!interaction.launcher || !interaction.launcher->session.empty())
-        return;
-    interaction.launcher->session = formatUuidV4(ids.next());
-    if (interaction.launcher->form)
-        interaction.launcher->form->session = interaction.launcher->session;
-}
-
-void Dashboard::State::syncLauncher()
-{
-    if (!interaction.launcher)
-    {
-        if (screen.isOverlayVisible(*launcherView))
-            screen.hideOverlay(*launcherView);
-        return;
-    }
-    // Centred; the Narrow band gives it the whole tab.
-    auto const band = this->band();
-    auto const width = popupWidthIn(
-        band,
-        size.width,
-        std::clamp(size.width * LauncherWidePercent / 100, LauncherMinColumns, LauncherMaxColumns));
-    auto const height =
-        band == Band::Narrow ? size.height : std::min(launcherView->heightAt(width), size.height);
-    auto const wanted = Size { .width = width, .height = height };
-    launcherView->place(wanted);
-    showCentred(*launcherView, wanted);
 }
 
 void Dashboard::State::syncStartDialog()
@@ -2177,7 +2079,7 @@ std::vector<UiAction> Dashboard::input(std::string_view bytes)
     state.escapeHeldSince.reset();
     state.ensureRows();
     // A form's warning confirmed by a key of this input is not confirmed for the rest of it.
-    std::ranges::move(state.applyKeys(state.parser.feed(bytes), state.launcherHooks()),
+    std::ranges::move(state.applyKeys(state.parser.feed(bytes), state.dialogHooks()),
                       std::back_inserter(actions));
     if (bytes.ends_with('\x1b'))
         state.escapeHeldSince = state.clock.now();
@@ -2282,11 +2184,6 @@ void Dashboard::openStartDialogOn(std::string_view repo, ItemRef const& item, st
     openStartDialogFor(state.interaction, state.engine, repo, item, task);
     state.mintSession();
     state.repaint = State::Repaint::Needed;
-}
-
-std::optional<LauncherState> const& Dashboard::launcher() const noexcept
-{
-    return _state->interaction.launcher;
 }
 
 void Dashboard::messageRefused(std::string_view why)
