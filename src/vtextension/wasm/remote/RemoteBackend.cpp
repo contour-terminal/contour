@@ -239,6 +239,16 @@ namespace
             return _exports;
         }
 
+        /// Instantiates the module in its host, loading it again first if the host it was loaded in died.
+        ///
+        /// A respawned host that describes the module's bytes otherwise than its predecessor did fails
+        /// `InvalidComponent`, not `HostUnavailable`, although the host is the one at fault and is
+        /// terminated: `HostUnavailable` says the host could not be reached, which a caller may meet by
+        /// trying again in a new one, whereas this module's imports and exports were checked against its
+        /// world as first described, and what a host would run now is not that module. Refusing the module is
+        /// what keeps it from running unchecked; the next instantiation respawns a host and checks again.
+        /// @return The instance; `InvalidComponent` if a respawned host describes the module differently,
+        ///         `HostUnavailable` if the host died or broke the protocol, else the host's own error.
         [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
             IHostContext& context) override;
 

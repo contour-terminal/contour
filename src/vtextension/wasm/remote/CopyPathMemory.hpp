@@ -23,10 +23,11 @@ namespace vtextension::wasm::remote
 using MemoryFetch = std::function<std::optional<std::vector<std::byte>>(uint32_t address, uint32_t size)>;
 
 /// The ranges of one instance's memory the parent read since the instance last ran, as local copies it may
-/// write to. A range is fetched once, and a view inside it is served from the copy. A range fetched while an
-/// earlier one overlaps it starts out with the earlier one's bytes, written ones included, so that two views
-/// of the same bytes agree when they are taken. What was written goes back to the instance (flush()) before
-/// it next runs, after which the copies are dropped (clear()).
+/// write to. A view is served from a copy holding all of it as long as no other copy wrote into those bytes
+/// since that copy was fetched, so that views alternating between overlapping ranges fetch each range once.
+/// Otherwise the view's range is fetched anew, starting out with what flush() would leave there, so that two
+/// views of the same bytes agree when they are taken. What was written goes back to the instance (flush())
+/// before it next runs, after which the copies are dropped (clear()).
 ///
 /// Not thread-safe: used by the thread calling into its instance.
 class CopyPathMemory
@@ -54,6 +55,11 @@ class CopyPathMemory
     void clear() noexcept;
 
   private:
+    /// @return Per byte of [@p begin, @p end), what flush() would leave there: the latest fetched range's
+    /// write
+    ///         to it, else what its first holder fetched; nothing where no range holds it.
+    [[nodiscard]] std::vector<std::optional<std::byte>> settledBytes(uint64_t begin, uint64_t end) const;
+
     /// One fetched range: what the parent sees and writes, and what it held when it was fetched.
     struct Range
     {

@@ -180,3 +180,54 @@ TEST_CASE("CopyPathMemory.overlappedRangeIsNotServedStale", "[vtextension][remot
     CHECK((*inner)[0] == std::byte { 0xB4 });
     CHECK(memory.fetches == fetches);
 }
+
+TEST_CASE("CopyPathMemory.alternatingOverlappingViewsFetchEachRangeOnce", "[vtextension][remote]")
+{
+    // Room for A = [0, 8) and B = [4, 12) once each, and no more.
+    auto memory = FakeMemory { 256 };
+    auto copies = memory.copies(16);
+
+    for (auto const round: std::views::iota(0, 64))
+    {
+        // Each writes where the other does not reach: neither's copy of the bytes they share goes stale.
+        auto const a = copies.view(0, 8);
+        REQUIRE(a.has_value());
+        (*a)[round % 4] = static_cast<std::byte>(round);
+        auto const b = copies.view(4, 8);
+        REQUIRE(b.has_value());
+        (*b)[4 + (round % 4)] = static_cast<std::byte>(round);
+    }
+    CHECK(memory.fetches == 2);
+
+    memory.apply(copies.flush());
+    CHECK(memory.at(3) == std::byte { 63 });
+    CHECK(memory.at(5) == std::byte { 5 });
+    CHECK(memory.at(11) == std::byte { 63 });
+}
+
+TEST_CASE("CopyPathMemory.earlierRangeWrittenAfterALaterFetchIsSeen", "[vtextension][remote]")
+{
+    auto memory = FakeMemory { 256 };
+    auto copies = memory.copies(1024);
+
+    // A = [0, 8), then B = [4, 12), then A written where it overlaps B: B's copy of [4, 8) is stale now,
+    // and A, which holds it all, serves the view instead, fetching nothing.
+    auto const a = copies.view(0, 8);
+    REQUIRE(a.has_value());
+    REQUIRE(copies.view(4, 8).has_value());
+    (*a)[5] = std::byte { 0xA5 };
+
+    auto const inner = copies.view(4, 4);
+    REQUIRE(inner.has_value());
+    CHECK((*inner)[1] == std::byte { 0xA5 });
+    CHECK(memory.fetches == 2);
+
+    // A range fetched over both carries A's write, which B, not having written there, does not undo.
+    auto const both = copies.view(2, 8);
+    REQUIRE(both.has_value());
+    CHECK((*both)[3] == std::byte { 0xA5 });
+    CHECK(memory.fetches == 3);
+
+    memory.apply(copies.flush());
+    CHECK(memory.at(5) == std::byte { 0xA5 });
+}
