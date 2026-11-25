@@ -77,12 +77,12 @@ namespace
 /// How long any one thing a case waits for may take; it fails, rather than hang, beyond it.
 constexpr auto Patience = std::chrono::seconds { 5 };
 
-/// @return The real helper, held to @p timeouts.
+/// @return The real helper, held to @p timeouts, and locked down where the build has a sandbox.
 [[nodiscard]] HelperBackendConfig realHelper(HostTimeouts timeouts = {})
 {
     return HelperBackendConfig { .helper = VTEXTENSION_HELPER_PATH,
                                  .extraArguments = {},
-                                 .lockdown = LockdownRequirement::AcceptUnsandboxed,
+                                 .lockdown = process::testing::HelperLockdown,
                                  .timeouts = timeouts };
 }
 

@@ -421,6 +421,11 @@ jobs:
           exit 1
         fi
         test "$(dpkg-deb -f "$deb" Package)" = contour-daemon
+        # The extension host, where contour looks for it: without it no extension runs.
+        if ! dpkg-deb -c "$deb" | grep -Eq '\./usr/libexec/contour/contour-extension-host$'; then
+          echo "::error::contour-daemon does not contain usr/libexec/contour/contour-extension-host"
+          exit 1
+        fi
     # A clean machine is what a user has, and the runner is not one: it carries Qt, the whole build
     # toolchain and more. So the package is installed into a bare ubuntu image. `apt-get install ./file`
     # resolves its Depends from the archive, which is the point: nothing Qt may come with it. The script
@@ -2492,6 +2497,9 @@ jobs:
           OS_VERSION=${OS_OVERRIDE/./_}
           mv -v "./out/gcc-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
                 "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          # The extension host, where contour looks for it: without it no extension runs.
+          dpkg-deb -c "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb" \
+            | grep -E '\./usr/libexec/contour/contour-extension-host$'
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v4
         with:
@@ -2509,6 +2517,8 @@ jobs:
           for extension in agent-status clock git plasma sysload; do
             test -f "/usr/share/contour/extensions/$extension.wasm"
           done
+          # The extension host, where contour looks for it.
+          test -x /usr/libexec/contour/contour-extension-host
   # }}}
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:

@@ -41,6 +41,15 @@ if(CONTOUR_EXTENSIONS)
     # contour installs to CMAKE_INSTALL_BINDIR (../contour/CMakeLists.txt).
     file(RELATIVE_PATH CONTOUR_EXTENSION_HOST_RELATIVE_DIR
         "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBEXECDIR}/contour")
+    # The engine contour-extension-host runs, whose directory (vtextension/wasm/<engine>/) defines
+    # vtextension_<engine>_helper_engine: Wasmtime's wherever one was found (../cmake/ContourThirdParties.cmake),
+    # as it compiles modules to native code and shares their memory with Contour; else the one
+    # CONTOUR_WASM_RUNTIME selects, which interprets them.
+    if(CONTOUR_HAVE_WASMTIME)
+        set(CONTOUR_EXTENSION_HOST_ENGINE wasmtime)
+    else()
+        set(CONTOUR_EXTENSION_HOST_ENGINE ${CONTOUR_WASM_RUNTIME})
+    endif()
     add_subdirectory(vtextension)
     add_subdirectory(contour-extension-host)
 endif()

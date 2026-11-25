@@ -288,10 +288,10 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_engine)
     endif()
 endif()
 
-if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
-    # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
-    # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host
-    # only for the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
+if(VTEXTENSION_TESTING AND CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wasmtime" AND _process_source)
+    # The extension host executable itself (../../../contour-extension-host, on Wasmtime's engine, as here),
+    # started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host only for
+    # the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
     #
     # Beside them, the contract and the suites vtextension_test runs on the default backend, here composed by
     # testing/ProcessDefaultBackend.cpp as the remote backend over real helper processes: their real guests
@@ -338,5 +338,50 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)
+    endif()
+endif()
+
+if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_source)
+    # The extension host on WAMR's engine, started as Contour starts it: contour-extension-host where the build
+    # runs WAMR's, its test-only twin contour-extension-host-wamr where it runs another
+    # (../../../contour-extension-host). The contract, the bundled extensions and the process cases of
+    # vtextension_helper_test, composed by testing/ProcessDefaultBackend.cpp over that helper, locked down where
+    # the build has a sandbox.
+    set(_wamr_helper contour-extension-host-wamr)
+    if(CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wamr")
+        set(_wamr_helper contour-extension-host)
+    endif()
+    add_executable(vtextension_wamr_helper_test
+        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+        ProcessBackend_test.cpp
+        ReviewFocusProcess_test.cpp
+        WamrHelper_test.cpp
+        process/testing/HelperComposition.cpp
+        process/testing/HelperComposition.hpp
+        process/testing/LaunchedHelper.cpp
+        process/testing/LaunchedHelper.hpp
+        testing/ProcessDefaultBackend.cpp
+        ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
+    )
+    target_link_libraries(vtextension_wamr_helper_test PRIVATE
+        vtextension vtextension_host vtextension_remote vtextension_remote_process vtextension_remote_wire
+        glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    add_dependencies(vtextension_wamr_helper_test ${_wamr_helper} contour-extension-host-hostile)
+    target_compile_definitions(vtextension_wamr_helper_test PRIVATE
+        VTEXTENSION_HELPER_PATH="$<TARGET_FILE:${_wamr_helper}>"
+        VTEXTENSION_HOSTILE_HELPER_PATH="$<TARGET_FILE:contour-extension-host-hostile>")
+    if(CONTOUR_WASM_GUESTS)
+        # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
+        foreach(_guest IN ITEMS echo hostile sleeper spawner)
+            add_dependencies(vtextension_wamr_helper_test ${_guest}_wasm)
+        endforeach()
+        add_dependencies(vtextension_wamr_helper_test contour_bundled_extensions)
+        target_compile_definitions(vtextension_wamr_helper_test PRIVATE
+            VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+    endif()
+    add_test(NAME vtextension_wamr_helper_test COMMAND vtextension_wamr_helper_test)
+    if(NOT WIN32)
+        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+        target_compile_options(vtextension_wamr_helper_test PRIVATE -Wno-c2y-extensions)
     endif()
 endif()
