@@ -29,9 +29,12 @@ struct HostTimeouts
 /// How the backend that runs extensions is set up.
 struct BackendConfig
 {
-    std::filesystem::path helper;                      ///< The extension host executable.
-    HostTimeouts timeouts {};                          ///< How long a host may take; not enforced yet.
-    std::shared_ptr<remote::IHostConnector> connector; ///< How hosts are started; null: in this process.
+    std::filesystem::path helper; ///< The extension host executable.
+    HostTimeouts timeouts {};     ///< How long a host may take; not enforced yet.
+    /// How hosts are started. Null leaves it to the composition root: the remote backend itself needs one,
+    /// and fails every load `HostUnavailable` without it, while a composition that can run hosts in this
+    /// process supplies a connector for them.
+    std::shared_ptr<remote::IHostConnector> connector;
 };
 
 } // namespace vtextension::wasm

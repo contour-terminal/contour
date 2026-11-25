@@ -68,9 +68,12 @@ namespace
         auto reply = incarnation.request(proto::Load { .runtimeId = HelperIncarnation::RuntimeId,
                                                        .moduleId = moduleId,
                                                        .bytes = { bytes.begin(), bytes.end() } });
+        // A module too large to send is the extension's fault; anything else, an over-cap reply included, the
+        // host's, which then is dead.
         if (!reply)
-            return std::unexpected(reply.error() == StreamError::OverCap ? ExtensionError::InvalidComponent
-                                                                         : ExtensionError::HostUnavailable);
+            return std::unexpected(reply.error() == StreamError::OverCap && incarnation.isAlive()
+                                       ? ExtensionError::InvalidComponent
+                                       : ExtensionError::HostUnavailable);
         auto* const loaded = std::get_if<proto::Loaded>(&*reply);
         if (!loaded || loaded->moduleId != moduleId)
         {
@@ -174,6 +177,8 @@ namespace
             if (key.empty())
                 return std::make_shared<HelperSlot>(_connector, _create);
             auto const lock = std::scoped_lock { _mutex };
+            // The hosts of identities whose last module went are forgotten.
+            std::erase_if(_slots, [](auto const& entry) { return entry.second.expired(); });
             auto& entry = _slots[key];
             auto slot = entry.lock();
             if (!slot)
@@ -390,15 +395,20 @@ namespace
         auto& host = **incarnation;
         if (*incarnation != _loadedIn)
         {
-            // The host it was loaded in died: loaded again in the new one, it must be the module it was.
+            // The host it was loaded in died: loaded again in the new one, it must be the module it was. An
+            // honest host describes the same bytes alike every time, so one that does not is not trusted, and
+            // the module is adopted there only once it matched.
             auto reloaded = loadInto(host, _bytes);
             if (!reloaded)
                 return std::unexpected(reloaded.error());
+            if (reloaded->imports != _imports || reloaded->exports != _exports)
+            {
+                host.markDead();
+                return std::unexpected(ExtensionError::InvalidComponent);
+            }
             _loadedIn->post(proto::Release { .target = proto::ReleaseTarget::Module, .id = _moduleId });
             _loadedIn = *incarnation;
             _moduleId = reloaded->moduleId;
-            if (reloaded->imports != _imports || reloaded->exports != _exports)
-                return std::unexpected(ExtensionError::InvalidComponent);
         }
 
         auto const instanceId = host.nextInstanceId();

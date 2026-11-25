@@ -27,10 +27,15 @@ std::optional<std::span<std::byte>> CopyPathMemory::view(uint32_t address, uint3
     if (end > uint64_t { 1 } << 32)
         return std::nullopt;
 
-    // The latest range holding all of it: it carries every earlier range's bytes it overlaps.
-    for (auto& range: _ranges | std::views::reverse)
-        if (range.address <= begin && end <= range.address + uint64_t { range.bytes.size() })
-            return std::span { range.bytes }.subspan(address - range.address, size);
+    // Served from the latest range overlapping it, if that one holds all of it: it carries every earlier
+    // range's bytes it overlaps. A range holding it all but overlapped by a later one may hold bytes the
+    // later one changed since; a range fetched anew overlays them.
+    auto const latest = std::ranges::find_if(_ranges | std::views::reverse, [&](Range const& range) {
+        return range.address < end && begin < range.address + uint64_t { range.bytes.size() };
+    });
+    if (latest != (_ranges | std::views::reverse).end() && latest->address <= begin
+        && end <= latest->address + uint64_t { latest->bytes.size() })
+        return std::span { latest->bytes }.subspan(address - latest->address, size);
 
     if (_heldBytes + size > _capBytes)
         return std::nullopt;

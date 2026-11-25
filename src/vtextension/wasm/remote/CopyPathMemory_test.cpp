@@ -154,3 +154,29 @@ TEST_CASE("CopyPathMemory.refusesWhatItCannotHold", "[vtextension][remote]")
     CHECK(memory.fetches == 2);
     CHECK(copies.view(100, 16).has_value());
 }
+
+TEST_CASE("CopyPathMemory.overlappedRangeIsNotServedStale", "[vtextension][remote]")
+{
+    auto memory = FakeMemory { 256 };
+    auto copies = memory.copies(1024);
+
+    // A = [0, 8), then B = [4, 12), written where it overlaps A: A's copy of [4, 8) is stale now.
+    REQUIRE(copies.view(0, 8).has_value());
+    auto const b = copies.view(4, 8);
+    REQUIRE(b.has_value());
+    (*b)[0] = std::byte { 0xB4 };
+    (*b)[3] = std::byte { 0xB7 };
+
+    auto const again = copies.view(0, 8);
+    REQUIRE(again.has_value());
+    CHECK((*again)[0] == std::byte { 0 });
+    CHECK((*again)[4] == std::byte { 0xB4 });
+    CHECK((*again)[7] == std::byte { 0xB7 });
+
+    // A view inside the latest range overlapping it is served from that range, fetching nothing.
+    auto const fetches = memory.fetches;
+    auto const inner = copies.view(4, 4);
+    REQUIRE(inner.has_value());
+    CHECK((*inner)[0] == std::byte { 0xB4 });
+    CHECK(memory.fetches == fetches);
+}
