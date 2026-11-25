@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -32,7 +33,9 @@ using MemoryFetch = std::function<std::optional<std::vector<std::byte>>(uint32_t
 ///
 /// The shadow is allocated once and left untouched until a page is fetched into it, so that only the pages
 /// read take memory where the system commits it lazily (Linux, macOS, the BSDs). Windows commits the
-/// allocation up front, charging it against the commit limit while its pages stay unused.
+/// allocation up front, charging it against the commit limit while its pages stay unused. What each fetched
+/// page held is kept beside it, in an arena that grows by the page and keeps its capacity across clear(), so
+/// that views of as many pages as before allocate nothing for it.
 ///
 /// Not thread-safe: used by the thread calling into its instance.
 class CopyPathMemory
@@ -61,13 +64,14 @@ class CopyPathMemory
     /// Forgets every fetched page: the next view of it fetches it again.
     void clear() noexcept;
 
+    /// Test hook.
+    /// @return How many bytes the snapshots of the fetched pages take: a page's worth per page fetched since
+    ///         clear(), and nothing for the rest of the memory.
+    [[nodiscard]] std::size_t snapshotBytes() const noexcept;
+
   private:
-    /// Whether a page of the shadow holds the instance's bytes.
-    enum class PageState : uint8_t
-    {
-        Absent,  ///< Not fetched since the instance last ran.
-        Fetched, ///< Fetched: the shadow holds it, as written since.
-    };
+    /// The slot of a page that has none: it was not fetched since the instance last ran.
+    static constexpr auto NoSlot = std::numeric_limits<uint32_t>::max();
 
     /// Why pages could not be fetched.
     enum class FetchError : uint8_t
@@ -75,8 +79,12 @@ class CopyPathMemory
         Unreachable, ///< The host refused the range, or could not be reached.
     };
 
-    /// Fetches pages [@p first, @p end) into the shadow and their snapshot, all of them absent.
+    /// Fetches pages [@p first, @p end) into the shadow, all of them absent, and snapshots each.
     [[nodiscard]] std::expected<void, FetchError> fetchPages(std::size_t first, std::size_t end);
+
+    /// @return The snapshot of page @p page, which must have been fetched: its bytes as fetched or last
+    /// flushed.
+    [[nodiscard]] std::span<std::byte> snapshotOf(std::size_t page) noexcept;
 
     /// @return The address one past page @p page's last byte.
     [[nodiscard]] std::size_t pageEnd(std::size_t page) const noexcept;
@@ -84,10 +92,10 @@ class CopyPathMemory
     uint32_t _instanceId;
     std::size_t _memoryBytes;
     MemoryFetch _fetch;
-    std::unique_ptr<std::byte[]> _shadow;   ///< The memory as the parent sees and writes it.
-    std::unique_ptr<std::byte[]> _snapshot; ///< The fetched pages as fetched or last flushed.
-    std::vector<PageState> _pages;          ///< Per page of the memory.
-    std::vector<std::size_t> _fetched;      ///< The pages fetched since clear(), in fetch order.
+    std::unique_ptr<std::byte[]> _shadow; ///< The memory as the parent sees and writes it.
+    std::vector<uint32_t> _slots;         ///< Per page of the memory, its snapshot's slot; NoSlot if absent.
+    std::vector<std::size_t> _fetched;    ///< The pages fetched since clear(), in fetch order.
+    std::vector<std::byte> _snapshots;    ///< One page per slot, in slot order; keeps its capacity.
 };
 
 } // namespace vtextension::wasm::remote

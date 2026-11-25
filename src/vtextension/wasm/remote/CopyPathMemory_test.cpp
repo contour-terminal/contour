@@ -265,3 +265,32 @@ TEST_CASE("CopyPathMemory.refusesWhatLiesPastTheMemory", "[vtextension][remote]"
                                          } };
     CHECK_FALSE(copiesOfSmall.view(Page, 4).has_value());
 }
+
+TEST_CASE("CopyPathMemory.snapshotsOnlyTheFetchedPages", "[vtextension][remote]")
+{
+    auto memory = FakeMemory { 64 * std::size_t { Page } };
+    auto copies = memory.copies();
+    CHECK(copies.snapshotBytes() == 0);
+
+    REQUIRE(copies.view(Page - 2, 4).has_value());
+    REQUIRE(copies.view(40 * Page, 8).has_value());
+    CHECK(copies.snapshotBytes() == 3 * std::size_t { Page });
+    // A view of held pages adds none.
+    REQUIRE(copies.view(0, 8).has_value());
+    CHECK(copies.snapshotBytes() == 3 * std::size_t { Page });
+
+    // Written and flushed, the snapshots stay what was fetched: the arena does not grow.
+    auto const view = copies.view(Page - 2, 4);
+    REQUIRE(view.has_value());
+    std::ranges::fill(*view, std::byte { 0x5A });
+    memory.apply(copies.flush());
+    CHECK(copies.flush().empty());
+    CHECK(copies.snapshotBytes() == 3 * std::size_t { Page });
+    CHECK(memory.at(Page - 2) == std::byte { 0x5A });
+    CHECK(memory.at(Page + 1) == std::byte { 0x5A });
+
+    copies.clear();
+    CHECK(copies.snapshotBytes() == 0);
+    REQUIRE(copies.view(10 * Page, 4).has_value());
+    CHECK(copies.snapshotBytes() == Page);
+}

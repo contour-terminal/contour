@@ -25,11 +25,9 @@ CopyPathMemory::CopyPathMemory(uint32_t instanceId, std::size_t memoryBytes, Mem
     _instanceId { instanceId },
     _memoryBytes { std::min(memoryBytes, AddressSpaceBytes) },
     _fetch { std::move(fetch) },
-    // Default-initialized: nothing writes the buffers, so the system commits only the pages fetched into
-    // them.
+    // Default-initialized: nothing writes the buffer, so the system commits only the pages fetched into it.
     _shadow { std::make_unique_for_overwrite<std::byte[]>(_memoryBytes) },
-    _snapshot { std::make_unique_for_overwrite<std::byte[]>(_memoryBytes) },
-    _pages((_memoryBytes + PageBytes - 1) / PageBytes, PageState::Absent)
+    _slots((_memoryBytes + PageBytes - 1) / PageBytes, NoSlot)
 {
 }
 
@@ -48,7 +46,7 @@ std::optional<std::span<std::byte>> CopyPathMemory::view(uint32_t address, uint3
     auto runBegin = std::optional<std::size_t> {};
     for (auto const page: std::views::iota(firstPage, endPage))
     {
-        auto const absent = _pages[page] == PageState::Absent;
+        auto const absent = _slots[page] == NoSlot;
         if (absent && !runBegin)
             runBegin = page;
         else if (!absent && runBegin && !fetchPages(*std::exchange(runBegin, std::nullopt), page))
@@ -67,13 +65,28 @@ std::expected<void, CopyPathMemory::FetchError> CopyPathMemory::fetchPages(std::
     if (!fetched || fetched->size() != size)
         return std::unexpected(FetchError::Unreachable);
     std::ranges::copy(*fetched, _shadow.get() + address);
-    std::ranges::copy(*fetched, _snapshot.get() + address);
+    // Each page's snapshot takes the next slot of the arena, which keeps its capacity across clear().
     for (auto const page: std::views::iota(first, end))
     {
-        _pages[page] = PageState::Fetched;
+        _slots[page] = static_cast<uint32_t>(_fetched.size());
         _fetched.push_back(page);
+        _snapshots.resize(_fetched.size() * PageBytes);
+        auto const pageBytes =
+            std::span { *fetched }.subspan((page - first) * PageBytes, pageEnd(page) - (page * PageBytes));
+        std::ranges::copy(pageBytes, snapshotOf(page).begin());
     }
     return {};
+}
+
+std::span<std::byte> CopyPathMemory::snapshotOf(std::size_t page) noexcept
+{
+    return std::span { _snapshots }.subspan(std::size_t { _slots[page] } * PageBytes,
+                                            pageEnd(page) - (page * PageBytes));
+}
+
+std::size_t CopyPathMemory::snapshotBytes() const noexcept
+{
+    return _snapshots.size();
 }
 
 std::size_t CopyPathMemory::pageEnd(std::size_t page) const noexcept
@@ -84,14 +97,21 @@ std::size_t CopyPathMemory::pageEnd(std::size_t page) const noexcept
 std::vector<proto::MemoryWrite> CopyPathMemory::flush()
 {
     auto const shadow = std::span { _shadow.get(), _memoryBytes };
-    auto const snapshot = std::span { _snapshot.get(), _memoryBytes };
     auto writes = std::vector<proto::MemoryWrite> {};
+    // Emits [begin, end), and takes it into the snapshots of the pages it spans.
     auto const emit = [&](std::size_t begin, std::size_t end) {
         auto const run = shadow.subspan(begin, end - begin);
         writes.push_back(proto::MemoryWrite { .instanceId = _instanceId,
                                               .address = static_cast<uint32_t>(begin),
                                               .bytes = { run.begin(), run.end() } });
-        std::ranges::copy(run, snapshot.begin() + static_cast<std::ptrdiff_t>(begin));
+        for (auto const page: std::views::iota(begin / PageBytes, ((end - 1) / PageBytes) + 1))
+        {
+            auto const from = std::max(begin, page * PageBytes);
+            auto const to = std::min(end, pageEnd(page));
+            std::ranges::copy(shadow.subspan(from, to - from),
+                              snapshotOf(page).begin()
+                                  + static_cast<std::ptrdiff_t>(from - (page * PageBytes)));
+        }
     };
 
     // A run of changed bytes continues across a page boundary only into the adjacent page.
@@ -105,8 +125,9 @@ std::vector<proto::MemoryWrite> CopyPathMemory::flush()
             emit(*std::exchange(runBegin, std::nullopt), previousEnd);
         previousEnd = pageEnd(page);
         // Most pages are only read: compared whole, at once, they end any run and need no closer look.
-        auto const extent = previousEnd - pageBegin;
-        if (std::ranges::equal(shadow.subspan(pageBegin, extent), snapshot.subspan(pageBegin, extent)))
+        auto const snapshot = snapshotOf(page);
+        auto const current = shadow.subspan(pageBegin, snapshot.size());
+        if (std::ranges::equal(current, snapshot))
         {
             if (runBegin)
                 emit(*std::exchange(runBegin, std::nullopt), pageBegin);
@@ -114,7 +135,7 @@ std::vector<proto::MemoryWrite> CopyPathMemory::flush()
         }
         for (auto const at: std::views::iota(pageBegin, previousEnd))
         {
-            auto const changed = shadow[at] != snapshot[at];
+            auto const changed = shadow[at] != snapshot[at - pageBegin];
             if (changed && !runBegin)
                 runBegin = at;
             else if (!changed && runBegin)
@@ -129,8 +150,9 @@ std::vector<proto::MemoryWrite> CopyPathMemory::flush()
 void CopyPathMemory::clear() noexcept
 {
     for (auto const page: _fetched)
-        _pages[page] = PageState::Absent;
+        _slots[page] = NoSlot;
     _fetched.clear();
+    _snapshots.clear();
 }
 
 } // namespace vtextension::wasm::remote

@@ -38,8 +38,9 @@ using transport::StreamError;
 
 namespace
 {
-    /// The most bytes of an instance's memory the parent holds copies of at once, whatever its runtime's cap:
-    /// the most one MemoryData or MemoryWrite carries.
+    /// The largest instance memory the protocol carries (one MemoryData or MemoryWrite holds at most this
+    /// much), and so the limit of the memory the parent's copy reaches, whatever its runtime's cap: no view
+    /// reaches past it.
     constexpr auto MaxCopiedBytes = static_cast<std::size_t>(proto::PduLimits {}.maxMemoryBytes);
 
     /// Whether an instance was interrupted (IWasmInstance::interrupt()).
