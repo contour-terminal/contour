@@ -181,6 +181,37 @@ if(CONTOUR_EXTENSIONS AND NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIME
     message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly runtime "
                         "Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
 endif()
+# Where status-line extensions run: out-of-process, in contour-extension-host processes Contour starts, one
+# per extension, each locked in the platform's sandbox; or in-process, inside Contour itself. Out of process
+# by default where Contour has a sandbox for the extension host, a row of _CONTOUR_SANDBOXED_PLATFORMS each:
+# <CMAKE_SYSTEM_NAME>:<regular expression matching CMAKE_SYSTEM_PROCESSOR>. Elsewhere a helper would be
+# refused for running unconfined, and extensions would not run at all.
+set(_CONTOUR_SANDBOXED_PLATFORMS
+    "Linux:^(x86_64|AMD64|aarch64|arm64)$"
+)
+set(CONTOUR_SANDBOXED_PLATFORM OFF)
+foreach(_platform IN LISTS _CONTOUR_SANDBOXED_PLATFORMS)
+    string(FIND "${_platform}" ":" _platform_separator)
+    string(SUBSTRING "${_platform}" 0 ${_platform_separator} _platform_system)
+    math(EXPR _platform_separator "${_platform_separator} + 1")
+    string(SUBSTRING "${_platform}" ${_platform_separator} -1 _platform_processors)
+    if(CMAKE_SYSTEM_NAME STREQUAL _platform_system AND CMAKE_SYSTEM_PROCESSOR MATCHES "${_platform_processors}")
+        set(CONTOUR_SANDBOXED_PLATFORM ON)
+    endif()
+endforeach()
+set(_CONTOUR_EXTENSION_HOSTS out-of-process in-process)
+if(CONTOUR_SANDBOXED_PLATFORM)
+    set(_CONTOUR_EXTENSION_HOST_DEFAULT out-of-process)
+else()
+    set(_CONTOUR_EXTENSION_HOST_DEFAULT in-process)
+endif()
+set(CONTOUR_EXTENSION_HOST "${_CONTOUR_EXTENSION_HOST_DEFAULT}" CACHE STRING
+    "Where status-line extensions run: out-of-process or in-process [default: out-of-process where the extension host has a sandbox]")
+set_property(CACHE CONTOUR_EXTENSION_HOST PROPERTY STRINGS ${_CONTOUR_EXTENSION_HOSTS})
+if(CONTOUR_EXTENSIONS AND NOT CONTOUR_EXTENSION_HOST IN_LIST _CONTOUR_EXTENSION_HOSTS)
+    message(FATAL_ERROR "CONTOUR_EXTENSION_HOST is \"${CONTOUR_EXTENSION_HOST}\", which is not where extensions can "
+                        "run. Known: ${_CONTOUR_EXTENSION_HOSTS}.")
+endif()
 # Whether the extension host can run Wasmtime: set ON by cmake/ContourThirdParties.cmake once a Wasmtime
 # resolves (the pinned prebuilt archive, or an installed one), never by the user.
 set(CONTOUR_HAVE_WASMTIME OFF)
@@ -486,6 +517,7 @@ macro(ContourConfigurationSummary)
     message(STATUS "Build contour frontend GUI:                         ${CONTOUR_FRONTEND_GUI}")
     message(STATUS "WebAssembly status-line extensions:                 ${CONTOUR_EXTENSIONS}")
     if(CONTOUR_EXTENSIONS)
+        message(STATUS "|> Where extensions run:                            ${CONTOUR_EXTENSION_HOST}")
         message(STATUS "|> WebAssembly runtime:                             ${CONTOUR_WASM_RUNTIME}")
         message(STATUS "|> Wasmtime for the extension host:                 ${CONTOUR_WASMTIME_STRING}")
     endif()

@@ -513,9 +513,10 @@ if(VTHOST_TESTING)
             keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp testing/StartTrace_test.cpp)
         target_link_libraries(vthost_test vthost_keeper_harness)
     endif()
-    # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
+    # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does, in this process on
+    # WAMR's backend: a test starts no extension host process.
     if(CONTOUR_EXTENSIONS)
-        target_link_libraries(vthost_test vtextension_runtime)
+        target_link_libraries(vthost_test vtextension_wamr)
     endif()
     # The release check reads which releases metainfo.xml names (@see proto/ReleasedVersions.hpp).
     target_compile_definitions(vthost_test PRIVATE CONTOUR_METAINFO_PATH="${PROJECT_SOURCE_DIR}/metainfo.xml")

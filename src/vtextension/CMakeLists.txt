@@ -1,7 +1,7 @@
 # vtextension: hosts WebAssembly status-line extensions on a runtime-neutral interface (wasm/WasmRuntime.hpp).
 # Qt-free, so that both the GUI (src/contour) and the daemon (src/vthost) can link it. It links no WebAssembly
-# runtime: the backend selected by CONTOUR_WASM_RUNTIME is its own target (wasm/<runtime>/), and a program
-# links it through vtextension_runtime, defined at the bottom.
+# runtime: each backend is its own target (wasm/<runtime>/, and wasm/remote/ for extension host processes),
+# and a program links the one CONTOUR_EXTENSION_HOST selects through vtextension_runtime, defined at the bottom.
 
 set(vtextension_SOURCES
     BundledExtensions.cpp
@@ -175,8 +175,9 @@ if(VTEXTENSION_TESTING)
     else()
         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
     endif()
-    # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
-    target_link_libraries(vtextension_test PRIVATE vtextension_runtime vtextension_remote vtextension_remote_wire glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    # The tests run real guests in this process, on WAMR's backend, named rather than the program's selection:
+    # they start no extension host process. Its own tests are added by its directory.
+    target_link_libraries(vtextension_test PRIVATE vtextension_wamr vtextension_remote vtextension_remote_wire glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
 
     # Compiles the headers other modules include (the GUI, vthost) without glaze on the include path: a public
     # header that pulled in ControlCodec.hpp, or anything else naming glaze, fails to build here, as it would in
@@ -192,18 +193,18 @@ if(VTEXTENSION_TESTING)
     endif()
 endif()
 
-# The backend this build selected (CONTOUR_WASM_RUNTIME, validated in the top-level CMakeLists.txt), and the one
-# name everything that composes a program links: the GUI, contour_cli (`contour daemon`), bench-headless and the
-# test executables. vtextension and vthost do not. Its target defines vtextension::wasm::makeDefaultBackend().
-add_subdirectory(wasm/${CONTOUR_WASM_RUNTIME})
-if(CONTOUR_HAVE_WASMTIME AND NOT CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
-    # Wasmtime's backend, beside the selected one: built and tested wherever Wasmtime was found, while no
-    # program links it yet.
+# The engines' backends: WAMR's always, as the tests run guests in this process on it; Wasmtime's wherever one
+# was found (../../cmake/ContourThirdParties.cmake).
+add_subdirectory(wasm/wamr)
+if(CONTOUR_HAVE_WASMTIME)
     add_subdirectory(wasm/wasmtime)
 endif()
 
 # Whether the extension host locks itself down with the Linux sandbox (wasm/host/Sandbox_linux.cpp): Linux, on the
-# two architectures whose system calls its filter numbers. Read by both directories below.
+# architectures whose system calls its filter numbers (host/linux/SystemCallRows.cpp). Keyed on those alone, as
+# FreeBSD's and macOS's are on their systems, and not on _CONTOUR_SANDBOXED_PLATFORMS (../../CMakeLists.txt): taking
+# a row out of that table changes where extensions run by default, and must never compile a sandbox out. Read by
+# both directories below.
 set(VTEXTENSION_LINUX_SANDBOX OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|aarch64|arm64)$")
     set(VTEXTENSION_LINUX_SANDBOX ON)
@@ -213,5 +214,16 @@ endif()
 # always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.
 add_subdirectory(wasm/remote)
 add_subdirectory(wasm/host)
+
+# The backend a program runs its extensions on, and the one name every program that composes one links: the
+# GUI and `contour daemon` (../contour/CMakeLists.txt) and bench-headless. vtextension, vthost and the test
+# executables do not; a test names the backend it runs on. Its target defines
+# vtextension::wasm::makeDefaultBackend(): out of process, the remote backend over extension host processes
+# (vtextension_out_of_process, wasm/remote/), which links no engine; in process, the engine
+# CONTOUR_WASM_RUNTIME names.
 add_library(vtextension_runtime INTERFACE)
-target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})
+if(CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
+    target_link_libraries(vtextension_runtime INTERFACE vtextension_out_of_process)
+else()
+    target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})
+endif()

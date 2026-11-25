@@ -140,6 +140,7 @@ if(_process_source)
             LaneWatch_test.cpp
             process/ExtensionHostSupervisor_test.cpp
             process/HelperLocation_test.cpp
+            process/HostComposition_test.cpp
             process/HostTimers_test.cpp
             process/ProcessHostConnector_test.cpp
             process/ProcessLauncher_test.cpp
@@ -156,10 +157,11 @@ if(_process_source)
             transport/WakeSignal_test.cpp
         )
         # vtextension_host on every system: the launcher's tests read the host's cap policy (HostBootstrap.hpp),
-        # whose header needs the sandbox definition only that target carries.
+        # whose header needs the sandbox definition only that target carries. vtextension_out_of_process for the
+        # composition's tests, which create backends but load nothing through a helper.
         target_link_libraries(vtextension_process_test PRIVATE
-            vtextension_host vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2
-            contour_test_trace)
+            vtextension_host vtextension_out_of_process vtextension_remote_process vtextension_remote_wire
+            core::testing Catch2::Catch2 contour_test_trace)
         if(VTEXTENSION_LINUX_SANDBOX)
             target_sources(vtextension_process_test PRIVATE
                 ../host/linux/Landlock_test.cpp
@@ -195,6 +197,22 @@ add_library(vtextension_remote STATIC
     SharedGuestMemory.hpp
 )
 target_link_libraries(vtextension_remote PUBLIC vtextension vtextension_remote_wire vtextension_remote_process)
+
+if(_process_source)
+    # vtextension_out_of_process: how a program runs its extensions out of process -- one supervisor, one
+    # kind and one connector for every backend (process/HostComposition.hpp) -- and the default backend
+    # composed of them (DefaultBackend.cpp), which a program links through vtextension_runtime
+    # (../../CMakeLists.txt). Links no engine: the engine runs in the helper.
+    add_library(vtextension_out_of_process STATIC
+        DefaultBackend.cpp
+        process/HostComposition.cpp
+        process/HostComposition.hpp
+    )
+    target_link_libraries(vtextension_out_of_process PUBLIC vtextension_remote vtextension_remote_process vtpty)
+elseif(CONTOUR_EXTENSIONS AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
+    message(FATAL_ERROR "CONTOUR_EXTENSION_HOST is out-of-process, but Contour cannot start processes on "
+                        "${CMAKE_SYSTEM_NAME} yet; choose in-process.")
+endif()
 
 option(VTEXTENSION_FUZZING "Builds the extension host protocol's libFuzzer target (Clang only) [default: OFF]" OFF)
 if(VTEXTENSION_FUZZING)

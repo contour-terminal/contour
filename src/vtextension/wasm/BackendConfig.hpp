@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 namespace vtextension::wasm
 {
@@ -34,6 +35,28 @@ enum class LockdownRequirement : uint8_t
     RequireLockedDown, ///< Only a host inside its sandbox; one that runs without is refused.
     AcceptUnsandboxed, ///< A host without a sandbox too: tests, and platforms that have none yet.
 };
+
+/// @param requirement A requirement, or any value of its type.
+/// @return Whether @p requirement names one.
+[[nodiscard]] constexpr bool isLockdownRequirement(LockdownRequirement requirement) noexcept
+{
+    switch (requirement)
+    {
+        case LockdownRequirement::RequireLockedDown:
+        case LockdownRequirement::AcceptUnsandboxed: return true;
+    }
+    return false;
+}
+
+/// The last requirement: what a table with a row per requirement is sized by. isLockdownRequirement()'s
+/// switch, which has no default, keeps it the last: a requirement added after it fails to compile until this
+/// names it.
+inline constexpr auto LastLockdownRequirement = LockdownRequirement::AcceptUnsandboxed;
+
+static_assert(isLockdownRequirement(LastLockdownRequirement));
+static_assert(
+    !isLockdownRequirement(static_cast<LockdownRequirement>(std::to_underlying(LastLockdownRequirement) + 1)),
+    "LastLockdownRequirement must name the last requirement");
 
 /// How the backend that runs extensions is set up.
 struct BackendConfig

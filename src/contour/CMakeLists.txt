@@ -819,6 +819,15 @@ endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
 contour_production_executable(contour)
+# The backend the GUI's and `contour daemon`'s extensions run on, which their composition roots create
+# (makeDefaultBackend()): the program links it, so that a test linking the same code names its own instead. Out
+# of process, the helper is placed beside the build tree's contour, as it is installed beside the installed one.
+if(CONTOUR_EXTENSIONS)
+    target_link_libraries(contour PRIVATE vtextension_runtime)
+    if(NOT CONTOUR_MACOS_APP_BUNDLE)
+        contour_place_extension_host_beside(contour)
+    endif()
+endif()
 
 # LLVM 22's ThreadSanitizer runtime does not intercept glibc's pthread_clockjoin_np, the only join Qt
 # 6.10's QThread::wait() uses on Linux, so it takes every waited-for QThread to be still running and
@@ -963,10 +972,6 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 if(CONTOUR_EXTENSIONS)
     target_link_libraries(contour_core PUBLIC contour_extensions)
-endif()
-# ContourGuiApp is a composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()).
-if(CONTOUR_EXTENSIONS AND CONTOUR_FRONTEND_GUI)
-    target_link_libraries(contour_core PRIVATE vtextension_runtime)
 endif()
 
 # The GUI-only layers beneath the frontend. Guarded for the same reason they are only added as
@@ -1303,6 +1308,11 @@ if(CONTOUR_FRONTEND_GUI)
             endif()
         endforeach()
         target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy contour_test_trace)
+        if(CONTOUR_EXTENSIONS)
+            # The extensions ContourGuiApp runs in its tests run in this process, on WAMR's backend: a test
+            # starts no extension host process.
+            target_link_libraries(contour_gui_test PRIVATE vtextension_wamr)
+        endif()
 
         # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
         if(TARGET contour_tsan_thread_join)
@@ -1906,7 +1916,9 @@ if(CONTOUR_TESTING)
         target_sources(contour_test PRIVATE
             config/ExtensionDeclarations_test.cpp
         )
-        target_link_libraries(contour_test PRIVATE contour_extensions)
+        # `contour daemon`'s extensions run in this process, on WAMR's backend: a test starts no extension host
+        # process.
+        target_link_libraries(contour_test PRIVATE contour_extensions vtextension_wamr)
     endif()
     add_test(NAME contour_test COMMAND contour_test)
     # The contour binary, for ShellIntegrationShells.profileLine: the profile line it tests asks that binary

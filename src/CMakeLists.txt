@@ -25,6 +25,38 @@ if(APPLE AND CONTOUR_FRONTEND_GUI)
     set(CONTOUR_MACOS_APP_BUNDLE ON)
 endif()
 
+# contour_place_extension_host_beside(<target>)
+#
+# Where extensions run out of process, has the build tree carry contour-extension-host beside <target>'s
+# executable, where locateExtensionHost()'s candidate of the program's own directory finds it: the build tree's
+# programs run extensions as installed ones do, and no build-tree path is compiled into a binary. The copy is a
+# command whose output is the placed helper, so it reruns whenever the helper is rebuilt, even when <target> is
+# not. Called in <target>'s own directory, whose binary directory <target> is built into: an OUTPUT may not name
+# a target's directory by generator expression. Nothing to do where every executable is built into one directory
+# (CMAKE_RUNTIME_OUTPUT_DIRECTORY, as on Windows), and not for a macOS bundle, which carries its own copy.
+# Defined before the modules: bench-headless (vtbackend/) is placed before the helper's directory is read.
+function(contour_place_extension_host_beside target)
+    if(NOT CONTOUR_EXTENSIONS OR NOT CONTOUR_EXTENSION_HOST STREQUAL "out-of-process" OR CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+        return()
+    endif()
+    get_property(_isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(_isMultiConfig)
+        set(_placedDir "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>")
+    else()
+        set(_placedDir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    set(_placed "${_placedDir}/contour-extension-host${CMAKE_EXECUTABLE_SUFFIX}")
+    add_custom_command(
+        OUTPUT "${_placed}"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>" "${_placed}"
+        DEPENDS contour-extension-host "$<TARGET_FILE:contour-extension-host>"
+        COMMENT "Placing contour-extension-host beside ${target}"
+        VERBATIM
+    )
+    add_custom_target(${target}_extension_host DEPENDS "${_placed}")
+    add_dependencies(${target} ${target}_extension_host)
+endfunction()
+
 # Before every module: their suites link its test support.
 add_subdirectory(testing)
 add_subdirectory(crispy)
