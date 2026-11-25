@@ -15,7 +15,9 @@
 
 #include <wasm_export.h>
 
+#include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/wamr/HiddenExports.hpp>
+#include <vtextension/wasm/wamr/TableCaps.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
@@ -158,12 +160,14 @@ namespace
                    std::vector<std::byte> bytes,
                    detail::ModuleHandle module,
                    std::vector<ImportDescription> imports,
-                   std::vector<ExportDescription> exports) noexcept:
+                   std::vector<ExportDescription> exports,
+                   binary::TableShape tables) noexcept:
             _runtime { std::move(runtime) },
             _bytes { std::move(bytes) },
             _module { std::move(module) },
             _imports { std::move(imports) },
-            _exports { std::move(exports) }
+            _exports { std::move(exports) },
+            _tables { tables }
         {
         }
 
@@ -181,7 +185,7 @@ namespace
             IHostContext& context) override
         {
             return instantiateModule(
-                shared_from_this(), _module.get(), _runtime->limits(), _exports, context);
+                shared_from_this(), _module.get(), _runtime->limits(), _exports, _tables, context);
         }
 
       private:
@@ -190,6 +194,7 @@ namespace
         detail::ModuleHandle _module;                ///< Unloaded before the bytes it refers into.
         std::vector<ImportDescription> _imports;
         std::vector<ExportDescription> _exports;
+        binary::TableShape _tables; ///< What instantiate() checks against the table caps.
     };
 } // namespace
 
@@ -203,6 +208,12 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
     // WAMR could not load either.
     if (!hideExports(bytes))
         return std::unexpected(ExtensionError::InvalidComponent);
+    // WAMR would let a table grow past the runtime's cap: each is declared a maximum within it instead.
+    auto const tables = binary::tableShape(bytes);
+    auto capped = capTableMaxima(std::move(bytes), runtime->limits().tableElements);
+    if (!tables || !capped)
+        return std::unexpected(ExtensionError::InvalidComponent);
+    bytes = std::move(*capped);
     auto errorBuffer = std::array<char, 128> {};
     // The vector's buffer stays where it is when the vector moves into the module. WAMR may rewrite it.
     auto module = detail::ModuleHandle { wasm_runtime_load(reinterpret_cast<uint8_t*>(bytes.data()),
@@ -232,8 +243,12 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
 
     auto imports = describeImports(module.get());
     auto exports = describeExports(module.get());
-    return std::make_shared<WamrModule>(
-        std::move(runtime), std::move(bytes), std::move(module), std::move(imports), std::move(exports));
+    return std::make_shared<WamrModule>(std::move(runtime),
+                                        std::move(bytes),
+                                        std::move(module),
+                                        std::move(imports),
+                                        std::move(exports),
+                                        *tables);
 }
 
 } // namespace vtextension::wasm::wamr

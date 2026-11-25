@@ -18,6 +18,10 @@ using vtextension::wasm::binary::BinaryError;
 using vtextension::wasm::binary::largestInitialMemoryPages;
 using vtextension::wasm::binary::Reader;
 using vtextension::wasm::binary::sections;
+using vtextension::wasm::binary::TableDeclaration;
+using vtextension::wasm::binary::tableDeclarations;
+using vtextension::wasm::binary::TableShape;
+using vtextension::wasm::binary::tableShape;
 
 namespace
 {
@@ -165,4 +169,79 @@ TEST_CASE("WasmBinary.largestInitialMemoryPages", "[vtextension]")
         CHECK(largestInitialMemoryPages(module) == pages);
     }
     CHECK(largestInitialMemoryPages({}) == std::unexpected(BinaryError::NotAModule));
+}
+
+TEST_CASE("WasmBinary.tableDeclarations", "[vtextension]")
+{
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections; ///< What follows the module header.
+        std::expected<std::vector<TableDeclaration>, BinaryError> tables;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no table", .sections = {}, .tables = std::vector<TableDeclaration> {} },
+        { .description = "a funcref table without a maximum",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x00, 0x02 }),
+          .tables =
+              std::vector { TableDeclaration { .elementType = 0x70, .initialElements = 2, .maximum = {} } } },
+        { .description = "an externref table with a multi-byte maximum",
+          .sections = raw({ 0x04, 0x06, 0x01, 0x6f, 0x01, 0x01, 0x80, 0x08 }),
+          .tables = std::vector { TableDeclaration {
+              .elementType = 0x6f, .initialElements = 1, .maximum = 1024 } } },
+        { .description = "two tables, in order",
+          .sections = raw({ 0x04, 0x07, 0x02, 0x70, 0x00, 0x03, 0x70, 0x00, 0x05 }),
+          .tables =
+              std::vector { TableDeclaration { .elementType = 0x70, .initialElements = 3, .maximum = {} },
+                            TableDeclaration { .elementType = 0x70, .initialElements = 5, .maximum = {} } } },
+        { .description = "a typed reference table",
+          .sections = raw({ 0x04, 0x05, 0x01, 0x64, 0x70, 0x00, 0x01 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "a table with an initializer expression",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x40, 0x00, 0x70 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "a shared table",
+          .sections = raw({ 0x04, 0x05, 0x01, 0x70, 0x03, 0x01, 0x01 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "a maximum cut short",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x01, 0x01 }),
+          .tables = std::unexpected(BinaryError::Truncated) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, tables]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(tableDeclarations(module) == tables);
+    }
+}
+
+TEST_CASE("WasmBinary.tableShape", "[vtextension]")
+{
+    auto module = raw({ 0x00,
+                        0x61,
+                        0x73,
+                        0x6d,
+                        0x01,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x04,
+                        0x08,
+                        0x02,
+                        0x70,
+                        0x00,
+                        0x03,
+                        0x70,
+                        0x01,
+                        0x07,
+                        0x09 });
+    auto const shape = tableShape(module);
+    REQUIRE(shape.has_value());
+    CHECK(*shape == TableShape { .count = 2, .largestInitialElements = 7 });
+    CHECK(shape->fitsWithin(2, 7));
+    CHECK_FALSE(shape->fitsWithin(1, 7));
+    CHECK_FALSE(shape->fitsWithin(2, 6));
+    CHECK(tableShape({}) == std::unexpected(BinaryError::NotAModule));
 }

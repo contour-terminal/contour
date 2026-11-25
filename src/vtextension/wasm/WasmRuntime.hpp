@@ -107,11 +107,25 @@ struct ExportDescription
     uint32_t initialPages = 0; ///< The memory's initial size in 64 KiB pages; 0 unless kind is Memory.
 };
 
+/// The most elements RuntimeLimits::tableElements may allow one table, and its default. It is WAMR's own
+/// cap on a table declared without a maximum, which that backend cannot raise; createRuntime() refuses a
+/// higher cap with `RuntimeUnavailable` on every backend, so that all of them accept the same limits.
+inline constexpr auto MaxTableElements = uint32_t { 1024 };
+
+/// The most tables one instance may define. Every toolchain the host targets emits one, the indirect
+/// function table; a module defining more is not instantiated (`OutOfMemory`). Without this cap the
+/// per-table one would bound nothing: each further table costs a guest three bytes of module.
+inline constexpr auto MaxTables = uint32_t { 1 };
+
 /// The limits a runtime holds every instance it creates to.
 struct RuntimeLimits
 {
     std::size_t memoryBytes = 0; ///< The cap on an instance's linear memory; growth past it is refused.
     std::size_t stackBytes = 0;  ///< The cap on an instance's stack; recursion past it traps.
+    /// The cap on the elements of each table of an instance, which lives outside linear memory and so
+    /// outside memoryBytes. A table whose initial size exceeds it is not instantiated (`OutOfMemory`), and
+    /// `table.grow` past it returns -1, as `memory.grow` does past memoryBytes. At most MaxTableElements.
+    uint32_t tableElements = MaxTableElements;
 };
 
 /// One host import. Every world host function takes only i32s and returns nothing.
@@ -332,8 +346,9 @@ class IWasmBackend
     /// @param hostFunctions The host functions modules may import; IHostContext::callHost() receives an
     ///                      index into this table. The runtime copies what it needs. Runtimes alive at
     ///                      once must agree on every host function they share (see the class notes).
-    /// @return The runtime; `RuntimeUnavailable` if the engine could not be brought up, or the backend
-    ///         cannot provide one of @p hostFunctions.
+    /// @return The runtime; `RuntimeUnavailable` if the engine could not be brought up, the backend
+    ///         cannot provide one of @p hostFunctions, or @p limits allow a table more than
+    ///         MaxTableElements.
     [[nodiscard]] virtual std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
         RuntimeLimits limits, std::span<HostFunction const> hostFunctions) = 0;
 

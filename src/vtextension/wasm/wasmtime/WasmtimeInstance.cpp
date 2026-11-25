@@ -129,6 +129,7 @@ namespace
             wasmtime_module_t const* module,
             std::span<ExportDescription const> exports,
             uint32_t largestInitialPages,
+            binary::TableShape tables,
             IHostContext& context);
 
         /// Use create(); public only so that std::make_unique can reach it.
@@ -305,12 +306,14 @@ namespace
         wasmtime_module_t const* module,
         std::span<ExportDescription const> exports,
         uint32_t largestInitialPages,
+        binary::TableShape tables,
         IHostContext& context)
     {
-        // Checked before instantiating, exported memories and others alike: the limiter's refusal would
-        // fail the instantiation as an error indistinguishable from any other.
-        auto const capBytes = runtime.limits().memoryBytes;
-        if (largestInitialPages * PageBytes > capBytes)
+        // Checked before instantiating, exported memories and tables and others alike: the limiter's
+        // refusal would fail the instantiation as an error indistinguishable from any other.
+        auto const limits = runtime.limits();
+        auto const capBytes = limits.memoryBytes;
+        if (largestInitialPages * PageBytes > capBytes || !tables.fitsWithin(MaxTables, limits.tableElements))
             return std::unexpected(ExtensionError::OutOfMemory);
 
         auto data = std::make_unique<StoreData>(context, runtime.wasiEnvironment(), runtime.kind());
@@ -320,11 +323,16 @@ namespace
         // Before anything runs in the store, a start function included: every deadline is one an interrupt
         // of any instance of the runtime moves the epoch past.
         wasmtime_store_epoch_deadline_callback(store.get(), &onEpochDeadline, data.get(), nullptr);
-        // Memory grows up to the cap and no further (memory.grow returns -1); one instance and one memory
-        // per store.
+        // Memory and tables grow up to their caps and no further (memory.grow and table.grow return -1);
+        // one instance, one memory and at most MaxTables tables per store.
         auto const memoryCap = static_cast<int64_t>(
             std::min<uint64_t>(capBytes, static_cast<uint64_t>(std::numeric_limits<int64_t>::max())));
-        wasmtime_store_limiter(store.get(), memoryCap, -1, 1, -1, 1);
+        wasmtime_store_limiter(store.get(),
+                               memoryCap,
+                               static_cast<int64_t>(limits.tableElements),
+                               1,
+                               static_cast<int64_t>(MaxTables),
+                               1);
 
         auto* const storeContext = wasmtime_store_context(store.get());
         // A start function runs during instantiation.
@@ -380,7 +388,7 @@ std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WasmtimeModule::in
 {
     // The guest's `_initialize` is never run here: it stays an ordinary export, the caller's to call.
     return WasmtimeInstance::create(
-        shared_from_this(), *_runtime, _module.get(), _exports, _largestInitialPages, context);
+        shared_from_this(), *_runtime, _module.get(), _exports, _largestInitialPages, _tables, context);
 }
 
 } // namespace vtextension::wasm::wasmtime

@@ -340,7 +340,8 @@ TEST_CASE("WasmtimeBackend.refusesAZeroStack", "[wasmtime]")
     // Wasmtime aborts the process on an engine whose stack cap is zero; the backend refuses it first.
     auto const runtime = WasmtimeTraits::make()->createRuntime(
         RuntimeLimits { .memoryBytes = vtextension::wasm::testing::contract::Limits.memoryBytes,
-                        .stackBytes = 0 },
+                        .stackBytes = 0,
+                        .tableElements = vtextension::wasm::testing::contract::Limits.tableElements },
         vtextension::wasm::testing::contract::HostFunctions);
     REQUIRE_FALSE(runtime.has_value());
     CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);

@@ -15,9 +15,10 @@ namespace vtextension
 std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(wasm::IWasmBackend& backend,
                                                                       ExtensionLimits limits)
 {
-    auto runtime = backend.createRuntime(
-        wasm::RuntimeLimits { .memoryBytes = limits.memoryBytes, .stackBytes = limits.stackBytes },
-        detail::hostFunctions());
+    auto runtime = backend.createRuntime(wasm::RuntimeLimits { .memoryBytes = limits.memoryBytes,
+                                                               .stackBytes = limits.stackBytes,
+                                                               .tableElements = wasm::MaxTableElements },
+                                         detail::hostFunctions());
     if (!runtime)
         return std::unexpected(ExtensionError::RuntimeUnavailable);
 

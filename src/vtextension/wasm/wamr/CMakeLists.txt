@@ -6,11 +6,13 @@
 add_library(vtextension_wamr STATIC
     DefaultBackend.cpp
     HiddenExports.cpp
+    TableCaps.cpp
     WamrBackend.cpp
     WamrInstance.cpp
     WamrModule.cpp
     WamrThreadEnv.cpp
     HiddenExports.hpp
+    TableCaps.hpp
     WamrBackend.hpp
     WamrHandles.hpp
     WamrRuntime.hpp
@@ -21,6 +23,11 @@ target_link_libraries(vtextension_wamr PUBLIC vtextension PRIVATE contour::wamr)
 if(TARGET vtextension_test)
     # The backend's own tests drive WAMR's C API directly, so they, and only they, need WAMR's headers.
     # PreparedGeneration.cpp defines the probe runtime-agnostic tests read (../testing/PreparedGeneration.hpp).
-    target_sources(vtextension_test PRIVATE HiddenExports_test.cpp PreparedGeneration.cpp WamrBackend_test.cpp)
+    target_sources(vtextension_test PRIVATE
+        HiddenExports_test.cpp
+        PreparedGeneration.cpp
+        TableCaps_test.cpp
+        WamrBackend_test.cpp
+    )
     target_link_libraries(vtextension_test PRIVATE contour::wamr)
 endif()

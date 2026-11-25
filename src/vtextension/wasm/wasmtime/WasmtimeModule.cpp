@@ -261,25 +261,29 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
     auto exports = describeExports(module.get());
     // Wasmtime's C API describes no memory a module does not export; its bytes do.
     auto const largestInitialPages = binary::largestInitialMemoryPages(bytes);
-    if (!imports || !exports || !largestInitialPages)
+    auto const tables = binary::tableShape(bytes);
+    if (!imports || !exports || !largestInitialPages || !tables)
         return std::unexpected(ExtensionError::InvalidComponent);
     return std::make_shared<WasmtimeModule>(std::move(runtime),
                                             std::move(module),
                                             std::move(*imports),
                                             std::move(*exports),
-                                            *largestInitialPages);
+                                            *largestInitialPages,
+                                            *tables);
 }
 
 WasmtimeModule::WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
                                detail::ModuleHandle module,
                                std::vector<ImportDescription> imports,
                                std::vector<ExportDescription> exports,
-                               uint32_t largestInitialPages) noexcept:
+                               uint32_t largestInitialPages,
+                               binary::TableShape tables) noexcept:
     _runtime { std::move(runtime) },
     _module { std::move(module) },
     _imports { std::move(imports) },
     _exports { std::move(exports) },
-    _largestInitialPages { largestInitialPages }
+    _largestInitialPages { largestInitialPages },
+    _tables { tables }
 {
 }
 

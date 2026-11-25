@@ -15,6 +15,7 @@
 #include <wasm_export.h>
 
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension::wasm::wamr
@@ -80,14 +81,17 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
 /// @param module WAMR's handle on @p owner's module.
 /// @param limits The limits of the runtime @p owner was loaded on.
 /// @param exports @p owner's exports.
+/// @param tables The tables @p owner defines, exported or not.
 /// @param context What the instance's host function calls reach.
-/// @return The instance; `OutOfMemory` if a memory's initial size exceeds the cap, `InvalidComponent`
+/// @return The instance; `OutOfMemory` if a memory's initial size exceeds the cap, or the tables exceed
+///         theirs (RuntimeLimits::tableElements, MaxTables), `InvalidComponent`
 ///         if WAMR cannot instantiate the module, `RuntimeUnavailable` on a resource failure.
 [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiateModule(
     std::shared_ptr<IWasmModule const> owner,
     WASMModuleCommon* module,
     RuntimeLimits const& limits,
     std::span<ExportDescription const> exports,
+    binary::TableShape tables,
     IHostContext& context);
 
 /// The most i32 parameters a host function can take: a trampoline exists for each count up to it. The

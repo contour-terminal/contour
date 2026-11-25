@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <expected>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -56,9 +57,11 @@ inline constexpr auto HostFunctions = std::array {
     HostFunction { .module = HostModule, .name = "pair", .parameterCount = 2 },
 };
 
-/// The limits every contract runtime is created with.
-inline constexpr auto Limits =
-    RuntimeLimits { .memoryBytes = std::size_t { 4 } * 1024 * 1024, .stackBytes = std::size_t { 64 } * 1024 };
+/// The limits every contract runtime is created with. The table cap is below MaxTableElements, so that a
+/// backend is seen to honour the cap it is given rather than one of its own.
+inline constexpr auto Limits = RuntimeLimits { .memoryBytes = std::size_t { 4 } * 1024 * 1024,
+                                               .stackBytes = std::size_t { 64 } * 1024,
+                                               .tableElements = 64 };
 
 // Every backend must provide each WASI function the extension host allows: wasm::AllowedWasiFunctions,
 // under wasm::WasiModule (WasiAllowList.hpp), the very list the world check applies.
@@ -408,6 +411,64 @@ inline constexpr auto PairModule = std::to_array<uint8_t>({
     0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x11, 0x02, 0x06,
     0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x70, 0x61, 0x69, 0x72, 0x00, 0x01,
     0x0a, 0x0a, 0x01, 0x08, 0x00, 0x20, 0x00, 0x20, 0x01, 0x10, 0x00, 0x0b,
+});
+
+/// Defines a table of 40 elements without a maximum, more than half of Limits' table cap: an engine that
+/// caps such a table at twice its initial size would let it grow past the cap. `grow` returns what
+/// `table.grow` does: the old size, or -1.
+///
+///     (module
+///       (table 40 funcref)
+///       (func (export "grow") (param i32) (result i32) (table.grow 0 (ref.null func) (local.get 0)))
+///       (func (export "size") (result i32) (table.size 0)))
+inline constexpr auto TableModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0a, 0x02, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x60,
+    0x00, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x00, 0x01, 0x04, 0x04, 0x01, 0x70, 0x00, 0x28, 0x07, 0x0f, 0x02,
+    0x04, 0x67, 0x72, 0x6f, 0x77, 0x00, 0x00, 0x04, 0x73, 0x69, 0x7a, 0x65, 0x00, 0x01, 0x0a, 0x11, 0x02,
+    0x09, 0x00, 0xd0, 0x70, 0x20, 0x00, 0xfc, 0x0f, 0x00, 0x0b, 0x05, 0x00, 0xfc, 0x10, 0x00, 0x0b,
+});
+
+/// Defines a table one element larger than Limits' table cap.
+///
+///     (module (table 65 funcref))
+inline constexpr auto OversizedTableModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x04,
+    0x04,
+    0x01,
+    0x70,
+    0x00,
+    0x41,
+});
+
+/// Defines one table more than MaxTables.
+///
+///     (module (table 1 funcref) (table 1 funcref))
+inline constexpr auto TwoTablesModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x04,
+    0x07,
+    0x02,
+    0x70,
+    0x00,
+    0x01,
+    0x70,
+    0x00,
+    0x01,
 });
 
 /// The WebAssembly page size, in bytes.
@@ -1024,9 +1085,10 @@ template <typename T>
 void nestedCallKeepsTheOuterRecord()
 {
     auto const backend = T::make();
-    auto const runtime = createRuntime(
-        *backend,
-        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes, .stackBytes = Limits.stackBytes });
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
     auto const guard = enterThread(*backend);
     auto const module = load(*runtime, GrowThenNestedCallModule);
     auto context = AbsorbingHostContext {};
@@ -1095,9 +1157,10 @@ template <typename T>
 void memoryCapRefusesGrowth()
 {
     auto const backend = T::make();
-    auto const runtime = createRuntime(
-        *backend,
-        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes, .stackBytes = Limits.stackBytes });
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
     auto const guard = enterThread(*backend);
     auto const module = load(*runtime, InstanceModule);
     auto context = RecordingHostContext {};
@@ -1117,9 +1180,10 @@ template <typename T>
 void callAfterTrapRuns()
 {
     auto const backend = T::make();
-    auto const runtime = createRuntime(
-        *backend,
-        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes, .stackBytes = Limits.stackBytes });
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
     auto const guard = enterThread(*backend);
     auto const module = load(*runtime, InstanceModule);
     auto context = RecordingHostContext {};
@@ -1136,8 +1200,10 @@ template <typename T>
 void memoryCapRefusesInitialSize()
 {
     auto const backend = T::make();
-    auto const runtime = createRuntime(
-        *backend, RuntimeLimits { .memoryBytes = PageBytes / 2, .stackBytes = Limits.stackBytes });
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = PageBytes / 2,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
     auto const guard = enterThread(*backend);
     auto const module = load(*runtime, InstanceModule);
     auto context = RecordingHostContext {};
@@ -1151,14 +1217,83 @@ template <typename T>
 void memoryCapRefusesUnexportedInitialSize()
 {
     auto const backend = T::make();
-    auto const runtime = createRuntime(
-        *backend, RuntimeLimits { .memoryBytes = PageBytes / 2, .stackBytes = Limits.stackBytes });
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = PageBytes / 2,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
     auto const guard = enterThread(*backend);
     auto const module = load(*runtime, UnexportedMemoryModule);
     auto context = RecordingHostContext {};
     auto const instance = module->instantiate(context);
     REQUIRE_FALSE(instance.has_value());
     CHECK(instance.error() == ExtensionError::OutOfMemory);
+}
+
+/// A table grows up to the runtime's cap and no further: `table.grow` past it returns -1, however far
+/// past it asks, and the table keeps its size.
+template <typename T>
+void tableGrowthIsCapped()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, TableModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    auto const grow = functionOf(*instance, "grow");
+    auto const refused = std::numeric_limits<uint32_t>::max();
+
+    auto argv = std::array<uint32_t, 1> { Limits.tableElements - 40 };
+    REQUIRE(instance->call(grow, argv).has_value());
+    CHECK(argv[0] == 40);
+    argv[0] = 1;
+    REQUIRE(instance->call(grow, argv).has_value());
+    CHECK(argv[0] == refused);
+    argv[0] = refused;
+    REQUIRE(instance->call(grow, argv).has_value());
+    CHECK(argv[0] == refused);
+    REQUIRE(instance->call(functionOf(*instance, "size"), argv).has_value());
+    CHECK(argv[0] == Limits.tableElements);
+}
+
+/// A table whose initial size exceeds the runtime's cap is not instantiated.
+template <typename T>
+void tableInitialSizeIsCapped()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, OversizedTableModule);
+    auto context = RecordingHostContext {};
+    auto const instance = module->instantiate(context);
+    REQUIRE_FALSE(instance.has_value());
+    CHECK(instance.error() == ExtensionError::OutOfMemory);
+}
+
+/// A module defining more tables than MaxTables is not instantiated.
+template <typename T>
+void tableCountIsCapped()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, TwoTablesModule);
+    auto context = RecordingHostContext {};
+    auto const instance = module->instantiate(context);
+    REQUIRE_FALSE(instance.has_value());
+    CHECK(instance.error() == ExtensionError::OutOfMemory);
+}
+
+/// A table cap above MaxTableElements creates no runtime.
+template <typename T>
+void tableCapAboveMaximumIsRefused()
+{
+    auto const backend = T::make();
+    auto limits = Limits;
+    limits.tableElements = MaxTableElements + 1;
+    auto const runtime = backend->createRuntime(limits, HostFunctions);
+    REQUIRE_FALSE(runtime.has_value());
+    CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
 }
 
 /// Unbounded recursion runs into the stack cap and traps.
@@ -1423,6 +1558,10 @@ void wasiStdioGoesNowhere()
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                     \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)           \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize) \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableGrowthIsCapped)                   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                    \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)         \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)               \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                    \
     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                      \

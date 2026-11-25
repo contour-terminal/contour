@@ -167,6 +167,9 @@ class HostRegistrations
 std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> WamrRuntime::create(
     RuntimeLimits limits, std::span<HostFunction const> hostFunctions)
 {
+    // WAMR caps a table at MaxTableElements at the least (TableCaps.hpp): a higher cap it would not keep.
+    if (limits.tableElements > MaxTableElements)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
     if (auto acquired = acquireRuntime(); !acquired)
         return std::unexpected(acquired.error());
 

@@ -118,7 +118,8 @@ TEST_CASE("Wamr.memoryGrowthLabelsEachInstance")
     // also what shows that a guest whose memory refused to grow fails the Instance as OutOfMemory.
     namespace contract = vtextension::wasm::testing::contract;
     auto const capped = RuntimeLimits { .memoryBytes = std::size_t { 2 } * contract::PageBytes,
-                                        .stackBytes = contract::Limits.stackBytes };
+                                        .stackBytes = contract::Limits.stackBytes,
+                                        .tableElements = contract::Limits.tableElements };
     auto const backend = makeWamrBackend();
     auto const runtime = contract::createRuntime(*backend, capped);
     auto const guard = contract::enterThread(*backend);
