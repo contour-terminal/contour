@@ -225,7 +225,11 @@ namespace
                 ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDIN_FILENO));
             actions.check(
                 ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDOUT_FILENO));
-            actions.check(::posix_spawn_file_actions_addinherit_np(actions.get(), STDERR_FILENO));
+            if (prepared->standardError.get() != -1)
+                actions.check(::posix_spawn_file_actions_adddup2(
+                    actions.get(), prepared->standardError.get(), STDERR_FILENO));
+            else
+                actions.check(::posix_spawn_file_actions_addinherit_np(actions.get(), STDERR_FILENO));
             auto child = posix::FirstChildDescriptor;
             for (auto const& parked: prepared->parked)
                 actions.check(::posix_spawn_file_actions_adddup2(actions.get(), parked.get(), child++));

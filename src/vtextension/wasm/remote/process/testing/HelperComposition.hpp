@@ -72,6 +72,10 @@ class HelperComposition
     /// @return Whether none is left.
     [[nodiscard]] bool awaitEveryHelperReaped() const;
 
+    /// Waits until at most @p count helpers live, or the teardown grace and some passed.
+    /// @return Whether at most @p count are left.
+    [[nodiscard]] bool awaitLiveHelpersAtMost(std::size_t count) const;
+
   private:
     std::shared_ptr<RecordingLauncher> _recording;
     std::unique_ptr<ExtensionHostSupervisor> _supervisor;

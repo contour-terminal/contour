@@ -76,7 +76,8 @@ std::expected<PreparedLaunch, LaunchError> prepareLaunch(LaunchSpec const& spec)
                                      .arguments = {},
                                      .environment = {},
                                      .parked = {},
-                                     .nullDevice = {} };
+                                     .nullDevice = {},
+                                     .standardError = {} };
     // posix_spawn() reports a failed exec too, but pdfork()'s child can only exit: the check up front gives
     // every platform the same NotFound.
     if (::access(prepared.executable.c_str(), X_OK) == -1)
@@ -91,6 +92,12 @@ std::expected<PreparedLaunch, LaunchError> prepareLaunch(LaunchSpec const& spec)
         if (parked == -1)
             return std::unexpected(launchErrorOf(errno));
         prepared.parked.emplace_back(parked);
+    }
+    if (spec.standardError)
+    {
+        prepared.standardError = UniqueFd { ::fcntl(*spec.standardError, F_DUPFD_CLOEXEC, childEnd) };
+        if (prepared.standardError.get() == -1)
+            return std::unexpected(launchErrorOf(errno));
     }
     prepared.nullDevice = UniqueFd { ::open("/dev/null", O_RDWR | O_CLOEXEC) };
     if (prepared.nullDevice.get() == -1)

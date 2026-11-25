@@ -394,9 +394,9 @@ namespace
                 std::ignore = nullDevice.release();
                 return std::unexpected(launchErrorOf(::GetLastError()));
             }
-            // This process's stderr, if it has one; the null device if not.
+            // The stderr the spec names, else this process's own, if it has one; the null device if not.
             auto errorOutput = OwnedHandle {};
-            if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE);
+            if (auto* const own = spec.standardError.value_or(::GetStdHandle(STD_ERROR_HANDLE));
                 own != nullptr && own != INVALID_HANDLE_VALUE)
                 errorOutput = copyOf(own);
             auto* const childError = errorOutput ? errorOutput.get() : nullDevice.get();

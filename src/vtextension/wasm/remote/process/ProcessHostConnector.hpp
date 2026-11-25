@@ -8,6 +8,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,6 +29,8 @@ struct ProcessHostConfig
     std::vector<std::pair<std::string, std::string>> environment = defaultHelperEnvironment();
     std::vector<std::string> extraArguments; ///< Appended after the handle arguments; for test helpers.
     ResourceCaps caps {};                    ///< The caps it runs under.
+    /// Where its stderr goes: nothing for this process's own (LaunchSpec::standardError).
+    std::optional<transport::NativeHandle> standardError {};
 };
 
 /// Starts each host as a process the supervisor launches and owns, connected over inherited channels, an

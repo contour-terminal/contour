@@ -107,7 +107,9 @@ namespace
         ::sigprocmask(SIG_SETMASK, &empty, nullptr);
 
         if (!inheritAs(prepared.nullDevice.get(), STDIN_FILENO)
-            || !inheritAs(prepared.nullDevice.get(), STDOUT_FILENO))
+            || !inheritAs(prepared.nullDevice.get(), STDOUT_FILENO)
+            || (prepared.standardError.get() != -1
+                && !inheritAs(prepared.standardError.get(), STDERR_FILENO)))
             ::_exit(ExecFailed);
         auto child = posix::FirstChildDescriptor;
         for (auto const& parked: prepared.parked)

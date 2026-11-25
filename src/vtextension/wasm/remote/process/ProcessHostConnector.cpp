@@ -94,7 +94,8 @@ std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::conn
                              .inherited = {},
                              .arguments = {},
                              .environment = _config.environment,
-                             .caps = _config.caps };
+                             .caps = _config.caps,
+                             .standardError = _config.standardError };
     spec.inherited.push_back(control->helper.nativeHandle());
     for (auto const& lane: lanes)
         spec.inherited.push_back(lane.helper.nativeHandle());

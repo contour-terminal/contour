@@ -98,6 +98,8 @@ struct PreparedLaunch
     std::vector<UniqueFd> parked; ///< The inherited descriptors' close-on-exec copies, all at or above
                                   ///< childEnd(): dup2() onto 3, 4, … cannot overwrite one of them.
     UniqueFd nullDevice;          ///< /dev/null, read-write and close-on-exec: stdin and stdout.
+    /// The stderr the spec names, parked as the inherited ones are; -1 to keep this process's own.
+    UniqueFd standardError;
 
     /// @return The first descriptor beyond those the child inherits: what it closes from.
     [[nodiscard]] int childEnd() const noexcept

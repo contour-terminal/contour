@@ -84,13 +84,19 @@ using Waitable = int;
 /// What to start.
 struct LaunchSpec
 {
-    std::filesystem::path executable;               ///< The program; an absolute path.
-    std::vector<transport::NativeHandle> inherited; ///< What the child inherits; it sees them in this order.
+    std::filesystem::path executable {}; ///< The program; an absolute path.
+    std::vector<transport::NativeHandle>
+        inherited {}; ///< What the child inherits; it sees them in this order.
     /// The command line after the program's name, given the values the inherited handles have in the child:
     /// on POSIX 3, 4, …; on Windows the duplicates' values.
-    std::function<std::vector<std::string>(std::span<transport::NativeHandle const> childHandles)> arguments;
-    std::vector<std::pair<std::string, std::string>> environment; ///< The child's whole environment.
-    ResourceCaps caps {};                                         ///< Its caps.
+    std::function<std::vector<std::string>(std::span<transport::NativeHandle const> childHandles)>
+        arguments {};
+    std::vector<std::pair<std::string, std::string>> environment {}; ///< The child's whole environment.
+    ResourceCaps caps {};                                            ///< Its caps.
+    /// Where the child's stderr goes: nothing for this process's own, as Contour starts its helpers. A test
+    /// names a copy of its own stderr taken before anything captured it, so that what a helper reports stays
+    /// visible however the test redirects its own.
+    std::optional<transport::NativeHandle> standardError {};
 };
 
 /// One started process. Non-copyable, non-movable; used by one thread at a time (the supervisor's).
