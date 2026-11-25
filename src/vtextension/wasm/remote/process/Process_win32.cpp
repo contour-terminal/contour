@@ -483,6 +483,11 @@ std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
     return std::make_shared<Win32ProcessLauncher>();
 }
 
+ProcessId currentProcessId() noexcept
+{
+    return static_cast<ProcessId>(::GetCurrentProcessId());
+}
+
 std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment()
 {
     // Without SystemRoot a process cannot load the system's DLLs. Read through the Win32 block, which a

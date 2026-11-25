@@ -60,8 +60,10 @@ struct RegistryKey
 /// configuration reload that changes nothing of an extension reuse its module and its host.
 ///
 /// It keeps no extension alive: an entry is a weak reference, and the last pane dropping its
-/// CompiledExtension releases it (on that pane's owner thread). Each entry carries the HostBreaker of its
-/// extension, which every instance of it reports its host's deaths to.
+/// CompiledExtension releases it (on that pane's owner thread). Each key has one HostBreaker, which every
+/// instance of it reports its host's deaths to, and which outlives failed loads and dropped entries until the
+/// configuration is reloaded: a host that dies while loading counts as a fault too, and once the breaker
+/// opened nothing of the extension is loaded or started any more.
 ///
 /// Thread-safe: modules are acquired on the build thread, and breakers reset on the owner's.
 class ExtensionRegistry
@@ -75,16 +77,18 @@ class ExtensionRegistry
     /// on another engine is none of @p engine's.
     ///
     /// Called on a thread prepared for @p engine's backend. A load runs outside the registry's lock; a
-    /// caller asking for an entry still loading waits for that load and gets its outcome.
+    /// caller asking for an entry still loading waits for that load and gets its outcome. A load is admitted
+    /// by the key's breaker first, and a load failing `HostUnavailable` counts as a fault of it.
     /// @param engine What the module is loaded on.
     /// @param key What names the extension.
     /// @param bytes The module's bytes; read only if it is to be loaded.
-    /// @return The loaded extension, or why it could not be loaded (CompiledExtension::load()).
+    /// @return The loaded extension, or why it could not be loaded (CompiledExtension::load());
+    ///         `HostUnavailable`, with nothing loaded, while the key's breaker is open.
     [[nodiscard]] std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> acquire(
         Engine& engine, RegistryKey const& key, std::vector<std::byte> bytes);
 
-    /// Closes every breaker, of reused and replaced entries alike: the configuration was reloaded, which
-    /// lifts what a host that kept dying was disabled for.
+    /// Closes every breaker, of reused and replaced entries alike, and forgets those of keys with no entry:
+    /// the configuration was reloaded, which lifts what a host that kept dying was disabled for.
     void resetBreakers() noexcept;
 
     /// @return How many entries are loading or alive.
@@ -101,12 +105,21 @@ class ExtensionRegistry
     struct Entry
     {
         RegistryKey key;
-        Engine const* engine;                 ///< Compared only: the entry's module keeps it alive.
-        uint64_t serial;                      ///< Tells the entry apart from a later one of the same key.
-        std::shared_ptr<HostBreaker> breaker; ///< The extension's, shared with its module.
+        Engine const* engine; ///< Compared only: the entry's module keeps it alive.
+        uint64_t serial;      ///< Tells the entry apart from a later one of the same key.
         /// What callers wait for while it loads; then what the panes hold.
         std::variant<std::shared_future<LoadResult>, std::weak_ptr<CompiledExtension>> state;
     };
+
+    /// One key's breaker: shared by every entry of the key, and with their modules.
+    struct KeyBreaker
+    {
+        RegistryKey key;
+        std::shared_ptr<HostBreaker> breaker;
+    };
+
+    /// @return @p key's breaker; a new, closed one if it has none. Its caller holds the lock.
+    [[nodiscard]] std::shared_ptr<HostBreaker> breakerOf(RegistryKey const& key);
 
     /// @return Whether @p entry is loaded and no pane holds it any more.
     [[nodiscard]] static bool isExpired(Entry const& entry) noexcept;
@@ -118,6 +131,7 @@ class ExtensionRegistry
     ExtensionLimits _limits;
     mutable std::mutex _mutex;
     std::vector<Entry> _entries;           ///< Guarded by _mutex.
+    std::vector<KeyBreaker> _breakers;     ///< Guarded by _mutex.
     uint64_t _nextSerial = 0;              ///< Guarded by _mutex.
     std::atomic<std::size_t> _waiting = 0; ///< How many acquire() calls wait for another's load.
 };

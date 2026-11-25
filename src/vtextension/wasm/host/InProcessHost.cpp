@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <ranges>
@@ -66,6 +68,9 @@ InProcessHost::InProcessHost(std::shared_ptr<InProcessHostRegistry> registry,
     _thread { [this] {
         std::ignore = _server.run();
         _state.store(ServingState::Ended);
+        // Last: onDeath may drop the last reference to this host (~InProcessHost()).
+        if (auto const onDeath = runReturned())
+            onDeath();
     } }
 {
     _registry->add(*this);
@@ -75,7 +80,10 @@ InProcessHost::~InProcessHost()
 {
     _registry->remove(*this);
     terminate();
-    _thread.join();
+    if (_thread.get_id() == std::this_thread::get_id())
+        _thread.detach(); // in its onDeath, which touches nothing of this host once it returns
+    else
+        _thread.join();
 }
 
 void InProcessHost::interrupt(uint32_t instanceId) noexcept
@@ -87,6 +95,32 @@ void InProcessHost::terminate() noexcept
 {
     _state.store(ServingState::Ended);
     _server.stop();
+}
+
+remote::StepWatch InProcessHost::watch(remote::HostStep /*step*/, std::chrono::milliseconds /*budget*/)
+{
+    return remote::StepWatch {};
+}
+
+void InProcessHost::attach(remote::HostAttachment attachment)
+{
+    {
+        auto const lock = std::scoped_lock { _attachmentMutex };
+        if (_run == RunState::Running)
+        {
+            _onDeath = std::move(attachment.onDeath);
+            return;
+        }
+    }
+    if (attachment.onDeath)
+        attachment.onDeath();
+}
+
+std::function<void()> InProcessHost::runReturned()
+{
+    auto const lock = std::scoped_lock { _attachmentMutex };
+    _run = RunState::Returned;
+    return std::exchange(_onDeath, nullptr);
 }
 
 InProcessHost::ServingState InProcessHost::state() const noexcept

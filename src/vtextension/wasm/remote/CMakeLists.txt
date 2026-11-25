@@ -65,13 +65,22 @@ if(_process_source AND NOT WIN32)
     list(APPEND _process_source process/PosixLaunch.cpp process/PosixLaunch.hpp)
 endif()
 if(_process_source)
+    # The supervisor and the process connector sit on the launcher: they name the connector's vocabulary
+    # (HostConnector.hpp), which is header-only and std-only, and log through core::log.
     add_library(vtextension_remote_process STATIC
+        process/ExtensionHostSupervisor.cpp
+        process/ExtensionHostSupervisor.hpp
         process/HelperLocation.cpp
         process/HelperLocation.hpp
+        process/HostTimers.cpp
+        process/HostTimers.hpp
+        process/ProcessHostConnector.cpp
+        process/ProcessHostConnector.hpp
         process/ProcessLauncher.hpp
         ${_process_source}
     )
-    target_link_libraries(vtextension_remote_process PUBLIC vtextension_remote_wire core::base core::platform)
+    target_link_libraries(vtextension_remote_process PUBLIC
+        vtextension_remote_wire core::base core::log core::platform)
     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
     target_compile_definitions(vtextension_remote_process PUBLIC
         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
@@ -87,7 +96,9 @@ if(_process_source)
         # no engine, so that it cross-builds and runs under wine.
         add_executable(vtextension_process_test
             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+            process/ExtensionHostSupervisor_test.cpp
             process/HelperLocation_test.cpp
+            process/HostTimers_test.cpp
             process/ProcessLauncher_test.cpp
             process/testing/FakeProcessLauncher.cpp
             process/testing/FakeProcessLauncher.hpp

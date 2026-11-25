@@ -103,6 +103,7 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> ExtensionRegis
 {
     auto loaded = std::promise<LoadResult> {};
     auto breaker = std::shared_ptr<HostBreaker> {};
+    auto admission = HostAdmission {};
     auto serial = uint64_t { 0 };
     {
         auto lock = std::unique_lock { _mutex };
@@ -127,19 +128,21 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> ExtensionRegis
                 return live;
             _entries.erase(entry);
         }
+        // A host that kept dying, while loading or running, is not started again.
+        breaker = breakerOf(key);
+        auto const admitted = breaker->admit();
+        if (!admitted)
+            return std::unexpected(admitted.error());
+        admission = *admitted;
         serial = _nextSerial++;
-        breaker = std::make_shared<HostBreaker>(_clock, _limits.faultsBeforeDisable, _limits.faultWindow);
-        _entries.push_back(Entry { .key = key,
-                                   .engine = &engine,
-                                   .serial = serial,
-                                   .breaker = breaker,
-                                   .state = loaded.get_future().share() });
+        _entries.push_back(
+            Entry { .key = key, .engine = &engine, .serial = serial, .state = loaded.get_future().share() });
     }
 
     auto result = LoadResult {};
     try
     {
-        result = CompiledExtension::load(engine, moduleIdentityOf(key), std::move(bytes), std::move(breaker));
+        result = CompiledExtension::load(engine, moduleIdentityOf(key), std::move(bytes), breaker);
     }
     catch (...)
     {
@@ -147,6 +150,10 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> ExtensionRegis
         loaded.set_exception(std::current_exception());
         throw;
     }
+    // A host that died or hung while loading is a fault of the extension's host, as one dying under an
+    // instance is; a module it refused is not.
+    if (!result && result.error() == ExtensionError::HostUnavailable)
+        breaker->recordHostFault(admission);
     settle(serial, result);
     loaded.set_value(result);
     return result;
@@ -164,12 +171,25 @@ void ExtensionRegistry::settle(uint64_t serial, LoadResult const& result) noexce
         _entries.erase(entry); // the next acquire tries again
 }
 
+std::shared_ptr<HostBreaker> ExtensionRegistry::breakerOf(RegistryKey const& key)
+{
+    if (auto const known = std::ranges::find(_breakers, key, &KeyBreaker::key); known != _breakers.end())
+        return known->breaker;
+    auto breaker = std::make_shared<HostBreaker>(_clock, _limits.faultsBeforeDisable, _limits.faultWindow);
+    _breakers.push_back(KeyBreaker { .key = key, .breaker = breaker });
+    return breaker;
+}
+
 void ExtensionRegistry::resetBreakers() noexcept
 {
     auto const lock = std::scoped_lock { _mutex };
-    for (auto const& entry: _entries)
+    std::erase_if(_entries, isExpired);
+    std::erase_if(_breakers, [this](KeyBreaker const& known) {
+        return std::ranges::none_of(_entries, [&](Entry const& entry) { return entry.key == known.key; });
+    });
+    for (auto const& known: _breakers)
     {
-        auto& breaker = *entry.breaker; // the breaker's reset(), not the pointer's
+        auto& breaker = *known.breaker; // the breaker's reset(), not the pointer's
         breaker.reset();
     }
 }

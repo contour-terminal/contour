@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// The connector that starts each extension host as a process of its own, through the supervisor: the
+/// production IHostConnector.
+
+#include <expected>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+
+namespace vtextension::wasm::remote::process
+{
+
+/// How each host process is started.
+struct ProcessHostConfig
+{
+    std::filesystem::path helper; ///< The extension host executable; an absolute path.
+    /// Its whole environment: by default what any host needs (defaultHelperEnvironment()).
+    std::vector<std::pair<std::string, std::string>> environment = defaultHelperEnvironment();
+    std::vector<std::string> extraArguments; ///< Appended after the handle arguments; for test helpers.
+    ResourceCaps caps {};                    ///< The caps it runs under.
+};
+
+/// Starts each host as a process the supervisor launches and owns, connected over inherited channels, an
+/// interrupt page and a wake signal.
+class ProcessHostConnector final: public remote::IHostConnector
+{
+  public:
+    /// @param supervisor What launches and supervises the processes.
+    /// @param config How each one is started.
+    ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor, ProcessHostConfig config);
+
+    /// Creates the channels, the page and the wake signal, and has the supervisor start a host on their
+    /// helper ends, which close here once it started.
+    /// @return The connection; `HostUnavailable` if any of it could not be created, or the host not started.
+    [[nodiscard]] std::expected<remote::HostConnection, ExtensionError> connect() override;
+
+  private:
+    std::shared_ptr<SupervisorMailbox> _supervisor;
+    ProcessHostConfig _config;
+};
+
+} // namespace vtextension::wasm::remote::process

@@ -88,7 +88,8 @@ namespace
         auto const moduleId = incarnation.nextModuleId();
         auto reply = incarnation.request(proto::Load { .runtimeId = HelperIncarnation::RuntimeId,
                                                        .moduleId = moduleId,
-                                                       .bytes = { bytes.begin(), bytes.end() } });
+                                                       .bytes = { bytes.begin(), bytes.end() } },
+                                         HostStep::Load);
         // A module too large to send is the extension's fault; anything else, an over-cap reply included, the
         // host's, which then is dead.
         if (!reply)
@@ -122,8 +123,11 @@ namespace
       public:
         /// @param connector What starts each incarnation.
         /// @param runtime The runtime each incarnation is created with.
-        HelperSlot(std::shared_ptr<IHostConnector> connector, proto::CreateRuntime runtime) noexcept:
-            _connector { std::move(connector) }, _runtime { std::move(runtime) }
+        /// @param policy What each incarnation's host is held to.
+        HelperSlot(std::shared_ptr<IHostConnector> connector,
+                   proto::CreateRuntime runtime,
+                   HelperPolicy policy) noexcept:
+            _connector { std::move(connector) }, _runtime { std::move(runtime) }, _policy { policy }
         {
         }
 
@@ -135,7 +139,7 @@ namespace
                 return _current;
             if (!_connector)
                 return std::unexpected(ExtensionError::HostUnavailable);
-            return HelperIncarnation::connect(*_connector, _runtime)
+            return HelperIncarnation::connect(*_connector, _runtime, _policy)
                 .transform([this](std::shared_ptr<HelperIncarnation> started) {
                     if (_current)
                         errorLog()("An extension host stopped; it was started anew ({} times so far).",
@@ -148,6 +152,7 @@ namespace
       private:
         std::shared_ptr<IHostConnector> _connector;
         proto::CreateRuntime _runtime;
+        HelperPolicy _policy;
         std::mutex _mutex; ///< Guards what follows.
         std::shared_ptr<HelperIncarnation> _current;
         std::size_t _respawns = 0; ///< How often a dead incarnation was replaced.
@@ -160,10 +165,12 @@ namespace
         /// Counts the runtime alive in @p kind for as long as it lives.
         RemoteRuntime(std::shared_ptr<RemoteKindState> kind,
                       std::shared_ptr<IHostConnector> connector,
+                      HelperPolicy policy,
                       RuntimeLimits limits,
                       proto::CreateRuntime create) noexcept:
             _kind { std::move(kind) },
             _connector { std::move(connector) },
+            _policy { policy },
             _limits { limits },
             _create { std::move(create) }
         {
@@ -196,7 +203,7 @@ namespace
         [[nodiscard]] std::shared_ptr<HelperSlot> slotFor(std::string const& key)
         {
             if (key.empty())
-                return std::make_shared<HelperSlot>(_connector, _create);
+                return std::make_shared<HelperSlot>(_connector, _create, _policy);
             auto const lock = std::scoped_lock { _mutex };
             // The hosts of identities whose last module went are forgotten.
             std::erase_if(_slots, [](auto const& entry) { return entry.second.expired(); });
@@ -204,7 +211,7 @@ namespace
             auto slot = entry.lock();
             if (!slot)
             {
-                slot = std::make_shared<HelperSlot>(_connector, _create);
+                slot = std::make_shared<HelperSlot>(_connector, _create, _policy);
                 entry = slot;
             }
             return slot;
@@ -212,6 +219,7 @@ namespace
 
         std::shared_ptr<RemoteKindState> _kind;
         std::shared_ptr<IHostConnector> _connector;
+        HelperPolicy _policy;
         RuntimeLimits _limits;
         proto::CreateRuntime _create; ///< What creates the runtime in each of its hosts.
         std::mutex _mutex;            ///< Guards _slots.
@@ -447,7 +455,8 @@ namespace
         }
 
         auto const instanceId = host.nextInstanceId();
-        auto reply = host.request(proto::Instantiate { .moduleId = _moduleId, .instanceId = instanceId });
+        auto reply = host.request(proto::Instantiate { .moduleId = _moduleId, .instanceId = instanceId },
+                                  HostStep::Instantiate);
         if (!reply)
             return std::unexpected(ExtensionError::HostUnavailable);
         auto* const instantiated = std::get_if<proto::Instantiated>(&*reply);
@@ -601,7 +610,12 @@ namespace
                     proto::WireHostFunction { .module = std::string { function.module },
                                               .name = std::string { function.name },
                                               .parameterCount = function.parameterCount });
-            return std::make_shared<RemoteRuntime>(_kind, _config.connector, limits, std::move(create));
+            return std::make_shared<RemoteRuntime>(
+                _kind,
+                _config.connector,
+                HelperPolicy { .timeouts = _config.timeouts, .lockdown = _config.lockdown },
+                limits,
+                std::move(create));
         }
 
         [[nodiscard]] std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread() override

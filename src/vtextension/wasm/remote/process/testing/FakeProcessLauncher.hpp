@@ -55,6 +55,14 @@ class FakeProcessLauncher final: public IProcessLauncher
     /// @param status How it ended.
     void exit(std::size_t index, ExitStatus status);
 
+    /// Makes the @p index-th process ignore kill(): it is recorded, and the process runs on until exit(). A
+    /// process stuck in the kernel behaves so.
+    /// @param index The process, counted from 0 in launch order.
+    void survivesKill(std::size_t index);
+
+    /// Makes every wait() of every set fail with @p error from now on, a wait blocked now included.
+    void failWaits(LaunchError error);
+
     /// @return The index of the process each kill() was called on, in call order -- also those that did
     ///         nothing, on a process that had ended already.
     [[nodiscard]] std::vector<std::size_t> kills() const;

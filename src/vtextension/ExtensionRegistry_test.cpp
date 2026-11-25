@@ -269,6 +269,70 @@ TEST_CASE("ExtensionRegistry.aFailedLoadLeavesNoEntry", "[vtextension][registry]
     CHECK(fixture.fake.loads() == 2);
 }
 
+namespace
+{
+/// @return What acquiring the minimal module from @p fixture's registry failed with; nothing if it loaded.
+[[nodiscard]] std::optional<ExtensionError> acquireError(RegistryFixture& fixture)
+{
+    auto const spec = minimalSpec({});
+    auto const acquired = fixture.registry.acquire(*fixture.engine,
+                                                   registryKeyOf(spec, ExtensionWorld::StatusLine),
+                                                   toModule(vtextension::testing::MinimalModule));
+    return acquired ? std::nullopt : std::optional { acquired.error() };
+}
+} // namespace
+
+TEST_CASE("load timeout counts a breaker fault", "[vtextension][registry]")
+{
+    // A host that dies or hangs while loading is the host's fault: three of them open the breaker, after
+    // which nothing is loaded, or started, any more.
+    auto fixture = RegistryFixture {};
+    fixture.fake.loadFailure = ExtensionError::HostUnavailable;
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 3))
+        CHECK(acquireError(fixture) == ExtensionError::HostUnavailable);
+    CHECK(fixture.fake.loads() == 3);
+    CHECK(acquireError(fixture) == ExtensionError::HostUnavailable);
+    CHECK(fixture.fake.loads() == 3);
+}
+
+TEST_CASE("reload resets a load breaker", "[vtextension][registry]")
+{
+    auto fixture = RegistryFixture {};
+    fixture.fake.loadFailure = ExtensionError::HostUnavailable;
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 3))
+        CHECK(acquireError(fixture) == ExtensionError::HostUnavailable);
+    REQUIRE(acquireError(fixture) == ExtensionError::HostUnavailable);
+    REQUIRE(fixture.fake.loads() == 3);
+
+    // Reloaded: the key's breaker closes, and the next acquire loads again -- and fails again, counting anew.
+    fixture.registry.resetBreakers();
+    CHECK(acquireError(fixture) == ExtensionError::HostUnavailable);
+    CHECK(fixture.fake.loads() == 4);
+}
+
+TEST_CASE("InvalidComponent counts no fault", "[vtextension][registry]")
+{
+    // A module the host refused is the extension's fault, which no breaker counts: it is tried every time.
+    auto fixture = RegistryFixture {};
+    fixture.fake.loadFailure = ExtensionError::InvalidComponent;
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 5))
+        CHECK(acquireError(fixture) == ExtensionError::InvalidComponent);
+    CHECK(fixture.fake.loads() == 5);
+}
+
+TEST_CASE("ExtensionRegistry.faultsWhileLoadingCarryOverToTheRunningEntry", "[vtextension][registry]")
+{
+    // The breaker is the key's, not the entry's: the deaths while loading count with those while running.
+    auto fixture = RegistryFixture {};
+    fixture.fake.loadFailure = ExtensionError::HostUnavailable;
+    CHECK(acquireError(fixture) == ExtensionError::HostUnavailable);
+    CHECK(acquireError(fixture) == ExtensionError::HostUnavailable);
+    fixture.fake.loadFailure.reset();
+    auto const compiled = fixture.acquire();
+    REQUIRE(compiled->breaker() != nullptr);
+    CHECK(compiled->breaker()->faultCount() == 2);
+}
+
 TEST_CASE("ExtensionRegistry.droppedEntryIsLoadedAgain", "[vtextension][registry]")
 {
     auto fixture = RegistryFixture {};

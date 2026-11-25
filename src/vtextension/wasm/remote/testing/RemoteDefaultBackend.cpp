@@ -22,10 +22,13 @@ std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
 {
     // One kind for the binary, as a program composes one: every backend made here behaves as one.
     static auto const kind = remote::makeRemoteKindState();
-    // No connector configured: this composition runs its hosts in this process.
+    // No connector configured: this composition runs its hosts in this process, which no sandbox confines.
     if (!config.connector)
+    {
         config.connector = std::make_shared<host::InProcessHostConnector>(
             [] { return testing::makeHostedEngine(); }, host::HostServerConfig {});
+        config.lockdown = LockdownRequirement::AcceptUnsandboxed;
+    }
     return remote::makeRemoteBackend(kind, std::move(config));
 }
 

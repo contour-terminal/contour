@@ -176,6 +176,9 @@ class RunnerHarness
   public:
     RunnerHarness() = default;
 
+    /// @param engines What the harness's engines are created from, in place of the default backend.
+    explicit RunnerHarness(std::unique_ptr<wasm::IWasmBackend> engines): backend { std::move(engines) } {}
+
     /// @return The services, for a Runner or an ExtensionHost built on this harness.
     [[nodiscard]] RunnerServices services() { return services(scheduler); }
 

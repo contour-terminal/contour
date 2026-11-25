@@ -18,12 +18,20 @@ namespace vtextension::wasm::remote::process::testing
 
 namespace
 {
+    /// What a process does when killed.
+    enum class KillResponse : uint8_t
+    {
+        Ends,    ///< It ends, as FakeKilledStatus.
+        Ignored, ///< It runs on (FakeProcessLauncher::survivesKill()).
+    };
+
     /// One process launched.
     struct LaunchRecord
     {
         LaunchSpec spec;
         std::thread::id thread;
         std::optional<ExitStatus> exit; ///< How it ended; nothing while it runs.
+        KillResponse onKill = KillResponse::Ends;
     };
 } // namespace
 
@@ -34,6 +42,7 @@ struct FakeProcessLauncher::State
     std::vector<LaunchRecord> launches;
     std::vector<std::size_t> kills;
     std::optional<core::SteadyTimePoint> lastDeadline;
+    std::optional<LaunchError> waitFailure; ///< What every wait() fails with; nothing while they work.
 };
 
 namespace
@@ -57,10 +66,10 @@ namespace
         {
             auto const lock = std::scoped_lock { _state->mutex };
             _state->kills.push_back(_index);
-            auto& exit = _state->launches[_index].exit;
-            if (!exit)
+            auto& record = _state->launches[_index];
+            if (!record.exit && record.onKill == KillResponse::Ends)
             {
-                exit = FakeKilledStatus;
+                record.exit = FakeKilledStatus;
                 _state->changed.notify_all();
             }
         }
@@ -111,8 +120,10 @@ namespace
             auto ended = std::vector<uint64_t> {};
             _state->changed.wait(lock, [&] {
                 ended = endedKeys();
-                return _isWoken || !ended.empty();
+                return _isWoken || !ended.empty() || _state->waitFailure;
             });
+            if (_state->waitFailure)
+                return std::unexpected(*_state->waitFailure);
             _isWoken = false;
             return ended;
         }
@@ -151,8 +162,10 @@ std::expected<std::unique_ptr<IProcessHandle>, LaunchError> FakeProcessLauncher:
     LaunchSpec const& spec)
 {
     auto const lock = std::scoped_lock { _state->mutex };
-    _state->launches.push_back(
-        LaunchRecord { .spec = spec, .thread = std::this_thread::get_id(), .exit = std::nullopt });
+    _state->launches.push_back(LaunchRecord { .spec = spec,
+                                              .thread = std::this_thread::get_id(),
+                                              .exit = std::nullopt,
+                                              .onKill = KillResponse::Ends });
     return std::make_unique<FakeProcessHandle>(_state, _state->launches.size() - 1);
 }
 
@@ -166,6 +179,19 @@ void FakeProcessLauncher::exit(std::size_t index, ExitStatus status)
 {
     auto const lock = std::scoped_lock { _state->mutex };
     _state->launches.at(index).exit = status;
+    _state->changed.notify_all();
+}
+
+void FakeProcessLauncher::survivesKill(std::size_t index)
+{
+    auto const lock = std::scoped_lock { _state->mutex };
+    _state->launches.at(index).onKill = KillResponse::Ignored;
+}
+
+void FakeProcessLauncher::failWaits(LaunchError error)
+{
+    auto const lock = std::scoped_lock { _state->mutex };
+    _state->waitFailure = error;
     _state->changed.notify_all();
 }
 

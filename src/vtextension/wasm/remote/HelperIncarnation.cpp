@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/wasm/remote/HelperIncarnation.hpp>
 
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstddef>
 #include <expected>
 #include <memory>
 #include <mutex>
+#include <ranges>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -19,11 +24,44 @@ namespace
     /// The limits the parent's ends apply: the protocol's own, which every host applies too.
     constexpr auto ParentLimits = proto::PduLimits {};
 
-    /// @return Whether a host that said @p hello may be driven: it speaks this protocol, confined itself or
-    ///         runs where there is no confinement, and copies memory, which is how this parent reaches it.
-    [[nodiscard]] bool isAcceptable(proto::Hello const& hello) noexcept
+    /// One step's budget, as HostTimeouts holds it.
+    struct StepBudget
     {
-        return hello.version == proto::ProtocolVersion && hello.lockdown != proto::LockdownState::Failed
+        HostStep step;
+        std::chrono::milliseconds HostTimeouts::* budget;
+    };
+
+    /// Every step's budget, at its step's index.
+    constexpr auto StepBudgets = std::array {
+        StepBudget { .step = HostStep::Handshake, .budget = &HostTimeouts::handshake },
+        StepBudget { .step = HostStep::Load, .budget = &HostTimeouts::load },
+        StepBudget { .step = HostStep::Instantiate, .budget = &HostTimeouts::instantiate },
+    };
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, StepBudgets.size()),
+                                      [](std::size_t index) {
+                                          return std::to_underlying(StepBudgets[index].step) == index;
+                                      }));
+
+    /// @return Whether a host confined as @p state may be driven under @p requirement: one that failed to
+    ///         confine itself never is.
+    [[nodiscard]] constexpr bool isConfinedEnough(proto::LockdownState state,
+                                                  LockdownRequirement requirement) noexcept
+    {
+        switch (state)
+        {
+            case proto::LockdownState::Failed: return false;
+            case proto::LockdownState::Unsandboxed:
+                return requirement == LockdownRequirement::AcceptUnsandboxed;
+            case proto::LockdownState::LockedDown: return true;
+        }
+        return false;
+    }
+
+    /// @return Whether a host that said @p hello may be driven: it speaks this protocol, is confined as
+    ///         @p requirement asks, and copies memory, which is how this parent reaches it.
+    [[nodiscard]] bool isAcceptable(proto::Hello const& hello, LockdownRequirement requirement) noexcept
+    {
+        return hello.version == proto::ProtocolVersion && isConfinedEnough(hello.lockdown, requirement)
                && hello.memoryMode == proto::MemoryMode::Copy;
     }
 
@@ -35,7 +73,7 @@ namespace
 } // namespace
 
 std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnation::connect(
-    IHostConnector& connector, proto::CreateRuntime const& runtime)
+    IHostConnector& connector, proto::CreateRuntime const& runtime, HelperPolicy const& policy)
 {
     auto connection = connector.connect();
     if (!connection)
@@ -46,25 +84,31 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
             connection->handle->terminate();
         return std::unexpected(ExtensionError::HostUnavailable);
     }
-    auto incarnation = std::make_shared<HelperIncarnation>(std::move(*connection));
+    auto incarnation = std::make_shared<HelperIncarnation>(std::move(*connection), policy.timeouts);
+    // A host that ends is declared dead at once, rather than by the next request that finds its channel
+    // closed; one that is gone already, at once.
+    incarnation->_handle->attach(HostAttachment { .onDeath = [weak = std::weak_ptr { incarnation }] {
+        if (auto const self = weak.lock())
+            self->markDead();
+    } });
 
-    // The host speaks first, unasked; a request then creates the runtime.
+    // The host speaks first, unasked; a request then creates the runtime. Both within the handshake's budget.
     auto const handshake = [&]() -> bool {
         auto const lock = std::scoped_lock { incarnation->_controlMutex };
+        auto const watch = incarnation->watch(HostStep::Handshake);
         auto const hello = incarnation->_control.receive();
-        return hello && std::holds_alternative<proto::Hello>(*hello)
-               && isAcceptable(std::get<proto::Hello>(*hello));
-    };
-    auto const created = [&]() -> bool {
+        if (!hello || !std::holds_alternative<proto::Hello>(*hello)
+            || !isAcceptable(std::get<proto::Hello>(*hello), policy.lockdown))
+            return false;
         auto request = runtime;
         request.runtimeId = RuntimeId;
-        auto const reply = incarnation->request(request);
+        auto const reply = incarnation->exchange(request);
         return reply
                && *reply
                       == proto::Pdu { proto::RuntimeCreated { .runtimeId = RuntimeId,
                                                               .error = std::nullopt } };
     };
-    if (!handshake() || !created())
+    if (!handshake())
     {
         incarnation->markDead();
         return std::unexpected(ExtensionError::HostUnavailable);
@@ -72,7 +116,8 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
     return incarnation;
 }
 
-HelperIncarnation::HelperIncarnation(HostConnection connection):
+HelperIncarnation::HelperIncarnation(HostConnection connection, HostTimeouts timeouts):
+    _timeouts { timeouts },
     _control { parentEnd(std::move(connection.control), proto::ChannelKind::Control) },
     _handle { std::move(connection.handle) }
 {
@@ -83,9 +128,16 @@ HelperIncarnation::HelperIncarnation(HostConnection connection):
 
 HelperIncarnation::~HelperIncarnation() = default;
 
-std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu const& pdu)
+std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu const& pdu, HostStep step)
 {
     auto const lock = std::scoped_lock { _controlMutex };
+    // Armed only once the channel is this request's: waiting for another's is not the host's time.
+    auto const watch = this->watch(step);
+    return exchange(pdu);
+}
+
+std::expected<proto::Pdu, StreamError> HelperIncarnation::exchange(proto::Pdu const& pdu)
+{
     if (!isAlive())
         return std::unexpected(StreamError::Closed);
     if (auto const sent = _control.send(pdu); !sent)
@@ -99,6 +151,11 @@ std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu con
     if (!reply)
         markDead();
     return reply;
+}
+
+StepWatch HelperIncarnation::watch(HostStep step)
+{
+    return _handle->watch(step, _timeouts.*StepBudgets[std::to_underlying(step)].budget);
 }
 
 void HelperIncarnation::post(proto::Pdu const& pdu) noexcept

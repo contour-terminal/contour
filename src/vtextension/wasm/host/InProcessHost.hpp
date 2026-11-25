@@ -6,10 +6,13 @@
 /// what measures the protocol's cost without a process boundary.
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -53,7 +56,9 @@ class InProcessHost final: public remote::IHostHandle
     InProcessHost& operator=(InProcessHost const&) = delete;
     InProcessHost& operator=(InProcessHost&&) = delete;
 
-    /// Terminates the host and joins its thread, on the thread that drops it.
+    /// Terminates the host and joins its thread, on the thread that drops it -- unless that is its own
+    /// thread, which an onDeath dropping the last reference to the host's parent ends on: the thread is
+    /// then let go, as it touches nothing of the host after onDeath.
     ~InProcessHost() override;
 
     /// Interrupts the instance directly, under the server's brief instance-map lock.
@@ -62,12 +67,33 @@ class InProcessHost final: public remote::IHostHandle
     /// Stops the server: its channels close, and its thread winds down.
     void terminate() noexcept override;
 
+    /// A host in this process cannot hang its parent's steps the way a process could: no timeout is armed.
+    /// @return An inert watch.
+    [[nodiscard]] remote::StepWatch watch(remote::HostStep step, std::chrono::milliseconds budget) override;
+
+    /// Stores @p attachment; its onDeath runs on the host's thread once the server's run() returned, or at
+    /// once if it returned already.
+    void attach(remote::HostAttachment attachment) override;
+
     /// @return Whether its server still serves.
     [[nodiscard]] ServingState state() const noexcept;
 
   private:
+    /// Whether the server's run() returned.
+    enum class RunState : uint8_t
+    {
+        Running,  ///< It serves, or was told to stop and has not returned yet.
+        Returned, ///< It returned; onDeath ran or runs on attach.
+    };
+
+    /// Marks run() returned. @return The onDeath to call, if one was attached.
+    [[nodiscard]] std::function<void()> runReturned();
+
     std::shared_ptr<InProcessHostRegistry> _registry;
     std::atomic<ServingState> _state { ServingState::Serving };
+    std::mutex _attachmentMutex;       ///< Guards the two below.
+    RunState _run = RunState::Running; ///< Guarded by _attachmentMutex.
+    std::function<void()> _onDeath;    ///< Guarded by _attachmentMutex.
     std::unique_ptr<IHostedEngine> _engine;
     HostServer _server;
     std::jthread _thread;

@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -265,6 +266,20 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         return _loads;
     }
 
+    /// @return The thread each load ran on, failed ones included, in order.
+    [[nodiscard]] std::vector<std::thread::id> loadThreads() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _loadThreads;
+    }
+
+    /// @return The thread each instantiation ran on, in order.
+    [[nodiscard]] std::vector<std::thread::id> instantiateThreads() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _instantiateThreads;
+    }
+
     /// @return The identity the last module was loaded with; empty before the first.
     [[nodiscard]] wasm::ModuleIdentity lastIdentity() const
     {
@@ -287,6 +302,7 @@ class FakeWasmBackend final: public wasm::IWasmBackend
 
   private:
     friend class FakeWasmRuntime;
+    friend class FakeWasmModule;
 
     /// A guard that prepares nothing, as nothing needs preparing; it remembers its generation.
     class Guard final: public wasm::IThreadGuard
@@ -314,7 +330,15 @@ class FakeWasmBackend final: public wasm::IWasmBackend
     {
         auto const lock = std::scoped_lock { _mutex };
         ++_loads;
+        _loadThreads.push_back(std::this_thread::get_id());
         _lastIdentity = std::move(identity);
+    }
+
+    /// Counts an instance created, on the calling thread.
+    void instanceCreated()
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _instantiateThreads.push_back(std::this_thread::get_id());
     }
 
     /// Counts a runtime destroyed, on whichever thread drops the last reference to it.
@@ -324,11 +348,13 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         --_runtimesAlive;
     }
 
-    mutable std::mutex _mutex;             ///< Guards the counters below; the generation is read without it.
-    std::size_t _runtimesAlive = 0;        ///< How many runtimes are alive.
-    std::size_t _loads = 0;                ///< How many modules were loaded.
-    wasm::ModuleIdentity _lastIdentity;    ///< The identity the last module was loaded with.
-    std::atomic<uint64_t> _generation = 0; ///< How many times the engine was brought up.
+    mutable std::mutex _mutex;          ///< Guards the counters below; the generation is read without it.
+    std::size_t _runtimesAlive = 0;     ///< How many runtimes are alive.
+    std::size_t _loads = 0;             ///< How many modules were loaded.
+    wasm::ModuleIdentity _lastIdentity; ///< The identity the last module was loaded with.
+    std::vector<std::thread::id> _loadThreads;        ///< Where each load ran.
+    std::vector<std::thread::id> _instantiateThreads; ///< Where each instantiation ran.
+    std::atomic<uint64_t> _generation = 0;            ///< How many times the engine was brought up.
 };
 
 inline FakeWasmRuntime::FakeWasmRuntime(FakeWasmBackend& backend,
@@ -391,6 +417,7 @@ inline std::expected<std::unique_ptr<wasm::IWasmInstance>, ExtensionError> FakeW
             return entry.kind == wasm::ExternKind::Function;
         })
         | std::views::transform(&wasm::ExportDescription::name));
+    _backend.instanceCreated();
     auto instance =
         std::make_unique<FakeWasmInstance>(_backend.guest, std::move(names), shared_from_this(), &context);
     _backend.lastInstance = instance.get();

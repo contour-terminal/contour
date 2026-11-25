@@ -238,3 +238,13 @@ std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makePollExitWaitSet(co
 #endif
 
 } // namespace vtextension::wasm::remote::process::posix
+
+namespace vtextension::wasm::remote::process
+{
+
+ProcessId currentProcessId() noexcept
+{
+    return static_cast<ProcessId>(::getpid());
+}
+
+} // namespace vtextension::wasm::remote::process

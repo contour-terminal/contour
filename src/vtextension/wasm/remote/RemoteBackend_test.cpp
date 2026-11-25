@@ -18,6 +18,7 @@
 #include <future>
 #include <latch>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <print>
 #include <ranges>
@@ -56,18 +57,22 @@ using vtextension::wasm::IWasmInstance;
 using vtextension::wasm::IWasmModule;
 using vtextension::wasm::IWasmRuntime;
 using vtextension::wasm::Linkage;
+using vtextension::wasm::LockdownRequirement;
 using vtextension::wasm::MemoryFailure;
 using vtextension::wasm::ModuleIdentity;
 using vtextension::wasm::ValueType;
 using vtextension::wasm::host::HostServerConfig;
 using vtextension::wasm::host::InProcessHostConnector;
+using vtextension::wasm::remote::HostAttachment;
 using vtextension::wasm::remote::HostConnection;
+using vtextension::wasm::remote::HostStep;
 using vtextension::wasm::remote::IHostConnector;
 using vtextension::wasm::remote::IHostHandle;
 using vtextension::wasm::remote::makeRemoteBackend;
 using vtextension::wasm::remote::makeRemoteKindState;
 using vtextension::wasm::remote::MaxLaneChannels;
 using vtextension::wasm::remote::RemoteKindState;
+using vtextension::wasm::remote::StepWatch;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::makeChannelPair;
 using vtextension::wasm::testing::makeHostedEngine;
@@ -91,11 +96,16 @@ namespace
     return std::make_shared<InProcessHostConnector>([] { return makeHostedEngine(); }, HostServerConfig {});
 }
 
-/// @return A remote backend of the shared kind, starting its hosts through @p connector.
-[[nodiscard]] std::unique_ptr<IWasmBackend> makeBackend(std::shared_ptr<IHostConnector> connector)
+/// @return A remote backend of the shared kind, starting its hosts through @p connector and driving those
+///         confined as @p lockdown asks: by default also those without a sandbox, which every host here is.
+[[nodiscard]] std::unique_ptr<IWasmBackend> makeBackend(
+    std::shared_ptr<IHostConnector> connector,
+    LockdownRequirement lockdown = LockdownRequirement::AcceptUnsandboxed)
 {
     return makeRemoteBackend(
-        sharedKind(), BackendConfig { .helper = {}, .timeouts = {}, .connector = std::move(connector) });
+        sharedKind(),
+        BackendConfig {
+            .helper = {}, .timeouts = {}, .connector = std::move(connector), .lockdown = lockdown });
 }
 
 struct RemoteTraits
@@ -351,20 +361,55 @@ struct HelperEnds
     }
 };
 
-/// A host handle that counts how often it was told to terminate.
+/// One step's watch a host handle was asked for.
+struct WatchRecord
+{
+    HostStep step;
+    std::chrono::milliseconds budget;
+
+    bool operator==(WatchRecord const&) const = default;
+};
+
+/// What the handles of one connector record: terminations, the watches armed and disarmed, and the
+/// attachment of the latest connection.
+struct HandleRecords
+{
+    std::atomic<int> terminations = 0;
+    std::mutex mutex;                 ///< Guards what follows.
+    std::vector<WatchRecord> watches; ///< Every watch armed, in order.
+    std::size_t disarmed = 0;         ///< How many watches were disarmed.
+    HostAttachment attachment;        ///< The latest connection's.
+};
+
+/// A host handle that records what it is told.
 class CountingHandle final: public IHostHandle
 {
   public:
-    explicit CountingHandle(std::shared_ptr<std::atomic<int>> terminations) noexcept:
-        _terminations { std::move(terminations) }
+    explicit CountingHandle(std::shared_ptr<HandleRecords> records) noexcept: _records { std::move(records) }
     {
     }
 
     void interrupt(uint32_t /*instanceId*/) noexcept override {}
-    void terminate() noexcept override { _terminations->fetch_add(1); }
+    void terminate() noexcept override { _records->terminations.fetch_add(1); }
+
+    [[nodiscard]] StepWatch watch(HostStep step, std::chrono::milliseconds budget) override
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        _records->watches.push_back(WatchRecord { .step = step, .budget = budget });
+        return StepWatch { [records = _records] {
+            auto const disarmLock = std::scoped_lock { records->mutex };
+            ++records->disarmed;
+        } };
+    }
+
+    void attach(HostAttachment attachment) override
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        _records->attachment = std::move(attachment);
+    }
 
   private:
-    std::shared_ptr<std::atomic<int>> _terminations;
+    std::shared_ptr<HandleRecords> _records;
 };
 
 /// A connector whose host is the test: each connection runs the script on the helper's ends, on a thread of
@@ -389,7 +434,7 @@ class ScriptedConnector final: public IHostConnector
             return std::unexpected(ExtensionError::HostUnavailable);
         auto connection = HostConnection { .control = std::move(control->parent),
                                            .lanes = {},
-                                           .handle = std::make_unique<CountingHandle>(_terminations) };
+                                           .handle = std::make_unique<CountingHandle>(_records) };
         auto ends = HelperEnds { .control = std::move(control->helper), .lanes = {}, .received = {} };
         for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
         {
@@ -406,11 +451,32 @@ class ScriptedConnector final: public IHostConnector
     }
 
     /// @return How often a host of this connector was told to terminate.
-    [[nodiscard]] int terminations() const noexcept { return _terminations->load(); }
+    [[nodiscard]] int terminations() const noexcept { return _records->terminations.load(); }
+
+    /// @return Every watch its hosts' handles armed, in order.
+    [[nodiscard]] std::vector<WatchRecord> watches() const
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        return _records->watches;
+    }
+
+    /// @return How many of them were disarmed.
+    [[nodiscard]] std::size_t disarmed() const
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        return _records->disarmed;
+    }
+
+    /// @return The latest connection's attachment.
+    [[nodiscard]] HostAttachment attachment() const
+    {
+        auto const lock = std::scoped_lock { _records->mutex };
+        return _records->attachment;
+    }
 
   private:
     Script _script;
-    std::shared_ptr<std::atomic<int>> _terminations = std::make_shared<std::atomic<int>>(0);
+    std::shared_ptr<HandleRecords> _records = std::make_shared<HandleRecords>();
     std::vector<std::jthread> _threads;
 };
 
@@ -498,9 +564,12 @@ struct ScriptedInstance
     return called ? std::nullopt : std::optional { called.error() };
 }
 
-/// Loads PeekModule through a scripted host that opens with @p hello.
+/// Loads PeekModule through a scripted host that opens with @p hello, driven as @p lockdown asks.
 /// @return What the load failed with; nothing if it succeeded.
-[[nodiscard]] std::optional<ExtensionError> loadAfterHello(proto::Hello hello, int& terminations)
+[[nodiscard]] std::optional<ExtensionError> loadAfterHello(
+    proto::Hello hello,
+    int& terminations,
+    LockdownRequirement lockdown = LockdownRequirement::AcceptUnsandboxed)
 {
     auto const connector =
         std::make_shared<ScriptedConnector>([hello](HelperEnds& ends, std::size_t /*connection*/) {
@@ -508,7 +577,7 @@ struct ScriptedInstance
                 ends.drain();
         });
     {
-        auto const backend = makeBackend(connector);
+        auto const backend = makeBackend(connector, lockdown);
         auto const runtime = contract::createRuntime(*backend);
         auto const loaded = runtime->load(ModuleIdentity {}, toModule(PeekModule));
         terminations = connector->terminations();
@@ -681,6 +750,86 @@ TEST_CASE("RemoteBackend.lockdownFailureIsHostUnavailable", "[vtextension][remot
     auto terminations = 0;
     CHECK(loadAfterHello(hello, terminations) == ExtensionError::HostUnavailable);
     CHECK(terminations == 1);
+}
+
+TEST_CASE("RemoteBackend.unsandboxedIsRefusedUnlessAccepted", "[vtextension][remote]")
+{
+    auto terminations = 0;
+    CHECK(loadAfterHello(HonestHello, terminations, LockdownRequirement::RequireLockedDown)
+          == ExtensionError::HostUnavailable);
+    CHECK(terminations == 1);
+
+    // A host in its sandbox is driven under either requirement: it gets as far as creating the runtime.
+    auto lockedDown = HonestHello;
+    lockedDown.lockdown = proto::LockdownState::LockedDown;
+    auto const connector =
+        std::make_shared<ScriptedConnector>([lockedDown](HelperEnds& ends, std::size_t /*connection*/) {
+            auto const created = [&] {
+                if (!ends.send(lockedDown))
+                    return false;
+                auto const create = ends.receive<proto::CreateRuntime>();
+                return create
+                       && ends.send(
+                           proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt });
+            }();
+            if (created)
+            {
+                auto const load = ends.receive<proto::Load>();
+                if (load)
+                    std::ignore = ends.sendFrame(frameOf(peekDescription(load->moduleId)));
+            }
+            ends.drain();
+        });
+    auto const backend = makeBackend(connector, LockdownRequirement::RequireLockedDown);
+    auto const runtime = contract::createRuntime(*backend);
+    CHECK(runtime->load(ModuleIdentity {}, toModule(PeekModule)).has_value());
+    CHECK(connector->terminations() == 0);
+}
+
+TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")
+{
+    auto const connector = scriptedConnector(HelperScript {});
+    {
+        auto const backend = makeRemoteBackend(
+            sharedKind(),
+            BackendConfig { .helper = {},
+                            .timeouts = { .load = std::chrono::milliseconds { 11 },
+                                          .instantiate = std::chrono::milliseconds { 12 },
+                                          .handshake = std::chrono::milliseconds { 13 },
+                                          .interruptGrace = std::chrono::milliseconds { 14 } },
+                            .connector = connector,
+                            .lockdown = LockdownRequirement::AcceptUnsandboxed });
+        auto const runtime = contract::createRuntime(*backend);
+        auto const guard = contract::enterThread(*backend);
+        auto const module = contract::load(*runtime, PeekModule);
+        auto context = contract::RecordingHostContext {};
+        auto const instance = contract::instantiate(*module, context);
+
+        // Hello and CreateRuntime under one handshake watch, then one per exchange: each budget the
+        // configuration's, and each watch disarmed once its exchange returned.
+        CHECK(connector->watches()
+              == std::vector {
+                  WatchRecord { .step = HostStep::Handshake, .budget = std::chrono::milliseconds { 13 } },
+                  WatchRecord { .step = HostStep::Load, .budget = std::chrono::milliseconds { 11 } },
+                  WatchRecord { .step = HostStep::Instantiate, .budget = std::chrono::milliseconds { 12 } },
+              });
+        CHECK(connector->disarmed() == 3);
+    }
+}
+
+TEST_CASE("RemoteBackend.observedDeathKillsTheIncarnation", "[vtextension][remote]")
+{
+    // The handle reports its host's end through the attachment: the incarnation is dead at once, without a
+    // request finding out, and the next instantiation starts a host anew.
+    auto instance = ScriptedInstance { HelperScript {} };
+    auto const onDeath = instance.rig.connector->attachment().onDeath;
+    REQUIRE(onDeath);
+    CHECK(instance.rig.connector->terminations() == 0);
+    onDeath();
+    CHECK(instance.rig.connector->terminations() == 1);
+    onDeath(); // once dead, for good
+    CHECK(instance.rig.connector->terminations() == 1);
+    CHECK(loadFailure(*instance.instance) == CallFailure::HostCrashed);
 }
 
 TEST_CASE("RemoteBackend.malformedPduKillsTheHelper", "[vtextension][remote]")

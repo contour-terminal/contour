@@ -13,13 +13,6 @@
 
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 
-#ifdef _WIN32
-    #define WIN32_LEAN_AND_MEAN
-    #include <Windows.h>
-#else
-    #include <unistd.h>
-#endif
-
 namespace vtextension::wasm::remote::process::testing
 {
 
@@ -28,11 +21,7 @@ using transport::NativeHandle;
 
 ProcessId ownProcessId() noexcept
 {
-#ifdef _WIN32
-    return static_cast<ProcessId>(::GetCurrentProcessId());
-#else
-    return static_cast<ProcessId>(::getpid());
-#endif
+    return currentProcessId();
 }
 
 std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process)

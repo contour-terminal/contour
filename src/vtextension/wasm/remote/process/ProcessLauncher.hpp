@@ -178,6 +178,9 @@ class IProcessLauncher
         core::IClock& clock) = 0;
 };
 
+/// @return This process's id: what a helper is told is its parent (`--parent`).
+[[nodiscard]] ProcessId currentProcessId() noexcept;
+
 /// @return The launcher of this operating system's processes.
 [[nodiscard]] std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher();
 

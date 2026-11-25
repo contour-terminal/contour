@@ -66,7 +66,10 @@ struct RemoteRig
 
     std::shared_ptr<InProcessHostConnector> connector;
     std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend(
-        wasm::BackendConfig { .helper = {}, .timeouts = {}, .connector = connector });
+        wasm::BackendConfig { .helper = {},
+                              .timeouts = {},
+                              .connector = connector,
+                              .lockdown = wasm::LockdownRequirement::AcceptUnsandboxed });
     std::shared_ptr<Engine> engine = [this] {
         auto created = Engine::create(*backend, Limits);
         REQUIRE(created.has_value());
