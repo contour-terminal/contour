@@ -157,8 +157,9 @@ struct ChangeRequest
 /// One pipeline of a project, as its pipeline list reports it.
 struct PipelineInfo
 {
-    uint64_t id = 0;            ///< Its project-wide id; a later pipeline has a higher one.
-    std::string sha;            ///< The commit it ran on.
+    uint64_t id = 0; ///< Its project-wide id; a later pipeline has a higher one.
+    std::string sha; ///< The commit it ran on.
+    std::string ref; ///< The branch, tag or merge request ref it ran for, as the forge reported it.
     CiState ci = CiState::None; ///< Its status, in the model.
     [[nodiscard]] bool operator==(PipelineInfo const&) const = default;
 };

@@ -55,8 +55,11 @@ None), it names no failing check, and it claims no issue.
 
 **Pipelines and failed jobs.** `glab api projects/:id/pipelines?per_page=100&order_by=id&sort=desc` and
 `glab api projects/:id/jobs?scope[]=failed&per_page=100` (`glab api` fills `:id` from the repository it runs in)
-print the REST API's arrays unprojected. A merge request whose `sha` matches a listed pipeline takes the
-highest-id one's `status` (`success`, `skipped` Passing; `failed`, `canceled` Failing; anything else Pending)
+print the REST API's arrays unprojected. A pipeline belongs to a merge request when it ran on its `sha`, or
+for its `refs/merge-requests/<iid>/head` or `refs/merge-requests/<iid>/merge`: a merged-results pipeline runs
+on a merge commit, not on the head (recorded refs: 56 `merge`, 30 `head`, 10 `train`, 4 branches; the
+scrubber keeps a merge request ref as it is and rewrites only branch and tag names). A merge request with such
+pipelines takes the highest-id one's `status` (`success`, `skipped` Passing; `failed`, `canceled` Failing; anything else Pending)
 and names that pipeline's failed jobs; one without a match keeps what `detailed_merge_status` says. Recorded
 pipeline statuses: `success`, `failed`, `canceled`, `running`; failed jobs' `failure_reason`: `script_failure`,
 `job_execution_timeout`, `data_integrity_failure`.

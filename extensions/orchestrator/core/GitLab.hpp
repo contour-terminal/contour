@@ -75,10 +75,11 @@ namespace orchestrator::gitlab
 [[nodiscard]] std::expected<std::vector<FailedJob>, ParseError> failedJobs(std::string_view stdoutText,
                                                                            OutputExtent extent);
 
-/// Joins pipelines and failed jobs into the REST list. A merge request whose `headSha` matches a pipeline
-/// takes the highest-id one's ci and that pipeline's failed jobs (list order, each name once), keeps the
-/// review reviewStateOf() gave it, and is Complete; without a match it stays as changeRequests() mapped it,
-/// Inferred.
+/// Joins pipelines and failed jobs into the REST list. A pipeline belongs to a merge request when it ran on
+/// its `headSha`, or for its `refs/merge-requests/<iid>/head` or `refs/merge-requests/<iid>/merge` (a
+/// merged-results pipeline, whose commit is not the head). A merge request with such pipelines takes the
+/// highest-id one's ci and that pipeline's failed jobs (list order, each name once), keeps the review
+/// reviewStateOf() gave it, and is Complete; without one it stays as changeRequests() mapped it, Inferred.
 /// @param listed The REST list's merge requests.
 /// @param pipelines What pipelines() read; std::nullopt: the call failed.
 /// @param jobs What failedJobs() read; std::nullopt: the call failed (failingChecks stay empty).

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <expected>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -116,6 +117,21 @@ namespace
         Spelling { .text = "canceled"sv, .meaning = CiState::Failing },
     };
 
+    /// The refs GitLab runs a merge request's pipelines for, after `refs/merge-requests/<iid>/`: its head,
+    /// and the merged result, whose commit is not the head's (a merge train's `train` ref is not the merge
+    /// request's own pipeline).
+    constexpr auto MergeRequestRefs = std::array { "head"sv, "merge"sv };
+
+    /// @return Whether @p pipeline ran for @p mr: on its head commit, or for one of its MergeRequestRefs.
+    [[nodiscard]] bool ranFor(PipelineInfo const& pipeline, ChangeRequest const& mr)
+    {
+        if (!mr.headSha.empty() && pipeline.sha == mr.headSha)
+            return true;
+        return std::ranges::any_of(MergeRequestRefs, [&](std::string_view kind) {
+            return pipeline.ref == std::format("refs/merge-requests/{}/{}", mr.number, kind);
+        });
+    }
+
     /// @return @p json in the model.
     ChangeRequest changeRequestOf(JsonMergeRequest const& json)
     {
@@ -207,8 +223,10 @@ std::expected<std::vector<PipelineInfo>, ParseError> pipelines(std::string_view 
         auto mapped = std::vector<PipelineInfo> {};
         for (auto const& entry: read.entries)
             if (entry.id != 0 && !entry.sha.empty())
-                mapped.push_back(
-                    PipelineInfo { .id = entry.id, .sha = entry.sha, .ci = pipelineStateOf(entry.status) });
+                mapped.push_back(PipelineInfo { .id = entry.id,
+                                                .sha = entry.sha,
+                                                .ref = entry.ref,
+                                                .ci = pipelineStateOf(entry.status) });
         return mapped;
     });
 }
@@ -237,13 +255,10 @@ std::vector<ChangeRequest> enriched(std::vector<ChangeRequest> listed,
     auto const failed = jobs.value_or(std::span<FailedJob const> {});
     for (auto& mr: listed)
     {
-        if (mr.headSha.empty())
-            continue;
-        auto ofHead = *pipelines | std::views::filter([&](PipelineInfo const& pipeline) {
-            return pipeline.sha == mr.headSha;
-        });
-        auto const newest = std::ranges::max_element(ofHead, {}, &PipelineInfo::id);
-        if (newest == ofHead.end())
+        auto ofMr = *pipelines
+                    | std::views::filter([&](PipelineInfo const& pipeline) { return ranFor(pipeline, mr); });
+        auto const newest = std::ranges::max_element(ofMr, {}, &PipelineInfo::id);
+        if (newest == ofMr.end())
             continue;
         mr.ci = newest->ci;
         mr.source = StateSource::Complete;

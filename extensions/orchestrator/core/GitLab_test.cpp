@@ -295,11 +295,14 @@ TEST_CASE("GitLab: the recorded pipelines and failed jobs map", "[gitlab]")
 
 TEST_CASE("GitLab: pipelines and failed jobs leave out what they cannot place", "[gitlab]")
 {
-    auto const pipes = gitlab::pipelines(
-        R"([{"id":3,"sha":"abc","status":"failed"},{"sha":"abc","status":"success"},{"id":4,"status":"success"}])",
-        OutputExtent::Whole);
+    auto const pipes =
+        gitlab::pipelines(R"([{"id":3,"sha":"abc","ref":"refs/merge-requests/7/merge","status":"failed"},)"
+                          R"({"sha":"abc","status":"success"},{"id":4,"status":"success"}])",
+                          OutputExtent::Whole);
     REQUIRE(pipes.has_value());
-    CHECK(*pipes == std::vector { PipelineInfo { .id = 3, .sha = "abc", .ci = CiState::Failing } });
+    CHECK(*pipes
+          == std::vector { PipelineInfo {
+              .id = 3, .sha = "abc", .ref = "refs/merge-requests/7/merge", .ci = CiState::Failing } });
     CHECK(gitlab::pipelines(R"({"id":3})", OutputExtent::Whole).error() == ParseError::WrongShape);
     CHECK(
         gitlab::pipelines(R"([{"id":3,"sha":"abc","status":"failed"},{"id")", OutputExtent::Truncated)->size()
@@ -357,4 +360,79 @@ TEST_CASE("GitLab: the REST list carries conflicts, update time and the head com
     CHECK(byIid(5752).source == StateSource::Inferred);
     CHECK(std::ranges::all_of(
         listed->items, [](ChangeRequest const& mr) { return mr.updatedWallMs != 0 && !mr.headSha.empty(); }));
+}
+
+TEST_CASE("GitLab: a merge request's pipelines are found by its head commit or its merge request refs",
+          "[gitlab]")
+{
+    auto const mr = [](uint64_t number, std::string_view sha) {
+        return ChangeRequest { .number = number,
+                               .title = "Example title",
+                               .url = {},
+                               .head = "topic",
+                               .base = "main",
+                               .ci = CiState::None,
+                               .failingChecks = {},
+                               .review = ReviewState::Required,
+                               .closesIssues = {},
+                               .source = StateSource::Inferred,
+                               .headSha = std::string(sha) };
+    };
+    auto const listed = std::vector {
+        mr(7, "aaa"),  // only a merged-results pipeline, on another commit
+        mr(8, "bbb"),  // only a pipeline for its head ref, on another commit
+        mr(9, "ccc"),  // its head commit and its merge ref: the merge ref's pipeline is newer
+        mr(10, "ddd"), // the same, but the head commit's pipeline is newer
+        mr(11, "eee"), // only refs of other merge requests
+    };
+    auto const pipelines = std::vector {
+        PipelineInfo { .id = 10, .sha = "m7", .ref = "refs/merge-requests/7/merge", .ci = CiState::Failing },
+        PipelineInfo { .id = 11, .sha = "zzz", .ref = "refs/merge-requests/8/head", .ci = CiState::Passing },
+        PipelineInfo { .id = 20, .sha = "ccc", .ref = "feature/x", .ci = CiState::Passing },
+        PipelineInfo { .id = 21, .sha = "m9", .ref = "refs/merge-requests/9/merge", .ci = CiState::Failing },
+        PipelineInfo {
+            .id = 29, .sha = "m10", .ref = "refs/merge-requests/10/merge", .ci = CiState::Passing },
+        PipelineInfo { .id = 30, .sha = "ddd", .ref = "feature/y", .ci = CiState::Failing },
+        PipelineInfo {
+            .id = 40, .sha = "m111", .ref = "refs/merge-requests/111/merge", .ci = CiState::Failing },
+        PipelineInfo { .id = 41, .sha = "m1", .ref = "refs/merge-requests/1/head", .ci = CiState::Failing },
+        PipelineInfo {
+            .id = 42, .sha = "t11", .ref = "refs/merge-requests/11/train", .ci = CiState::Failing },
+    };
+    auto const jobs = std::vector {
+        FailedJob { .pipelineId = 21, .name = "e2e" },
+        FailedJob { .pipelineId = 20, .name = "stale" },
+        FailedJob { .pipelineId = 10, .name = "merged-build" },
+    };
+    auto const mrs = gitlab::enriched(listed, std::span { pipelines }, std::span { jobs });
+    REQUIRE(mrs.size() == listed.size());
+
+    CHECK(mrs[0].ci == CiState::Failing);
+    CHECK(mrs[0].source == StateSource::Complete);
+    CHECK(mrs[0].failingChecks == std::vector<std::string> { "merged-build" });
+
+    CHECK(mrs[1].ci == CiState::Passing);
+    CHECK(mrs[1].source == StateSource::Complete);
+
+    CHECK(mrs[2].ci == CiState::Failing);
+    CHECK(mrs[2].failingChecks == std::vector<std::string> { "e2e" });
+
+    CHECK(mrs[3].ci == CiState::Failing);
+    CHECK(mrs[3].failingChecks.empty());
+
+    CHECK(mrs[4] == listed[4]);
+    CHECK(mrs[4].source == StateSource::Inferred);
+}
+
+TEST_CASE("GitLab: the recorded merged-results pipelines keep their merge request refs", "[gitlab]")
+{
+    auto const pipes =
+        gitlab::pipelines(readFixture(FixtureRoot::Testdata, "gitlab/pipelines.json"), OutputExtent::Whole);
+    REQUIRE(pipes.has_value());
+    CHECK(std::ranges::any_of(*pipes, [](PipelineInfo const& p) {
+        return p.ref.starts_with("refs/merge-requests/") && p.ref.ends_with("/merge");
+    }));
+    CHECK(std::ranges::any_of(*pipes, [](PipelineInfo const& p) {
+        return p.ref.starts_with("refs/merge-requests/") && p.ref.ends_with("/head");
+    }));
 }

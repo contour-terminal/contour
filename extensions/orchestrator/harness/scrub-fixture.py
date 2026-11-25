@@ -17,6 +17,8 @@ joined by `.`, an array's element written `[]` (`[].author.web_url`), `*` matchi
                     innermost array), `{host}` (the shape's placeholder host) and any key of an enclosing
                     object, innermost first (`{iid}`);
 - `url:<template>`  the same, for a URL: the template names `{host}`;
+- `ref:<template>`  a merge request's pipeline ref (`refs/merge-requests/<iid>/<kind>`), kept, as the iid is;
+                    any other ref, a branch or a tag, the template, filled as `fmt:` fills it;
 - `sha`             forty times one hexadecimal digit, chosen by the entry's index (`sha:<length>` for a
                     shortened one, such as a commit's `short_id`);
 - `key`             a Jira key, as `ABC-<n>`: the same recorded key always becomes the same placeholder, and
@@ -231,7 +233,7 @@ SHAPES = {
     },
     "glab-pipelines": {
         "[].sha": "sha",
-        "[].ref": "fmt:feature/branch-{n}",
+        "[].ref": "ref:feature/branch-{n}",
         "[].name": "text:Pipeline",
         "[].web_url": "url:https://{host}/group/project/-/pipelines/{id}",
         "[].status": "keep",
@@ -243,7 +245,7 @@ SHAPES = {
     "glab-jobs": {
         "[].name": "fmt:job-{n}",
         "[].stage": "keep",
-        "[].ref": "fmt:feature/branch-{n}",
+        "[].ref": "ref:feature/branch-{n}",
         "[].status": "keep",
         "[].failure_reason": "keep",
         "[].created_at": "keep",
@@ -259,7 +261,7 @@ SHAPES = {
         "[].artifacts[].filename": "keep",
         "[].artifacts_file.filename": "keep",
         "[].pipeline.sha": "sha",
-        "[].pipeline.ref": "fmt:feature/branch-{n}",
+        "[].pipeline.ref": "ref:feature/branch-{n}",
         "[].pipeline.status": "keep",
         "[].pipeline.source": "keep",
         "[].pipeline.created_at": "keep",
@@ -343,6 +345,9 @@ HOSTS = {
     "acli-issues": JIRA_HOST,
 }
 
+# A merge request's pipeline ref: what it names is the iid, which every fixture keeps, not a branch.
+MERGE_REQUEST_REF = re.compile(r"refs/merge-requests/[0-9]+/[a-z]+")
+
 # A Jira key as the recording may spell it: an upper-case project key, a dash, a number.
 JIRA_KEY = re.compile(r"[A-Z][A-Z0-9_]*-[0-9]+")
 
@@ -418,7 +423,9 @@ class Scrubber:
         if kind == "text":
             draft = "Draft: " if value.startswith("Draft: ") else ""
             return f"{draft}{argument} {n}"
-        if kind in ("fmt", "url"):
+        if kind == "ref" and MERGE_REQUEST_REF.fullmatch(value):
+            return value
+        if kind in ("fmt", "url", "ref"):
             return argument.format_map(context)
         if kind == "sha":
             return "0123456789abcdef"[n % 16] * int(argument or 40)

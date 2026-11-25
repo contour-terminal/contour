@@ -35,6 +35,7 @@ struct JsonPipeline
 {
     uint64_t id = 0;
     std::string sha;
+    std::string ref;
     std::string status;
 };
 
