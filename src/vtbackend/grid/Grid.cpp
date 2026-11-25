@@ -1187,7 +1187,7 @@ std::string Grid::lineText(LineOffset lineOffset) const
 std::string Grid::lineTextTrimmed(LineOffset lineOffset) const
 {
     std::string output = lineText(lineOffset);
-    while (!output.empty() && isspace(output.back()))
+    while (!output.empty() && isAsciiWhitespace(output.back()))
         output.pop_back();
     return output;
 }

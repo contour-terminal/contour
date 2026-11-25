@@ -32,6 +32,14 @@
 namespace vtbackend
 {
 
+/// @return Whether @p c is ASCII whitespace: what trimming a line's text strips. Unlike std::isspace, it is
+///         defined for every byte of UTF-8 text (a `char` past 0x7F is negative) and does not depend on the
+///         locale, which may call a UTF-8 continuation byte such as 0xA0 a space.
+[[nodiscard]] constexpr bool isAsciiWhitespace(char c) noexcept
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
 // Declared here, defined in state/: the captured form of a line sits above this layer, and a Line only
 // has to be able to produce and consume it.
 struct LineEncodeContext;

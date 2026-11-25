@@ -236,13 +236,13 @@ std::string Line::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpace
     std::string output = toUtf8();
 
     if (stripTrailingSpaces)
-        while (!output.empty() && isspace(output.back()))
+        while (!output.empty() && isAsciiWhitespace(output.back()))
             output.pop_back();
 
     if (stripLeadingSpaces)
     {
         size_t frontGap = 0;
-        while (frontGap < output.size() && std::isspace(output[frontGap]))
+        while (frontGap < output.size() && isAsciiWhitespace(output[frontGap]))
             frontGap++;
         output = output.substr(frontGap);
     }
