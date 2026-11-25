@@ -410,16 +410,29 @@ StepContext Engine::contextFor(Run const& run) const noexcept
         main = mainCheckout(state->worktrees);
     else if (repo == nullptr)
         main = std::string_view { run.repoPath };
-    auto const unknown = state != nullptr && repo != nullptr && repo->path == run.repoPath
-                             ? state->unknownCheckout
-                             : CheckoutUnknown::Unavailable;
+    auto const listed = state != nullptr && repo != nullptr && repo->path == run.repoPath;
+    auto const unknown = listed ? state->unknownCheckout : CheckoutUnknown::Unavailable;
     return StepContext {
         .mainCheckout = main,
         .unknownCheckout = unknown,
+        .worktreeListing = listed ? worktreeListingOf(*state, run) : WorktreeListing::Unavailable,
         .wallMs = _wallMs,
         .monoMs = _monoMs,
         .providers = _config ? _config->sources().providers : providers(),
     };
+}
+
+WorktreeListing Engine::worktreeListingOf(RepoState const& state, Run const& run) noexcept
+{
+    // A failing listing is asked for again by the poll, which checks a kept run again then.
+    if (state.worktreeListFailures != 0)
+        return WorktreeListing::Unavailable;
+    if (state.unknownCheckout == CheckoutUnknown::Pending || state.worktreesListedMonoMs < run.changedMonoMs)
+        return WorktreeListing::Pending;
+    // git always lists the main worktree: a listing that names nothing says nothing.
+    if (state.worktrees.empty())
+        return WorktreeListing::Unavailable;
+    return listsWorktree(state.worktrees, run) ? WorktreeListing::Listed : WorktreeListing::Unlisted;
 }
 
 std::optional<CheckoutUnknown> Engine::unknownCheckout(Run const& run) const noexcept

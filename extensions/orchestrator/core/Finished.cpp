@@ -47,11 +47,12 @@ namespace
     // kept run's entry ("the reachability check"), where these name it on its own ("reachable").
     constexpr auto PrepareStepNames = std::array { "fetch"sv, "worktree"sv, "checkout"sv, "pane"sv };
     constexpr auto EndStepNames = std::array {
-        "closing tab"sv,  "waiting for the main checkout"sv,
-        "verify"sv,       "common dir"sv,
-        "index"sv,        "reachable"sv,
-        "operation"sv,    "status"sv,
-        "status board"sv, "remove"sv,
+        "closing tab"sv, "waiting for the main checkout"sv,
+        "verify"sv,      "waiting for the worktree list"sv,
+        "common dir"sv,  "index"sv,
+        "reachable"sv,   "operation"sv,
+        "status"sv,      "status board"sv,
+        "remove"sv,
     };
     constexpr auto EndedNames = std::array {
         "completed"sv,      "ended by you"sv,  "preparation failed"sv,
@@ -101,7 +102,7 @@ namespace
                                 nameOf(PrepareStepNames, run.failure->step),
                                 wording == FailureWording::Plain ? plainFailure(run.failure->why)
                                                                  : std::string_view { run.failure->why });
-        else if (finished.fate == Fate::Kept && !finished.entries.empty())
+        else if (!finished.entries.empty())
             text += std::format(": {}", finished.entries.front());
         return text;
     }

@@ -152,6 +152,12 @@ struct Settings
     return std::format("{}/{}/{}", WorktreeRoot, repo, id);
 }
 
+/// @return The listing entry of the contour run @p id's worktree, on its branch.
+[[nodiscard]] std::string listedWorktreeOf(std::string_view id)
+{
+    return agentWorktree(worktreeOf("contour", id), std::format("agent/{}", id));
+}
+
 [[nodiscard]] std::string intactGitFile(std::string_view main, std::string_view id)
 {
     return std::format("gitdir: {}/.git/worktrees/{}\n", main, id);
@@ -1386,6 +1392,9 @@ TEST_CASE("a worktree removed by hand ends the run; anything else keeps it", "[o
         harness.list({ paneOf(PrId) });
         harness.list({});
         harness.read("/.git", std::unexpected { row.error });
+        // A directory without a .git file asks git whether it still lists the worktree: here it does.
+        if (row.error == FileReadError::NotRegular)
+            harness.finish("git-worktree-list", ok(worktreeList(ContourPath, listedWorktreeOf(PrId))));
         auto const finished = finishedOf(harness.run(PrId));
         REQUIRE(finished);
         CHECK(finished->fate == row.fate);
@@ -1393,6 +1402,130 @@ TEST_CASE("a worktree removed by hand ends the run; anything else keeps it", "[o
             CHECK(finished->ended == *row.ended);
         CHECK(harness.commandsIssued("git-head-reachable") == 0);
     }
+}
+
+TEST_CASE("a worktree directory git no longer lists ends the run removed, naming the directory",
+          "[orchestrator][engine]")
+{
+    // On Windows a directory some process still runs in cannot be deleted: `git worktree remove` drops the
+    // worktree from git and deletes its files, `.git` among them, and leaves the directory.
+    auto const worktree = worktreeOf("contour", PrId);
+    auto const leftBehind = std::format("git no longer lists the worktree, but its directory is still there; "
+                                        "check it and delete it by hand: {}",
+                                        worktree);
+    constexpr auto NoGitFile = "the .git entry is not a readable file: it is not a regular file"sv;
+    struct Row
+    {
+        std::string_view name;
+        std::optional<ProcessOutcome> listing; ///< What the listing asked for after the read answers.
+        Fate fate;
+        std::string entry;
+    };
+    auto const rows = std::array {
+        Row { .name = "git lists only the main checkout",
+              .listing = ok(worktreeList(ContourPath)),
+              .fate = Fate::Removed,
+              .entry = leftBehind },
+        Row { .name = "git still lists it",
+              .listing = ok(worktreeList(ContourPath, listedWorktreeOf(PrId))),
+              .fate = Fate::Kept,
+              .entry = std::string { NoGitFile } },
+        // git prints a path resolved, so a link in the worktree root spells it otherwise: its name still
+        // names it.
+        Row { .name = "git lists it under a resolved path, detached",
+              .listing = ok(worktreeList(
+                  ContourPath,
+                  std::format("worktree /mnt/disk/wt/contour/{}\0HEAD {}\0detached\0\0"sv, PrId, Sha))),
+              .fate = Fate::Kept,
+              .entry = std::string { NoGitFile } },
+        Row { .name = "git lists it on its branch elsewhere",
+              .listing =
+                  ok(worktreeList(ContourPath, agentWorktree("/elsewhere/x", std::format("agent/{}", PrId)))),
+              .fate = Fate::Kept,
+              .entry = std::string { NoGitFile } },
+        Row { .name = "the listing fails",
+              .listing = failed(128, "fatal: not a git repository"),
+              .fate = Fate::Kept,
+              .entry = std::string { NoGitFile } },
+    };
+    for (auto const& row: rows)
+    {
+        CAPTURE(row.name);
+        auto harness = booted();
+        harness.runToRunning(prDispatch());
+        harness.list({ paneOf(PrId) });
+        harness.list({});
+        harness.read("/.git", std::unexpected { FileReadError::NotRegular });
+        // The listing the poll made before is no answer: it may predate what the read found.
+        auto const* const ending = std::get_if<Ending>(&harness.run(PrId)->state);
+        REQUIRE(ending != nullptr);
+        CHECK(ending->step == EndStep::WorktreeList);
+        REQUIRE(harness.pending("git-worktree-list"));
+        harness.finish("git-worktree-list", *row.listing);
+        auto const finished = finishedOf(harness.run(PrId));
+        REQUIRE(finished);
+        CHECK(finished->fate == row.fate);
+        CHECK(finished->entries == std::vector { row.entry });
+        // Nothing in the directory was deleted, nor run there.
+        CHECK(harness.commandsIssued("git-worktree-remove") == 0);
+        CHECK(harness.commandsIssued("git-clean") == 0);
+        CHECK(harness.commandsIssued("git-common-dir") == 0);
+        if (row.fate == Fate::Removed)
+            CHECK(finished->ended == Ended::WorktreeGone);
+    }
+}
+
+TEST_CASE("a kept run checked again ends removed once git no longer lists its directory",
+          "[orchestrator][engine]")
+{
+    // The removal failed on the directory itself, and its check again then found no .git file: kept. The
+    // user's `x` checks it again.
+    auto const kept = storedRun(Finished { .ended = Ended::Completed,
+                                           .fate = Fate::Kept,
+                                           .entries = { "the .git entry is not a readable file: it is not a "
+                                                        "regular file" },
+                                           .seen = Seen::Opened,
+                                           .endedWallMs = DispatchWallMs });
+    auto context = contextFor({});
+    context.stored = { entryOf(kept) };
+    auto harness = Harness { std::move(context) };
+    harness.boot();
+    // The user checks it again after the boot's listing, which says nothing of what the read finds then.
+    harness.wake(1);
+    harness.feed(RetryRemovalOf { .run = std::string(PrId), .monoMs = harness.now() });
+    harness.read("/.git", std::unexpected { FileReadError::NotRegular });
+    harness.finish("git-worktree-list", ok(worktreeList(ContourPath)));
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->fate == Fate::Removed);
+    // It ended as it had, but the directory left behind is news: unread, and ended now, so that the
+    // retention does not purge the notice before the user saw it.
+    CHECK(finished->ended == Ended::Completed);
+    CHECK(finished->seen == Seen::New);
+    CHECK(finished->endedWallMs > DispatchWallMs);
+    REQUIRE(finished->entries.size() == 1);
+    CHECK(finished->entries.front().ends_with(worktreeOf("contour", PrId)));
+    CHECK(harness.commandsIssued("git-worktree-remove") == 0);
+    // A removed run can be dismissed.
+    CHECK(countOf<StoreRemove>(harness.feed(DismissRun { .run = std::string(PrId) })) == 1);
+}
+
+TEST_CASE("a run waiting for the worktree list survives a restart", "[orchestrator][engine]")
+{
+    auto stored = storedRun(Ending { .step = EndStep::WorktreeList,
+                                     .cause = Ended::Completed,
+                                     .resumedFrom = std::nullopt,
+                                     .removal = Removal::Issued });
+    auto context = contextFor({});
+    context.stored = { entryOf(stored) };
+    auto harness = Harness { std::move(context) };
+    CHECK(holds<Ending>(harness.run(PrId)));
+    harness.boot();
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->fate == Fate::Removed);
+    // The removal was its own: the run ended as it did.
+    CHECK(finished->ended == Ended::Completed);
 }
 
 TEST_CASE("a running run with a listed pane is never ended by the worktree list", "[orchestrator][engine]")

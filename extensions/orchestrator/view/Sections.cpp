@@ -233,6 +233,31 @@ namespace
         return DetailLine { .label = "", .value = std::string { OutsideStatus }, .role = Role::Warning };
     }
 
+    /// The heading over a finished run's entries, one row per fate.
+    struct EntriesHeading
+    {
+        Fate fate;
+        std::string_view label;
+        std::string_view value;
+    };
+
+    /// A kept worktree's entries say what kept it; a removed one's, what its removal left behind.
+    constexpr auto EntriesHeadings = std::array {
+        EntriesHeading {
+            .fate = Fate::Removed, .label = "left"sv, .value = "what its removal left behind:"sv },
+        EntriesHeading { .fate = Fate::Kept, .label = "kept"sv, .value = "what kept its worktree:"sv },
+    };
+
+    /// @return The detail line over the entries of a finished run whose worktree met @p fate.
+    [[nodiscard]] DetailLine entriesHeading(Fate fate)
+    {
+        auto const row = std::ranges::find(EntriesHeadings, fate, &EntriesHeading::fate);
+        auto const& heading = row != EntriesHeadings.end() ? *row : EntriesHeadings.back();
+        return DetailLine { .label = std::string { heading.label },
+                            .value = std::string { heading.value },
+                            .role = Role::Warning };
+    }
+
     /// Whether rows name their repository.
     enum class RepoPrefix : uint8_t
     {
@@ -555,6 +580,9 @@ namespace
                                   context,
                                   finished.entries.size(),
                                   finished.entries.size() == 1 ? "entry kept" : "entries kept");
+        // A removal that left its directory says so: the user deletes it by hand.
+        else if (!finished.entries.empty())
+            context = std::format("{} · directory left behind", context);
 
         auto details = std::vector<DetailLine> {};
         if (scope == RunScope::Outside)
@@ -569,8 +597,7 @@ namespace
                     DetailLine { .label = "", .value = clean(words->detail), .role = Role::Dim });
         }
         if (!finished.entries.empty())
-            details.push_back(
-                DetailLine { .label = "kept", .value = "what kept its worktree:", .role = Role::Warning });
+            details.push_back(entriesHeading(finished.fate));
         for (auto const& entry: finished.entries)
             details.push_back(DetailLine { .label = "", .value = clean(entry), .role = Role::Warning });
         if (isRetryable)

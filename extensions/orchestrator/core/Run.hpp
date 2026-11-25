@@ -51,6 +51,8 @@ enum class EndStep : uint8_t
     MainCheckout, ///< Waiting for the repository's main checkout to be known, which the first checks compare
                   ///< the worktree against: no host call.
     Verify,       ///< Reading the worktree's `.git` file.
+    WorktreeList, ///< Its directory has no `.git` file: waiting for a worktree listing asked for since, which
+                  ///< says whether git still knows it as a worktree: no host call of its own.
     CommonDir,    ///< `git-common-dir`: git uses the main checkout's `.git`, not a redirected one.
     IndexFlags,   ///< `git-index-flags`: no submodule, and no file marked so `git status` misses its change.
     Reachable,    ///< `git-head-reachable`: some ref contains HEAD.
@@ -86,7 +88,7 @@ enum class Ended : uint8_t
 /// What happened to a finished run's worktree.
 enum class Fate : uint8_t
 {
-    Removed, ///< It was removed, or there was none.
+    Removed, ///< It was removed, or there was none; its directory may be left behind (Finished::entries).
     Kept,    ///< It was kept; the entries say why.
 };
 
@@ -149,7 +151,8 @@ struct Finished
     Ended ended = Ended::Completed; ///< How it ended.
     Fate fate = Fate::Removed;      ///< What happened to its worktree.
     std::vector<std::string>
-        entries;              ///< Why it was kept: `git status` lines or the check that stopped; sanitised.
+        entries; ///< Why it was kept: `git status` lines or the check that stopped; for a removed worktree,
+                 ///< the directory its removal left behind, if it did. Sanitised.
     Seen seen = Seen::New;    ///< Whether the user has looked at it.
     uint64_t endedWallMs = 0; ///< When it ended, in wall-clock milliseconds.
 
@@ -339,7 +342,8 @@ struct RetryRemoval
 {
 };
 
-/// The repository's worktree listing answered: a run waiting for its main checkout looks again.
+/// The repository's worktree listing answered: a run waiting for its main checkout, or for a listing that
+/// says whether git still knows its worktree, looks again.
 struct CheckoutListed
 {
 };
@@ -417,6 +421,17 @@ enum class CheckoutUnknown : uint8_t
     Pending,     ///< Not yet: its listing has not answered. A check that needs it waits for CheckoutListed.
 };
 
+/// What the repository's worktree listing, asked for since the run last changed, says of the run's worktree.
+/// A listing asked for earlier may predate the worktree, so it says nothing.
+enum class WorktreeListing : uint8_t
+{
+    Unavailable = 0, ///< No such listing will come: the repository is not configured, or its last listing
+                     ///< failed or named nothing. A directory without a `.git` file is kept.
+    Pending,         ///< None has answered yet: a check that needs it waits for CheckoutListed.
+    Listed,          ///< git still lists the worktree, by its path, its directory's name or its branch.
+    Unlisted,        ///< git no longer lists it: a directory without a `.git` file is what its removal left.
+};
+
 /// What a step may know about the world beyond the run.
 struct StepContext
 {
@@ -424,8 +439,11 @@ struct StepContext
         mainCheckout; ///< The repository's main checkout, resolved; nullopt if unknown.
     CheckoutUnknown unknownCheckout =
         CheckoutUnknown::Unavailable; ///< Why mainCheckout is nullopt; not read while it is known.
-    uint64_t wallMs = 0;              ///< Now, in wall-clock milliseconds.
-    uint64_t monoMs = 0;              ///< Now, in monotonic milliseconds: what a change is stamped with.
+    /// Whether git still lists the run's worktree; read only once its directory was found without a `.git`
+    /// file.
+    WorktreeListing worktreeListing = WorktreeListing::Unavailable;
+    uint64_t wallMs = 0; ///< Now, in wall-clock milliseconds.
+    uint64_t monoMs = 0; ///< Now, in monotonic milliseconds: what a change is stamped with.
     /// The provider rows the configuration was read with; a step never runs an Unmeasured row's command.
     std::span<Provider const> providers = orchestrator::providers();
 };
@@ -477,6 +495,12 @@ enum class BeginError : uint8_t
 /// @param run The run.
 /// @return Whether it is Preparing, Running, Blocked or Done.
 [[nodiscard]] bool countsAsActive(Run const& run) noexcept;
+
+/// Whether a run waits for its repository's worktree listing: for its main checkout, or for whether git
+/// still lists its worktree. CheckoutListed is what it waits for.
+/// @param run The run.
+/// @return Whether it is Ending at a step that awaits a listing.
+[[nodiscard]] bool awaitsWorktreeListing(Run const& run) noexcept;
 
 /// Whether a run still has steps to take.
 /// @param run The run.

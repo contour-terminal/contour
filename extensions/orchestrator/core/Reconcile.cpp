@@ -238,6 +238,15 @@ namespace
         return rest && rest->size() > 1 && separators.contains(rest->front());
     }
 
+    /// @return The last component of @p path, which git spells with `/` where the host may use `\`.
+    [[nodiscard]] std::string_view componentName(std::string_view path, PathStyle style) noexcept
+    {
+        auto const separators =
+            style == PathStyle::Windows ? std::string_view { "/\\" } : std::string_view { "/" };
+        auto const last = path.find_last_of(separators);
+        return last == std::string_view::npos ? path : path.substr(last + 1);
+    }
+
     // }}}
 } // namespace
 
@@ -361,6 +370,17 @@ std::vector<WorktreeEntry> orphans(std::span<Run const> runs,
         found.push_back(entry);
     }
     return found;
+}
+
+bool listsWorktree(std::span<WorktreeEntry const> entries, Run const& run) noexcept
+{
+    auto const style = worktreeStyle(run);
+    auto const name = componentName(run.worktree, style);
+    return std::ranges::any_of(entries, [&](WorktreeEntry const& entry) {
+        return sameHostPath(entry.path, run.worktree, style)
+               || (!name.empty() && sameHostPath(componentName(entry.path, style), name, style))
+               || entry.branch == run.branch;
+    });
 }
 
 std::optional<std::string_view> mainCheckout(std::span<WorktreeEntry const> entries) noexcept

@@ -756,6 +756,14 @@ class Engine
     // Defined in Engine.cpp: runs, the queue and the step's end.
     [[nodiscard]] Run* findRun(std::string_view id) noexcept;
     [[nodiscard]] StepContext contextFor(Run const& run) const noexcept;
+    /// What @p state's worktree listing says of @p run's worktree. Only a listing asked for since the run
+    /// last changed counts: one asked for in that very step was asked for after it, as the host runs it
+    /// later.
+    /// @param state The run's repository, configured as the run was.
+    /// @param run The run.
+    /// @return Unavailable while the last listing failed or named nothing, Pending until such a listing
+    ///         answered, else whether it names the worktree (listsWorktree()).
+    [[nodiscard]] static WorktreeListing worktreeListingOf(RepoState const& state, Run const& run) noexcept;
     void loadStore(std::span<StoredEntry const> stored);
     void resolveStaleWork(std::span<std::string const> awaited,
                           StartContext const& context,

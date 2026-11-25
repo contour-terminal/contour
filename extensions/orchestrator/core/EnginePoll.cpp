@@ -103,6 +103,13 @@ namespace
         PollListRow { .list = PollList::Linked, .name = LinkedList, .index = ListIndex::None },
     };
 
+    /// @return Whether @p run is Ending at @p step.
+    [[nodiscard]] bool isAtStep(Run const& run, EndStep step) noexcept
+    {
+        auto const* const ending = std::get_if<Ending>(&run.state);
+        return ending != nullptr && ending->step == step;
+    }
+
     /// The configuration key of a source whose query is JQL: the one a key lookup searches.
     constexpr auto JqlKey = "jql"sv;
 
@@ -727,8 +734,13 @@ void Engine::relistAfterFinishedRuns(std::vector<Effect>& out)
         // A listing that keeps failing is asked for again by the poll, not on every step.
         if (state == nullptr || state->worktreeListFailures != 0)
             continue;
+        // So is a run that found its worktree without a `.git` file, until a listing asked for since says
+        // whether git still knows it: one already pending may predate that.
         auto const isStale = [&](Run const& run) {
-            return run.repo == repo.name && finishedSince(run, state->worktreesListedMonoMs);
+            return run.repo == repo.name
+                   && (finishedSince(run, state->worktreesListedMonoMs)
+                       || (isAtStep(run, EndStep::WorktreeList)
+                           && worktreeListingOf(*state, run) == WorktreeListing::Pending));
         };
         if (std::ranges::any_of(_runs, isStale))
             issueWorktreeList(repo, out);
@@ -1418,10 +1430,10 @@ void Engine::resumeCheckoutWaits(std::vector<Effect>& out)
 {
     auto ids = std::vector<std::string> {};
     for (auto const& run: std::span(_runs).first(_insideCount))
-        if (auto const* const ending = std::get_if<Ending>(&run.state);
-            ending != nullptr && ending->step == EndStep::MainCheckout)
+        if (awaitsWorktreeListing(run))
             ids.push_back(run.id);
-    // A run whose main checkout is still not known stays as it is.
+    // A run whose main checkout is still not known, or that still waits for a listing asked for after its
+    // last change, stays as it is.
     for (auto const& id: ids)
         feed(id, CheckoutListed {}, out);
 }

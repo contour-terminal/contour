@@ -148,6 +148,19 @@ void removeKeptWorktree(DashboardFixture& fixture)
     REQUIRE_FALSE(keepsWorktree(*run));
 }
 
+/// What a read the step that shows a board makes is answered with: the board's read gets @p content; a kept
+/// run's `.git`, read again by the poll due in the same step, cannot be read, which keeps the run as it was.
+/// @param read The read.
+/// @param content What the board's read answers.
+/// @return The answer.
+[[nodiscard]] std::expected<std::string, FileReadError> readAnswer(
+    ReadFile const& read, std::expected<std::string, FileReadError> const& content)
+{
+    if (read.path.ends_with(".git"))
+        return std::unexpected { FileReadError::Unreadable };
+    return content;
+}
+
 /// What the guest does with a ShowBoardAction or a HideBoardAction, and with the read that follows.
 /// @param fixture The dashboard and its engine.
 /// @param action What the dashboard asked.
@@ -169,7 +182,7 @@ void carryOut(DashboardFixture& fixture,
     for (auto const& effect: effects)
         if (auto const* const read = std::get_if<ReadFile>(&effect); read != nullptr && content)
             static_cast<void>(fixture.engine.step(FileRead { .tag = read->tag,
-                                                             .content = *content,
+                                                             .content = readAnswer(*read, *content),
                                                              .modifiedWallMs = modifiedWallMs,
                                                              .monoMs = now,
                                                              .wallMs = wallOf(now) }));

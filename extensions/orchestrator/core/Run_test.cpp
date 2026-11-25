@@ -82,6 +82,7 @@ using orchestrator::StateChange;
 using orchestrator::StatsCost;
 using orchestrator::StatusReported;
 using orchestrator::StepContext;
+using orchestrator::WorktreeListing;
 
 // {{{ the run every row starts from
 
@@ -99,6 +100,12 @@ constexpr auto RedirectedKept =
     "Finished(completed, kept, new: git uses another directory than the main checkout's "
     ".git; nothing more was run there)"sv;
 constexpr auto AlteredGitFile = "gitdir: /tmp/elsewhere/.git/worktrees/pr-2334-20261113-150847\n"sv;
+constexpr auto NotRegularKept =
+    "Finished(completed, kept, new: the .git entry is not a readable file: it is not a regular file)"sv;
+constexpr auto LeftBehindGone =
+    "Finished(worktree-gone, removed, new: git no longer lists the worktree, but its directory is still "
+    "there; "
+    "check it and delete it by hand: /home/u/worktrees/contour/pr-2334-20261113-150847)"sv;
 constexpr auto StartedMs = uint64_t { 1'794'578'927'000 };
 constexpr auto NowMs = uint64_t { 1'794'580'000'000 };
 
@@ -188,6 +195,7 @@ constexpr auto EndSteps = std::array {
     Spelling { EndStep::ClosePane, "close-pane"sv },
     Spelling { EndStep::MainCheckout, "main-checkout"sv },
     Spelling { EndStep::Verify, "verify"sv },
+    Spelling { EndStep::WorktreeList, "worktree-list"sv },
     Spelling { EndStep::CommonDir, "common-dir"sv },
     Spelling { EndStep::IndexFlags, "index-flags"sv },
     Spelling { EndStep::Reachable, "reachable"sv },
@@ -291,7 +299,8 @@ constexpr auto SeenNames = std::array {
 enum class Carried : uint8_t
 {
     Nothing,
-    Failure,
+    Failure,         ///< `git worktree add` failed.
+    CheckoutFailure, ///< The checkout after it failed.
 };
 
 /// What a row expects a predicate to answer.
@@ -321,6 +330,7 @@ struct TransitionRow
     std::optional<AgentStatus> lastStatus = std::nullopt;
     std::string_view failureAfter = {};
     Checkout checkout = Checkout::Known;
+    WorktreeListing listing = WorktreeListing::Unavailable; ///< What git's listing says of the worktree.
 };
 
 [[nodiscard]] Ending endingAt(EndStep step, Ended cause = Ended::Completed)
@@ -661,6 +671,99 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
           .to = "Finished(completed, kept, new: the .git entry is not a readable file: it is not a regular "
                 "file)",
           .effects = "persist" },
+        // A directory without a .git file: git's listing, asked for since, says whether it is a worktree.
+        { .from = "verify, not a regular file, git not asked since",
+          .state = endingAt(EndStep::Verify),
+          .input = gitFileError(FileReadError::NotRegular),
+          .to = "Ending(worktree-list, completed)",
+          .effects = "persist",
+          .listing = WorktreeListing::Pending },
+        { .from = "verify, not a regular file, git still lists it",
+          .state = endingAt(EndStep::Verify),
+          .input = gitFileError(FileReadError::NotRegular),
+          .to = NotRegularKept,
+          .effects = "persist",
+          .listing = WorktreeListing::Listed },
+        { .from = "verify, not a regular file, git no longer lists it",
+          .state = endingAt(EndStep::Verify),
+          .input = gitFileError(FileReadError::NotRegular),
+          .to = LeftBehindGone,
+          .effects = "persist",
+          .listing = WorktreeListing::Unlisted },
+        // Only a missing .git says the directory is no worktree; one that cannot be read says nothing.
+        { .from = "verify, unreadable, git no longer lists it",
+          .state = endingAt(EndStep::Verify),
+          .input = gitFileError(FileReadError::Unreadable),
+          .to = "Finished(completed, kept, new: the .git entry is not a readable file: it cannot be read)",
+          .effects = "persist",
+          .listing = WorktreeListing::Unlisted },
+        // Ending(WorktreeList): waiting for that listing.
+        { .from = "worktree-list, not yet",
+          .state = endingAt(EndStep::WorktreeList),
+          .input = CheckoutListed {},
+          .effects = "",
+          .listing = WorktreeListing::Pending },
+        { .from = "worktree-list, git no longer lists it",
+          .state = endingAt(EndStep::WorktreeList),
+          .input = CheckoutListed {},
+          .to = LeftBehindGone,
+          .effects = "persist",
+          .listing = WorktreeListing::Unlisted },
+        { .from = "worktree-list, git still lists it",
+          .state = endingAt(EndStep::WorktreeList),
+          .input = CheckoutListed {},
+          .to = NotRegularKept,
+          .effects = "persist",
+          .listing = WorktreeListing::Listed },
+        { .from = "worktree-list, no listing will come",
+          .state = endingAt(EndStep::WorktreeList),
+          .input = CheckoutListed {},
+          .to = NotRegularKept,
+          .effects = "persist",
+          .listing = WorktreeListing::Unavailable },
+        { .from = "worktree-list after a failed checkout, git no longer lists it",
+          .state = endingAt(EndStep::WorktreeList, Ended::PreparationFailed),
+          .input = CheckoutListed {},
+          .to = "Finished(preparation-failed, removed, new: git no longer lists the worktree, but its "
+                "directory is still there; check it and delete it by hand: "
+                "/home/u/worktrees/contour/pr-2334-20261113-150847)",
+          .effects = "persist",
+          .carried = Carried::CheckoutFailure,
+          .failureAfter = "checkout: exit 1",
+          .listing = WorktreeListing::Unlisted },
+        // A directory a failed `git worktree add` left was never a worktree: it may be someone else's.
+        { .from = "verify after a failed worktree add, no .git, git does not list it",
+          .state = endingAt(EndStep::Verify, Ended::PreparationFailed),
+          .input = gitFileError(FileReadError::NotRegular),
+          .to = "Finished(preparation-failed, kept, new: the .git entry is not a readable file: it is not a "
+                "regular file)",
+          .effects = "persist",
+          .carried = Carried::Failure,
+          .failureAfter = "worktree-add: exit 128",
+          .listing = WorktreeListing::Unlisted },
+        { .from = "worktree-list of a kept entry, git no longer lists it",
+          .state = resumedAt(EndStep::WorktreeList),
+          .input = CheckoutListed {},
+          .to = "Finished(completed, removed, new: git no longer lists the worktree, but its directory is "
+                "still there; check it and delete it by hand: "
+                "/home/u/worktrees/contour/pr-2334-20261113-150847)",
+          .effects = "persist",
+          .listing = WorktreeListing::Unlisted },
+        { .from = "worktree-list, lost",
+          .state = endingAt(EndStep::WorktreeList),
+          .input = Lost {},
+          .to = "Ending(verify, completed)",
+          .effects = VerifyEffects },
+        { .from = "worktree-list, a stray file read",
+          .state = endingAt(EndStep::WorktreeList),
+          .input = GitFileRead { .content = IntactGitFile },
+          .effects = "",
+          .listing = WorktreeListing::Unlisted },
+        { .from = "worktree-list, a stray command result",
+          .state = endingAt(EndStep::WorktreeList),
+          .input = CommandOk { MainCommonDir },
+          .effects = "",
+          .listing = WorktreeListing::Unlisted },
         { .from = "verify, unreadable",
           .state = endingAt(EndStep::Verify),
           .input = gitFileError(FileReadError::Unreadable),
@@ -1122,6 +1225,8 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
     run.lastStatus = row.lastStatus;
     if (row.carried == Carried::Failure)
         run.failure = RunFailure { .step = PrepareStep::WorktreeAdd, .why = "exit 128" };
+    else if (row.carried == Carried::CheckoutFailure)
+        run.failure = RunFailure { .step = PrepareStep::Checkout, .why = "exit 1" };
     return run;
 }
 
@@ -1132,6 +1237,7 @@ constexpr auto CleanLongStatus = "On branch agent/x\nnothing to commit, working 
         context.mainCheckout = std::nullopt;
     context.unknownCheckout =
         row.checkout == Checkout::Pending ? CheckoutUnknown::Pending : CheckoutUnknown::Unavailable;
+    context.worktreeListing = row.listing;
     return context;
 }
 

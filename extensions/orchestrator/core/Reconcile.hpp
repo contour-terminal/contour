@@ -179,6 +179,14 @@ struct WorktreeEntry
 /// @return Whether @p run finished after that listing was asked for, which may still name its worktree.
 [[nodiscard]] bool finishedSince(Run const& run, uint64_t listedMonoMs) noexcept;
 
+/// Whether a worktree listing still names a run's worktree. git prints paths resolved, which a symbolic link
+/// in the worktree root makes differ from the run's: so its directory's name, the run's unique id, and its
+/// branch name it too. Any of them counts, so that a doubt keeps the worktree.
+/// @param entries worktreeEntries() of the run's repository.
+/// @param run The run.
+/// @return Whether an entry has the run's worktree path or directory name, or is on its branch.
+[[nodiscard]] bool listsWorktree(std::span<WorktreeEntry const> entries, Run const& run) noexcept;
+
 /// The repository's main checkout.
 /// @param entries worktreeEntries() of the repository.
 /// @return The first entry's path; nullopt when there is none or it is a bare repository.

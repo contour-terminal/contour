@@ -170,8 +170,15 @@ namespace
         PaneGone,     ///< The agent's tab to be gone: no host call.
         MainCheckout, ///< The repository's main checkout to be known: no host call.
         GitFile,      ///< The `.git` file read.
+        WorktreeList, ///< A worktree listing asked for since the run last changed: no host call of its own.
         Command,      ///< A declared command's result.
     };
+
+    /// @return Whether a step that awaits @p awaits waits for the repository's worktree listing.
+    [[nodiscard]] constexpr bool isListingWait(Awaits awaits) noexcept
+    {
+        return awaits == Awaits::MainCheckout || awaits == Awaits::WorktreeList;
+    }
 
     struct EndStepRow
     {
@@ -203,6 +210,10 @@ namespace
                      .name = "verify"sv,
                      .label = "reading .git"sv,
                      .awaits = Awaits::GitFile },
+        EndStepRow { .step = EndStep::WorktreeList,
+                     .name = "worktree-list"sv,
+                     .label = "waiting for the worktree list"sv,
+                     .awaits = Awaits::WorktreeList },
         EndStepRow { .step = EndStep::CommonDir,
                      .name = "common-dir"sv,
                      .label = "the common-directory check"sv,
@@ -276,6 +287,11 @@ namespace
     constexpr auto HiddenChanges =
         "a file is marked assume-unchanged or skip-worktree, so git status cannot see its changes"sv;
     constexpr auto NoProvider = "no provider stands for the repository's forge"sv;
+    /// What a removed run says of the directory its removal left: no host call lists or deletes a directory,
+    /// so what is still in it is not known. The path comes last, where a cut entry loses least.
+    constexpr auto LeftBehind =
+        "git no longer lists the worktree, but its directory is still there; check it "
+        "and delete it by hand: {}"sv;
 
     /// The one untracked file the extension itself writes, as `git status --porcelain` lists it.
     constexpr auto StatusBoardEntry = "?? STATUS.md"sv;
@@ -511,6 +527,47 @@ namespace
         return {};
     }
 
+    [[nodiscard]] Effects keepUnreadable(Run& run,
+                                         StepContext const& context,
+                                         Ending const& ending,
+                                         FileReadError error)
+    {
+        return keep(run,
+                    context,
+                    ending,
+                    std::format("the .git entry is not a readable file: {}", spell(FileReadReasons, error)));
+    }
+
+    /// A worktree directory without a `.git` file. Once git no longer lists it, it is what a removal left
+    /// behind -- on Windows a directory still some process's working directory cannot be deleted -- and the
+    /// run ends as a gone worktree does, naming the directory, which nothing here can list or delete. While
+    /// git still lists it, or cannot say, it is kept as any unreadable `.git` is; until a listing asked for
+    /// since says, the run waits for one. A directory a failed `git worktree add` left was never a worktree:
+    /// it may hold someone else's files, so it is kept.
+    [[nodiscard]] Effects withoutGitFile(Run& run, StepContext const& context, Ending ending)
+    {
+        auto const neverAWorktree = run.failure && run.failure->step == PrepareStep::WorktreeAdd;
+        switch (neverAWorktree ? WorktreeListing::Unavailable : context.worktreeListing)
+        {
+            case WorktreeListing::Unlisted:
+                // A notice the user has yet to act on: it ends now and unread, even for a run checked again,
+                // so that the retention neither purges it at once nor hides it among the runs already seen.
+                return finish(run,
+                              context,
+                              goneEnded(run, ending),
+                              Fate::Removed,
+                              { sanitized(std::format(LeftBehind, run.worktree)) },
+                              std::nullopt);
+            case WorktreeListing::Pending:
+                ending.step = EndStep::WorktreeList;
+                run.state = std::move(ending);
+                return { Persist {} };
+            case WorktreeListing::Listed:
+            case WorktreeListing::Unavailable: break;
+        }
+        return keepUnreadable(run, context, ending, FileReadError::NotRegular);
+    }
+
     [[nodiscard]] Effects verified(Run& run,
                                    Ending ending,
                                    GitFileRead const& read,
@@ -518,13 +575,19 @@ namespace
     {
         if (!read.content)
         {
-            if (read.content.error() == FileReadError::DirectoryMissing)
-                return finish(run, context, goneEnded(run, ending), Fate::Removed, {}, ending.resumedFrom);
-            return keep(run,
-                        context,
-                        ending,
-                        std::format("the .git entry is not a readable file: {}",
-                                    spell(FileReadReasons, read.content.error())));
+            switch (read.content.error())
+            {
+                case FileReadError::DirectoryMissing:
+                    return finish(
+                        run, context, goneEnded(run, ending), Fate::Removed, {}, ending.resumedFrom);
+                // The host says the same of a `.git` that is missing and of one that is a directory: either
+                // way it is no worktree's link.
+                case FileReadError::NotRegular: return withoutGitFile(run, context, std::move(ending));
+                case FileReadError::Unreadable:
+                case FileReadError::TooLarge:
+                case FileReadError::Escapes: break;
+            }
+            return keepUnreadable(run, context, ending, read.content.error());
         }
         if (!context.mainCheckout)
             return withoutCheckout(run, context, ending);
@@ -679,7 +742,8 @@ namespace
                 return finish(run, context, ending.cause, Fate::Removed, {}, ending.resumedFrom);
             case EndStep::ClosePane:
             case EndStep::MainCheckout:
-            case EndStep::Verify: return {};
+            case EndStep::Verify:
+            case EndStep::WorktreeList: return {};
         }
         return {};
     }
@@ -805,6 +869,12 @@ std::vector<RunEffect> advance(Run& run, RunInput const& input, StepContext cons
         },
         [&](Ending ending, CheckoutListed const&) -> Effects {
             // Still not known: the run waits on, unchanged.
+            if (ending.step == EndStep::WorktreeList)
+            {
+                if (context.worktreeListing == WorktreeListing::Pending)
+                    return {};
+                return withoutGitFile(run, context, std::move(ending));
+            }
             if (ending.step != EndStep::MainCheckout || awaitsCheckout(context))
                 return {};
             return toVerify(run, std::move(ending), context);
@@ -904,6 +974,12 @@ bool countsAsActive(Run const& run) noexcept
 {
     return std::holds_alternative<Preparing>(run.state) || std::holds_alternative<Running>(run.state)
            || std::holds_alternative<Blocked>(run.state) || std::holds_alternative<Done>(run.state);
+}
+
+bool awaitsWorktreeListing(Run const& run) noexcept
+{
+    auto const* const ending = std::get_if<Ending>(&run.state);
+    return ending != nullptr && isListingWait(endStep(ending->step).awaits);
 }
 
 bool isUnfinished(Run const& run) noexcept
