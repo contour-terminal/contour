@@ -163,6 +163,9 @@ cd build
 %doc README.md docs/CONTRIBUTING.md
 %{_bindir}/*
 %{_datadir}/*
+# The extension host, a private executable Contour starts to run extensions apart from itself: in both
+# packages, as both build extensions.
+%{_libexecdir}/contour/
 # The daemon as a systemd user service: shipped in both packages, enabled by neither.
 %{_prefix}/lib/systemd/user/contour-daemon.service
 %if %{without daemon}
