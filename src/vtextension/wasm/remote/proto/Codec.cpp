@@ -128,7 +128,8 @@ namespace
             case LockdownStep::Profile:
             case LockdownStep::Container:
             case LockdownStep::Mitigations:
-            case LockdownStep::Job: return true;
+            case LockdownStep::Job:
+            case LockdownStep::Priming: return true;
         }
         return false;
     }
@@ -208,7 +209,12 @@ namespace
     }
     constexpr auto members(Of<Hello> auto& value) noexcept
     {
-        return fields(value.version, value.memoryMode, value.lockdown, value.failedStep, value.failureCode);
+        return fields(value.version,
+                      value.memoryMode,
+                      value.lockdown,
+                      value.failedStep,
+                      value.failureCode,
+                      value.unavailableStep);
     }
     constexpr auto members(Of<CreateRuntime> auto& value) noexcept
     {

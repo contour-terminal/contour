@@ -252,7 +252,7 @@ int runExtensionHost(std::span<std::string_view const> arguments,
     config.startExecutor = confinement.startThread;
     // Once every thread runs and was prepared: caps first, which the locked-down host could not set.
     config.confine = [&confinement, &sandbox, &tellOf, hardened, restricted, dataBytes = parsed->dataBytes]()
-        -> std::expected<remote::proto::LockdownState, ConfinementFailure> {
+        -> std::expected<Confinement, ConfinementFailure> {
         auto const capped = confinement.confine(dataBytes);
         tellOf("resource caps", capped);
         auto const lockedDown = sandbox->lockDown();
@@ -262,7 +262,8 @@ int runExtensionHost(std::span<std::string_view const> arguments,
         for (auto const& step: std::array { hardened, restricted, capped, lockedDown })
             if (!step)
                 return std::unexpected(step.error());
-        return sandbox->lockdownState();
+        return Confinement { .state = sandbox->lockdownState(),
+                             .unavailableStep = sandbox->unavailableStep() };
     };
     auto host = HostProcess { *engine, *std::move(endpoints), std::move(config) };
     return endWith(hostProcessExitOf(host.run()));

@@ -48,10 +48,17 @@ namespace
                                   "requires, and was refused. Extensions do not run." },
     };
     static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
+    static_assert(std::to_underlying(proto::LockdownStep::Priming) < 32,
+                  "a bit per step in HostRefusalLog's word of unavailable steps");
 
     /// The line for a host that could not confine itself, around the step it named.
     constexpr auto LockdownStepLine = std::string_view {
         "The extension host could not confine itself, and was refused: {}. Extensions do not run."
+    };
+
+    /// The line for hosts that run confined without a step their system lacks, around that step.
+    constexpr auto UnavailableStepLine = std::string_view {
+        "The extension host runs confined, but this system lacks part of its sandbox: {}. Extensions run."
     };
 
     /// The line for a host that could not be started for a reason the launcher's table does not name.
@@ -93,11 +100,16 @@ std::string refusalLine(HostRefusal refusal)
     return std::string { UnnamedLaunchLine };
 }
 
-std::string refusalLine(HostRefusal refusal, proto::LockdownStep failedStep)
+std::string refusalLine(HostRefusal refusal, proto::LockdownFailure failure)
 {
-    if (refusal == HostRefusal::LockdownFailed && failedStep != proto::LockdownStep::None)
-        return std::format(LockdownStepLine, proto::lockdownStepText(failedStep));
+    if (refusal == HostRefusal::LockdownFailed && failure.step != proto::LockdownStep::None)
+        return std::format(LockdownStepLine, proto::lockdownFailureText(failure));
     return refusalLine(refusal);
+}
+
+std::string unavailableStepLine(proto::LockdownStep step)
+{
+    return std::format(UnavailableStepLine, proto::lockdownStepText(step));
 }
 
 HostRefusalLog::HostRefusalLog(Writer writer): _writer { std::move(writer) }
@@ -106,15 +118,25 @@ HostRefusalLog::HostRefusalLog(Writer writer): _writer { std::move(writer) }
 
 void HostRefusalLog::refused(HostRefusal refusal)
 {
-    refused(refusal, proto::LockdownStep::None);
+    refused(refusal, proto::LockdownFailure { .step = proto::LockdownStep::None, .code = 0 });
 }
 
-void HostRefusalLog::refused(HostRefusal refusal, proto::LockdownStep failedStep)
+void HostRefusalLog::refused(HostRefusal refusal, proto::LockdownFailure failure)
 {
     auto const bit = uint32_t { 1 } << std::to_underlying(refusal);
     if ((_logged.fetch_or(bit) & bit) != 0)
         return;
-    _writer(refusalLine(refusal, failedStep));
+    _writer(refusalLine(refusal, failure));
+}
+
+void HostRefusalLog::unavailable(proto::LockdownStep step)
+{
+    if (step == proto::LockdownStep::None || std::to_underlying(step) >= proto::lockdownSteps().size())
+        return;
+    auto const bit = uint32_t { 1 } << std::to_underlying(step);
+    if ((_unavailable.fetch_or(bit) & bit) != 0)
+        return;
+    _writer(unavailableStepLine(step));
 }
 
 HostRefusalLog::Writer errorLogWriter()

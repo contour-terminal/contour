@@ -170,6 +170,9 @@ TEST_CASE("ProcessHostConnector.lockdownFailureIsNotRelaunched", "[vtextension][
         }
         CHECK(fake->launches().size() == 1);
     }
-    // Said once, naming the step the host failed at.
-    CHECK(*lines == std::vector<std::string> { refusalLine(HostRefusal::LockdownFailed, FailedStep) });
+    // Said once, naming the step the host failed at, and what the system said of it.
+    CHECK(*lines
+          == std::vector<std::string> {
+              refusalLine(HostRefusal::LockdownFailed,
+                          proto::LockdownFailure { .step = FailedStep, .code = FailureCode }) });
 }

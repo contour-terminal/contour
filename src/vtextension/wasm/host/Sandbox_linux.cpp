@@ -128,7 +128,10 @@ namespace
                     })
                     .and_then([&] { return restrictFileSystem(kept.rules(), _landlock); });
             if (restricted == LandlockOutcome::Unavailable)
+            {
                 _tell(LandlockUnavailable);
+                _unavailableStep = remote::proto::LockdownStep::FileSystem;
+            }
             if (!restricted && !first)
                 first = restricted.error();
             if (first)
@@ -148,11 +151,19 @@ namespace
             return remote::proto::LockdownState::LockedDown;
         }
 
+        /// @return `FileSystem` where the kernel has no Landlock, or has it off; `None` otherwise.
+        [[nodiscard]] remote::proto::LockdownStep unavailableStep() const noexcept override
+        {
+            return _unavailableStep;
+        }
+
       private:
         SandboxDescriptors _descriptors;
         GuestCode _code;
         LandlockSystem _landlock;
         std::function<void(std::string_view)> _tell;
+        /// What restrictBeforeThreads() found this system lacks.
+        remote::proto::LockdownStep _unavailableStep = remote::proto::LockdownStep::None;
     };
 } // namespace
 

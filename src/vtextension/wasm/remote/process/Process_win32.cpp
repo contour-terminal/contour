@@ -261,13 +261,12 @@ namespace
     }
 
     /// @return A job that kills its process when closed, allows it no second one, caps its memory at
-    ///         @p dataBytes (0: no cap) and ends it on an unhandled exception; nothing if it could not be
-    ///         made.
-    [[nodiscard]] OwnedHandle makeJob(uint64_t dataBytes) noexcept
+    ///         @p dataBytes (0: no cap) and ends it on an unhandled exception; or why it could not be made.
+    [[nodiscard]] std::expected<OwnedHandle, LaunchRefusal> makeJob(uint64_t dataBytes) noexcept
     {
         auto job = OwnedHandle { ::CreateJobObjectW(nullptr, nullptr) };
         if (!job)
-            return job;
+            return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
         auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
                                                   | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
@@ -278,8 +277,9 @@ namespace
             limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
             limits.ProcessMemoryLimit = static_cast<SIZE_T>(dataBytes);
         }
+        // The code is read before the job closes: its CloseHandle() may set another.
         if (!::SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
-            return OwnedHandle {};
+            return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
         return job;
     }
 
@@ -520,8 +520,8 @@ namespace
 
             auto job = makeJob(spec.caps.dataBytes);
             if (!job)
-                return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
-            auto jobList = std::array<HANDLE, 1> { job.get() };
+                return std::unexpected(job.error());
+            auto jobList = std::array<HANDLE, 1> { job->get() };
             auto list = AttributeList::create(contained ? 4 : 2);
             if (!list)
                 return std::unexpected(refusalOf(LaunchStep::AttributeList, ::GetLastError()));
@@ -595,10 +595,12 @@ namespace
                 return std::unexpected(refusalOf(LaunchStep::CreateProcess, error));
             ::CloseHandle(info.hThread);
             return std::make_unique<Win32ProcessHandle>(
-                OwnedHandle { info.hProcess }, std::move(job), static_cast<ProcessId>(info.dwProcessId));
+                OwnedHandle { info.hProcess }, *std::move(job), static_cast<ProcessId>(info.dwProcessId));
         }
 
         AppContainerProvision _containers; ///< Ensured on the first isolated launch; used on this one thread.
+        /// Where a refusal its launch error cannot tell apart is said, and a grant this user may not make:
+        /// Contour's error log, or a test's record of it.
         std::function<void(std::string_view line)> _diagnostics;
         std::vector<std::pair<LaunchStep, DWORD>> _saidRefusals; ///< Each step and code said already.
     };

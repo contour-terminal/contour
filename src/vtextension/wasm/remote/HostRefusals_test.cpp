@@ -27,6 +27,7 @@ using vtextension::wasm::remote::LastHostRefusal;
 using vtextension::wasm::remote::refusalLine;
 using vtextension::wasm::remote::RefusalSource;
 using vtextension::wasm::remote::refusalSource;
+using vtextension::wasm::remote::unavailableStepLine;
 using vtextension::wasm::remote::process::LaunchError;
 using vtextension::wasm::remote::process::launchErrors;
 using vtextension::wasm::remote::process::launchErrorText;
@@ -100,7 +101,8 @@ TEST_CASE("HostRefusals.lockdownLineNamesTheStep", "[vtextension]")
 {
     for (auto const& row: proto::lockdownSteps())
     {
-        auto const line = refusalLine(HostRefusal::LockdownFailed, row.step);
+        auto const line =
+            refusalLine(HostRefusal::LockdownFailed, proto::LockdownFailure { .step = row.step, .code = 0 });
         INFO(line);
         if (row.step == proto::LockdownStep::None)
         {
@@ -113,16 +115,43 @@ TEST_CASE("HostRefusals.lockdownLineNamesTheStep", "[vtextension]")
             CHECK_FALSE(lowered(line).contains(engine));
     }
     // Any other reason has no step to name.
-    CHECK(refusalLine(HostRefusal::Unsandboxed, proto::LockdownStep::SystemCalls)
+    CHECK(refusalLine(HostRefusal::Unsandboxed,
+                      proto::LockdownFailure { .step = proto::LockdownStep::SystemCalls, .code = 1 })
           == refusalLine(HostRefusal::Unsandboxed));
+
+    // What the step's code says follows the step: the system's word on an errno, read on this side, as a
+    // release build's host has nowhere else to say it.
+    auto const withCode =
+        refusalLine(HostRefusal::LockdownFailed,
+                    proto::LockdownFailure { .step = proto::LockdownStep::SystemCalls, .code = 1 });
+    CHECK(withCode.contains(std::string { proto::lockdownStepText(proto::LockdownStep::SystemCalls) } + " ("
+                            + proto::systemErrorText(1) + ")"));
 
     // The log names the step the first refusal for the reason named.
     auto lines = Lines {};
     auto log = HostRefusalLog { lines.writer() };
-    log.refused(HostRefusal::LockdownFailed, proto::LockdownStep::FileSystem);
-    log.refused(HostRefusal::LockdownFailed, proto::LockdownStep::SystemCalls);
-    CHECK(lines.written
-          == std::vector { refusalLine(HostRefusal::LockdownFailed, proto::LockdownStep::FileSystem) });
+    auto const fileSystem = proto::LockdownFailure { .step = proto::LockdownStep::FileSystem, .code = 13 };
+    log.refused(HostRefusal::LockdownFailed, fileSystem);
+    log.refused(HostRefusal::LockdownFailed,
+                proto::LockdownFailure { .step = proto::LockdownStep::SystemCalls, .code = 1 });
+    CHECK(lines.written == std::vector { refusalLine(HostRefusal::LockdownFailed, fileSystem) });
+}
+
+TEST_CASE("HostRefusals.unavailableStepIsLoggedOnce", "[vtextension]")
+{
+    auto lines = Lines {};
+    auto log = HostRefusalLog { lines.writer() };
+    log.unavailable(proto::LockdownStep::None);
+    log.unavailable(proto::LockdownStep::FileSystem);
+    log.unavailable(proto::LockdownStep::FileSystem);
+    CHECK(lines.written == std::vector { unavailableStepLine(proto::LockdownStep::FileSystem) });
+    auto const& line = lines.written.front();
+    CHECK(line.contains(proto::lockdownStepText(proto::LockdownStep::FileSystem)));
+    for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
+        CHECK_FALSE(lowered(line).contains(engine));
+    // A value naming no step logs nothing.
+    log.unavailable(static_cast<proto::LockdownStep>(200));
+    CHECK(lines.written.size() == 1);
 }
 
 TEST_CASE("HostRefusals.eachReasonIsLoggedOnce", "[vtextension]")

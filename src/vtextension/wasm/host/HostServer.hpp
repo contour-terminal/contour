@@ -46,6 +46,17 @@ inline constexpr std::size_t ExecutorStackBytes =
 using GuestMemoryOpener = std::function<std::expected<void, remote::transport::MappingError>(
     remote::transport::GuestMemoryMapping& memory, uint64_t bytes)>;
 
+/// How far a host confined itself, as its Hello states it.
+struct Confinement
+{
+    remote::proto::LockdownState state = remote::proto::LockdownState::Failed; ///< How far.
+    /// A step this system lacks, which the host went without: confined all the same, but by less than the
+    /// sandbox could. `None` when it lacks none.
+    remote::proto::LockdownStep unavailableStep = remote::proto::LockdownStep::None;
+
+    bool operator==(Confinement const&) const = default;
+};
+
 /// How a host server runs.
 struct HostServerConfig
 {
@@ -55,8 +66,9 @@ struct HostServerConfig
     /// Confines the host: called once every lane's thread started and every thread that runs guests was
     /// prepared (IHostedEngine::prepareThread()), before Hello. What it returns is what Hello states: how far
     /// the host is confined, or `Failed` with the step that failed. Null: nothing is confined, and Hello
-    /// states `lockdown`.
-    std::function<std::expected<remote::proto::LockdownState, ConfinementFailure>()> confine {};
+    /// states `lockdown`. Not called where a thread could not be prepared: Hello then states `Failed` with
+    /// `Priming` and what the engine said.
+    std::function<std::expected<Confinement, ConfinementFailure>()> confine {};
     /// How each lane's executor thread is started: the operating system's threads, but in a test that
     /// records or fails each start.
     ExecutorStarter startExecutor = &ExecutorThread::start;

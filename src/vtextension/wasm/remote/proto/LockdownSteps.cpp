@@ -4,10 +4,15 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <format>
 #include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
+
+#include <vtextension/ExtensionError.hpp>
 
 namespace vtextension::wasm::remote::proto
 {
@@ -42,6 +47,24 @@ namespace
         LockdownStepRow { .step = LockdownStep::Mitigations,
                           .text = "its process mitigations cannot be turned on" },
         LockdownStepRow { .step = LockdownStep::Job, .text = "the process does not run in a job of its own" },
+        LockdownStepRow { .step = LockdownStep::Priming,
+                          .text = "a thread to run extensions on cannot be prepared",
+                          .code = FailureCodeKind::Extension },
+    };
+
+    /// What an extension runtime's error a step states says, in users' words naming no engine. A step's
+    /// ExtensionError not here is left unphrased.
+    struct ExtensionCodeRow
+    {
+        ExtensionError error;  ///< The error.
+        std::string_view text; ///< What it says.
+    };
+
+    /// The errors preparing a thread may state.
+    constexpr auto ExtensionCodeTexts = std::array {
+        ExtensionCodeRow { .error = ExtensionError::RuntimeUnavailable,
+                           .text = "the extension runtime is unavailable" },
+        ExtensionCodeRow { .error = ExtensionError::OutOfMemory, .text = "out of memory" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, LockdownStepTable.size()),
@@ -49,7 +72,7 @@ namespace
                                           return std::to_underlying(LockdownStepTable[index].step) == index;
                                       }),
                   "LockdownStepTable lists every LockdownStep at its own index");
-    static_assert(LockdownStepTable.back().step == LockdownStep::Job,
+    static_assert(LockdownStepTable.back().step == LockdownStep::Priming,
                   "LockdownStepTable ends at the last LockdownStep");
 } // namespace
 
@@ -64,6 +87,44 @@ std::string_view lockdownStepText(LockdownStep step) noexcept
     if (index >= LockdownStepTable.size())
         return LockdownStepTable.front().text;
     return LockdownStepTable[index].text;
+}
+
+std::string systemErrorText(int code)
+{
+#ifdef _WIN32
+    // The system's message names an HRESULT it knows; the value itself names every one.
+    return std::format(
+        "{}, HRESULT 0x{:08X}", std::system_category().message(code), static_cast<uint32_t>(code));
+#else
+    return std::system_category().message(code);
+#endif
+}
+
+std::string failureCodeText(LockdownFailure failure)
+{
+    auto const index = static_cast<std::size_t>(std::to_underlying(failure.step));
+    auto const kind =
+        index < LockdownStepTable.size() ? LockdownStepTable[index].code : FailureCodeKind::System;
+    switch (kind)
+    {
+        case FailureCodeKind::System:
+            // An HRESULT travels as its bit pattern: the int it was.
+            return failure.code == 0 ? std::string {} : systemErrorText(static_cast<int>(failure.code));
+        case FailureCodeKind::Extension:
+            for (auto const& row: ExtensionCodeTexts)
+                if (std::to_underlying(row.error) == failure.code)
+                    return std::string { row.text };
+            return {};
+    }
+    return {};
+}
+
+std::string lockdownFailureText(LockdownFailure failure)
+{
+    auto const code = failureCodeText(failure);
+    if (code.empty())
+        return std::string { lockdownStepText(failure.step) };
+    return std::format("{} ({})", lockdownStepText(failure.step), code);
 }
 
 } // namespace vtextension::wasm::remote::proto

@@ -476,6 +476,9 @@ TEST_CASE("Sandbox.locksDownWithoutLandlock", "[vtextension][sandbox]")
     // Inside a filter that has no Landlock, the host locks down all the same, by its filter alone.
     auto const run = runProbe("open-file", "no-landlock");
     CHECK(valueOf(run.lockdown, "lockdown") == "locked");
+    // And says what it went without, which its Hello carries to Contour.
+    CHECK(valueOf(run.lockdown, "unavailable")
+          == std::to_string(std::to_underlying(proto::LockdownStep::FileSystem)));
     CHECK(valueOf(run.lockdown, "after-restrict") == "ok");
     REQUIRE(run.op.has_value());
     // The filter refuses files; an instrumented build's lets them through for its reports and counters, and

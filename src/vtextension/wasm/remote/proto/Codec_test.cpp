@@ -52,7 +52,8 @@ namespace
                 .memoryMode = MemoryMode::Shared,
                 .lockdown = LockdownState::LockedDown,
                 .failedStep = LockdownStep::None,
-                .failureCode = 0 },
+                .failureCode = 0,
+                .unavailableStep = LockdownStep::FileSystem },
         Hello { .version = ProtocolVersion,
                 .memoryMode = MemoryMode::Copy,
                 .lockdown = LockdownState::Failed,
@@ -306,7 +307,7 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
     SECTION("a byte after the last field is TrailingBytes")
     {
         // A Hello of this version: another version's is read no further than its version.
-        auto const body = std::vector<uint8_t> { ThisVersion, 0, 2, 0, 0, 0 };
+        auto const body = std::vector<uint8_t> { ThisVersion, 0, 2, 0, 0, 0, 0 };
         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), body), helloRow)
               == DecodeError::TrailingBytes);
     }
@@ -532,9 +533,9 @@ TEST_CASE("PduCodec.directionAndChannelAreChecked", "[vtextension]")
     CHECK(PduTable.at(std::to_underlying(PduKind::Grown) - 1).direction == Direction::ToHelper);
 }
 
-TEST_CASE("PduCodec.protocolVersionIsFour", "[vtextension]")
+TEST_CASE("PduCodec.protocolVersionIsFive", "[vtextension]")
 {
-    STATIC_CHECK(ProtocolVersion == 4);
+    STATIC_CHECK(ProtocolVersion == 5);
 }
 
 TEST_CASE("PduCodec.helloAtItsLargestFitsItsCap", "[vtextension]")
@@ -544,7 +545,8 @@ TEST_CASE("PduCodec.helloAtItsLargestFitsItsCap", "[vtextension]")
                                  .memoryMode = MemoryMode::Shared,
                                  .lockdown = LockdownState::Failed,
                                  .failedStep = lockdownSteps().back().step,
-                                 .failureCode = UINT32_MAX };
+                                 .failureCode = UINT32_MAX,
+                                 .unavailableStep = lockdownSteps().back().step };
     auto const& row = rowOf(Pdu { largest });
     CHECK(bodyBytesOf(encoded(Pdu { largest })) <= row.sizeCap(PduLimits {}));
 
@@ -575,10 +577,10 @@ TEST_CASE("PduCodec.helloOfAnotherVersionDecodesItsVersion", "[vtextension]")
 
     // A later one with more fields than this version knows likewise; one without a version is still
     // malformed.
-    auto const later = std::vector<uint8_t> { 8, static_cast<uint8_t>(PduKind::Hello), 5, 1, 2, 3, 4, 5, 6 };
+    auto const later = std::vector<uint8_t> { 8, static_cast<uint8_t>(PduKind::Hello), 6, 1, 2, 3, 4, 5, 6 };
     auto const laterDecoded = decodeFrame(later, Direction::ToParent, ChannelKind::Control, PduLimits {});
     REQUIRE(laterDecoded.has_value());
-    CHECK(laterDecoded->pdu == Pdu { Hello { .version = 5 } });
+    CHECK(laterDecoded->pdu == Pdu { Hello { .version = 6 } });
     auto const empty = std::vector<uint8_t> { 1, static_cast<uint8_t>(PduKind::Hello) };
     CHECK(decodeFrame(empty, Direction::ToParent, ChannelKind::Control, PduLimits {}).error()
           == DecodeError::Truncated);
@@ -586,6 +588,7 @@ TEST_CASE("PduCodec.helloOfAnotherVersionDecodesItsVersion", "[vtextension]")
 
 TEST_CASE("LockdownSteps.oneRowPerStep", "[vtextension]")
 {
+    constexpr auto ThisVersion = static_cast<uint8_t>(ProtocolVersion);
     auto const& helloRow = PduTable.at(std::to_underlying(PduKind::Hello) - 1);
     auto const steps = lockdownSteps();
     for (auto const index: std::views::iota(std::size_t { 0 }, steps.size()))
@@ -602,18 +605,27 @@ TEST_CASE("LockdownSteps.oneRowPerStep", "[vtextension]")
         });
         for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
             CHECK_FALSE(lowered.contains(engine));
-        // Every step the table names is one the wire carries.
+        // Every step the table names is one the wire carries, as the step that failed and as the one lacked.
+        auto const step = static_cast<uint8_t>(index);
         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello),
-                              std::vector<uint8_t> { 4, 0, 0, static_cast<uint8_t>(index), 0 }),
+                              std::vector<uint8_t> { ThisVersion, 0, 0, step, 0, 0 }),
+                      helloRow)
+              == std::nullopt);
+        CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello),
+                              std::vector<uint8_t> { ThisVersion, 0, 0, 0, 0, step }),
                       helloRow)
               == std::nullopt);
     }
-    // And the wire carries no step past the table's last.
+    // And the wire carries no step past the table's last, in either place.
     auto const pastTheLast = static_cast<uint8_t>(lockdownSteps().size());
-    CHECK(
-        errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { 4, 0, 0, pastTheLast, 0 }),
-                helloRow)
-        == DecodeError::BadEnum);
+    CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello),
+                          std::vector<uint8_t> { ThisVersion, 0, 0, pastTheLast, 0, 0 }),
+                  helloRow)
+          == DecodeError::BadEnum);
+    CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello),
+                          std::vector<uint8_t> { ThisVersion, 0, 0, 0, 0, pastTheLast }),
+                  helloRow)
+          == DecodeError::BadEnum);
     // A value naming no step reads as no step at all.
     CHECK(lockdownStepText(static_cast<LockdownStep>(pastTheLast)) == lockdownStepText(LockdownStep::None));
 }

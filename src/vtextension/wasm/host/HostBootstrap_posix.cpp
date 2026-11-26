@@ -13,8 +13,6 @@
 #include <expected>
 #include <optional>
 #include <span>
-#include <string>
-#include <system_error>
 
 #include <unistd.h>
 
@@ -165,11 +163,6 @@ std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexce
 std::span<HardeningRow const> hardeningSteps() noexcept
 {
     return HardeningSteps;
-}
-
-std::string systemErrorText(int code)
-{
-    return std::system_category().message(code);
 }
 
 std::array<HeldDescriptor, 3> standardStreams() noexcept

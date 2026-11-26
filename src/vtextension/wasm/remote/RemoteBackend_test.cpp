@@ -97,6 +97,7 @@ using vtextension::wasm::remote::MaxLaneChannels;
 using vtextension::wasm::remote::refusalLine;
 using vtextension::wasm::remote::RemoteKindState;
 using vtextension::wasm::remote::StepWatch;
+using vtextension::wasm::remote::unavailableStepLine;
 using vtextension::wasm::remote::transport::Channel;
 using vtextension::wasm::remote::transport::makeChannelPair;
 using vtextension::wasm::remote::transport::PduStream;
@@ -911,9 +912,15 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
     failed.lockdown = proto::LockdownState::Failed;
     failed.failedStep = proto::LockdownStep::FileSystem;
     failed.failureCode = 13;
+    // A host that could not prepare a thread to run guests says so in a Hello of its own.
+    auto unprimed = HonestHello;
+    unprimed.lockdown = proto::LockdownState::Failed;
+    unprimed.failedStep = proto::LockdownStep::Priming;
+    unprimed.failureCode = std::to_underlying(ExtensionError::RuntimeUnavailable);
     auto const rows = std::array {
         RefusalRow { versioned, LockdownRequirement::AcceptUnsandboxed, HostRefusal::ProtocolVersion },
         RefusalRow { failed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
+        RefusalRow { unprimed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
         RefusalRow { HonestHello, LockdownRequirement::RequireLockedDown, HostRefusal::Unsandboxed },
     };
     auto const runtime = proto::CreateRuntime {
@@ -937,11 +944,48 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
             REQUIRE_FALSE(connected.has_value());
             CHECK(connected.error() == ExtensionError::HostUnavailable);
         }
-        // A host that failed to confine itself is refused naming the step it failed at.
-        CHECK(lines == std::vector<std::string> { refusalLine(row.refusal, row.hello.failedStep) });
+        // A host that failed to confine itself is refused naming the step it failed at, and what its code
+        // says: what the system said, or what the engine did -- in release builds the only place it is seen.
+        CHECK(lines
+              == std::vector<std::string> { refusalLine(
+                  row.refusal,
+                  proto::LockdownFailure { .step = row.hello.failedStep, .code = row.hello.failureCode }) });
         // The connector hears of every refusal, and may keep one that every host it starts would share.
         CHECK(connector->refusals() == std::vector<HostRefusal> { row.refusal, row.refusal });
     }
+}
+
+TEST_CASE("RemoteBackend.unavailableStepIsLoggedOnceAndServed", "[vtextension][remote]")
+{
+    // A host confined without what its system lacks is driven, and the lack logged once, however many say it.
+    auto said = HonestHello;
+    said.unavailableStep = proto::LockdownStep::FileSystem;
+    auto const connector =
+        std::make_shared<ScriptedConnector>([said](HelperEnds& ends, std::size_t /*connection*/) {
+            if (!ends.send(said))
+                return;
+            if (auto const create = ends.receive<proto::CreateRuntime>())
+                std::ignore = ends.send(
+                    proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt });
+            ends.drain();
+        });
+    auto const runtime = proto::CreateRuntime {
+        .runtimeId = HelperIncarnation::RuntimeId, .memoryBytes = 65536, .stackBytes = 65536, .functions = {}
+    };
+    auto lines = std::vector<std::string> {};
+    auto refusals = HostRefusalLog { [&lines](std::string_view line) { lines.emplace_back(line); } };
+    for ([[maybe_unused]] auto const attempt: { 1, 2 })
+    {
+        auto const connected = HelperIncarnation::connect(
+            *connector,
+            runtime,
+            HelperPolicy { .timeouts = {}, .lockdown = LockdownRequirement::AcceptUnsandboxed },
+            refusals);
+        CHECK(connected.has_value());
+    }
+    CHECK(lines == std::vector { unavailableStepLine(proto::LockdownStep::FileSystem) });
+    CHECK(lines.front().contains(proto::lockdownStepText(proto::LockdownStep::FileSystem)));
+    CHECK(connector->refusals().empty());
 }
 
 TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")

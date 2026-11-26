@@ -17,7 +17,6 @@
 #include <expected>
 #include <limits>
 #include <span>
-#include <string>
 
 #include <vtextension/wasm/BuildInstrumentation.hpp>
 #include <vtextension/wasm/host/Sandbox.hpp>
@@ -68,10 +67,6 @@ struct HardeningRow
 /// Hardens this process by this system's steps (hardeningSteps()), before it starts any thread of its own.
 /// @return Nothing if every step was taken; the first that failed otherwise.
 [[nodiscard]] std::expected<void, ConfinementFailure> hardenProcess() noexcept;
-
-/// @param code An error code a confinement step returned: errno on POSIX, an HRESULT on Windows.
-/// @return What the system says of it, user-readable.
-[[nodiscard]] std::string systemErrorText(int code);
 
 /// @return This process's standard streams, each with its role: input and output, which the host never uses,
 ///         and standard error, which it tells why it fails on. Handles it keeps once it is locked down.

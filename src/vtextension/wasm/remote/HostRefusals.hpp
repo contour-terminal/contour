@@ -16,6 +16,7 @@
 #include <string_view>
 #include <utility>
 
+#include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 
 namespace vtextension::wasm::remote
@@ -132,10 +133,15 @@ static_assert(everyRefusalHasAPersistenceRow());
 [[nodiscard]] std::string refusalLine(HostRefusal refusal);
 
 /// @param refusal Why no extension host serves.
-/// @param failedStep The step of its confinement a host refused as `LockdownFailed` named in its Hello.
-/// @return refusalLine(@p refusal); for `LockdownFailed` with a step, naming that step as the confinement's
-///         own table phrases it (proto::lockdownSteps()).
-[[nodiscard]] std::string refusalLine(HostRefusal refusal, proto::LockdownStep failedStep);
+/// @param failure The step of its confinement a host refused as `LockdownFailed` named in its Hello, and the
+///        code it stated.
+/// @return refusalLine(@p refusal); for `LockdownFailed` with a step, naming that step and what its code says
+///         as the confinement's own table phrases them (proto::lockdownFailureText()).
+[[nodiscard]] std::string refusalLine(HostRefusal refusal, proto::LockdownFailure failure);
+
+/// @param step A step of its confinement a host's Hello said this system lacks.
+/// @return The line logged for it, user-readable, naming no engine: the host runs confined, without it.
+[[nodiscard]] std::string unavailableStepLine(proto::LockdownStep step);
 
 /// Logs each reason the first time it comes up. Thread-safe; the reasons seen are kept wait-free.
 class HostRefusalLog
@@ -151,14 +157,22 @@ class HostRefusalLog
     /// @param refusal Why no host serves.
     void refused(HostRefusal refusal);
 
-    /// Logs @p refusal's line naming @p failedStep (refusalLine()), unless @p refusal was logged already.
+    /// Logs @p refusal's line naming @p failure (refusalLine()), unless @p refusal was logged already.
     /// @param refusal Why no host serves.
-    /// @param failedStep The step of its confinement the host named.
-    void refused(HostRefusal refusal, proto::LockdownStep failedStep);
+    /// @param failure The step of its confinement the host named, and its code.
+    void refused(HostRefusal refusal, proto::LockdownFailure failure);
+
+    /// Logs that hosts run without @p step, which their system lacks (unavailableStepLine()), unless that was
+    /// logged already: once, though every host started says it. `None` is no step, and logs nothing.
+    /// @param step The step a host's Hello said it went without.
+    void unavailable(proto::LockdownStep step);
 
   private:
     Writer _writer;
     std::atomic<uint32_t> _logged { 0 }; ///< A bit per reason logged, at its enumerator's value.
+    std::atomic<uint32_t> _unavailable {
+        0
+    }; ///< A bit per unavailable step logged, at its enumerator's value.
 };
 
 /// @return A writer to Contour's error log.

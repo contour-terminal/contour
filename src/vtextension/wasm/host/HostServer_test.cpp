@@ -60,6 +60,7 @@ using vtextension::ExtensionError;
 using vtextension::testing::toModule;
 using vtextension::wasm::CallFailure;
 using vtextension::wasm::ModuleIdentity;
+using vtextension::wasm::host::Confinement;
 using vtextension::wasm::host::ConfinementFailure;
 using vtextension::wasm::host::ExecutorThread;
 using vtextension::wasm::host::HostFrameBytes;
@@ -892,7 +893,7 @@ TEST_CASE("HostServer.confineRunsAfterTheLanesStartAndBeforeHello", "[vtextensio
         starts->fetch_add(1);
         return ExecutorThread::start(stackBytes, std::move(body));
     };
-    config.confine = [starts, startsAtConfine]() -> std::expected<proto::LockdownState, ConfinementFailure> {
+    config.confine = [starts, startsAtConfine]() -> std::expected<Confinement, ConfinementFailure> {
         startsAtConfine->store(starts->load());
         return std::unexpected(ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = -1 });
     };
@@ -948,7 +949,7 @@ thread_local auto executorLane = std::size_t { 0 };
         seen->preparedAtConfine = seen->prepared.size();
         seen->confinedOn = std::this_thread::get_id();
         ++seen->confines;
-        return proto::LockdownState::Unsandboxed;
+        return Confinement { .state = proto::LockdownState::Unsandboxed };
     };
     return config;
 }
@@ -993,11 +994,34 @@ TEST_CASE("HostServer.unpreparedThreadEndsTheHost", "[vtextension][host]")
 {
     auto const seen = std::make_shared<PreparedThreads>();
     auto parent = ScriptedParent { countingEngine(seen, 2), recordingThreads(seen) };
+    // The host is not confined, and says why it cannot serve: priming failed, with what the engine said.
+    CHECK(parent.receiveControl()
+          == proto::Pdu {
+              proto::Hello { .version = proto::ProtocolVersion,
+                             .memoryMode = proto::MemoryMode::Copy,
+                             .lockdown = proto::LockdownState::Failed,
+                             .failedStep = proto::LockdownStep::Priming,
+                             .failureCode = std::to_underlying(ExtensionError::RuntimeUnavailable) } });
     CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);
-    // Nothing was sent, nor the host confined: a host that cannot prepare a thread never says Hello.
     CHECK(parent.control->receive() == std::unexpected(StreamError::Closed));
     auto const lock = std::scoped_lock { seen->mutex };
     CHECK(seen->confines == 0);
+}
+
+TEST_CASE("HostServer.helloSaysWhatTheSystemLacks", "[vtextension][host]")
+{
+    // A host confined without what its system lacks says so beside its lockdown.
+    auto config = HostServerConfig {};
+    config.confine = [] {
+        return Confinement { .state = proto::LockdownState::LockedDown,
+                             .unavailableStep = proto::LockdownStep::FileSystem };
+    };
+    auto parent = ScriptedParent { std::move(config) };
+    CHECK(parent.receiveControl()
+          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                         .memoryMode = proto::MemoryMode::Copy,
+                                         .lockdown = proto::LockdownState::LockedDown,
+                                         .unavailableStep = proto::LockdownStep::FileSystem } });
 }
 
 TEST_CASE("HostServer.noConfineSendsTheConfiguredLockdown", "[vtextension][host]")
@@ -1021,7 +1045,7 @@ TEST_CASE("HostServer.executorFailureSkipsConfine", "[vtextension][host]")
     };
     config.confine = [confined] {
         confined->fetch_add(1);
-        return proto::LockdownState::Unsandboxed;
+        return Confinement { .state = proto::LockdownState::Unsandboxed };
     };
     auto parent = ScriptedParent { std::move(config) };
     CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);

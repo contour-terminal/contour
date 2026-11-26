@@ -24,7 +24,7 @@ namespace vtextension::wasm::remote::proto
 {
 
 /// The protocol version both ends must speak; the helper states it in its Hello.
-inline constexpr uint32_t ProtocolVersion = 4;
+inline constexpr uint32_t ProtocolVersion = 5;
 
 /// The size of a guest's memory page: what guest memory grows by, and what its object is rounded up to.
 inline constexpr uint64_t WasmPageBytes = uint64_t { 64 } * 1024;
@@ -115,6 +115,7 @@ enum class LockdownStep : uint8_t
     Container,        ///< A container of its own (Windows: AppContainer).
     Mitigations,      ///< The process mitigations it runs under (Windows).
     Job,              ///< A job that ends it with Contour and limits what it starts (Windows).
+    Priming,          ///< Each thread that runs guests prepared before the rest is taken (every system).
 };
 
 /// Which way a PDU travels.
@@ -205,8 +206,12 @@ struct Hello
     LockdownState lockdown = LockdownState::Failed; ///< How far it confined itself.
     /// The first step of its confinement that failed, when `lockdown` is `Failed`; `None` otherwise.
     LockdownStep failedStep = LockdownStep::None;
-    /// What the system said of that step: an errno, or an HRESULT's bit pattern; 0 when none failed.
+    /// What was said of that step, as its row in lockdownSteps() reads it: an errno or an HRESULT's bit
+    /// pattern for a system's step, an ExtensionError for `Priming`; 0 when none failed.
     uint32_t failureCode = 0;
+    /// A step this system lacks, which the host went without while it is confined all the same (Linux without
+    /// Landlock: `FileSystem`); `None` when it lacks none.
+    LockdownStep unavailableStep = LockdownStep::None;
 
     bool operator==(Hello const&) const = default;
 };

@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/host/ContainerSandbox.hpp>
 #include <vtextension/wasm/host/DescriptorRights.hpp>
 #include <vtextension/wasm/host/HostBootstrap.hpp>
@@ -44,7 +45,6 @@ using vtextension::wasm::host::ProfileParameters;
 using vtextension::wasm::host::rightsOf;
 using vtextension::wasm::host::SandboxDescriptors;
 using vtextension::wasm::host::SandboxProfile;
-using vtextension::wasm::host::systemErrorText;
 using vtextension::wasm::host::ThisPlatformSandbox;
 
 namespace proto = vtextension::wasm::remote::proto;
@@ -80,9 +80,27 @@ TEST_CASE("Sandbox.failureSaysTheStepAndWhatTheSystemSaid", "[vtextension][host]
     auto const text = confinementFailureText(failure);
     INFO(text);
     CHECK(text
-          == std::string { proto::lockdownStepText(proto::LockdownStep::SystemCalls) } + ": "
-                 + systemErrorText(1));
-    CHECK_FALSE(systemErrorText(1).empty());
+          == std::string { proto::lockdownStepText(proto::LockdownStep::SystemCalls) } + " ("
+                 + proto::systemErrorText(1) + ")");
+    CHECK_FALSE(proto::systemErrorText(1).empty());
+    // As the parent phrases what a Hello states: the same words on both ends.
+    CHECK(text == proto::lockdownFailureText({ .step = proto::LockdownStep::SystemCalls, .code = 1 }));
+}
+
+TEST_CASE("Sandbox.failureCodeIsReadAsItsStepSays", "[vtextension][host]")
+{
+    // A system's step states what the system said, and nothing for 0; priming states what the extension
+    // runtime said; a value naming nothing leaves the step's text alone.
+    CHECK(proto::lockdownFailureText({ .step = proto::LockdownStep::Job, .code = 0 })
+          == proto::lockdownStepText(proto::LockdownStep::Job));
+    auto const primed = proto::lockdownFailureText(
+        { .step = proto::LockdownStep::Priming,
+          .code = static_cast<uint32_t>(vtextension::ExtensionError::RuntimeUnavailable) });
+    CHECK(primed
+          == std::string { proto::lockdownStepText(proto::LockdownStep::Priming) }
+                 + " (the extension runtime is unavailable)");
+    CHECK(proto::lockdownFailureText({ .step = proto::LockdownStep::Priming, .code = 255 })
+          == proto::lockdownStepText(proto::LockdownStep::Priming));
 }
 
 namespace

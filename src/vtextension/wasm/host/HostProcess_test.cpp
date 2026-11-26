@@ -171,6 +171,8 @@ struct Confined
     std::expected<void, ConfinementFailure> restriction {};
     std::expected<void, ConfinementFailure> lockdown {};
     proto::LockdownState sandboxState = proto::LockdownState::Unsandboxed;
+    /// What the sandbox says its system lacks.
+    proto::LockdownStep sandboxUnavailable = proto::LockdownStep::None;
     /// The control handle the sandbox was made for.
     std::atomic<NativeHandle> sandboxedControl {};
     /// The other handles the sandbox was made for, each with its role.
@@ -226,6 +228,11 @@ class RecordingSandbox final: public ISandbox
     [[nodiscard]] proto::LockdownState lockdownState() const noexcept override
     {
         return _confined->sandboxState;
+    }
+
+    [[nodiscard]] proto::LockdownStep unavailableStep() const noexcept override
+    {
+        return _confined->sandboxUnavailable;
     }
 
   private:
@@ -533,6 +540,8 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
 {
     auto parent = makeParentEnds();
     auto confined = std::make_shared<Confined>();
+    // What the sandbox says its system lacks reaches the parent beside its state.
+    confined->sandboxUnavailable = proto::LockdownStep::FileSystem;
     auto const arguments = formatHelperArguments(parent.arguments);
     auto task = std::packaged_task<int()> { [&] {
         return runHost(
@@ -548,7 +557,8 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
                                          .memoryMode = proto::MemoryMode::Copy,
                                          .lockdown = proto::LockdownState::Unsandboxed,
                                          .failedStep = proto::LockdownStep::None,
-                                         .failureCode = 0 } });
+                                         .failureCode = 0,
+                                         .unavailableStep = proto::LockdownStep::FileSystem } });
     CHECK(confined->boundTo.load() == TheParent);
     CHECK(confined->cappedTo.load() == TheDataBytes);
     CHECK(confined->confines.load() == 1);

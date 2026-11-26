@@ -119,10 +119,13 @@ std::expected<std::shared_ptr<HelperIncarnation>, ExtensionError> HelperIncarnat
         auto const& said = std::get<proto::Hello>(*hello);
         if (auto const refusal = refusalOf(said, policy.lockdown))
         {
-            refusals.refused(*refusal, said.failedStep);
+            refusals.refused(*refusal,
+                             proto::LockdownFailure { .step = said.failedStep, .code = said.failureCode });
             connector.refused(*refusal);
             return false;
         }
+        // Confined, but by less than the sandbox could: said once, however many hosts say it.
+        refusals.unavailable(said.unavailableStep);
         incarnation->_memoryMode = said.memoryMode;
         auto request = runtime;
         request.runtimeId = RuntimeId;

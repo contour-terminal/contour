@@ -30,8 +30,8 @@ namespace vtextension::wasm::host
 {
 
 /// Which system's sandbox makeSystemSandbox() makes in this build.
-/// CONTOUR_PLATFORM_SANDBOX is an index into these, in this order: keep `_platform_sandboxes` in CMakeLists.txt
-/// the same.
+/// CONTOUR_PLATFORM_SANDBOX is an index into these, in this order: keep `_platform_sandboxes` in
+/// CMakeLists.txt the same.
 enum class PlatformSandbox : uint8_t
 {
     None,    ///< None: the host runs unsandboxed.
@@ -56,8 +56,8 @@ struct ConfinementFailure
 };
 
 /// @param failure A step that failed.
-/// @return What failed and why, user-readable: the step's text (lockdownSteps()), then the system's word on
-///         the error.
+/// @return What failed and why, user-readable, as the parent phrases a Hello's (lockdownFailureText()): the
+///         step's text, then the system's word on the error.
 [[nodiscard]] std::string confinementFailureText(ConfinementFailure const& failure);
 
 /// A handle the host keeps using once it is locked down, beside its control channel, and what for.
@@ -118,6 +118,14 @@ class ISandbox
     ///         states then. `Unsandboxed` where the system has no sandbox, `LockedDown` where it has one --
     ///         on Windows only where the parent started the host in its AppContainer, which lockDown() asks.
     [[nodiscard]] virtual remote::proto::LockdownState lockdownState() const noexcept = 0;
+
+    /// @return A step this system lacks, which the sandbox went without while it confines the host all the
+    ///         same (Linux without Landlock: `FileSystem`), as its Hello states; `None` where it lacks none,
+    ///         as every system but Linux.
+    [[nodiscard]] virtual remote::proto::LockdownStep unavailableStep() const noexcept
+    {
+        return remote::proto::LockdownStep::None;
+    }
 };
 
 /// The sandbox of a system that has none: both steps do nothing, and the host runs `Unsandboxed`.

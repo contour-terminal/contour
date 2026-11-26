@@ -848,12 +848,16 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
                 return failedLine(step.error());
         return std::string { "locked" };
     }();
+    // What the sandbox went without, as a Hello states it: the step's number, 0 for none.
+    auto const unavailable = sandbox ? std::to_underlying(sandbox->unavailableStep()) : 0;
     if (!sendText(lane,
-                  std::format("lockdown={}\nno-new-privs={}\nbefore-restrict={}\nafter-restrict={}\nend\n",
+                  std::format("lockdown={}\nno-new-privs={}\nbefore-restrict={}\nafter-restrict={}\n"
+                              "unavailable={}\nend\n",
                               lockdown,
                               privileges,
                               beforeRestrict,
-                              afterRestrict)))
+                              afterRestrict,
+                              unavailable)))
         return exitWith(SandboxProbeExit::ReportFailed);
 
     go.count_down();

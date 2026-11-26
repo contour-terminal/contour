@@ -45,11 +45,30 @@ namespace
     /// What a request was served with: nothing to go on, or the reason the connection ends.
     using Served = std::expected<void, ServerExit>;
 
-    /// Whether every thread that runs guests was prepared to.
-    enum class Preparation : uint8_t
+    /// The first thread that could not be prepared to run guests, as its engine said, from any thread.
+    class Priming
     {
-        Complete,   ///< Every one was, so far.
-        Incomplete, ///< One was not: the host cannot run guests on it once confined, and ends.
+      public:
+        /// Notes @p prepared, kept only if it is the first failure.
+        void note(std::expected<void, ExtensionError> const& prepared)
+        {
+            if (prepared)
+                return;
+            auto const lock = std::scoped_lock { _mutex };
+            if (!_failure)
+                _failure = prepared.error();
+        }
+
+        /// @return Why the first thread that failed was not prepared; nothing if every one was.
+        [[nodiscard]] std::optional<ExtensionError> failure() const
+        {
+            auto const lock = std::scoped_lock { _mutex };
+            return _failure;
+        }
+
+      private:
+        mutable std::mutex _mutex;
+        std::optional<ExtensionError> _failure;
     };
 
     /// @return The reason a stream's failure ends the connection with.
@@ -256,6 +275,9 @@ class HostServer::Impl
 
     /// Confines the host, says Hello, then serves the control channel (serveControl()).
     void sendHello();
+    /// Says Hello as a host that could not prepare a thread to run guests: `Failed`, at `Priming`, with
+    /// @p failure.
+    void sendUnprimed(ExtensionError failure);
 
     /// Serves the control channel until the connection ends, and ends it for the reason it does.
     void serveControl();
@@ -354,16 +376,15 @@ ServerExit HostServer::Impl::run()
     auto releaseAll = core::Finally { [this] { release(); } };
     // Counted down by each executor once it prepared its thread, or failed to; outlives every executor.
     auto lanesPrepared = std::latch { static_cast<std::ptrdiff_t>(_lanes.size()) };
-    auto preparation = std::atomic<Preparation> { Preparation::Complete };
+    auto priming = Priming {};
     auto executors = std::vector<ExecutorThread> {};
     auto endConnection = core::Finally { [this] { finish(ServerExit::ProtocolViolation); } };
     executors.reserve(_lanes.size());
     for (auto& lane: _lanes)
     {
-        auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane, &lanesPrepared, &preparation] {
+        auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane, &lanesPrepared, &priming] {
             auto const prepared = _engine.prepareThread();
-            if (!prepared)
-                preparation.store(Preparation::Incomplete);
+            priming.note(prepared);
             lanesPrepared.count_down();
             if (prepared)
                 runLane(lane);
@@ -375,13 +396,16 @@ ServerExit HostServer::Impl::run()
     if (executors.size() == _lanes.size())
     {
         // The control thread runs start functions: it is prepared too, then waits for every lane's.
-        if (!_engine.prepareThread())
-            preparation.store(Preparation::Incomplete);
+        priming.note(_engine.prepareThread());
         lanesPrepared.wait();
-        if (preparation.load() == Preparation::Complete)
-            sendHello();
-        else
+        if (auto const failure = priming.failure())
+        {
+            // A host that cannot run guests on every thread says so, unconfined, and ends.
+            sendUnprimed(*failure);
             finish(ServerExit::ExecutorUnavailable);
+        }
+        else
+            sendHello();
     }
     else
         finish(ServerExit::ExecutorUnavailable);
@@ -394,17 +418,32 @@ ServerExit HostServer::Impl::run()
     return _exit.value_or(ServerExit::Stopped);
 }
 
+void HostServer::Impl::sendUnprimed(ExtensionError failure)
+{
+    // Sent before anything is served: nothing else writes the control channel yet. Whether it arrives or not,
+    // the connection ends.
+    std::ignore = send(_control,
+                       proto::Hello { .version = proto::ProtocolVersion,
+                                      .memoryMode = _engine.memoryMode(),
+                                      .lockdown = proto::LockdownState::Failed,
+                                      .failedStep = proto::LockdownStep::Priming,
+                                      .failureCode = std::to_underlying(failure) });
+}
+
 void HostServer::Impl::sendHello()
 {
     // Every thread the host needs runs now, prepared: it may confine itself, then say how far it did.
-    auto const confined = _config.confine
-                              ? _config.confine()
-                              : std::expected<proto::LockdownState, ConfinementFailure> { _config.lockdown };
-    auto hello = proto::Hello { .version = proto::ProtocolVersion,
-                                .memoryMode = _engine.memoryMode(),
-                                .lockdown = confined.value_or(proto::LockdownState::Failed),
-                                .failedStep = proto::LockdownStep::None,
-                                .failureCode = 0 };
+    auto const confined =
+        _config.confine
+            ? _config.confine()
+            : std::expected<Confinement, ConfinementFailure> { Confinement { .state = _config.lockdown } };
+    auto hello =
+        proto::Hello { .version = proto::ProtocolVersion,
+                       .memoryMode = _engine.memoryMode(),
+                       .lockdown = confined ? confined->state : proto::LockdownState::Failed,
+                       .failedStep = proto::LockdownStep::None,
+                       .failureCode = 0,
+                       .unavailableStep = confined ? confined->unavailableStep : proto::LockdownStep::None };
     if (!confined)
     {
         hello.failedStep = confined.error().step;
