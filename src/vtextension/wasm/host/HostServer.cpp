@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -93,17 +94,32 @@ namespace
 
     /// Sends @p pdu on @p stream, unless it is larger than its caps allow: @p refusal is sent instead, so
     /// that a reply too large to carry fails its request rather than the connection.
+    /// @param withdraw Undoes what @p pdu would have announced, before @p refusal goes out: a peer acting on
+    ///        the refusal at once -- on another channel, served by another thread -- finds nothing of it.
     /// @return Whether @p pdu itself was sent; why the connection ends if neither could be.
+    template <std::invocable Withdraw>
     [[nodiscard]] std::expected<proto::Pdu const*, ServerExit> sendOrRefuse(PduStream& stream,
                                                                             proto::Pdu const& pdu,
-                                                                            proto::Pdu const& refusal)
+                                                                            proto::Pdu const& refusal,
+                                                                            Withdraw&& withdraw)
     {
         auto const sent = stream.send(pdu);
         if (sent)
             return &pdu;
         if (sent.error() != StreamError::OverCap)
             return std::unexpected(exitOf(sent.error()));
+        std::forward<Withdraw>(withdraw)();
         return send(stream, refusal).transform([&] { return &refusal; });
+    }
+
+    /// Sends @p pdu on @p stream, or @p refusal if @p pdu is larger than its caps allow, with nothing to
+    /// withdraw first.
+    /// @return Whether @p pdu itself was sent; why the connection ends if neither could be.
+    [[nodiscard]] std::expected<proto::Pdu const*, ServerExit> sendOrRefuse(PduStream& stream,
+                                                                            proto::Pdu const& pdu,
+                                                                            proto::Pdu const& refusal)
+    {
+        return sendOrRefuse(stream, pdu, refusal, [] {});
     }
 
     /// @return Whether a call can carry @p signature's parameters and results: every value an i32, and no
@@ -695,15 +711,19 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
     auto const refusal = proto::Pdu { proto::Instantiated { .instanceId = request.instanceId,
                                                             .error = ExtensionError::InvalidComponent,
                                                             .callableExports = {} } };
-    return sendOrRefuse(_control, answer, refusal).transform([&](proto::Pdu const* sent) {
-        if (sent == &answer)
-            return;
-        // Stopped for good, as a released one is, should a lane have reached it meanwhile.
-        auto const lock = std::scoped_lock { _mutex };
-        slot->instance->interrupt();
-        _instances.erase(request.instanceId);
-        _slotInstances.erase(request.interruptSlot);
-    });
+    // Gone before the refusal goes out: a parent that calls it the moment the refusal arrives -- on a lane,
+    // served by another thread -- calls an instance that is not the server's, which is a violation. Stopped
+    // for good, as a released one is, should a lane have reached it meanwhile.
+    return sendOrRefuse(_control,
+                        answer,
+                        refusal,
+                        [&] {
+                            auto const lock = std::scoped_lock { _mutex };
+                            slot->instance->interrupt();
+                            _instances.erase(request.instanceId);
+                            _slotInstances.erase(request.interruptSlot);
+                        })
+        .transform([](proto::Pdu const* /*sent*/) {});
 }
 
 std::expected<std::optional<MemoryProvision>, ServerExit> HostServer::Impl::provisionOf(
