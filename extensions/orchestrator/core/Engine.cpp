@@ -1002,9 +1002,14 @@ void Engine::trackDoneRuns()
 
 std::optional<uint64_t> Engine::endsWhenDoneAt(Run const& run) const
 {
-    auto const after = _config ? static_cast<uint64_t>(_config->endDoneAfterFor(run.task).count()) : 0;
     auto const since = _doneSinceMs.find(run.id);
-    if (after == 0 || since == _doneSinceMs.end())
+    if (since == _doneSinceMs.end())
+        return std::nullopt;
+    // What a rule or a group start began ends once its agent is done: nobody waits at its tab.
+    if (run.origin != RunOrigin::User)
+        return since->second;
+    auto const after = _config ? static_cast<uint64_t>(_config->endDoneAfterFor(run.task).count()) : 0;
+    if (after == 0)
         return std::nullopt;
     return since->second + after;
 }

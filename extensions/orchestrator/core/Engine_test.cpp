@@ -6157,4 +6157,67 @@ TEST_CASE("automation: a poll forgets the items that left the list", "[orchestra
     CHECK_FALSE(harness.automationState()->contains("contour/!1"));
 }
 
+namespace
+{
+
+/// prDispatch(), begun by the fix_ci rule.
+[[nodiscard]] Dispatch ruleDispatch()
+{
+    auto request = prDispatch();
+    request.origin = RunOrigin::Rule;
+    request.originRule = "pipeline_failed/fix_ci";
+    return request;
+}
+
+} // namespace
+
+TEST_CASE("automation: an automatic run ends as soon as its agent is done",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = booted();
+    harness.runToRunning(ruleDispatch());
+    auto const ended = harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    CHECK(countOf<ClosePane>(ended) == 1);
+    REQUIRE(holds<Ending>(harness.run(PrId)));
+    harness.endCleanly(PrId);
+    auto const finished = finishedOf(harness.run(PrId));
+    REQUIRE(finished);
+    CHECK(finished->ended == Ended::Completed);
+    CHECK(finished->fate == Fate::Removed);
+}
+
+TEST_CASE("automation: a done automatic run with changes left ends kept",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = booted();
+    harness.runToRunning(ruleDispatch());
+    harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, AgentStatus::Done) });
+    harness.list({});
+    harness.read("/.git", intactGitFile(ContourPath, PrId));
+    harness.finish("git-common-dir", ok(commonDirOf(ContourPath)));
+    harness.finish("git-index-flags", ok(CleanIndex));
+    harness.finish("git-head-reachable", ok("refs/heads/agent/x\n"));
+    harness.finish("git-operation-state", ok(CleanLongStatus));
+    harness.finish("git-status", ok(" M f\n"));
+    auto const kept = finishedOf(harness.run(PrId));
+    REQUIRE(kept);
+    CHECK(kept->fate == Fate::Kept);
+    CHECK(harness.commandsIssued("git-worktree-remove") == 0);
+}
+
+TEST_CASE("automation: an automatic run that asks, waits or failed is left for the user",
+          "[orchestrator][engine][automation]")
+{
+    for (auto const status:
+         { AgentStatus::Asking, AgentStatus::Waiting, AgentStatus::Error, AgentStatus::Idle })
+    {
+        CAPTURE(std::to_underlying(status));
+        auto harness = booted();
+        harness.runToRunning(ruleDispatch());
+        harness.list({ paneOf(PrId, "p1", ProgramLiveness::Alive, status) });
+        CHECK(countOf<ClosePane>(harness.wake(24 * 60 * Minute)) == 0);
+        CHECK_FALSE(holds<Ending>(harness.run(PrId)));
+    }
+}
+
 // }}}
