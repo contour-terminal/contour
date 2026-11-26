@@ -82,7 +82,8 @@ set(_process_sources_FreeBSD process/Process_freebsd.cpp)
 set(_process_sources_Darwin process/Process_macos.cpp)
 set(_process_sources_Windows
     process/AppContainer_win32.cpp process/AppContainer_win32.hpp process/LaunchRefusal_win32.cpp
-    process/LaunchRefusal_win32.hpp process/Process_win32.cpp process/Process_win32.hpp)
+    process/LaunchRefusal_win32.hpp process/LaunchSpelling_win32.cpp process/LaunchSpelling_win32.hpp
+    process/Process_win32.cpp process/Process_win32.hpp)
 set(_process_source "${_process_sources_${CMAKE_SYSTEM_NAME}}")
 if(_process_source AND NOT WIN32)
     # What the POSIX launchers share.
@@ -113,10 +114,9 @@ if(_process_source)
         ${_process_source}
     )
     target_link_libraries(vtextension_remote_process PUBLIC core::platform)
-    if(WIN32)
-        # The extension host's AppContainer profile (process/AppContainer_win32.cpp).
-        target_link_libraries(vtextension_remote_process PRIVATE userenv)
-    endif()
+    # Windows: no library beyond the default ones. The AppContainer functions beyond advapi32's -- userenv's, and
+    # combase's CoTaskMemFree() -- are looked up at run time (process/AppContainer_win32.cpp), so that no
+    # executable linking the launcher imports a library that loads user32 as it starts.
     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
     target_compile_definitions(vtextension_remote_process PUBLIC
         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
@@ -184,6 +184,7 @@ if(_process_source)
             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
         endif()
         if(WIN32)
+            target_sources(vtextension_process_test PRIVATE process/LaunchSpelling_test.cpp)
             # Sandbox.windowsHelperRunsContained listens on loopback for the contained probe.
             target_link_libraries(vtextension_process_test PRIVATE ws2_32)
         endif()
@@ -372,6 +373,10 @@ if(VTEXTENSION_TESTING AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND _process
         target_compile_definitions(vtextension_helper_test PRIVATE
             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
     endif()
+    if(WIN32)
+        # The startup imports of the extension host and of the probe (process/StartupImports_test.cpp).
+        target_sources(vtextension_helper_test PRIVATE process/StartupImports_test.cpp)
+    endif()
     add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
@@ -417,6 +422,13 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_so
         add_dependencies(vtextension_wamr_helper_test contour_bundled_extensions)
         target_compile_definitions(vtextension_wamr_helper_test PRIVATE
             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+    endif()
+    if(WIN32)
+        # The startup imports of this extension host and of the probe (process/StartupImports_test.cpp).
+        target_sources(vtextension_wamr_helper_test PRIVATE process/StartupImports_test.cpp)
+        add_dependencies(vtextension_wamr_helper_test extension_host_probe)
+        target_compile_definitions(vtextension_wamr_helper_test PRIVATE
+            VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
     endif()
     add_test(NAME vtextension_wamr_helper_test COMMAND vtextension_wamr_helper_test)
     if(NOT WIN32)

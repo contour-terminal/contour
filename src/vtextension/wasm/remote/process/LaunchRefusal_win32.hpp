@@ -24,6 +24,7 @@ enum class LaunchStep : uint8_t
 {
     Executable,         ///< Looking the executable up.
     Profile,            ///< Creating or finding the AppContainer profile.
+    ContainerFolder,    ///< Asking for the AppContainer's own folder.
     PackagesSid,        ///< Spelling the SID of ALL APPLICATION PACKAGES.
     ReadGrant,          ///< Reading the executable directory's DACL.
     Grant,              ///< Adding the AppContainer grant to it.
@@ -61,6 +62,9 @@ inline constexpr auto LaunchSteps = std::to_array<LaunchStepRow>({
     { .step = LaunchStep::Executable, .text = "to find its executable", .code = RefusalCode::Win32 },
     { .step = LaunchStep::Profile,
       .text = "to create or find its app container profile",
+      .code = RefusalCode::HResult },
+    { .step = LaunchStep::ContainerFolder,
+      .text = "to name its app container's folder",
       .code = RefusalCode::HResult },
     { .step = LaunchStep::PackagesSid,
       .text = "to name ALL APPLICATION PACKAGES",

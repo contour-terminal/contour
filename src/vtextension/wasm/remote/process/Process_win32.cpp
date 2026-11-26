@@ -15,10 +15,12 @@
 // rather than the volume's root, which an AppContainer may not.
 //
 // The child gets the null device as stdin and stdout, the stderr it is given or else the null device -- never
-// this process's console unasked -- the environment it is given and nothing else, the root of its
-// executable's volume as its working directory, and a console of its own that shows no window
-// (CREATE_NO_WINDOW), so that it is attached to no console of the parent's and receives none of its
-// Ctrl+C events.
+// this process's console unasked -- the environment it is given and nothing else (contained, with
+// LOCALAPPDATA, TEMP and TMP set to the container's own folders, whatever it was given or this process has:
+// the system refuses a contained launch without them; LaunchSpelling_win32.hpp), the root of its
+// executable's volume as its working directory (contained, its executable's own, as above), and a console of
+// its own that shows no window (CREATE_NO_WINDOW), so that it is attached to no console of the parent's and
+// receives none of its Ctrl+C events.
 //
 // The inheritance window. The handle list binds only this CreateProcessW(): while the duplicates are
 // inheritable, any other CreateProcess() of this process that inherits handles without a list of its own
@@ -35,7 +37,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cwctype>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -53,6 +54,7 @@
 #include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
 #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
+#include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 
 #define WIN32_LEAN_AND_MEAN
@@ -75,6 +77,31 @@ namespace
         void operator()(HANDLE handle) const noexcept { ::CloseHandle(handle); }
     };
     using OwnedHandle = std::unique_ptr<void, HandleCloser>;
+
+    /// @return This process's value of the variable @p name, in UTF-8; nothing if it has none, none UTF-16
+    ///         spells, or an empty one (GetEnvironmentVariableW() reads 0 for it, as for none). Read through
+    ///         the Win32 block, which a process's own changes to its environment reach.
+    [[nodiscard]] std::optional<std::string> processVariable(std::string_view name)
+    {
+        auto const wideName = wideOf(name);
+        if (!wideName)
+            return std::nullopt;
+        // Asked once for the size, with its terminator; again, should it have grown in between.
+        auto value = std::wstring {};
+        auto length = ::GetEnvironmentVariableW(wideName->c_str(), nullptr, 0);
+        while (length > value.size())
+        {
+            value.resize(length);
+            length =
+                ::GetEnvironmentVariableW(wideName->c_str(), value.data(), static_cast<DWORD>(value.size()));
+        }
+        if (length == 0)
+            return std::nullopt;
+        value.resize(length);
+        // UTF-8, as every string of the launcher's is; path::string() would spell it in the ANSI code page.
+        auto const utf8 = std::filesystem::path { value }.u8string();
+        return std::string { utf8.begin(), utf8.end() };
+    }
 
     /// @return Why a call that set @p error failed to start a process.
     [[nodiscard]] LaunchError launchErrorOf(DWORD error) noexcept
@@ -100,84 +127,6 @@ namespace
     [[nodiscard]] LaunchRefusal refusalOf(LaunchStep step, DWORD error) noexcept
     {
         return LaunchRefusal { .error = launchErrorOf(error), .step = step, .code = error };
-    }
-
-    /// @return @p text, UTF-8, as UTF-16; nothing if it is not UTF-8.
-    [[nodiscard]] std::optional<std::wstring> wideOf(std::string_view text)
-    {
-        if (text.empty())
-            return std::wstring {};
-        auto const size = ::MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
-        if (size == 0)
-            return std::nullopt;
-        auto wide = std::wstring(static_cast<std::size_t>(size), L'\0');
-        ::MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), size);
-        return wide;
-    }
-
-    /// Appends @p argument to @p commandLine, quoted as the C runtime's argv parser reads it back.
-    void appendArgument(std::wstring& commandLine, std::wstring_view argument)
-    {
-        if (!commandLine.empty())
-            commandLine += L' ';
-        if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring_view::npos)
-        {
-            commandLine += argument;
-            return;
-        }
-        commandLine += L'"';
-        auto backslashes = std::size_t { 0 };
-        for (auto const c: argument)
-        {
-            if (c == L'\\')
-            {
-                ++backslashes;
-                continue;
-            }
-            // Backslashes double only before a quote; the quote itself is escaped.
-            commandLine.append(c == L'"' ? (backslashes * 2) + 1 : backslashes, L'\\');
-            backslashes = 0;
-            commandLine += c;
-        }
-        commandLine.append(backslashes * 2, L'\\');
-        commandLine += L'"';
-    }
-
-    /// @return The environment block of @p environment: `NAME=value` entries sorted by name, as Windows wants
-    ///         them, each null-terminated, the block null-terminated; nothing if an entry is not UTF-8.
-    [[nodiscard]] std::optional<std::wstring> environmentBlock(
-        std::span<std::pair<std::string, std::string> const> environment)
-    {
-        auto entries = std::vector<std::pair<std::wstring, std::wstring>> {};
-        for (auto const& [name, value]: environment)
-        {
-            auto wideName = wideOf(name);
-            auto wideValue = wideOf(value);
-            if (!wideName || !wideValue)
-                return std::nullopt;
-            entries.emplace_back(*std::move(wideName), *std::move(wideValue));
-        }
-        auto const upper = [](std::wstring const& name) {
-            auto folded = name;
-            std::ranges::transform(folded, folded.begin(), [](wchar_t c) { return std::towupper(c); });
-            return folded;
-        };
-        std::ranges::sort(entries, {}, [&](auto const& entry) { return upper(entry.first); });
-        auto block = std::wstring {};
-        for (auto const& [name, value]: entries)
-        {
-            block += name;
-            block += L'=';
-            block += value;
-            block += L'\0';
-        }
-        // An empty block still needs two terminators.
-        if (entries.empty())
-            block += L'\0';
-        block += L'\0';
-        return block;
     }
 
     /// Owns an initialized PROC_THREAD_ATTRIBUTE_LIST.
@@ -410,11 +359,13 @@ namespace
         std::vector<std::pair<uint64_t, HANDLE>> _watched; ///< Each key's process, owned by its handle.
     };
 
-    /// What an isolated launch adds to the attribute list: the container and the child process policy.
+    /// What an isolated launch adds: to the attribute list the container and the child process policy, to
+    /// the environment the container's folders.
     struct ContainedAttributes
     {
         SECURITY_CAPABILITIES capabilities; ///< The container's SID, and no capability.
         DWORD childProcessPolicy;           ///< PROCESS_CREATION_CHILD_PROCESS_RESTRICTED.
+        ContainerFolders folders; ///< The container's own folder, and the profile's (ContainerVariables).
     };
 
     class Win32ProcessLauncher final: public IProcessLauncher
@@ -510,11 +461,12 @@ namespace
                 if (!container)
                     return std::unexpected(container.error());
                 contained = ContainedAttributes {
-                    .capabilities = SECURITY_CAPABILITIES { .AppContainerSid = *container,
+                    .capabilities = SECURITY_CAPABILITIES { .AppContainerSid = container->sid,
                                                             .Capabilities = nullptr,
                                                             .CapabilityCount = 0,
                                                             .Reserved = 0 },
                     .childProcessPolicy = PROCESS_CREATION_CHILD_PROCESS_RESTRICTED,
+                    .folders = container->folders,
                 };
             }
 
@@ -559,7 +511,11 @@ namespace
                     return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
                 appendArgument(commandLine, *wide);
             }
-            auto block = environmentBlock(spec.environment);
+            // Contained, the container's folders are named by what the parent asked the system for, never by
+            // this process's environment (ContainerVariables).
+            auto const environment =
+                contained ? containedEnvironment(spec.environment, contained->folders) : spec.environment;
+            auto block = environmentBlock(environment);
             if (!block)
                 return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
             auto const workingDirectory =
@@ -634,17 +590,11 @@ std::optional<transport::NativeHandle> defaultHelperStandardError()
 
 std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment()
 {
-    // Without SystemRoot a process cannot load the system's DLLs. Read through the Win32 block, which a
-    // process's own changes to its environment reach.
-    auto value = std::wstring(MAX_PATH, L'\0');
-    auto const length =
-        ::GetEnvironmentVariableW(L"SystemRoot", value.data(), static_cast<DWORD>(value.size()));
-    if (length == 0 || length >= value.size())
+    // Without SystemRoot a process cannot load the system's DLLs.
+    auto systemRoot = processVariable("SystemRoot");
+    if (!systemRoot)
         return {};
-    value.resize(length);
-    // UTF-8, as every string of the launcher's is; path::string() would spell it in the ANSI code page.
-    auto const utf8 = std::filesystem::path { value }.u8string();
-    return { { "SystemRoot", std::string { utf8.begin(), utf8.end() } } };
+    return { { "SystemRoot", *std::move(systemRoot) } };
 }
 
 } // namespace vtextension::wasm::remote::process

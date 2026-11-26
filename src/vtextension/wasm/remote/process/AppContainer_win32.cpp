@@ -19,6 +19,7 @@
 #include <utility>
 
 #include <AclAPI.h>
+#include <combaseapi.h>
 #include <sddl.h>
 #include <userenv.h>
 
@@ -33,6 +34,67 @@ namespace
         void operator()(void* memory) const noexcept { ::LocalFree(memory); }
     };
     using LocalMemory = std::unique_ptr<void, LocalMemoryFree>;
+
+    /// The system functions the container is ensured through beyond kernel32's and advapi32's, looked up from
+    /// System32 the first time a launcher prepares a container, and imported by no executable -- neither as
+    /// it starts nor delay-loaded. An executable that links the launcher may itself run contained (the probe
+    /// does), and ole32, CoTaskMemFree()'s usual home, loads user32, whose initialisation connects to a
+    /// window station that a service's (a CI runner's, an SSH session's) does not admit an app container to:
+    /// the loader then ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) before its main().
+    /// Delay-loading would take /DELAYLOAD on exactly the executables that pull this file in, and link.exe
+    /// warns on every other (LNK4199). userenv and combase are loaded once and deliberately never freed: that
+    /// keeps the looked-up pointers valid for as long as the process runs.
+    struct ContainerFunctions
+    {
+        decltype(&::CreateAppContainerProfile) createProfile = nullptr;             ///< userenv's.
+        decltype(&::DeriveAppContainerSidFromAppContainerName) deriveSid = nullptr; ///< userenv's.
+        decltype(&::GetAppContainerFolderPath) folderPath = nullptr;                ///< userenv's.
+        decltype(&::CoTaskMemFree) freeTaskMemory = nullptr; ///< combase's, which loads no user32.
+    };
+
+    /// @return The function @p name of @p library, as @p Function; nothing if either is missing.
+    template <typename Function>
+    [[nodiscard]] Function lookUp(HMODULE library, char const* name) noexcept
+    {
+        if (library == nullptr)
+            return nullptr;
+        return reinterpret_cast<Function>(::GetProcAddress(library, name));
+    }
+
+    /// @return The functions, looked up once; a missing one is null, and what needs it fails with
+    ///         MissingFunction.
+    [[nodiscard]] ContainerFunctions const& containerFunctions() noexcept
+    {
+        static auto const functions = [] {
+            auto* const userenv = ::LoadLibraryExW(L"userenv.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            auto* const combase = ::LoadLibraryExW(L"combase.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            return ContainerFunctions {
+                .createProfile =
+                    lookUp<decltype(&::CreateAppContainerProfile)>(userenv, "CreateAppContainerProfile"),
+                .deriveSid = lookUp<decltype(&::DeriveAppContainerSidFromAppContainerName)>(
+                    userenv, "DeriveAppContainerSidFromAppContainerName"),
+                .folderPath =
+                    lookUp<decltype(&::GetAppContainerFolderPath)>(userenv, "GetAppContainerFolderPath"),
+                .freeTaskMemory = lookUp<decltype(&::CoTaskMemFree)>(combase, "CoTaskMemFree"),
+            };
+        }();
+        return functions;
+    }
+
+    /// What a call fails with whose system function could not be looked up.
+    constexpr auto MissingFunction = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+    /// Frees what the system allocated with CoTaskMemAlloc().
+    struct TaskMemoryFree
+    {
+        void operator()(wchar_t* memory) const noexcept
+        {
+            // Only folderPath() allocates, and only with freeTaskMemory found.
+            if (auto const free = containerFunctions().freeTaskMemory; free != nullptr)
+                free(memory);
+        }
+    };
+    using TaskMemory = std::unique_ptr<wchar_t, TaskMemoryFree>;
 
     /// What every AppContainer needs on the helper's directory, and on each file in it: read and execute, as
     /// FILE_GENERIC_READ | FILE_GENERIC_EXECUTE (`RX`) spells it -- FILE_EXECUTE the one right the second
@@ -128,10 +190,18 @@ AppContainerApi systemAppContainerApi()
     return AppContainerApi {
         .createProfile =
             [](PCWSTR name, PCWSTR displayName, PCWSTR description, PSID* sid) {
-                return ::CreateAppContainerProfile(name, displayName, description, nullptr, 0, sid);
+                auto const create = containerFunctions().createProfile;
+                if (create == nullptr)
+                    return MissingFunction;
+                return create(name, displayName, description, nullptr, 0, sid);
             },
-        .deriveSid = [](PCWSTR name,
-                        PSID* sid) { return ::DeriveAppContainerSidFromAppContainerName(name, sid); },
+        .deriveSid =
+            [](PCWSTR name, PSID* sid) {
+                auto const derive = containerFunctions().deriveSid;
+                if (derive == nullptr)
+                    return MissingFunction;
+                return derive(name, sid);
+            },
         .readDacl =
             [](PCWSTR path, PACL* dacl, PSECURITY_DESCRIPTOR* descriptor) {
                 return ::GetNamedSecurityInfoW(path,
@@ -153,6 +223,23 @@ AppContainerApi systemAppContainerApi()
                                                dacl,
                                                nullptr);
             },
+        .folderPath = [](PSID sid) -> std::expected<std::filesystem::path, HRESULT> {
+            auto const& functions = containerFunctions();
+            if (functions.folderPath == nullptr || functions.freeTaskMemory == nullptr)
+                return std::unexpected(MissingFunction);
+            PWSTR spelled = nullptr;
+            if (!::ConvertSidToStringSidW(sid, &spelled))
+                return std::unexpected(HRESULT_FROM_WIN32(::GetLastError()));
+            auto const ownedSpelled = LocalMemory { spelled };
+            PWSTR folder = nullptr;
+            auto const result = functions.folderPath(spelled, &folder);
+            auto const ownedFolder = TaskMemory { folder };
+            if (FAILED(result))
+                return std::unexpected(result);
+            if (ownedFolder == nullptr)
+                return std::filesystem::path {};
+            return std::filesystem::path { ownedFolder.get() };
+        },
     };
 }
 
@@ -212,7 +299,8 @@ AppContainerProvision::AppContainerProvision(AppContainerApi api,
 {
 }
 
-std::expected<PSID, LaunchRefusal> AppContainerProvision::prepare(std::filesystem::path const& directory)
+std::expected<PreparedContainer, LaunchRefusal> AppContainerProvision::prepare(
+    std::filesystem::path const& directory)
 {
     if (!_sid)
     {
@@ -220,6 +308,26 @@ std::expected<PSID, LaunchRefusal> AppContainerProvision::prepare(std::filesyste
         if (!sid)
             return std::unexpected(sid.error());
         _sid = *std::move(sid);
+    }
+    if (!_folder)
+    {
+        // A folder named empty names none, and one not shaped <profile>\Packages\<name>\AC yields no
+        // profile folder for CreateProcessW() to extend (ContainerVariables): either is refused.
+        auto folder =
+            _api.folderPath(_sid->get())
+                .and_then([](std::filesystem::path const& named) -> std::expected<ContainerFolders, HRESULT> {
+                    if (named.empty())
+                        return std::unexpected(HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND));
+                    auto folders = containerFoldersOf(named);
+                    if (!folders)
+                        return std::unexpected(HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME));
+                    return *std::move(folders);
+                });
+        if (!folder)
+            return std::unexpected(LaunchRefusal { .error = LaunchError::Io,
+                                                   .step = LaunchStep::ContainerFolder,
+                                                   .code = static_cast<DWORD>(folder.error()) });
+        _folder = *std::move(folder);
     }
     if (!std::ranges::contains(_grantedDirectories, directory))
     {
@@ -242,7 +350,7 @@ std::expected<PSID, LaunchRefusal> AppContainerProvision::prepare(std::filesyste
         }
         _grantedDirectories.push_back(directory);
     }
-    return _sid->get();
+    return PreparedContainer { .sid = _sid->get(), .folders = *_folder };
 }
 
 } // namespace vtextension::wasm::remote::process

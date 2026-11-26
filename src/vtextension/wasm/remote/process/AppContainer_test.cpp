@@ -32,6 +32,7 @@
 #ifdef _WIN32
     #include <algorithm>
     #include <array>
+    #include <cstddef>
     #include <format>
     #include <fstream>
     #include <ranges>
@@ -39,6 +40,7 @@
 
     #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
     #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
+    #include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
     #include <vtextension/wasm/remote/process/Process_win32.hpp>
 
     #define WIN32_LEAN_AND_MEAN
@@ -112,7 +114,11 @@ struct ApiCalls
 {
     std::size_t created = 0;
     std::size_t derived = 0;
+    std::size_t folders = 0;
 };
+
+/// The folder a fake API names every container's.
+constexpr auto FakeContainerFolder = std::wstring_view { L"C:\\fake\\Packages\\Contour.ExtensionHost\\AC" };
 
 /// @return An API whose profile is created with @p createResult (derived when it already exists), and whose
 ///         every directory lets everyone do anything (a null DACL), counting into @p calls.
@@ -140,6 +146,10 @@ struct ApiCalls
                 return DWORD { ERROR_SUCCESS };
             },
         .writeDacl = [](PCWSTR /*path*/, PACL /*dacl*/) { return DWORD { ERROR_ACCESS_DENIED }; },
+        .folderPath = [calls](PSID /*sid*/) -> std::expected<std::filesystem::path, HRESULT> {
+            ++calls->folders;
+            return std::filesystem::path { FakeContainerFolder };
+        },
     };
 }
 
@@ -410,8 +420,59 @@ TEST_CASE("AppContainer.profileIsEnsuredOnce", "[vtextension][appcontainer]")
         REQUIRE(first.has_value());
         REQUIRE(second.has_value());
         CHECK(*first == *second);
+        CHECK(first->folders.container == std::filesystem::path { FakeContainerFolder });
+        CHECK(first->folders.profile == std::filesystem::path { L"C:\\fake" });
         CHECK(calls->created == 1);
         CHECK(calls->derived == 0);
+        CHECK(calls->folders == 1);
+    }
+    SECTION("its folder refused: a refusal of its own, with the HRESULT")
+    {
+        auto const calls = std::make_shared<ApiCalls>();
+        auto api = fakeApi(calls, S_OK);
+        api.folderPath = [](PSID /*sid*/) -> std::expected<std::filesystem::path, HRESULT> {
+            return std::unexpected(E_ACCESSDENIED);
+        };
+        auto provision = process::AppContainerProvision { std::move(api), [](std::string_view) {} };
+        auto const prepared = provision.prepare(std::filesystem::temp_directory_path());
+        REQUIRE_FALSE(prepared.has_value());
+        CHECK(prepared.error()
+              == process::LaunchRefusal { .error = process::LaunchError::Io,
+                                          .step = process::LaunchStep::ContainerFolder,
+                                          .code = static_cast<DWORD>(E_ACCESSDENIED) });
+        auto const line = process::launchRefusalLine(prepared.error());
+        INFO(line);
+        CHECK(line.contains("app container's folder (error 0x80070005"));
+    }
+    SECTION("its folder named empty, or not a container's: refused alike")
+    {
+        struct Row
+        {
+            std::wstring_view folder;
+            DWORD error;
+        };
+        auto const rows = std::to_array<Row>({
+            { .folder = L"", .error = ERROR_PATH_NOT_FOUND },
+            { .folder = LR"(C:\fake\AC)", .error = ERROR_BAD_PATHNAME },
+            { .folder = LR"(C:\fake\Elsewhere\Contour.ExtensionHost\AC)", .error = ERROR_BAD_PATHNAME },
+        });
+        for (auto const& row: rows)
+        {
+            INFO(std::filesystem::path { row.folder }.string());
+            auto const calls = std::make_shared<ApiCalls>();
+            auto api = fakeApi(calls, S_OK);
+            api.folderPath = [folder =
+                                  row.folder](PSID /*sid*/) -> std::expected<std::filesystem::path, HRESULT> {
+                return std::filesystem::path { folder };
+            };
+            auto provision = process::AppContainerProvision { std::move(api), [](std::string_view) {} };
+            auto const prepared = provision.prepare(std::filesystem::temp_directory_path());
+            REQUIRE_FALSE(prepared.has_value());
+            CHECK(prepared.error()
+                  == process::LaunchRefusal { .error = process::LaunchError::Io,
+                                              .step = process::LaunchStep::ContainerFolder,
+                                              .code = static_cast<DWORD>(HRESULT_FROM_WIN32(row.error)) });
+        }
     }
     SECTION("already there: derived")
     {
@@ -607,13 +668,15 @@ using ProbeReport = std::vector<std::string>;
     return *std::move(report);
 }
 
-/// @return The value of @p key in @p report; empty if it has none.
-[[nodiscard]] std::string valueOf(ProbeReport const& report, std::string_view key)
+/// @return The value of @p key in @p report; nothing if it has no line for @p key.
+[[nodiscard]] std::optional<std::string> valueOf(ProbeReport const& report, std::string_view key)
 {
     auto const prefix = std::string { key } + '=';
     auto const line =
         std::ranges::find_if(report, [&](auto const& entry) { return entry.starts_with(prefix); });
-    return line == report.end() ? std::string {} : line->substr(prefix.size());
+    if (line == report.end())
+        return std::nullopt;
+    return line->substr(prefix.size());
 }
 
 /// What a loopback connection from an AppContainer without a network capability may fail with. Windows
@@ -621,12 +684,70 @@ using ProbeReport = std::vector<std::string>;
 /// caller sees: WSAEACCES (10013) where the connect is refused at authorization, WSAECONNREFUSED (10061),
 /// which is what UWP apps are widely reported to see (0x8007274D), WSAETIMEDOUT (10060) where the packet is
 /// dropped silently, and WSAENETUNREACH (10051) or WSAEHOSTUNREACH (10065) where no route is offered. Each is
-/// the container's refusal: the listener accepts every connection, and the uncontained run proves it.
-constexpr auto ContainedConnectRefusals = std::array<std::string_view, 5> { "refused:connect:10013",
+/// the container's refusal: the listener accepts every connection, and the uncontained run proves it. And the
+/// probe's own `refused:connect:timeout`, for a dropped connection it gave up on before the system did -- as
+/// on a GitHub Windows runner, where the system's WSAETIMEDOUT took twenty seconds.
+constexpr auto ContainedConnectRefusals = std::to_array<std::string_view>({ "refused:connect:10013",
                                                                             "refused:connect:10061",
                                                                             "refused:connect:10060",
                                                                             "refused:connect:10051",
-                                                                            "refused:connect:10065" };
+                                                                            "refused:connect:10065",
+                                                                            "refused:connect:timeout" });
+
+/// @return The extension host's container's folder, as this process asks the system for it, independent of
+///         the launcher's provision.
+[[nodiscard]] std::filesystem::path expectedContainerFolder()
+{
+    auto const api = process::systemAppContainerApi();
+    auto const name = std::wstring { process::AppContainerName };
+    PSID sid = nullptr;
+    REQUIRE(SUCCEEDED(api.deriveSid(name.c_str(), &sid)));
+    auto const ownedSid = process::OwnedSid { sid };
+    auto folder = api.folderPath(sid);
+    REQUIRE(folder.has_value());
+    REQUIRE_FALSE(folder->empty());
+    return *std::move(folder);
+}
+
+/// @return Whether @p a and @p b name one path as Windows compares paths: ordinal, ignoring case, and
+/// ignoring
+///         one trailing backslash on either side. Exact otherwise: a path beneath the other is not it.
+[[nodiscard]] bool isSamePath(std::wstring_view a, std::wstring_view b)
+{
+    auto const trimmed = [](std::wstring_view path) {
+        return path.ends_with(L'\\') ? path.substr(0, path.size() - 1) : path;
+    };
+    a = trimmed(a);
+    b = trimmed(b);
+    return ::CompareStringOrdinal(
+               a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE)
+           == CSTR_EQUAL;
+}
+
+/// Checks what @p report says each variable that names a container folder holds -- a line for each, which
+/// must be there: its folder beneath @p containerFolder (isSamePath()), or nothing when there is none.
+void checkContainerVariables(ProbeReport const& report,
+                             std::optional<std::filesystem::path> const& containerFolder)
+{
+    for (auto const& variable: process::ContainerVariables)
+    {
+        INFO(variable.name);
+        // A probe that stopped reporting a variable fails here, rather than reading as one it lacks.
+        auto const value = valueOf(report, std::format("value-{}", variable.name));
+        REQUIRE(value.has_value());
+        INFO("value=" << *value);
+        if (!containerFolder)
+        {
+            CHECK(value->empty());
+            continue;
+        }
+        auto const folder = variable.subfolder.empty()
+                                ? *containerFolder
+                                : *containerFolder / std::wstring { variable.subfolder };
+        auto const utf8 = std::u8string { value->begin(), value->end() };
+        CHECK(isSamePath(std::filesystem::path { utf8 }.native(), folder.native()));
+    }
+}
 
 } // namespace
 
@@ -634,7 +755,8 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
 {
     // A file of the user's, and a loopback port that listens: both open to the probe uncontained, both shut
     // to it contained, as is starting a process -- refused by the container's child process policy
-    // (ERROR_ACCESS_DENIED), not only by the job's process count (ERROR_NOT_ENOUGH_QUOTA, 1816).
+    // (ERROR_CHILD_PROCESS_BLOCKED, 367, as a GitHub Windows runner showed), not only by the job's process
+    // count (ERROR_NOT_ENOUGH_QUOTA, 1816).
     auto const directory = ScratchDirectory { "contained-probe" };
     auto const profileFile = directory.path / "secret.txt";
     std::ofstream { profileFile } << "not the extension host's\n";
@@ -644,12 +766,19 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
     {
         INFO("uncontained");
         auto const report = probeReportIn(ProcessIsolation::None, profileFile, *listener.port());
-        CHECK(valueOf(report, "container") == "no");
-        CHECK(valueOf(report, "profile-file") == "ok");
-        CHECK(valueOf(report, "connect") == "ok");
+        CHECK(valueOf(report, "container").value_or("(no line)") == "no");
+        CHECK(valueOf(report, "profile-file").value_or("(no line)") == "ok");
+        CHECK(valueOf(report, "connect").value_or("(no line)") == "ok");
         // Under wine the job's process count is not held: what it says is only recorded.
         if (!vtextension::wasm::testing::runsOnWine())
-            CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:1816");
+            CHECK(valueOf(report, "spawn").value_or("(no line)") == "refused:CreateProcessW:1816");
+        // Uncontained, it is started with the environment it is given: SystemRoot, and none of these.
+        checkContainerVariables(report, std::nullopt);
+        // Said on every run, passed or failed: a service's window station admits no app container, and a
+        // contained process loading user32 then dies in the loader (STATUS_DLL_INIT_FAILED).
+        auto const station = valueOf(report, "window-station");
+        REQUIRE(station.has_value());
+        WARN("the probe's window station, uncontained: " << *station);
     }
 
     if (vtextension::wasm::testing::runsOnWine())
@@ -671,12 +800,14 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
     }
     INFO("contained");
     auto const report = probeReportIn(ProcessIsolation::AppContainer, profileFile, *listener.port());
-    CHECK(valueOf(report, "container") == "yes");
-    CHECK(valueOf(report, "profile-file") == "refused:CreateFileW:5");
-    auto const connect = valueOf(report, "connect");
+    CHECK(valueOf(report, "container").value_or("(no line)") == "yes");
+    CHECK(valueOf(report, "profile-file").value_or("(no line)") == "refused:CreateFileW:5");
+    auto const connect = valueOf(report, "connect").value_or("(no line)");
     INFO("connect=" << connect);
     CHECK(std::ranges::contains(ContainedConnectRefusals, std::string_view { connect }));
-    CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:5");
+    CHECK(valueOf(report, "spawn").value_or("(no line)") == "refused:CreateProcessW:367");
+    // Each names exactly the container's own folder, as this process asks the system for it.
+    checkContainerVariables(report, expectedContainerFolder());
 }
 TEST_CASE("LaunchRefusal.lineNamesTheStepAndTheCode", "[vtextension]")
 {
@@ -726,4 +857,39 @@ TEST_CASE("LaunchRefusal.refusalALaunchErrorLosesIsSaidOnce", "[vtextension]")
     CHECK(missing.error() == process::LaunchError::NotFound);
     CHECK(lines.size() == 1);
 }
+
+namespace
+{
+
+/// What a row expects of two paths.
+enum class PathsAre : uint8_t
+{
+    Different, ///< They name two paths.
+    Same,      ///< They name one.
+};
+
+} // namespace
+
+TEST_CASE("AppContainer.pathsCompareAsWindowsComparesThem", "[vtextension]")
+{
+    struct Row
+    {
+        std::wstring_view a;
+        std::wstring_view b;
+        PathsAre expected;
+    };
+    auto const rows = std::to_array<Row>({
+        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Same },
+        { .a = LR"(c:\users\U\ac)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Same },
+        { .a = LR"(C:\Users\u\AC\)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Same },
+        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC\)", .expected = PathsAre::Same },
+        { .a = LR"(C:\Users\u\AC\Temp)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
+        { .a = LR"(C:\Users\u\AC\AC)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
+        { .a = LR"(C:\Users\u\AC\\)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
+        { .a = L"", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
+    });
+    for (auto const& row: rows)
+        CHECK((isSamePath(row.a, row.b) ? PathsAre::Same : PathsAre::Different) == row.expected);
+}
+
 #endif

@@ -167,7 +167,8 @@ enum class ProcessIsolation : uint8_t
 {
     None,         ///< Nothing beyond its handles, its environment and (Windows) its job.
     AppContainer, ///< Windows: in the extension host's AppContainer (AppContainer_win32.hpp), with no
-                  ///< capabilities, and allowed no child process.
+                  ///< capabilities, and allowed no child process; its environment names the container's
+                  ///< own folders (ContainerVariables), whatever it was given.
 };
 
 /// What to start.

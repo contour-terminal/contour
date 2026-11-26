@@ -30,8 +30,11 @@
 // With --contained (Windows), it tries what the extension host's AppContainer must refuse it, bound to its
 // parent likewise, and reports on its control channel: `container=` `yes` or `no` (its token's word) or
 // `unknown`; `profile-file=`, opening PATH (a file of the user's that the parent made) for reading;
-// `connect=`, a TCP connection to 127.0.0.1:N (where the parent listens); `spawn=`, starting the system's
-// cmd.exe. Each is `ok`, or `refused:<what>:<error>` naming the call that failed and its Win32 error. Then
+// `connect=`, a TCP connection to 127.0.0.1:N (where the parent listens), given up on as
+// `refused:connect:timeout` after two seconds unanswered; `spawn=`, starting the system's cmd.exe. Each is
+// `ok`, or `refused:<what>:<error>` naming the call that failed and its Win32 error. Then,
+// for each variable that names a container folder (ContainerVariables), `value-NAME=` its value; and
+// `window-station=` the name of its window station, asked only uncontained (`not-asked` contained). Then
 // `end`, and it waits for its control channel to end.
 //
 // With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
@@ -52,6 +55,7 @@
 #include <array>
 #include <bit>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -85,6 +89,8 @@
 #include <vtextension/wasm/remote/transport/SharedObject.hpp>
 
 #ifdef _WIN32
+    #include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
+
     #define WIN32_LEAN_AND_MEAN
     #include <WinSock2.h>
     #include <Windows.h>
@@ -500,6 +506,13 @@ constexpr auto ProfileFile = std::string_view { "--profile-file=" };
 /// The prefix of the option naming the loopback port --contained tries to connect to.
 constexpr auto Port = std::string_view { "--port=" };
 
+/// How long --contained waits for its loopback connection: one the container's filter drops is never
+/// answered.
+constexpr auto ConnectPatience = std::chrono::seconds { 2 };
+
+/// What --contained reports for a connection still unanswered after ConnectPatience.
+constexpr auto ConnectTimedOut = std::string_view { "refused:connect:timeout" };
+
 /// @return `refused:<what>:<error>`: the call @p what failed with the Win32 error @p error.
 [[nodiscard]] std::string refusedBy(std::string_view what, DWORD error)
 {
@@ -542,14 +555,39 @@ constexpr auto Port = std::string_view { "--port=" };
         auto const socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (std::cmp_equal(socket, INVALID_SOCKET))
             return refusedBy("socket", static_cast<DWORD>(::WSAGetLastError()));
-        auto address = sockaddr_in {};
-        address.sin_family = AF_INET;
-        address.sin_port = ::htons(port);
-        address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
-        auto const connected =
-            ::connect(socket, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0
-                ? std::string { "ok" }
-                : refusedBy("connect", static_cast<DWORD>(::WSAGetLastError()));
+        auto const connected = [&] {
+            // Not blocking, so that a connection the container's filter drops silently -- which a blocking
+            // connect waits out for some twenty seconds before WSAETIMEDOUT -- is given up on after
+            // ConnectPatience, and every row after it is still reported.
+            auto nonBlocking = u_long { 1 };
+            if (::ioctlsocket(socket, FIONBIO, &nonBlocking) != 0)
+                return refusedBy("ioctlsocket", static_cast<DWORD>(::WSAGetLastError()));
+            auto address = sockaddr_in {};
+            address.sin_family = AF_INET;
+            address.sin_port = ::htons(port);
+            address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+            if (::connect(socket, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0)
+                return std::string { "ok" };
+            if (auto const error = ::WSAGetLastError(); error != WSAEWOULDBLOCK)
+                return refusedBy("connect", static_cast<DWORD>(error));
+            auto writable = fd_set {};
+            FD_ZERO(&writable);
+            FD_SET(socket, &writable);
+            auto failed = writable;
+            auto timeout = timeval { .tv_sec = static_cast<long>(ConnectPatience.count()), .tv_usec = 0 };
+            auto const ready = ::select(0, nullptr, &writable, &failed, &timeout);
+            if (ready == SOCKET_ERROR)
+                return refusedBy("select", static_cast<DWORD>(::WSAGetLastError()));
+            if (ready == 0)
+                return std::string { ConnectTimedOut };
+            if (FD_ISSET(socket, &writable))
+                return std::string { "ok" };
+            auto error = 0;
+            auto length = static_cast<int>(sizeof(error));
+            if (::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &length) != 0)
+                return refusedBy("getsockopt", static_cast<DWORD>(::WSAGetLastError()));
+            return refusedBy("connect", static_cast<DWORD>(error));
+        }();
         ::closesocket(socket);
         return connected;
     }();
@@ -587,6 +625,53 @@ constexpr auto Port = std::string_view { "--port=" };
     return "ok";
 }
 
+/// @return The name of this process's window station; `not-asked` contained, `unknown` where the system named
+///         none. user32 is loaded only here, at run time, and only uncontained: a contained process may be
+///         refused the window station, and user32 imported would end it before its main()
+///         (STATUS_DLL_INIT_FAILED) -- which is what this tells a CI run about.
+[[nodiscard]] std::string windowStationOf(std::string_view container)
+{
+    if (container != "no")
+        return "not-asked";
+    auto* const user32 = ::LoadLibraryExW(L"user32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (user32 == nullptr)
+        return refusedBy("LoadLibraryExW", ::GetLastError());
+    auto const getStation = reinterpret_cast<decltype(&::GetProcessWindowStation)>(
+        ::GetProcAddress(user32, "GetProcessWindowStation"));
+    auto const getInformation = reinterpret_cast<decltype(&::GetUserObjectInformationW)>(
+        ::GetProcAddress(user32, "GetUserObjectInformationW"));
+    if (getStation == nullptr || getInformation == nullptr)
+        return "unknown";
+    auto* const station = getStation();
+    auto name = std::wstring(256, L'\0');
+    auto length = DWORD { 0 };
+    if (station == nullptr
+        || !getInformation(
+            station, UOI_NAME, name.data(), static_cast<DWORD>(name.size() * sizeof(wchar_t)), &length))
+        return "unknown";
+    name.resize(::wcsnlen(name.c_str(), name.size()));
+    auto const utf8 = std::filesystem::path { name }.u8string();
+    return std::string { utf8.begin(), utf8.end() };
+}
+
+/// @return One report line per ContainerVariables row: `value-NAME=` its value, empty if it has none. Where
+///         it should point is the parent's to know, not this process's to judge.
+[[nodiscard]] std::string containerVariablesReport()
+{
+    auto text = std::string {};
+    for (auto const& variable: vtextension::wasm::remote::process::ContainerVariables)
+    {
+        auto const name = std::wstring { variable.name.begin(), variable.name.end() };
+        auto value = std::wstring(::GetEnvironmentVariableW(name.c_str(), nullptr, 0), L'\0');
+        auto const length =
+            ::GetEnvironmentVariableW(name.c_str(), value.data(), static_cast<DWORD>(value.size()));
+        value.resize(length < value.size() ? length : 0);
+        auto const utf8 = std::filesystem::path { value }.u8string();
+        text += std::format("value-{}={}\n", variable.name, std::string { utf8.begin(), utf8.end() });
+    }
+    return text;
+}
+
 /// Tries what an AppContainer must refuse, reports how each went, then waits for its control channel to end.
 [[nodiscard]] ProbeExit contained(std::span<std::string_view const> arguments)
 {
@@ -616,11 +701,15 @@ constexpr auto Port = std::string_view { "--port=" };
     auto control = Channel::adopt(parsed->control);
     if (!control)
         return ProbeExit::NoControl;
-    auto const text = std::format("container={}\nprofile-file={}\nconnect={}\nspawn={}\nend\n",
-                                  containerOf(),
-                                  openFile(*profileFile),
-                                  connectLoopback(*port),
-                                  spawnProcess());
+    auto const container = containerOf();
+    auto const text =
+        std::format("container={}\nprofile-file={}\nconnect={}\nspawn={}\n{}window-station={}\nend\n",
+                    container,
+                    openFile(*profileFile),
+                    connectLoopback(*port),
+                    spawnProcess(),
+                    containerVariablesReport(),
+                    windowStationOf(container));
     if (!sendText(*control, text))
         return ProbeExit::ReportFailed;
     auto buffer = std::array<uint8_t, 64> {};

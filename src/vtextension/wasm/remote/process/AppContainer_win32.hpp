@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
+#include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 
 #define WIN32_LEAN_AND_MEAN
@@ -55,6 +56,18 @@ struct AppContainerApi
     std::function<DWORD(PCWSTR path, PACL* dacl, PSECURITY_DESCRIPTOR* descriptor)> readDacl;
     /// SetNamedSecurityInfoW() of a file's DACL, which propagates its inheritable entries to the children.
     std::function<DWORD(PCWSTR path, PACL dacl)> writeDacl;
+    /// GetAppContainerFolderPath() of the container @p sid, spelled as ConvertSidToStringSidW() spells it:
+    /// the folder it keeps its local data in; or the HRESULT the system refused with.
+    std::function<std::expected<std::filesystem::path, HRESULT>(PSID sid)> folderPath;
+};
+
+/// The extension host's AppContainer, as a launch into it needs it.
+struct PreparedContainer
+{
+    PSID sid;                 ///< Its SID, owned by the provision that prepared it.
+    ContainerFolders folders; ///< Its own folder (AppContainerApi::folderPath), and the profile's it lies in.
+
+    bool operator==(PreparedContainer const&) const = default;
 };
 
 /// @return The system's functions.
@@ -86,17 +99,21 @@ class AppContainerProvision
     ///        Contour's error log.
     AppContainerProvision(AppContainerApi api, std::function<void(std::string_view line)> diagnostics);
 
-    /// Ensures the profile, once, and that executables in @p directory may run in it, once per directory. A
-    /// directory this user may not grant is asked of again at every launch, but said only once.
+    /// Ensures the profile and asks for its folder, once, and that executables in @p directory may run in
+    /// it, once per directory. A directory this user may not grant is asked of again at every launch, but
+    /// said only once.
     /// @param directory The directory of the executable about to be started.
-    /// @return The container's SID, owned by this provision; why it cannot be used, and where the system
-    ///         refused.
-    [[nodiscard]] std::expected<PSID, LaunchRefusal> prepare(std::filesystem::path const& directory);
+    /// @return The container; why it cannot be used, and where the system refused: a folder it was refused,
+    ///         named empty (ERROR_PATH_NOT_FOUND), or not shaped as a container's (ERROR_BAD_PATHNAME), is
+    ///         `Io` at LaunchStep::ContainerFolder, with the HRESULT.
+    [[nodiscard]] std::expected<PreparedContainer, LaunchRefusal> prepare(
+        std::filesystem::path const& directory);
 
   private:
     AppContainerApi _api;
     std::function<void(std::string_view line)> _diagnostics;
     std::optional<OwnedSid> _sid;                           ///< Once ensured.
+    std::optional<ContainerFolders> _folder;                ///< Once the system named it.
     std::vector<std::filesystem::path> _grantedDirectories; ///< Each directory ensured.
     std::vector<std::filesystem::path>
         _ungrantableDirectories; ///< Each directory refused `NotGranted`, said once.
