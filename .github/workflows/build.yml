@@ -1983,9 +1983,10 @@ jobs:
   # {{{ Ubuntu 24.04 CC matrix
   ubuntu_2404_cc_matrix:
     # Each leg queues behind its own previous run on the same ref. Three of the four legs run on master
-    # alone and take over an hour; without this, the legs of consecutive pushes ran side by side and
-    # pull requests waited for a runner. The pull-request leg (Clang on x86) queues too: a newer push's
-    # leg replaces one still pending, so the newest commit always saves the cache.
+    # alone (the two arm legs also on a pull request labelled `ci-arm`) and take over an hour; without
+    # this, the legs of consecutive pushes ran side by side and pull requests waited for a runner. The
+    # pull-request leg (Clang on x86) queues too: a newer push's leg replaces one still pending, so the
+    # newest commit always saves the cache.
     concurrency:
       group: ${{ github.ref }}-ubuntu_2404_cc_matrix-${{ strategy.job-index }}
       cancel-in-progress: false
@@ -2001,7 +2002,10 @@ jobs:
         # requests, which have no consumers but keep the steps exercised.
         # The arm Clang leg is OFF too: it runs on master only, so nothing proves it builds clean with
         # -Werror before merge, whereas the x86 Clang leg is proven by every pull request.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]') }}
+        # Pull requests skip the two arm legs unless they carry the `ci-arm` label, which a change to
+        # aarch64-only code (the extension host's sandbox, a platform layer) asks for so that it runs
+        # before the merge queue does.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'ci-arm') && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]' || '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true}]') || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]') }}
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
     env:
