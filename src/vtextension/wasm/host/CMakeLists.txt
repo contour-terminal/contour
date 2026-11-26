@@ -2,8 +2,9 @@
 # and instances over a control channel and its lanes; InProcessHostConnector runs one in this process, for the
 # tests and for measuring the protocol without a process boundary; HostProcess is the extension host
 # executable's body, HostBootstrap and Sandbox what that process does to itself before it serves. It links no
-# engine: whoever composes a host hands it one (IHostedEngine), and its tests live in vtextension_remote_test
-# (../remote/CMakeLists.txt), which links Wasmtime's.
+# engine: whoever composes a host hands it one (IHostedEngine). Its tests live in vtextension_remote_test
+# (../remote/CMakeLists.txt), which links Wasmtime's, and those that need no engine in vtextension_remote_wamr_test,
+# which is built wherever this library is.
 
 set(_bootstrap_source HostBootstrap_posix.cpp)
 if(WIN32)

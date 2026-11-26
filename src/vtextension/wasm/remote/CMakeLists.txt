@@ -262,10 +262,8 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
     # run through the protocol.
     add_executable(vtextension_remote_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
-        ../host/ExecutorThread_test.cpp
         ../host/HostProcess_test.cpp
         ../host/HostServer_test.cpp
-        ../host/Sandbox_test.cpp
         RegistryRemote_test.cpp
         RemoteBackend_test.cpp
         SharedGuestMemory_test.cpp
@@ -309,8 +307,13 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_engine)
     # A binary of its own, apart from vtextension_remote_test, as one executable never links both engines: each
     # defines the standard wasm.h C API, which MSVC's linker refuses twice (LNK2005) and an ELF linker silently
     # resolves to whichever engine it meets first. scripts/check-wasm-runtime-containment.py keeps it that way.
+    #
+    # Beside it, the host's tests that need no engine at all (its executor threads and its sandbox): built
+    # wherever vtextension_host is, as WAMR's engine always is, and not only where Wasmtime is found.
     add_executable(vtextension_remote_wamr_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+        ../host/ExecutorThread_test.cpp
+        ../host/Sandbox_test.cpp
         ../wamr/RemoteWamrEngine_test.cpp
     )
     target_link_libraries(vtextension_remote_wamr_test PRIVATE
