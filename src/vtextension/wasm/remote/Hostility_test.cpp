@@ -870,7 +870,8 @@ TEST_CASE("Hostility.descriptorUpIsNeverInstalled", "[vtextension][process][host
 {
     // The host attaches a descriptor to its CallResult. Where Contour's ends refuse descriptors (Linux 6.16+)
     // its send fails and it passes the frame on bare; elsewhere Contour's plain receives leave the system to
-    // drop it. Either way the call is answered as if nothing came with it, and the host serves on.
+    // drop it, or, where it installs it all the same (macOS), close it at once. Either way the call is
+    // answered as if nothing came with it, and the host serves on.
     auto const deadline = CaseDeadline { "Hostility.descriptorUpIsNeverInstalled" };
     auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
     {

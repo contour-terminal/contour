@@ -2,6 +2,9 @@
 //
 // The byte channel between Contour and its extension host process: both ways, closing, and what a child
 // process does not inherit.
+#include <core/Utils.hpp>
+#include <core/log/LogStore.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -16,12 +19,15 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/testing/ClosingReceive.hpp>
 #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 
 #ifdef _WIN32
@@ -274,8 +280,10 @@ TEST_CASE("Channel.trySendNeverBlocks", "[vtextension]")
 namespace proto = vtextension::wasm::remote::proto;
 using vtextension::wasm::remote::transport::OwnedHandle;
 using vtextension::wasm::remote::transport::upwardDescriptorsWhenUnrefused;
+using vtextension::wasm::remote::transport::testing::forgetToldForeignAncillaryData;
 using vtextension::wasm::remote::transport::testing::inodeOf;
 using vtextension::wasm::remote::transport::testing::openDescriptorCount;
+using vtextension::wasm::remote::transport::testing::receiveSomeClosingAttachments;
 
 namespace
 {
@@ -405,4 +413,52 @@ TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
     CHECK(openDescriptorCount() == before);
     CHECK_FALSE(parent.takeAttachedHandle());
 }
+    #ifdef SO_PASSCRED
+TEST_CASE("Channel.foreignAncillaryDataIsDiscardedAndToldOnce", "[vtextension]")
+{
+    // The receive macOS makes, where the system installs what came beside the bytes whether or not it is
+    // asked for (testing::receiveSomeClosingAttachments()), run here on any system that has it. Credentials,
+    // which the kernel attaches to every message once the reader asks for them, are ancillary data that no
+    // peer sends: the bytes still arrive, nothing stays installed -- a descriptor sent along neither -- and
+    // the warning log tells of it once, however many such messages come.
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto const enable = 1;
+    REQUIRE(::setsockopt(pair->helper.nativeHandle(), SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable)) == 0);
+
+    auto& registry = core::log::get();
+    auto const category = std::ranges::find_if(
+        registry, [](core::log::Category const& each) { return each.name() == "vtextension.warning"; });
+    REQUIRE(category != registry.end());
+    auto warnings = std::vector<std::string> {};
+    auto sink = core::log::Sink { true, [&](std::string_view const& text) { warnings.emplace_back(text); } };
+    auto& previous = category->get().sink();
+    category->get().setSink(sink);
+    auto const restore = core::Finally { [&] { category->get().setSink(previous); } };
+    // The warning is given once per process, and every case of vtextension_test runs in one: forgotten
+    // first, so that this case counts its own, whatever ran before it.
+    forgetToldForeignAncillaryData();
+
+    auto const before = openDescriptorCount();
+    auto const bytes = std::array<uint8_t, 1> { 0x5a };
+    auto const receiveOne = [&] {
+        auto received = std::array<uint8_t, 1> {};
+        auto const count = receiveSomeClosingAttachments(pair->helper, received);
+        REQUIRE(count == std::expected<std::size_t, ChannelError> { 1 });
+        CHECK(received == bytes);
+        CHECK(openDescriptorCount() == before);
+    };
+    {
+        // With a descriptor, which is taken in and closed.
+        auto const pipe = makePipe();
+        REQUIRE(pair->parent.sendWithHandle(bytes, pipe.writer.get()).has_value());
+    }
+    receiveOne();
+    // Bytes alone, which still come with credentials.
+    REQUIRE(pair->parent.send(bytes).has_value());
+    receiveOne();
+    // Two messages, one warning: it is given once per process (Channel_posix.cpp).
+    CHECK(warnings.size() == 1);
+}
+    #endif
 #endif

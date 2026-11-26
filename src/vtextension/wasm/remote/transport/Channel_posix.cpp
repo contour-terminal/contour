@@ -4,9 +4,10 @@
 // raise SIGPIPE. Shutting an end down is ::shutdown(), which wakes a reader blocked on it; the descriptor is
 // closed only when the channel is destroyed, so that no thread can find its number reused.
 //
-// A descriptor travels as SCM_RIGHTS on a message's first byte. Only receiveSomeWithHandles() installs what
-// arrives; a plain recv() leaves the system to discard it. Contour's end of a pair refuses descriptors where
-// Linux lets it (SO_PASSRIGHTS), so that none is even discarded there (UpwardDescriptors).
+// A descriptor travels as SCM_RIGHTS on a message's first byte. Only receiveSomeWithHandles() keeps what
+// arrives. A plain recv() leaves the system to discard it -- but on macOS, which installs it all the same,
+// receiveSome() takes it in and closes it. Contour's end of a pair refuses descriptors where Linux lets it
+// (SO_PASSRIGHTS), so that none is even discarded there (UpwardDescriptors).
 //
 // trySend() never waits. Where the system honours MSG_DONTWAIT on a send, that is all it takes. macOS does
 // not: XNU's sosendcheck() waits for room unless the socket itself is non-blocking or the caller passed
@@ -21,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -37,9 +39,11 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <vtextension/wasm/remote/WarningLog.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
 #include <vtextension/wasm/remote/transport/WouldBlock.hpp>
+#include <vtextension/wasm/remote/transport/testing/ClosingReceive.hpp>
 
 namespace vtextension::wasm::remote::transport
 {
@@ -120,6 +124,15 @@ namespace
     using ControlLength = decltype(::msghdr {}.msg_controllen);
     using ControlMessageLength = decltype(::cmsghdr {}.cmsg_len);
 
+    /// What the system does with descriptors attached to bytes that a receive takes without asking for them.
+    enum class UnclaimedDescriptors : uint8_t
+    {
+        Disposed,  ///< It closes them, and none is ever installed (Linux, FreeBSD).
+        Installed, ///< It installs them all the same, unnamed: XNU's soreceive_ctl() externalizes SCM_RIGHTS
+                   ///< whether or not the caller takes the control message, then frees the message. Every
+                   ///< receive must then take them in, to close them.
+    };
+
     /// Whether a send honours MSG_DONTWAIT.
     enum class DontWaitSend : uint8_t
     {
@@ -129,20 +142,37 @@ namespace
     };
 
 #ifdef __APPLE__
+    constexpr auto ThisSystemUnclaimedDescriptors = UnclaimedDescriptors::Installed;
     constexpr auto ThisSystemDontWaitSend = DontWaitSend::Ignored;
 #else
+    constexpr auto ThisSystemUnclaimedDescriptors = UnclaimedDescriptors::Disposed;
     constexpr auto ThisSystemDontWaitSend = DontWaitSend::Honoured;
 #endif
 
-    /// The most descriptors one receive takes in: one more than a message may carry, so that a peer that
-    /// attached two is told from one that attached one.
+    /// How many descriptors a receive takes in at least: one more than a message may carry, so that a peer
+    /// that attached two is told from one that attached one.
     constexpr auto MaxReceivedHandles = std::size_t { 2 };
 
     /// The control buffer one attached descriptor is sent in.
     using SendControlBuffer = std::array<std::byte, CMSG_SPACE(sizeof(int))>;
 
+    /// Room for all the control data a message can carry: XNU takes at most MCLBYTES (2048) of it in, once
+    /// each descriptor in it is widened to a pointer, so no message carries more than that out.
+    constexpr auto WholeMessageControlBytes = std::size_t { 2048 };
+
+    /// How many bytes of control data a receive takes in. Where the system disposes of what does not fit
+    /// (Linux, FreeBSD), room for MaxReceivedHandles descriptors. Where it installs every descriptor before
+    /// it truncates what does not fit (macOS), room for all a message can carry, so that each one installed
+    /// is seen, and closed.
+    constexpr auto ReceiveControlBytes = ThisSystemUnclaimedDescriptors == UnclaimedDescriptors::Installed
+                                             ? WholeMessageControlBytes
+                                             : std::size_t { CMSG_SPACE(sizeof(int) * MaxReceivedHandles) };
+
     /// The control buffer a receive takes descriptors into.
-    using ReceiveControlBuffer = std::array<std::byte, CMSG_SPACE(sizeof(int) * MaxReceivedHandles)>;
+    using ReceiveControlBuffer = std::array<std::byte, ReceiveControlBytes>;
+
+    /// The control buffer a receive that closes whatever came takes it into.
+    using WholeMessageControlBuffer = std::array<std::byte, WholeMessageControlBytes>;
 
 #ifdef MSG_CMSG_CLOEXEC
     /// Installs received descriptors close-on-exec, atomically.
@@ -287,17 +317,151 @@ std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t cons
     return sent;
 }
 
+namespace
+{
+    /// What came beside the bytes of one receive.
+    enum class Ancillary : uint8_t
+    {
+        Descriptors,  ///< Descriptors only, if anything, every one taken in close-on-exec.
+        Foreign,      ///< Something other than descriptors, or descriptors the buffer had no room for.
+        Unconfigured, ///< Descriptors, one of which could not be made close-on-exec.
+    };
+
+    /// What one receive took in.
+    struct Receipt
+    {
+        std::size_t bytes = 0; ///< How many bytes; 0 at the peer's end of stream.
+        Ancillary ancillary = Ancillary::Descriptors;
+    };
+
+    /// @return Whether warnOfForeignAncillaryData() told of it already, in this process.
+    [[nodiscard]] std::atomic<bool>& toldForeignAncillaryData() noexcept
+    {
+        static auto told = std::atomic<bool> { false };
+        return told;
+    }
+
+    /// Tells once, in the warning log, that a channel took in what no peer of it sends beside its bytes, and
+    /// closed or dropped it.
+    void warnOfForeignAncillaryData()
+    {
+        if (!toldForeignAncillaryData().exchange(true))
+            warningLog()(
+                "An extension host channel received data beside its bytes that no peer sends, or more "
+                "than a message can carry; it was discarded.");
+    }
+
+    /// Receives at least one byte from @p descriptor into @p buffer, blocking until one arrives, with what
+    /// came beside them.
+    /// @param control Where the control data goes, aligned for a cmsghdr: its size is how much is taken in.
+    /// @param arrived Where every descriptor installed is appended, owned at once, so that each is closed
+    ///                however the receive ends.
+    /// @return What arrived; why nothing did otherwise.
+    [[nodiscard]] std::expected<Receipt, ChannelError> receiveMessage(int descriptor,
+                                                                      std::span<uint8_t> buffer,
+                                                                      std::span<std::byte> control,
+                                                                      std::vector<OwnedHandle>& arrived)
+    {
+        auto iov = ::iovec { .iov_base = buffer.data(), .iov_len = buffer.size() };
+        auto message = ::msghdr {};
+        message.msg_iov = &iov;
+        message.msg_iovlen = 1;
+        message.msg_control = control.data();
+        message.msg_controllen = static_cast<ControlLength>(control.size());
+        auto received = ssize_t { 0 };
+        do
+            received = ::recvmsg(descriptor, &message, ReceiveFlags);
+        while (received == -1 && errno == EINTR);
+        if (received == -1)
+            return std::unexpected(channelErrorOf(errno));
+
+        auto foreign = false;
+        auto unconfigured = false;
+        auto const* const controlEnd = control.data() + message.msg_controllen;
+        for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr;
+             header = CMSG_NXTHDR(&message, header))
+        {
+            // Defence in depth: on Linux the 2-descriptor buffer is too small for any other cmsg, which ends
+            // as MSG_CTRUNC instead, so this is unreachable there.
+            if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
+                || header->cmsg_len < CMSG_LEN(0))
+            {
+                foreign = true;
+                continue;
+            }
+            // Every one the buffer holds, never past its end, whatever the header claims.
+            auto const* const data = reinterpret_cast<std::byte const*>(CMSG_DATA(header));
+            auto const held = static_cast<std::size_t>(std::max(controlEnd - data, std::ptrdiff_t { 0 }));
+            auto const count = std::min((header->cmsg_len - CMSG_LEN(0)) / sizeof(int), held / sizeof(int));
+            for (auto const index: std::views::iota(std::size_t { 0 }, count))
+            {
+                auto installed = -1;
+                std::memcpy(&installed, data + (index * sizeof(int)), sizeof(int));
+                arrived.emplace_back(installed);
+#ifndef MSG_CMSG_CLOEXEC
+                if (::fcntl(installed, F_SETFD, FD_CLOEXEC) == -1)
+                    unconfigured = true;
+#endif
+            }
+        }
+        // Something other than descriptors, or descriptors the buffer had no room for: nothing of the message
+        // can be trusted to carry what its sender meant.
+        if (foreign || (message.msg_flags & MSG_CTRUNC) != 0)
+            return Receipt { .bytes = static_cast<std::size_t>(received), .ancillary = Ancillary::Foreign };
+        return Receipt { .bytes = static_cast<std::size_t>(received),
+                         .ancillary = unconfigured ? Ancillary::Unconfigured : Ancillary::Descriptors };
+    }
+} // namespace
+
+namespace
+{
+    /// Receives at least one byte from @p descriptor as macOS needs it (testing/ClosingReceive.hpp).
+    [[nodiscard]] std::expected<std::size_t, ChannelError> receiveClosingAttachments(
+        int descriptor, std::span<uint8_t> buffer)
+    {
+        // Whatever came beside the bytes is closed as this ends: the bytes are what was asked for. As where
+        // the system discards it, the stream goes on; what no peer sends -- ancillary data other than
+        // descriptors, or more than any message carries -- is told of once.
+        auto discarded = std::vector<OwnedHandle> {};
+        alignas(::cmsghdr) auto control = WholeMessageControlBuffer {};
+        return receiveMessage(descriptor, buffer, control, discarded)
+            .and_then([](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
+                if (receipt.ancillary == Ancillary::Foreign)
+                    warnOfForeignAncillaryData();
+                if (receipt.bytes == 0)
+                    return std::unexpected(ChannelError::Closed);
+                return receipt.bytes;
+            });
+    }
+} // namespace
+
+std::expected<std::size_t, ChannelError> testing::receiveSomeClosingAttachments(Channel& channel,
+                                                                                std::span<uint8_t> buffer)
+{
+    return receiveClosingAttachments(channel.nativeHandle(), buffer);
+}
+
+void testing::forgetToldForeignAncillaryData() noexcept
+{
+    toldForeignAncillaryData().store(false);
+}
+
 std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)
 {
-    while (true)
+    if constexpr (ThisSystemUnclaimedDescriptors == UnclaimedDescriptors::Installed)
+        return receiveClosingAttachments(_native->descriptor, buffer);
+    else
     {
-        auto const received = ::recv(_native->descriptor, buffer.data(), buffer.size(), 0);
-        if (received > 0)
-            return static_cast<std::size_t>(received);
-        if (received == 0)
-            return std::unexpected(ChannelError::Closed);
-        if (errno != EINTR)
-            return std::unexpected(channelErrorOf(errno));
+        while (true)
+        {
+            auto const received = ::recv(_native->descriptor, buffer.data(), buffer.size(), 0);
+            if (received > 0)
+                return static_cast<std::size_t>(received);
+            if (received == 0)
+                return std::unexpected(ChannelError::Closed);
+            if (errno != EINTR)
+                return std::unexpected(channelErrorOf(errno));
+        }
     }
 }
 
@@ -337,57 +501,23 @@ std::expected<void, ChannelError> Channel::sendWithHandle(std::span<uint8_t cons
 std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::span<uint8_t> buffer,
                                                                          std::vector<OwnedHandle>& handles)
 {
-    auto iov = ::iovec { .iov_base = buffer.data(), .iov_len = buffer.size() };
-    alignas(::cmsghdr) auto control = ReceiveControlBuffer {};
-    auto message = ::msghdr {};
-    message.msg_iov = &iov;
-    message.msg_iovlen = 1;
-    message.msg_control = control.data();
-    message.msg_controllen = static_cast<ControlLength>(control.size());
-    auto received = ssize_t { 0 };
-    do
-        received = ::recvmsg(_native->descriptor, &message, ReceiveFlags);
-    while (received == -1 && errno == EINTR);
-    if (received == -1)
-        return std::unexpected(channelErrorOf(errno));
-
     // Owned at once, so that every one is closed should any part of the message be refused.
     auto arrived = std::vector<OwnedHandle> {};
-    auto foreign = false;
-    auto unconfigured = false;
-    for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header))
-    {
-        // Defence in depth: on Linux the 2-descriptor buffer is too small for any other cmsg, which ends as
-        // MSG_CTRUNC instead, so this is unreachable there.
-        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
-            || header->cmsg_len < CMSG_LEN(0))
-        {
-            foreign = true;
-            continue;
-        }
-        auto const count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-        for (auto const index: std::views::iota(std::size_t { 0 }, std::min(count, MaxReceivedHandles)))
-        {
-            auto descriptor = -1;
-            std::memcpy(&descriptor, CMSG_DATA(header) + (index * sizeof(int)), sizeof(int));
-            arrived.emplace_back(descriptor);
-#ifndef MSG_CMSG_CLOEXEC
-            if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1)
-                unconfigured = true;
-#endif
-        }
-    }
-    // Something other than descriptors, or descriptors the buffer had no room for: nothing of the message
-    // can be trusted to carry what its sender meant.
-    if (foreign || (message.msg_flags & MSG_CTRUNC) != 0)
-        return std::unexpected(ChannelError::Refused);
-    if (unconfigured)
-        return std::unexpected(ChannelError::Io);
-    if (received == 0)
-        return std::unexpected(ChannelError::Closed);
-    for (auto& handle: arrived)
-        handles.push_back(std::move(handle));
-    return static_cast<std::size_t>(received);
+    alignas(::cmsghdr) auto control = ReceiveControlBuffer {};
+    return receiveMessage(_native->descriptor, buffer, control, arrived)
+        .and_then([&](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
+            switch (receipt.ancillary)
+            {
+                case Ancillary::Foreign: return std::unexpected(ChannelError::Refused);
+                case Ancillary::Unconfigured: return std::unexpected(ChannelError::Io);
+                case Ancillary::Descriptors: break;
+            }
+            if (receipt.bytes == 0)
+                return std::unexpected(ChannelError::Closed);
+            for (auto& handle: arrived)
+                handles.push_back(std::move(handle));
+            return receipt.bytes;
+        });
 }
 
 void Channel::shutdown() noexcept

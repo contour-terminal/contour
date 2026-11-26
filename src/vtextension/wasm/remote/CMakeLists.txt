@@ -55,8 +55,12 @@ add_library(vtextension_remote_wire STATIC
     transport/SharedObjectName.hpp
     transport/WakeSignal.hpp
     transport/WouldBlock.hpp
+    WarningLog.cpp
+    WarningLog.hpp
     ${_transport_sources}
 )
+# The warning log (WarningLog.hpp), which a channel writes to as well as the parent's code.
+target_link_libraries(vtextension_remote_wire PUBLIC core::log)
 # The codec names the runtime vocabulary (WasmRuntime.hpp, ExtensionError.hpp), which is header-only and
 # std-only: the include path is all it takes.
 target_include_directories(vtextension_remote_wire PUBLIC

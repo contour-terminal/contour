@@ -86,7 +86,8 @@ class Channel
     [[nodiscard]] std::expected<std::size_t, ChannelError> trySend(std::span<uint8_t const> bytes);
 
     /// Receives at least one byte, blocking until one arrives. A descriptor the peer attached to them is
-    /// discarded by the system, never installed in this process.
+    /// never kept: the system discards it, or, where it installs it all the same (macOS), it is closed at
+    /// once.
     /// @param buffer Where the bytes go. Not empty.
     /// @return How many bytes arrived, at least one; `Closed` at the peer's end of stream, or once this end
     ///         was shut down.
@@ -104,9 +105,10 @@ class Channel
                                                                    NativeHandle handle);
 
     /// Receives at least one byte, as receiveSome() does, and installs the descriptors attached to them,
-    /// close-on-exec. At most two are taken in at once, so that a reader tells a peer that attached one
-    /// more than a message may carry from one that did not; past that, the system truncates them, and the
-    /// receive fails.
+    /// close-on-exec. At least two are taken in at once, so that a reader tells a peer that attached one
+    /// more than a message may carry from one that did not. Past that, Linux and FreeBSD truncate them, and
+    /// the receive fails; macOS, which installs every one before it truncates, has every one a message can
+    /// carry taken in, so that none stays installed unseen.
     /// @param buffer Where the bytes go. Not empty.
     /// @param handles Where the descriptors that arrived are appended, now the caller's.
     /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Refused` if the system
@@ -138,14 +140,15 @@ class Channel
 
 /// What becomes of a descriptor the extension host process attaches to what it sends Contour.
 ///
-/// Contour reads its ends with plain receives, so nothing a helper attaches is ever installed. But where the
-/// system merely discards such a descriptor, it closes it in the receiving thread, and a last close can block
-/// without bound (a socket lingering on a full send buffer): a compromised helper could hang a thread of
-/// Contour's. Where the system lets an end refuse descriptors outright (Linux 6.16 and later,
-/// `SO_PASSRIGHTS`), the helper's send fails instead, and no descriptor ever reaches Contour's process.
+/// Contour reads its ends with plain receives, so nothing a helper attaches is ever kept. But where the
+/// system merely discards such a descriptor, or installs it all the same for the receive to close (macOS),
+/// it is closed in the receiving thread, and a last close can block without bound (a socket lingering on a
+/// full send buffer): a compromised helper could hang a thread of Contour's. Where the system lets an end
+/// refuse descriptors outright (Linux 6.16 and later, `SO_PASSRIGHTS`), the helper's send fails instead, and
+/// no descriptor ever reaches Contour's process.
 enum class UpwardDescriptors : uint8_t
 {
-    Discarded, ///< The system takes them in and closes them, in the receiving thread (older kernels, BSDs).
+    Discarded, ///< They are taken in and closed, in the receiving thread (older kernels, BSDs, macOS).
     Refused,   ///< The system refuses to send them: nothing reaches Contour (Linux 6.16+, and Windows, where
                ///< no handle travels beside the bytes).
 };

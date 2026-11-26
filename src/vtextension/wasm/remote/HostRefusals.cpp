@@ -13,6 +13,7 @@
 #include <utility>
 
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/remote/WarningLog.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
 
@@ -21,13 +22,6 @@ namespace vtextension::wasm::remote
 
 namespace
 {
-    /// Warnings of extensions running, but not quite as they should: a sandbox short of a step is worth
-    /// knowing about whether or not anyone debugs extensions, so it is on unless turned off. At namespace
-    /// scope, so that it is registered -- listed, and turned off by a filter -- before anything logs.
-    auto const warningLog = core::log::Category("vtextension.warning",
-                                                "Warns of extensions running, but not quite as they should.",
-                                                core::log::Category::State::Enabled);
-
     /// The line for a host that could not be started, around what the launcher says of why.
     constexpr auto LaunchLine =
         std::string_view { "The extension host cannot be started: {}. Extensions do not run." };
