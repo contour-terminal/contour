@@ -178,6 +178,13 @@ namespace
         wasmtime_config_parallel_compilation_set(engineConfig, false);
         // Mach ports would install a process-wide exception handler thread on macOS.
         wasmtime_config_macos_use_mach_ports_set(engineConfig, false);
+#ifndef _WIN32
+        // No native unwinder walks through guest frames: Wasmtime finds traps and backtraces through its own
+        // tables and frame pointers, and every host function is noexcept. Unregistered, the code costs no
+        // libgcc frame registration -- a process-wide lock -- per module, and nothing outside Wasmtime reads
+        // the code memory it maps and unmaps. Windows keeps it: its x64 ABI requires the unwind tables.
+        wasmtime_config_native_unwind_info_set(engineConfig, false);
+#endif
         if (config.memory == MemorySharing::Provided)
         {
             // Every memory lives in the object Contour granted for it, reserved whole, never moved, and
