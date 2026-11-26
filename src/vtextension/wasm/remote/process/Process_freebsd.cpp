@@ -4,9 +4,10 @@
 // instruction, which kill() signals (pdkill), the wait set polls (it hangs up when the process exits), and
 // whose close ends the process -- nothing ever addresses it by a pid that could be reused. Everything the
 // child needs is prepared before the fork, so that the child of this multi-threaded process calls only
-// async-signal-safe functions: setsid(), dup2(), closefrom(), chdir(), sigaction(), sigprocmask() and
-// execve(), and _exit(127) on any failure. It starts as the other launchers' children do: in a session of
+// async-signal-safe functions: setsid(), dup2(), closefrom(), chdir(), sigaction(), sigprocmask(), procctl()
+// and execve(), and _exit(127) on any failure. It starts as the other launchers' children do: in a session of
 // its own, which has no controlling terminal, on the null device but for its stderr, in "/".
+#include <sys/procctl.h>
 #include <sys/procdesc.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -18,6 +19,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -117,6 +119,14 @@ namespace
         ::closefrom(prepared.childEnd());
         if (::chdir("/") == -1)
             ::_exit(ExecFailed);
+#ifdef PROC_WXMAP_CTL
+        // The address space exec builds maps nothing both writable and executable. What this launcher starts
+        // is an extension host on FreeBSD, whose engine interprets (it runs no compiling one there): it makes
+        // no memory executable, and the host checks that this holds (LockdownStep::WriteXorExecute). Asked of
+        // the next exec only: the call has no effect on this process, and its failure is the host's to state.
+        auto writeXorExecute = PROC_WX_MAPPINGS_DISALLOW_EXEC;
+        std::ignore = ::procctl(P_PID, 0, PROC_WXMAP_CTL, &writeXorExecute);
+#endif
         ::execve(prepared.executable.c_str(), argv, envp);
         ::_exit(ExecFailed);
     }

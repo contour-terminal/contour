@@ -223,7 +223,8 @@ constexpr auto ForbiddenOperations = std::array {
 // ECAPMODE; a descriptor's rights refuse what its role does not use with ENOTCAPABLE. It refuses neither a
 // new socket, which reaches nothing without an address, nor a new process, which RLIMIT_NPROC does. It cannot
 // refuse SCM_RIGHTS over a socket that may send, so what send-descriptor comes to is recorded: Contour's end
-// discards what a helper attaches.
+// discards what a helper attaches. Memory both writable and executable is refused with EACCES: the launcher
+// started the probe, as it starts the host, with W^X enforced (Process_freebsd.cpp).
 constexpr auto ForbiddenOperations = std::array {
     Expectation { .op = "open-file", .fate = Fate::Refused, .error = ECAPMODE },
     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = ECAPMODE },
@@ -240,6 +241,8 @@ constexpr auto ForbiddenOperations = std::array {
     Expectation { .op = "execve", .fate = Fate::Refused, .error = ECAPMODE },
     Expectation { .op = "ptrace-traceme", .fate = Fate::Refused, .error = ECAPMODE },
     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "map-writable-executable", .fate = Fate::Refused, .error = EACCES },
+    Expectation { .op = "protect-writable-executable", .fate = Fate::Refused, .error = EACCES },
 };
 #elifdef __APPLE__
 // The profile refuses what it does not allow with EPERM: a file, a socket of any family, a new process, a

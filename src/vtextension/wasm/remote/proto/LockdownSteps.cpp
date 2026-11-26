@@ -50,6 +50,9 @@ namespace
         LockdownStepRow { .step = LockdownStep::Priming,
                           .text = "a thread to run extensions on cannot be prepared",
                           .code = FailureCodeKind::Extension },
+        LockdownStepRow { .step = LockdownStep::WriteXorExecute,
+                          .text =
+                              "the process cannot be kept from mapping memory both writable and executable" },
     };
 
     /// What an extension runtime's error a step states says, in users' words naming no engine. A step's
@@ -72,7 +75,7 @@ namespace
                                           return std::to_underlying(LockdownStepTable[index].step) == index;
                                       }),
                   "LockdownStepTable lists every LockdownStep at its own index");
-    static_assert(LockdownStepTable.back().step == LockdownStep::Priming,
+    static_assert(LockdownStepTable.back().step == LockdownStep::WriteXorExecute,
                   "LockdownStepTable ends at the last LockdownStep");
 } // namespace
 

@@ -114,6 +114,17 @@ namespace
 
         [[nodiscard]] std::expected<void, ConfinementFailure> restrictBeforeThreads() override
         {
+            // Both steps run; the first that failed is the one stated.
+            auto const privileges = noNewPrivileges();
+            auto const writeXorExecute = verifyWriteXorExecute();
+            if (!privileges)
+                return privileges;
+            return writeXorExecute;
+        }
+
+        /// @return Nothing once the process gains no privilege through exec; the step and errno otherwise.
+        [[nodiscard]] static std::expected<void, ConfinementFailure> noNewPrivileges()
+        {
 #ifdef PROC_NO_NEW_PRIVS_CTL
             // Per process, and kept across fork: set once, it reaches every thread.
             auto enable = PROC_NO_NEW_PRIVS_ENABLE;
@@ -121,6 +132,29 @@ namespace
                           remote::proto::LockdownStep::NoNewPrivileges);
 #else
             // Older than FreeBSD 14: capability mode refuses execve(2) all the same.
+            return {};
+#endif
+        }
+
+        /// The host's image maps nothing both writable and executable: its engine interprets, and makes no
+        /// memory executable. That is set for an address space only as exec builds it, so Contour's launcher
+        /// asks for it before it execs the host (Process_freebsd.cpp); the host checks that it holds.
+        /// @return Nothing once it holds; `WriteXorExecute` with errno if it cannot be asked, or with 0 if it
+        ///         does not hold.
+        [[nodiscard]] static std::expected<void, ConfinementFailure> verifyWriteXorExecute()
+        {
+#ifdef PROC_WXMAP_STATUS
+            auto status = 0;
+            if (auto const asked = stepOf(::procctl(P_PID, 0, PROC_WXMAP_STATUS, &status),
+                                          remote::proto::LockdownStep::WriteXorExecute);
+                !asked)
+                return asked;
+            if ((static_cast<unsigned>(status) & PROC_WXORX_ENFORCE) == 0)
+                return std::unexpected(
+                    ConfinementFailure { .step = remote::proto::LockdownStep::WriteXorExecute, .code = 0 });
+            return {};
+#else
+            // Older than FreeBSD 13: the system has no such control.
             return {};
 #endif
         }

@@ -116,6 +116,7 @@ enum class LockdownStep : uint8_t
     Mitigations,      ///< The process mitigations it runs under (Windows).
     Job,              ///< A job that ends it with Contour and limits what it starts (Windows).
     Priming,          ///< Each thread that runs guests prepared before the rest is taken (every system).
+    WriteXorExecute,  ///< No memory both writable and executable (FreeBSD: PROC_WXMAP_CTL).
 };
 
 /// Which way a PDU travels.

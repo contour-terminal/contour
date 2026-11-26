@@ -129,7 +129,8 @@ namespace
             case LockdownStep::Container:
             case LockdownStep::Mitigations:
             case LockdownStep::Job:
-            case LockdownStep::Priming: return true;
+            case LockdownStep::Priming:
+            case LockdownStep::WriteXorExecute: return true;
         }
         return false;
     }

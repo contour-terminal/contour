@@ -48,7 +48,7 @@ namespace
                                   "requires, and was refused. Extensions do not run." },
     };
     static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
-    static_assert(std::to_underlying(proto::LockdownStep::Priming) < 32,
+    static_assert(std::to_underlying(proto::LockdownStep::WriteXorExecute) < 32,
                   "a bit per step in HostRefusalLog's word of unavailable steps");
 
     /// The line for a host that could not confine itself, around the step it named.
