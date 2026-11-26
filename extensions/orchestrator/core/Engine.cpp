@@ -217,6 +217,9 @@ Engine::Started Engine::start(StartContext context)
     if (engine._config)
         for (auto const& notice: engine._config->notices())
             engine._startProblems.push_back(message(notice, context.sources));
+    // The switch is as configured until the user turned it: the store, read next, says if they did.
+    if (engine._config)
+        engine._automation = engine._config->automation().enabled;
     engine.loadStore(context.stored);
     if (engine._config)
     {
@@ -328,6 +331,8 @@ std::vector<Effect> Engine::step(Input const& input)
                 checkHooks(out);
             },
             [&](InstallPlugins const&) { installPlugins(out); },
+            [&](SetAutomation const& set) { setAutomation(set.to, out); },
+            [&](RunOnItems const& request) { runOnItems(request); },
         },
         input);
     // Work that fell due is done on any input, so that no wake is ever asked for in the past; the status
@@ -453,6 +458,11 @@ void Engine::loadStore(std::span<StoredEntry const> stored)
         if (entry.key == FoldsKey)
         {
             loadFolds(entry.value);
+            continue;
+        }
+        if (entry.key == AutomationKey)
+        {
+            loadAutomation(entry.value);
             continue;
         }
         if (!entry.key.starts_with(RunKeyPrefix))
@@ -956,6 +966,7 @@ void Engine::endStep(std::vector<Effect>& out, uint64_t revision)
     relistAfterFinishedRuns(out);
     readDueStats(out);
     retryDueRefLocks();
+    planAndStart(out);
     drainQueue(out);
     forgetSettledPaneOpenings();
     refreshOrphans();
@@ -1087,6 +1098,7 @@ void Engine::rebuildProblems()
                 MaxSummaryLineChars));
     for (auto const& lines: _pollProblems | std::views::values)
         problems.insert(problems.end(), lines.begin(), lines.end());
+    std::ranges::move(automationProblems(), std::back_inserter(problems));
     // Each set's lines name the workers on it; the implicit worker's read as they did before workers.
     for (auto const& set: _config ? engine::detail::claudeSetsOf(*_config) : std::vector<std::string> {})
     {

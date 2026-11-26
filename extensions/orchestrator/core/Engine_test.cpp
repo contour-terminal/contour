@@ -340,7 +340,26 @@ class Harness
         auto entries = std::vector<StoredEntry> {};
         for (auto const& [id, value]: _stored)
             entries.push_back(StoredEntry { .key = runKey(id), .value = value });
+        if (_automationState)
+            entries.push_back(
+                StoredEntry { .key = std::string { AutomationKey }, .value = *_automationState });
         return entries;
+    }
+
+    /// @return The automation entry as the effects so far left it; std::nullopt: never stored.
+    [[nodiscard]] std::optional<std::string> const& automationState() const { return _automationState; }
+
+    /// @return Every StartAutomatic so far, in order.
+    [[nodiscard]] std::span<StartAutomatic const> automaticStarts() const { return _automatic; }
+
+    /// Steps the dispatch of the oldest StartAutomatic not stepped yet, as the driver does.
+    std::vector<Effect> startNextAutomatic()
+    {
+        REQUIRE(_automaticStepped < _automatic.size());
+        auto request = _automatic[_automaticStepped++].request;
+        request.session = std::string(Session);
+        request.wallMs = DispatchWallMs;
+        return feed(request);
     }
 
     /// Answers the oldest unanswered @p command.
@@ -593,9 +612,14 @@ class Harness
                     [&](OpenPane const& pane) { checkPane(pane); },
                     [&](StoreSet const& set) {
                         CAPTURE(set.key);
-                        // The folds are the one entry that is no run.
+                        // The folds and automation's state are the entries that are no run.
                         if (set.key == FoldsKey)
                             return;
+                        if (set.key == AutomationKey)
+                        {
+                            _automationState = set.value;
+                            return;
+                        }
                         REQUIRE(set.key.starts_with("run/"));
                         CHECK(set.value.size() <= MaxStoredRunBytes);
                         CHECK(runFromJson(set.value));
@@ -603,6 +627,12 @@ class Harness
                     },
                     [&](StoreRemove const& remove) { _stored.erase(remove.key.substr(4)); },
                     [&](PublishSummary const& summary) { _lastSummary = summary; },
+                    [&](StartAutomatic const& start) {
+                        // The driver mints the session: the engine leaves it empty.
+                        CHECK(start.request.session.empty());
+                        CHECK(start.request.origin != RunOrigin::User);
+                        _automatic.push_back(start);
+                    },
                     [&](WakeAt const& wake) {
                         _wakeAt = wake.monoMs;
                         // A wake at or before now would come back at once, and again.
@@ -722,6 +752,9 @@ class Harness
     std::vector<RunCommand> _commands; ///< Every RunCommand carried out, in order.
     std::vector<OpenPane> _opened;     ///< Every OpenPane carried out, in order.
     std::map<std::string, std::string, std::less<>> _stored;
+    std::optional<std::string> _automationState; ///< The entry under AutomationKey.
+    std::vector<StartAutomatic> _automatic;      ///< Every StartAutomatic, in order.
+    std::size_t _automaticStepped = 0;           ///< How many of them startNextAutomatic() stepped.
     std::set<std::string, std::less<>> _tainted;
     std::map<std::string, uint64_t, std::less<>> _deadlines;
     uint64_t _now = 0;
@@ -5885,6 +5918,243 @@ TEST_CASE("a worker that takes no profile is refused for a task with one", "[orc
     REQUIRE(run != nullptr);
     CHECK(run->agent == AgentKind::Copilot);
     CHECK(run->permissions.empty());
+}
+
+// }}}
+
+// {{{ 17. automation
+
+namespace
+{
+
+/// One open pull request of `gh-prs`'s output.
+struct PrRow
+{
+    uint64_t number = 0;
+    std::string_view conclusion = "SUCCESS"; ///< Its one check's conclusion.
+    std::string_view updatedAt = "2026-11-13T12:00:00Z";
+};
+
+/// @return `gh-prs`' output listing @p rows.
+[[nodiscard]] std::string prsOf(std::initializer_list<PrRow> rows)
+{
+    auto text = std::string { "[" };
+    for (auto const& row: rows)
+    {
+        if (text.size() > 1)
+            text += ",";
+        text += std::format(
+            R"([{0},"change {0}","https://github.com/contour-terminal/contour/pull/{0}","feature-{0}","master",)"
+            R"(false,false,"",[],[["CheckRun","build",null,"COMPLETED","{1}",null]],"MERGEABLE","{2}"])",
+            row.number,
+            row.conclusion,
+            row.updatedAt);
+    }
+    return text + "]";
+}
+
+/// The rules the automation tests run with, as `limits` adds them.
+constexpr auto FixCiRule =
+    R"("automation": { "max_agents": 2, "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] },)"sv;
+
+/// A booted harness whose `gh-prs` lists @p rows, with @p limits.
+[[nodiscard]] Harness automationHarness(std::initializer_list<PrRow> rows,
+                                        std::string_view limits = FixCiRule)
+{
+    auto harness = Harness { contextFor({ .limits = limits }) };
+    harness.answers["gh-prs"] = ok(prsOf(rows));
+    harness.boot();
+    return harness;
+}
+
+/// @return Whether @p start works on the pull request @p number.
+[[nodiscard]] bool startsOn(StartAutomatic const& start, uint64_t number)
+{
+    return start.request.item == ItemRef { ChangeRequestRef { number } };
+}
+
+} // namespace
+
+TEST_CASE("automation: paused by default, a poll starts nothing", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } });
+    CHECK(harness.engine().automation() == AutomationSwitch::Paused);
+    CHECK(harness.engine().hasAutomationRules());
+    harness.wake(2 * Minute);
+    harness.boot();
+    CHECK(harness.automaticStarts().empty());
+    CHECK_FALSE(harness.engine().isQueuedForAutomation("contour/!1"));
+}
+
+TEST_CASE("automation: switched on, a failing pull request gets its rule's task",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" }, { .number = 2 } });
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    CHECK(harness.engine().automation() == AutomationSwitch::On);
+    REQUIRE(harness.automaticStarts().size() == 1);
+    auto const& start = harness.automaticStarts().front();
+    CHECK(startsOn(start, 1));
+    CHECK(start.request.repo == "contour");
+    CHECK(start.request.task == "fix_ci");
+    CHECK(start.request.url == "https://github.com/contour-terminal/contour/pull/1");
+    CHECK(start.request.origin == RunOrigin::Rule);
+    CHECK(start.request.originRule == "pipeline_failed/fix_ci");
+    REQUIRE(harness.automationState().has_value());
+    CHECK(harness.automationState()->contains(R"("switch":"on")"));
+
+    harness.startNextAutomatic();
+    auto const* const run = harness.engine().activeRunOn("contour", ChangeRequestRef { 1 });
+    REQUIRE(run != nullptr);
+    CHECK(run->origin == RunOrigin::Rule);
+    CHECK(harness.engine().activeAutomaticRuns() == 1);
+}
+
+TEST_CASE("automation: the cap holds, and the rest is queued", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" },
+                                       { .number = 2, .conclusion = "FAILURE" },
+                                       { .number = 3, .conclusion = "FAILURE" } });
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    CHECK(harness.automaticStarts().size() == 2);
+    CHECK(harness.engine().isQueuedForAutomation("contour/!3"));
+    // A start in flight is not issued twice.
+    harness.wake(1);
+    CHECK(harness.automaticStarts().size() == 2);
+}
+
+TEST_CASE("automation: one attempt per state, remembered across a restart",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } });
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    REQUIRE(harness.automaticStarts().size() == 1);
+    harness.startNextAutomatic();
+    auto const id = harness.engine().activeRunOn("contour", ChangeRequestRef { 1 })->id;
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    harness.finish("gh-pr-checkout", ok());
+    harness.feed(PaneOpenedFor { .run = id, .pane = "p1" });
+    harness.feed(EndRun { .run = id });
+    harness.endCleanly(id);
+    REQUIRE(holds<Finished>(harness.run(id)));
+
+    // The same pull request, unchanged, is not started again.
+    harness.wake(2 * Minute);
+    harness.boot();
+    CHECK(harness.automaticStarts().size() == 1);
+
+    auto restarted = Harness { [&] {
+        auto context = contextFor({ .limits = FixCiRule });
+        context.stored = harness.stored();
+        return context;
+    }() };
+    restarted.answers["gh-prs"] = ok(prsOf({ { .number = 1, .conclusion = "FAILURE" } }));
+    restarted.boot();
+    CHECK(restarted.engine().automation() == AutomationSwitch::On);
+    CHECK(restarted.automaticStarts().empty());
+
+    // A new push changes it: the rule fires again.
+    restarted.answers["gh-prs"] =
+        ok(prsOf({ { .number = 1, .conclusion = "FAILURE", .updatedAt = "2026-11-13T13:00:00Z" } }));
+    restarted.wake(2 * Minute);
+    restarted.boot();
+    CHECK(restarted.automaticStarts().size() == 1);
+}
+
+TEST_CASE("automation: the user's runs neither count nor are blocked", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness(
+        { { .number = 1, .conclusion = "FAILURE" }, { .number = 2, .conclusion = "FAILURE" } },
+        R"("automation": { "max_agents": 1, "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] },)");
+    harness.feed(prDispatch(1));
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    REQUIRE(harness.automaticStarts().size() == 1);
+    CHECK(startsOn(harness.automaticStarts().front(), 2));
+}
+
+TEST_CASE("automation: a rule refused three polls in a row is paused, and resumed by the switch",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = Harness { contextFor({ .limits = FixCiRule }) };
+    harness.answers["gh-prs"] = ok(prsOf({ { .number = 1, .conclusion = "FAILURE" } }));
+    harness.answers["agent-setup-check"] =
+        ok(readFixture(FixtureRoot::Testdata, "contour/setup-hooks-missing.json"));
+    harness.boot();
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    CHECK(mentions(harness.engine().problems(),
+                   "automation: pipeline_failed/fix_ci could not start on contour/!1: its worker's hooks are "
+                   "missing"));
+    for ([[maybe_unused]] auto const poll: std::views::iota(0, 2))
+    {
+        harness.wake(2 * Minute);
+        harness.boot();
+    }
+    CHECK(harness.automaticStarts().empty());
+    CHECK(mentions(
+        harness.engine().problems(),
+        "automation: pipeline_failed/fix_ci is paused after 3 refusals; switch automation off and on "
+        "to resume it"));
+    REQUIRE(harness.automationState().has_value());
+    CHECK(harness.automationState()->contains("pipeline_failed/fix_ci"));
+
+    harness.answers.erase("agent-setup-check");
+    harness.feed(RefreshNow {});
+    harness.boot();
+    harness.feed(SetAutomation { .to = AutomationSwitch::Paused });
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    CHECK_FALSE(mentions(harness.engine().problems(), "is paused after"));
+    CHECK(harness.automaticStarts().size() == 1);
+}
+
+TEST_CASE("automation: a full repository is no refusal, the item waits", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness(
+        { { .number = 1, .conclusion = "FAILURE" }, { .number = 2 } },
+        R"("max_agents_per_repo": 1, "automation": { "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] },)");
+    harness.feed(prDispatch(2));
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    CHECK(harness.automaticStarts().empty());
+    CHECK(harness.engine().isQueuedForAutomation("contour/!1"));
+    for ([[maybe_unused]] auto const poll: std::views::iota(0, 3))
+    {
+        harness.wake(2 * Minute);
+        harness.boot();
+    }
+    CHECK_FALSE(mentions(harness.engine().problems(), "automation:"));
+}
+
+TEST_CASE("automation: a configuration without rules queues nothing", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } }, {});
+    CHECK_FALSE(harness.engine().hasAutomationRules());
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    CHECK(harness.automaticStarts().empty());
+    CHECK_FALSE(harness.engine().isQueuedForAutomation("contour/!1"));
+}
+
+TEST_CASE("automation: a group start runs while paused, and keeps to the cap",
+          "[orchestrator][engine][automation]")
+{
+    auto harness =
+        automationHarness({ { .number = 1 }, { .number = 2 } }, R"("automation": { "max_agents": 1 },)");
+    harness.feed(RunOnItems { .items = { "contour/!1", "contour/!2" }, .task = "fix_ci" });
+    REQUIRE(harness.automaticStarts().size() == 1);
+    CHECK(startsOn(harness.automaticStarts().front(), 1));
+    CHECK(harness.automaticStarts().front().request.origin == RunOrigin::Bulk);
+    CHECK(harness.engine().isQueuedForAutomation("contour/!2"));
+}
+
+TEST_CASE("automation: a poll forgets the items that left the list", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } });
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    REQUIRE(harness.automationState().has_value());
+    CHECK(harness.automationState()->contains("contour/!1"));
+    harness.answers["gh-prs"] = ok(prsOf({ { .number = 2 } }));
+    harness.wake(2 * Minute);
+    harness.boot();
+    CHECK_FALSE(harness.automationState()->contains("contour/!1"));
 }
 
 // }}}

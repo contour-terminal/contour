@@ -16,6 +16,7 @@
 #include <variant>
 #include <vector>
 
+#include <orchestrator/core/Automation.hpp>
 #include <orchestrator/core/Board.hpp>
 #include <orchestrator/core/Commands.hpp>
 #include <orchestrator/core/Config.hpp>
@@ -318,6 +319,22 @@ struct AwaitMessage
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
 };
 
+/// The user switched automation on or off.
+struct SetAutomation
+{
+    AutomationSwitch to = AutomationSwitch::Paused; ///< What it is now.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
+/// The user started one task on several Work-view items ("run a task on this group"): each starts as a free
+/// slot allows, whether automation is on or not.
+struct RunOnItems
+{
+    std::vector<std::string> items; ///< The items, by workItemKey(), in the order shown.
+    std::string task = {};          ///< The task for all of them; empty: each item's suggested one.
+    uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+};
+
 /// What the engine is fed.
 using Input = std::variant<Wake,
                            ProcessFinished,
@@ -338,7 +355,9 @@ using Input = std::variant<Wake,
                            ShowBoard,
                            HideBoard,
                            TabClosed,
-                           AwaitMessage>;
+                           AwaitMessage,
+                           SetAutomation,
+                           RunOnItems>;
 
 // }}}
 // {{{ effects
@@ -401,6 +420,13 @@ struct Redraw
 {
 };
 
+/// Start what automation chose: the driver gives the request a fresh session, the wall and the monotonic time
+/// now, and steps it as a Dispatch.
+struct StartAutomatic
+{
+    Dispatch request; ///< The dispatch, its session empty.
+};
+
 /// Why a dispatch was refused.
 enum class DispatchRefusal : uint8_t
 {
@@ -418,6 +444,16 @@ enum class DispatchRefusal : uint8_t
     UnknownWorker,  ///< No worker has that id.
     WorkerTakesNoProfile, ///< The worker's agent takes no permission profile, and the task has its own.
 };
+
+/// @param refusal Why a dispatch was refused.
+/// @return What it tells the user, such as "an agent already works on this item".
+[[nodiscard]] std::string_view dispatchRefusalText(DispatchRefusal refusal) noexcept;
+
+/// The store key automation's switch, memory and paused rules are kept under.
+inline constexpr std::string_view AutomationKey = "automation/state";
+
+/// How many refusals in a row pause a rule.
+inline constexpr uint32_t MaxRuleRefusals = 3;
 
 /// A dispatch was refused.
 struct DispatchRefused
@@ -439,7 +475,8 @@ using Effect = std::variant<RunCommand,
                             PublishSummary,
                             WakeAt,
                             Redraw,
-                            DispatchRefused>;
+                            DispatchRefused,
+                            StartAutomatic>;
 
 // }}}
 
@@ -650,6 +687,16 @@ class Engine
     /// @return Whether a STATUS.md was found in its worktree, by the threshold read or a shown board's.
     [[nodiscard]] bool hasBoard(std::string_view run) const noexcept;
 
+    /// @return Whether the rules may start agents now.
+    [[nodiscard]] AutomationSwitch automation() const noexcept { return _automation; }
+    /// @return Whether the configuration has any automation rule.
+    [[nodiscard]] bool hasAutomationRules() const noexcept;
+    /// @param itemKey A Work-view item's workItemKey().
+    /// @return Whether a rule or a group start waits for a free slot to start on it.
+    [[nodiscard]] bool isQueuedForAutomation(std::string_view itemKey) const noexcept;
+    /// @return The active runs a rule or a group start began.
+    [[nodiscard]] std::size_t activeAutomaticRuns() const noexcept;
+
   private:
     /// Who a queued command is for: a run's go ahead of the polls.
     enum class Priority : uint8_t
@@ -834,6 +881,31 @@ class Engine
 
     // Defined in EngineDispatch.cpp.
     void dispatch(Dispatch const& request, std::vector<Effect>& out);
+    /// Takes in what automation's store entry holds; the configured default when @p json cannot be read.
+    void loadAutomation(std::string_view json);
+    /// Stores the switch, the memory and the paused rules under AutomationKey.
+    void storeAutomation(std::vector<Effect>& out) const;
+    void setAutomation(AutomationSwitch to, std::vector<Effect>& out);
+    void runOnItems(RunOnItems const& request);
+    /// Plans automation over the Work-view items and asks the driver to start what the free slots allow.
+    void planAndStart(std::vector<Effect>& out);
+    /// Asks the driver to start @p start on @p item, unless its worker's hooks are missing.
+    void startAutomatic(WorkItem const& item, PlannedStart const& start, std::vector<Effect>& out);
+    /// Notes the answer to an automatic dispatch: its item no longer waits, and a refusal counts against its
+    /// rule.
+    void onAutomaticDispatch(Dispatch const& request,
+                             std::optional<DispatchRefusal> refusal,
+                             std::vector<Effect>& out);
+    /// Counts a refusal against @p ruleKey (the group start's are not counted), pausing it at
+    /// MaxRuleRefusals.
+    void refuseAutomatic(std::string_view ruleKey,
+                         std::string_view itemKey,
+                         std::string_view why,
+                         std::vector<Effect>& out);
+    /// At a poll's end: forgets the items no longer listed and lets the refused ones be tried again.
+    void settleAutomationAfterPoll(std::vector<Effect>& out);
+    /// @return The problem lines of the rules refused or paused.
+    [[nodiscard]] std::vector<std::string> automationProblems() const;
     [[nodiscard]] std::expected<Run, DispatchRefusal> prepare(Dispatch const& request) const;
 
     // Defined in EnginePoll.cpp: the polls, the lists and the status boards.
@@ -1027,6 +1099,28 @@ class Engine
     std::optional<uint64_t> _wakeAt; ///< The last WakeAt asked for.
     Summary _published;              ///< The last summary published.
     uint64_t _revision = 0;          ///< Counts the changes the dashboard shows.
+
+    AutomationSwitch _automation = AutomationSwitch::Paused; ///< automation(); stored under AutomationKey.
+    AutomationMemory _automationMemory;                      ///< What each rule last started; stored.
+    std::vector<std::string> _pausedRules;                   ///< By ruleKeyOf(); stored.
+    /// A rule's refusals in a row and why it was last refused, by ruleKeyOf(); the group start's under its
+    /// own.
+    struct RuleRecord
+    {
+        uint32_t refusals = 0; ///< In a row; reset by a start.
+        std::string lastWhy;   ///< The problem line of its last refusal; empty: none since its last start.
+    };
+    std::map<std::string, RuleRecord, std::less<>> _ruleRecords;
+    std::vector<std::string> _automaticPending; ///< The items whose StartAutomatic awaits its Dispatch.
+    std::vector<std::string> _refusedThisPoll;  ///< The items refused since the last poll ended.
+    std::vector<std::string> _automationQueued; ///< The items waiting for a free slot, as last planned.
+    /// One item a group start still waits to start.
+    struct BulkItem
+    {
+        std::string item; ///< Its workItemKey().
+        std::string task; ///< The task's id; empty: the suggested one.
+    };
+    std::vector<BulkItem> _bulk;
 };
 
 /// What Engine::start returns.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -22,6 +23,8 @@
 #include <orchestrator/core/Reconcile.hpp>
 #include <orchestrator/core/Sanitize.hpp>
 
+using namespace std::string_view_literals;
+
 namespace orchestrator
 {
 
@@ -29,15 +32,42 @@ namespace
 {
     /// The most runs of one item a second names apart (runId()'s ordinal); one more is refused as running.
     constexpr auto MaxRunsPerSecond = uint32_t { 99 };
+
+    /// What each refusal tells the user, indexed by DispatchRefusal.
+    constexpr auto RefusalTexts = std::array {
+        "the orchestrator is not configured: the line above says why"sv,            // NotConfigured
+        "max_agents agents are running: end one first"sv,                           // AgentLimit
+        "max_agents_per_repo agents run in this repository: end one first"sv,       // RepoLimit
+        "the repository is no longer configured"sv,                                 // UnknownRepo
+        "the task does not apply to this item"sv,                                   // UnknownTask
+        "the model is not one of models"sv,                                         // UnknownModel
+        "an agent already works on this item"sv,                                    // AlreadyRunning
+        "the base branch is not known yet: it is read with the next refresh (R)"sv, // BaseUnknown
+        "the prompt or the note cannot be passed to the agent"sv,                   // BadPrompt
+        "the permission profile is no longer configured"sv,                         // UnknownProfile
+        "no worker has that id: check `workers`"sv,                                 // UnknownWorker
+        "that worker takes no permission profile, and this task has one: pick another worker"sv, // WorkerTakesNoProfile
+    };
+    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::WorkerTakesNoProfile) + 1U,
+                  "RefusalTexts has one row per DispatchRefusal");
 } // namespace
+
+std::string_view dispatchRefusalText(DispatchRefusal refusal) noexcept
+{
+    return RefusalTexts[std::to_underlying(refusal)];
+}
 
 void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
 {
     auto prepared = prepare(request);
+    auto const automatic = request.origin != RunOrigin::User;
     if (!prepared)
     {
-        out.emplace_back(
-            DispatchRefused { .repo = request.repo, .reason = prepared.error(), .nearTab = request.nearTab });
+        if (automatic)
+            onAutomaticDispatch(request, prepared.error(), out);
+        else
+            out.emplace_back(DispatchRefused {
+                .repo = request.repo, .reason = prepared.error(), .nearTab = request.nearTab });
         return;
     }
     auto const id = prepared->id;
@@ -50,10 +80,15 @@ void Engine::dispatch(Dispatch const& request, std::vector<Effect>& out)
     if (!effects)
     {
         forget(id);
-        out.emplace_back(DispatchRefused {
-            .repo = request.repo, .reason = DispatchRefusal::BadPrompt, .nearTab = request.nearTab });
+        if (automatic)
+            onAutomaticDispatch(request, DispatchRefusal::BadPrompt, out);
+        else
+            out.emplace_back(DispatchRefused {
+                .repo = request.repo, .reason = DispatchRefusal::BadPrompt, .nearTab = request.nearTab });
         return;
     }
+    if (automatic)
+        onAutomaticDispatch(request, std::nullopt, out);
     apply(id, std::move(*effects), out);
 }
 

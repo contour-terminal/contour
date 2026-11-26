@@ -31,24 +31,6 @@ namespace
 {
     // {{{ what the form says
 
-    /// What each refusal tells the user, indexed by DispatchRefusal.
-    constexpr auto RefusalTexts = std::array {
-        "the orchestrator is not configured: the line above says why"sv,            // NotConfigured
-        "max_agents agents are running: end one first"sv,                           // AgentLimit
-        "max_agents_per_repo agents run in this repository: end one first"sv,       // RepoLimit
-        "the repository is no longer configured"sv,                                 // UnknownRepo
-        "the task does not apply to this item"sv,                                   // UnknownTask
-        "the model is not one of models"sv,                                         // UnknownModel
-        "an agent already works on this item"sv,                                    // AlreadyRunning
-        "the base branch is not known yet: it is read with the next refresh (R)"sv, // BaseUnknown
-        "the prompt or the note cannot be passed to the agent"sv,                   // BadPrompt
-        "the permission profile is no longer configured"sv,                         // UnknownProfile
-        "no worker has that id: check `workers`"sv,                                 // UnknownWorker
-        "that worker takes no permission profile, and this task has one: pick another worker"sv, // WorkerTakesNoProfile
-    };
-    static_assert(RefusalTexts.size() == std::to_underlying(DispatchRefusal::WorkerTakesNoProfile) + 1U,
-                  "RefusalTexts has one row per DispatchRefusal");
-
     /// The arguments the command line shows by their placeholder, being long: lines of their own say what
     /// they hold.
     constexpr auto ShownByPlaceholder = std::array { "board"sv, "settings"sv };
@@ -96,7 +78,7 @@ namespace
 
 std::string_view refusalText(DispatchRefusal refusal) noexcept
 {
-    return RefusalTexts[std::to_underlying(refusal)];
+    return dispatchRefusalText(refusal);
 }
 
 std::optional<DispatchFormState> openItemForm(Engine const& engine,

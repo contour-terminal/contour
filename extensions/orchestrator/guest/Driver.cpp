@@ -943,6 +943,16 @@ void Driver::carryOut(std::span<Effect const> effects)
                     for (auto const& dashboard: _dashboards | std::views::values)
                         dashboard->engineChanged();
                 },
+                [&](StartAutomatic const& start) {
+                    // A fresh session and the time now, as a dashboard's dispatch gets them; stepped after
+                    // this batch, as the driver's own replies are, whether or not any tab is served.
+                    auto request = start.request;
+                    auto const clock = readClock();
+                    request.session = formatUuidV4(_ids.next());
+                    request.wallMs = clock.wallMs;
+                    request.monoMs = clock.monoMs;
+                    _replies.emplace_back(std::move(request));
+                },
                 [&](DispatchRefused const& refused) {
                     _host.log(LogLevel::Info,
                               std::format("dispatch for {} refused: {}",
