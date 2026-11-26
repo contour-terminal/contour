@@ -156,6 +156,21 @@ enum class SnapshotScript : uint8_t
     /// sidebar-daemon-not-running with starfive's row menu open, as the Menu key opens it: Open in New
     /// Window, then its buttons' Start and Remove.
     SidebarDaemonMenu,
+    /// starfive's ci workspace row's menu, as the Menu key opens it: what runs on another daemon's row.
+    SidebarOtherDaemonWorkspaceMenu,
+    /// starfive's build tab row's menu: Open, Color, Rename, Close Tab, the splits; no move.
+    SidebarOtherDaemonTabMenu,
+    /// starfive's tests pane row's menu: Go to Pane, Open, Mark Seen, the splits, Close Pane; no move.
+    SidebarOtherDaemonPaneMenu,
+    /// The sidebar's Hidden row, last, "2 hidden daemons", its menu open: Show home, Show vega.
+    SidebarHiddenMenu,
+    /// The toast Hide from Sidebar shows: "starfive hidden from the sidebar", with its Undo.
+    DaemonHiddenToast,
+    /// The switcher, the home daemon row's menu open: the Show in Sidebar check box, checked.
+    SwitcherDaemonMenu,
+    /// sidebar-two-daemons with starfive's row menu open, starfive connected and observed: Open in New
+    /// Window, New Workspace, then Hide from Sidebar.
+    SidebarDaemonMenuLive,
 };
 
 /// What the workspace sidebar of a script shows.
@@ -183,6 +198,10 @@ enum class SnapshotSections : uint8_t
     NeedsMeEmpty, //!< `work` alone under the Needs-me scope, nothing needing the user.
     /// NotRunning, starfive under a long name, the sidebar at its narrowest.
     Narrow,
+    /// TwoDaemons, starfive's build tab of two panes (build, tests), its rows unfolded.
+    OtherDaemonRows,
+    /// TwoDaemons, and the local home and the saved host vega hidden by the user: the Hidden row last.
+    Hidden,
 };
 
 /// What a script colours in the workspace sidebar.
@@ -263,6 +282,12 @@ enum class ScriptAction : uint8_t
     OpenWorkspaceColorPicker,  //!< The sidebar's colour picker over billing's row, as Custom… opens it.
     OpenSidebarTabColorPicker, //!< The sidebar's tab colour picker over build's row, as its Custom… opens it.
     OpenSidebarDaemonMenu,     //!< starfive's daemon row menu, opened under the row as the Menu key opens it.
+    OpenOtherDaemonWorkspaceMenu, //!< starfive's ci workspace row's menu, opened under the row.
+    OpenOtherDaemonTabMenu,       //!< starfive's build tab row's menu, opened under the row.
+    OpenOtherDaemonPaneMenu,      //!< starfive's tests pane row's menu, opened under the row.
+    OpenSidebarHiddenMenu,        //!< The Hidden row's menu, opened under the row as Return opens it.
+    ShowHiddenToast,              //!< The window posts the toast Hide from Sidebar shows, with its Undo.
+    SwitcherDaemonMenu, //!< The switcher, the home daemon row's menu opened as the Menu key opens it.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -2522,6 +2547,46 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenSidebarDaemonMenu,
                         .sidebar = SnapshotSidebar::Tree,
                         .sections = SnapshotSections::NotRunning },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarOtherDaemonWorkspaceMenu,
+                        .name = "sidebar-other-daemon-menus-workspace",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenOtherDaemonWorkspaceMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::OtherDaemonRows },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarOtherDaemonTabMenu,
+                        .name = "sidebar-other-daemon-menus-tab",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenOtherDaemonTabMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::OtherDaemonRows },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarOtherDaemonPaneMenu,
+                        .name = "sidebar-other-daemon-menus-pane",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenOtherDaemonPaneMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::OtherDaemonRows },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHiddenMenu,
+                        .name = "sidebar-hidden-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarHiddenMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Hidden },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonHiddenToast,
+                        .name = "daemon-hidden-toast",
+                        .tabCount = 3,
+                        .action = ScriptAction::ShowHiddenToast,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Hidden },
+    SnapshotScriptRow { .script = SnapshotScript::SwitcherDaemonMenu,
+                        .name = "switcher-daemon-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::SwitcherDaemonMenu },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonMenuLive,
+                        .name = "sidebar-daemon-menu-live",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarDaemonMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::TwoDaemons },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

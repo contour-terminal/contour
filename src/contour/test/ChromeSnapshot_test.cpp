@@ -624,6 +624,7 @@ void checkSwitcherScript(contour::test::snapshot::ChromeSnapshotScene const& sce
             break;
         case SnapshotScript::SwitcherRowMenu:
         case SnapshotScript::SwitcherHover: CHECK(has("docs")); break;
+        case SnapshotScript::SwitcherDaemonMenu: CHECK(has("home")); break;
         default: FAIL("not a switcher script"); break;
     }
 }
@@ -1313,6 +1314,7 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SwitcherNoMatch:
             case SnapshotScript::SwitcherDiscovering:
             case SnapshotScript::SwitcherRowMenu:
+            case SnapshotScript::SwitcherDaemonMenu:
             case SnapshotScript::SwitcherHover: checkSwitcherScript(scene, variant.script); break;
             case SnapshotScript::DaemonLocal:
             case SnapshotScript::DaemonLocalSingleTab: {
@@ -1380,8 +1382,30 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SidebarPendingRow:
             case SnapshotScript::SidebarNeedsMeEmpty:
             case SnapshotScript::SidebarDaemonNarrow:
-            case SnapshotScript::SidebarDaemonMenu: {
+            case SnapshotScript::SidebarDaemonMenu:
+            case SnapshotScript::SidebarOtherDaemonWorkspaceMenu:
+            case SnapshotScript::SidebarOtherDaemonTabMenu:
+            case SnapshotScript::SidebarOtherDaemonPaneMenu:
+            case SnapshotScript::SidebarHiddenMenu:
+            case SnapshotScript::DaemonHiddenToast:
+            case SnapshotScript::SidebarDaemonMenuLive: {
                 static_cast<void>(checkSidebarScript(scene, variant));
+                // The toast's scene hid starfive as Hide from Sidebar does: the Hidden row names it too.
+                auto const hiddenStarfive = variant.script == SnapshotScript::DaemonHiddenToast;
+                if (row.sections == SnapshotSections::Hidden)
+                    CHECK(contour::test::itemsNamed(content, QStringLiteral("sidebarRow"))
+                              .back()
+                              ->property("title")
+                          == (hiddenStarfive ? QStringLiteral("3 hidden daemons")
+                                             : QStringLiteral("2 hidden daemons")));
+                if (variant.script == SnapshotScript::DaemonHiddenToast)
+                {
+                    auto const* toast = scene.root().findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+                    REQUIRE(toast != nullptr);
+                    auto const* undo = toast->findChild<QQuickItem*>(QStringLiteral("toastAction"));
+                    REQUIRE(undo != nullptr);
+                    CHECK(undo->isVisible());
+                }
                 // The tree names the window's daemon in its heading row; no chip names it in the sidebar's
                 // head or the band, and the switcher is a control of the title row.
                 auto titles = QStringList {};
@@ -1392,7 +1416,8 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const other = row.sections == SnapshotSections::Narrow
                                        ? QStringLiteral("build-farm-eu-west-2")
                                        : QStringLiteral("starfive");
-                CHECK(titles.contains(other) == (row.sections != SnapshotSections::NeedsMeEmpty));
+                CHECK(titles.contains(other)
+                      == (row.sections != SnapshotSections::NeedsMeEmpty && !hiddenStarfive));
                 CHECK(contour::test::itemsNamed(content, QStringLiteral("sidebarDaemonChip")).empty());
                 CHECK(contour::test::itemsNamed(content, QStringLiteral("headerSidebarDaemonChip")).empty());
                 auto const switchers =

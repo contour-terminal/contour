@@ -3,10 +3,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -16,6 +19,7 @@ using contour::window::JumpCancel;
 using contour::window::JumpEvent;
 using contour::window::JumpMode;
 using contour::window::JumpRefusal;
+using contour::window::PendingJumps;
 using contour::window::SidebarJumps;
 using contour::window::SidebarTarget;
 using vthost::proto::SwitchOutcome;
@@ -47,11 +51,26 @@ class HeldSwitching final: public contour::session::WindowSwitching
                  contour::session::SwitchLandBy /*landBy*/,
                  contour::session::SwitchCompletion done) override
     {
-        // As the switcher does for the user's newer request: the one under way ends first, told so.
-        if (!asked.empty() && asked.back().done)
-            std::exchange(asked.back().done, {})(std::unexpected(std::string { "superseded" }));
+        // As the switcher does for the user's newer request: the one under way of its mode ends first, told
+        // so; the other mode's goes on.
+        auto const sameMode = std::ranges::find_if(
+            asked | std::views::reverse, [mode](Asked const& earlier) { return earlier.mode == mode; });
+        if (sameMode != (asked | std::views::reverse).end() && sameMode->done)
+            std::exchange(sameMode->done, {})(std::unexpected(std::string { "superseded" }));
         asked.push_back(
             Asked { .window = window, .target = std::move(target), .mode = mode, .done = std::move(done) });
+    }
+
+    /// A creation, kept as a request of its own: told as the switch to the made workspace would be.
+    void createWorkspace(vtworkspace::WorkspaceId window,
+                         contour::session::SwitchTarget const& daemon,
+                         std::string label,
+                         contour::session::SwitchMode mode,
+                         contour::session::SwitchCompletion done) override
+    {
+        created.push_back(
+            Created { .window = window, .daemon = daemon, .label = std::move(label), .mode = mode });
+        request(window, daemon, mode, contour::session::NoLandingDeadline, std::move(done));
     }
 
     void cancel(vtworkspace::WorkspaceId window, contour::session::SwitchMode mode) override
@@ -64,11 +83,28 @@ class HeldSwitching final: public contour::session::WindowSwitching
     void answer(std::expected<SwitchOutcome, std::string> outcome)
     {
         REQUIRE_FALSE(asked.empty());
-        REQUIRE(asked.back().done);
-        std::exchange(asked.back().done, {})(std::move(outcome));
+        answerAt(asked.size() - 1, std::move(outcome));
     }
 
+    /// Tells request @p index (in the order asked) @p outcome.
+    void answerAt(std::size_t index, std::expected<SwitchOutcome, std::string> outcome)
+    {
+        REQUIRE(index < asked.size());
+        REQUIRE(asked.at(index).done);
+        std::exchange(asked.at(index).done, {})(std::move(outcome));
+    }
+
+    /// One createWorkspace() call.
+    struct Created
+    {
+        vtworkspace::WorkspaceId window;
+        contour::session::SwitchTarget daemon;
+        std::string label;
+        contour::session::SwitchMode mode;
+    };
+
     std::vector<Asked> asked;
+    std::vector<Created> created; ///< Every createWorkspace(), in order.
     std::vector<vtworkspace::WorkspaceId> cancels;
     std::vector<contour::session::SwitchMode> cancelledModes; ///< The mode each cancel named, in order.
 };
@@ -125,14 +161,14 @@ TEST_CASE("a pending jump marks its target until it lands, and says Connecting t
     rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt);
 
     REQUIRE(rig.switching.asked.size() == 1);
-    CHECK(rig.jumps.pending() == ciOnStarfive());
+    CHECK(rig.jumps.pending().here == ciOnStarfive());
     REQUIRE(rig.said.size() == 1);
     CHECK(rig.said[0].event == JumpEvent::Connecting);
     CHECK(rig.changes == 1);
 
     rig.switching.answer(SwitchOutcome::Switched);
 
-    CHECK_FALSE(rig.jumps.pending().has_value());
+    CHECK(rig.jumps.pending() == PendingJumps {});
     REQUIRE(rig.said.size() == 2);
     CHECK(rig.said[1].event == JumpEvent::Landed);
     CHECK(rig.said[1].target == ciOnStarfive());
@@ -166,7 +202,7 @@ TEST_CASE("a jump to a restarted daemon's old workspace switches nothing", "[sid
         Window, ciOnStarfive(), JumpMode::Here, std::unexpected(JumpRefusal::StaleRun), std::nullopt);
 
     CHECK(rig.switching.asked.empty());
-    CHECK_FALSE(rig.jumps.pending().has_value());
+    CHECK(rig.jumps.pending() == PendingJumps {});
     REQUIRE(rig.said.size() == 1);
     CHECK(rig.said[0].event == JumpEvent::Failed);
     CHECK(rig.said[0].reason == "the daemon restarted");
@@ -177,14 +213,14 @@ TEST_CASE("Cancel ends the pending jump through the switching service, and says 
     auto rig = JumpRig {};
     rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt);
 
-    rig.jumps.cancel(Window);
+    rig.jumps.cancel(Window, JumpMode::Here);
 
     REQUIRE(rig.switching.cancels.size() == 1);
     CHECK(rig.switching.cancels.front() == Window);
     CHECK(rig.switching.cancelledModes.front() == contour::session::SwitchMode::Switch);
     // The service ends the switch as cancelled.
     rig.switching.answer(std::unexpected(std::string { "the user cancelled it" }));
-    CHECK_FALSE(rig.jumps.pending().has_value());
+    CHECK(rig.jumps.pending() == PendingJumps {});
     REQUIRE(rig.said.size() == 2);
     CHECK(rig.said[1].event == JumpEvent::Cancelled);
 }
@@ -194,7 +230,7 @@ TEST_CASE("Cancel of an Open in New Window cancels that Open, not a switch in pl
     auto rig = JumpRig {};
     rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::NewWindow, ControlId, std::nullopt);
 
-    rig.jumps.cancel(Window);
+    rig.jumps.cancel(Window, JumpMode::NewWindow);
 
     REQUIRE(rig.switching.cancelledModes.size() == 1);
     CHECK(rig.switching.cancelledModes.front() == contour::session::SwitchMode::Open);
@@ -203,7 +239,7 @@ TEST_CASE("Cancel of an Open in New Window cancels that Open, not a switch in pl
 TEST_CASE("Cancel with no jump under way asks nothing", "[sidebar][jump]")
 {
     auto rig = JumpRig {};
-    rig.jumps.cancel(Window);
+    rig.jumps.cancel(Window, JumpMode::Here);
     CHECK(rig.switching.cancels.empty());
     CHECK(rig.said.empty());
 }
@@ -231,10 +267,154 @@ TEST_CASE("a superseded jump says nothing", "[sidebar][jump]")
     REQUIRE(rig.said.size() == 2);
     CHECK(rig.said[0].event == JumpEvent::Connecting);
     CHECK(rig.said[1].event == JumpEvent::Connecting);
-    CHECK(rig.jumps.pending() == second);
+    CHECK(rig.jumps.pending().here == second);
 
     rig.switching.answer(SwitchOutcome::Switched);
     REQUIRE(rig.said.size() == 3);
     CHECK(rig.said[2].event == JumpEvent::Landed);
     CHECK(rig.said[2].target == second);
+}
+
+TEST_CASE("a jump's then runs once it landed here", "[sidebar][jump]")
+{
+    auto rig = JumpRig {};
+    auto told = std::vector<SwitchOutcome> {};
+    rig.jumps.jumpTo(
+        Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt, [&](SwitchOutcome outcome) {
+            // Run once the jump is over: no jump is pending any more.
+            CHECK(rig.jumps.pending() == PendingJumps {});
+            told.push_back(outcome);
+        });
+    CHECK(told.empty());
+    rig.switching.answer(SwitchOutcome::Switched);
+    CHECK(told == std::vector { SwitchOutcome::Switched });
+}
+
+TEST_CASE("a jump's then is told when another window shows the target", "[sidebar][jump]")
+{
+    auto rig = JumpRig {};
+    auto told = std::vector<SwitchOutcome> {};
+    rig.jumps.jumpTo(
+        Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt, [&](SwitchOutcome outcome) {
+            told.push_back(outcome);
+        });
+    rig.switching.answer(SwitchOutcome::FocusedExisting);
+    CHECK(told == std::vector { SwitchOutcome::FocusedExisting });
+}
+
+TEST_CASE("a superseded or cancelled jump runs no then", "[sidebar][jump]")
+{
+    auto rig = JumpRig {};
+    auto runs = 0;
+    auto const then = [&](SwitchOutcome) {
+        ++runs;
+    };
+    SECTION("superseded")
+    {
+        rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt, then);
+        auto other = ciOnStarfive();
+        other.workspace = 6;
+        rig.jumps.jumpTo(Window, other, JumpMode::Here, ControlId, std::nullopt);
+        // The first was told it ended as the second started; the second lands.
+        rig.switching.answer(SwitchOutcome::Switched);
+    }
+    SECTION("cancelled")
+    {
+        rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt, then);
+        rig.jumps.cancel(Window, JumpMode::Here);
+        rig.switching.answer(std::unexpected(std::string { "the user cancelled it" }));
+    }
+    SECTION("failed")
+    {
+        rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt, then);
+        rig.switching.answer(std::unexpected(std::string { "no route" }));
+    }
+    SECTION("only the picker shown")
+    {
+        rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::Here, ControlId, std::nullopt, then);
+        rig.switching.answer(SwitchOutcome::PickerShown);
+    }
+    CHECK(runs == 0);
+}
+
+TEST_CASE("New Workspace on another daemon creates there and is the pending jump", "[sidebar][jump]")
+{
+    auto rig = JumpRig {};
+    auto const daemonRow = SidebarTarget { .daemon = contour::window::hostDaemonRef("starfive"),
+                                           .instance = contour::window::DaemonInstance { 9 },
+                                           .workspace = 0,
+                                           .tab = std::nullopt,
+                                           .pane = std::nullopt };
+    rig.jumps.createAndJump(Window, daemonRow, std::nullopt);
+
+    REQUIRE(rig.switching.created.size() == 1);
+    auto const& created = rig.switching.created.front();
+    CHECK(created.window == Window);
+    CHECK(created.daemon.kind == vthost::proto::SwitchDaemonKind::Host);
+    CHECK(created.daemon.daemon == "starfive");
+    CHECK(created.label.empty());
+    CHECK(created.mode == contour::session::SwitchMode::Switch);
+    CHECK(rig.jumps.pending().here == daemonRow);
+    REQUIRE(rig.said.size() == 1);
+    CHECK(rig.said[0].event == JumpEvent::Connecting);
+
+    rig.switching.answer(SwitchOutcome::Switched);
+    CHECK(rig.jumps.pending() == PendingJumps {});
+    CHECK(rig.said.back().event == JumpEvent::Landed);
+}
+
+TEST_CASE("a jump in place and an Open in New Window are pending side by side, and either may end first",
+          "[sidebar][jump]")
+{
+    auto build = ciOnStarfive();
+    build.workspace = 6;
+    for (auto const openFirst: { JumpMode::NewWindow, JumpMode::Here })
+    {
+        INFO("first " << static_cast<int>(openFirst));
+        auto rig = JumpRig {};
+        auto const second = openFirst == JumpMode::NewWindow ? JumpMode::Here : JumpMode::NewWindow;
+        rig.jumps.jumpTo(Window, ciOnStarfive(), openFirst, ControlId, std::nullopt);
+        rig.jumps.jumpTo(Window, build, second, ControlId, std::nullopt);
+
+        // Neither ended the other.
+        auto const pending = rig.jumps.pending();
+        CHECK(pending.of(openFirst) == ciOnStarfive());
+        CHECK(pending.of(second) == build);
+        REQUIRE(rig.said.size() == 2);
+
+        // The older fails: said, and the newer goes on.
+        rig.switching.answerAt(0, std::unexpected(std::string { "cannot connect to the daemon" }));
+        REQUIRE(rig.said.size() == 3);
+        CHECK(rig.said[2].event == JumpEvent::Failed);
+        CHECK(rig.said[2].target == ciOnStarfive());
+        CHECK_FALSE(rig.jumps.pending().of(openFirst).has_value());
+        CHECK(rig.jumps.pending().of(second) == build);
+
+        rig.switching.answerAt(1, SwitchOutcome::Switched);
+        REQUIRE(rig.said.size() == 4);
+        CHECK(rig.said[3].event == JumpEvent::Landed);
+        CHECK(rig.said[3].target == build);
+        CHECK(rig.jumps.pending() == PendingJumps {});
+    }
+}
+
+TEST_CASE("Escape's cancel ends the jump in place and leaves an Open in New Window", "[sidebar][jump]")
+{
+    auto rig = JumpRig {};
+    rig.jumps.jumpTo(Window, ciOnStarfive(), JumpMode::NewWindow, ControlId, std::nullopt);
+
+    // No jump in place: nothing to end.
+    rig.jumps.cancel(Window, JumpMode::Here);
+    CHECK(rig.switching.cancels.empty());
+
+    auto build = ciOnStarfive();
+    build.workspace = 6;
+    rig.jumps.jumpTo(Window, build, JumpMode::Here, ControlId, std::nullopt);
+    rig.jumps.cancel(Window, JumpMode::Here);
+
+    REQUIRE(rig.switching.cancelledModes.size() == 1);
+    CHECK(rig.switching.cancelledModes.front() == contour::session::SwitchMode::Switch);
+    rig.switching.answerAt(1, std::unexpected(std::string { "the user cancelled it" }));
+    CHECK(rig.said.back().event == JumpEvent::Cancelled);
+    CHECK(rig.jumps.pending().newWindow == ciOnStarfive());
 }

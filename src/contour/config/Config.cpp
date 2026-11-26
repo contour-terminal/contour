@@ -5557,9 +5557,11 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::SwitchToWorkspace>(action)
             || holds_alternative<actions::OpenWorkspace>(action)
-            || holds_alternative<actions::MoveTabToWorkspace>(action))
+            || holds_alternative<actions::MoveTabToWorkspace>(action)
+            || holds_alternative<actions::ShowHiddenDaemon>(action))
         {
-            // Like SwitchToTab: "which workspace?" has no default, and positions count from 1.
+            // Like SwitchToTab: "which workspace?" -- or which hidden daemon -- has no default, and positions
+            // count from 1.
             if (auto index = node["index"]; index && index.IsScalar())
                 if (auto const value = index.as<uint32_t>(); value >= 1)
                 {
@@ -5567,6 +5569,8 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                         return actions::SwitchToWorkspace { value };
                     if (holds_alternative<actions::MoveTabToWorkspace>(action))
                         return actions::MoveTabToWorkspace { value };
+                    if (holds_alternative<actions::ShowHiddenDaemon>(action))
+                        return actions::ShowHiddenDaemon { value };
                     return actions::OpenWorkspace { value };
                 }
             return std::nullopt;

@@ -741,20 +741,35 @@ class MainWindowControllerMock: public QAbstractListModel
     }
     /// Mirrors WindowController::closeConfirmation(): the table's wording, with the counts the mock's scene
     /// knows nothing of left at zero.
-    Q_INVOKABLE [[nodiscard]] QVariantMap closeConfirmation(
-        int kind, quint64 /*workspace*/, quint64 /*tab*/, QString const& label, QString const& program) const
+    Q_INVOKABLE [[nodiscard]] QVariantMap closeConfirmation(QVariant const& node,
+                                                            QString const& label,
+                                                            QString const& program) const
     {
-        auto const text = contour::window::closeDialogText(
-            static_cast<contour::window::CloseKind>(kind),
-            { .label = label.toStdString(), .tabs = 0, .panes = 0, .program = program.toStdString() });
+        auto const closing = closeNodeOf(node);
+        if (!closing)
+            return {};
+        auto const text = contour::window::closeDialogText(closing->kind,
+                                                           { .label = label.toStdString(),
+                                                             .tabs = 0,
+                                                             .panes = 0,
+                                                             .program = program.toStdString(),
+                                                             .daemon = {} });
         return { { QStringLiteral("heading"), QString::fromStdString(text.heading) },
                  { QStringLiteral("message"), QString::fromStdString(text.message) },
                  { QStringLiteral("acceptText"), QString::fromStdString(text.acceptText) } };
     }
     /// Mirrors WindowController::confirmClose(): records the answer.
-    Q_INVOKABLE void confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane)
+    Q_INVOKABLE void confirmClose(QVariant const& node)
     {
-        confirmedCloses.push_back({ kind, workspace, tab, pane });
+        if (auto const closing = closeNodeOf(node))
+            confirmedCloses.push_back(*closing);
+    }
+    /// @return The close node @p node carries; none for anything else.
+    [[nodiscard]] static std::optional<window::CloseNode> closeNodeOf(QVariant const& node)
+    {
+        if (node.metaType() != QMetaType::fromType<window::CloseNode>())
+            return std::nullopt;
+        return node.value<window::CloseNode>();
     }
     /// Mirrors WindowController::newWorkspace(): counts the request.
     Q_INVOKABLE void newWorkspace() { ++newWorkspaces; }
@@ -838,21 +853,13 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::toggleMaximized(): counts the request, as a title-bar double-click makes it.
     Q_INVOKABLE void toggleMaximized() { ++maximizeToggles; }
 
-    std::vector<int> savedSidebarWidths {};           ///< Every setSidebarWidth() width, in order.
-    int sidebarToggles = 0;                           ///< How often toggleSidebar() ran.
-    int maximizeToggles = 0;                          ///< How often toggleMaximized() ran.
-    int newWorkspaces = 0;                            ///< How often newWorkspace() ran.
-    std::optional<QRectF> workspaceDropdownAnchor;    ///< What showWorkspaceDropdown() was last asked.
-    std::vector<quint64> confirmedWorkspaceCloses {}; ///< Every confirmCloseWorkspace() workspace, in order.
-    /// One confirmClose() answer: the kind, the workspace, the tab and the pane.
-    struct ConfirmedClose
-    {
-        int kind = 0;
-        quint64 workspace = 0;
-        quint64 tab = 0;
-        quint64 pane = 0;
-    };
-    std::vector<ConfirmedClose> confirmedCloses {}; ///< Every confirmClose() answer, in order.
+    std::vector<int> savedSidebarWidths {};            ///< Every setSidebarWidth() width, in order.
+    int sidebarToggles = 0;                            ///< How often toggleSidebar() ran.
+    int maximizeToggles = 0;                           ///< How often toggleMaximized() ran.
+    int newWorkspaces = 0;                             ///< How often newWorkspace() ran.
+    std::optional<QRectF> workspaceDropdownAnchor;     ///< What showWorkspaceDropdown() was last asked.
+    std::vector<quint64> confirmedWorkspaceCloses {};  ///< Every confirmCloseWorkspace() workspace, in order.
+    std::vector<window::CloseNode> confirmedCloses {}; ///< Every confirmClose() answer's node, in order.
     // }}}
 
     std::vector<int> tabMenuPicks {};     ///< Every tab menu pick, in order.
@@ -896,9 +903,12 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::sidebarFilterRequested().
     void sidebarFilterRequested();
     void workspaceRenameRequested();
-    void sidebarCloseConfirmationRequested(
-        int kind, quint64 workspace, quint64 tab, quint64 pane, QString const& label, QString const& program);
-    void closeWorkspaceConfirmationRequested(quint64 workspace,
+    /// Mirrors WindowController::sidebarCloseConfirmationRequested().
+    void sidebarCloseConfirmationRequested(QVariant const& node,
+                                           QString const& label,
+                                           QString const& program);
+    /// Mirrors WindowController::closeWorkspaceConfirmationRequested().
+    void closeWorkspaceConfirmationRequested(QVariant const& node,
                                              QString const& workspaceLabel,
                                              QString const& program);
 
@@ -963,7 +973,9 @@ class MainWindowControllerMock: public QAbstractListModel
     /// @see setNativeMaximizeVisual.
     platform::CaptionButtonVisual _nativeMaximizeVisual = platform::CaptionButtonVisual::Rest;
     platform::NullAnnouncer _noticeAnnouncer;
-    window::NoticeModel _notices { noticeClock, _noticeAnnouncer, [](window::NoticeAction) {} };
+    window::NoticeModel _notices { noticeClock,
+                                   _noticeAnnouncer,
+                                   [](window::NoticeAction, std::string const&) {} };
     // The sidebar's window, in the order the model needs them built.
     FakeDirectorySource _sidebarSource;
     FakeSidebarHost _sidebarHost { &_sidebarSource };

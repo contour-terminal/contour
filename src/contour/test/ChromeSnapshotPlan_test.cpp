@@ -852,6 +852,9 @@ TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts precede the location
              std::tuple {
                  SnapshotScript::SwitcherRowMenu, "switcher-row-menu", ScriptAction::SwitcherRowMenu },
              std::tuple { SnapshotScript::SwitcherHover, "switcher-hover", ScriptAction::HoverSwitcherRow },
+             std::tuple { SnapshotScript::SwitcherDaemonMenu,
+                          "switcher-daemon-menu",
+                          ScriptAction::SwitcherDaemonMenu },
          })
     {
         INFO(name);
@@ -945,6 +948,19 @@ TEST_CASE("snapshot plan: the daemon sections' scripts are listed and named", "[
         Expected { SnapshotScript::SidebarDaemonNarrow, "sidebar-daemon-narrow", SnapshotSections::Narrow },
         Expected { SnapshotScript::LocationChipPending, "location-chip-pending", SnapshotSections::Pending },
         Expected { SnapshotScript::SidebarDaemonMenu, "sidebar-daemon-menu", SnapshotSections::NotRunning },
+        Expected { SnapshotScript::SidebarOtherDaemonWorkspaceMenu,
+                   "sidebar-other-daemon-menus-workspace",
+                   SnapshotSections::OtherDaemonRows },
+        Expected { SnapshotScript::SidebarOtherDaemonTabMenu,
+                   "sidebar-other-daemon-menus-tab",
+                   SnapshotSections::OtherDaemonRows },
+        Expected { SnapshotScript::SidebarOtherDaemonPaneMenu,
+                   "sidebar-other-daemon-menus-pane",
+                   SnapshotSections::OtherDaemonRows },
+        Expected { SnapshotScript::SidebarHiddenMenu, "sidebar-hidden-menu", SnapshotSections::Hidden },
+        Expected { SnapshotScript::DaemonHiddenToast, "daemon-hidden-toast", SnapshotSections::Hidden },
+        Expected {
+            SnapshotScript::SidebarDaemonMenuLive, "sidebar-daemon-menu-live", SnapshotSections::TwoDaemons },
     };
     for (auto const& expected: Scripts)
     {

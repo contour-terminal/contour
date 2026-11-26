@@ -338,6 +338,8 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 | `GoToPane` | none | none | Shows the pane a sidebar row names; a row of the pane menu. |
 | `OpenInNewWindow` | none | none | Opens what a sidebar row names in a window of its own, or raises a window that shows it; a row of every sidebar row's menu (Shift+Return in the sidebar does the same). |
 | `ConnectDaemon`, `StartDaemon`, `RemoveDaemon` | none | none | What a sidebar daemon row's Connect, Start and Remove buttons do; rows of the daemon row's menu. |
+| `HideDaemon` | none | none | Hides a sidebar daemon row's daemon and keeps that choice; a row of the daemon row's menu. The sidebar's Hidden row offers it back. |
+| `ShowHiddenDaemon` | `index:` (1-based, required) | | Lists the Nth daemon the sidebar's Hidden row names again; a row of the Hidden row's menu. |
 | `MoveTabToWorkspace` | `index:` (1-based, required) | | Moves the current tab into the Nth workspace. |
 
 `NewWorkspace` is listed under [Switching daemons and workspaces](#switching-daemons-and-workspaces); the

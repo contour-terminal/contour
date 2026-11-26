@@ -2,10 +2,21 @@
 #include <contour/session/SidebarJump.hpp>
 #include <contour/window/SidebarJumps.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <utility>
 
 namespace contour::window
 {
+
+namespace
+{
+    /// @return The switch a jump of @p mode makes.
+    [[nodiscard]] constexpr session::SwitchMode switchModeOf(JumpMode mode) noexcept
+    {
+        return mode == JumpMode::NewWindow ? session::SwitchMode::Open : session::SwitchMode::Switch;
+    }
+} // namespace
 
 SidebarJumps::SidebarJumps(session::WindowSwitching& switching,
                            Announce announce,
@@ -21,7 +32,8 @@ void SidebarJumps::jumpTo(vtworkspace::WorkspaceId window,
                           SidebarTarget const& target,
                           JumpMode mode,
                           std::expected<std::array<uint8_t, 16>, JumpRefusal> const& controlId,
-                          std::optional<SidebarTarget> from)
+                          std::optional<SidebarTarget> from,
+                          JumpThen then)
 {
     // A row of a run that has ended names nothing any more: said, and nothing is asked of anyone.
     if (!controlId)
@@ -42,55 +54,91 @@ void SidebarJumps::jumpTo(vtworkspace::WorkspaceId window,
                                 target.instance);
     if (!switchTarget)
         return;
-    // Pending before the request: the switch it replaces is told it ended as this one starts, and says
-    // nothing, as its serial is no longer the one under way; and one that ends at once finds this one.
+    auto const switchMode = switchModeOf(mode);
+    auto done = start(target, std::move(from), switchMode, std::move(then));
+    _switching.request(
+        window, *std::move(switchTarget), switchMode, session::NoLandingDeadline, std::move(done));
+}
+
+void SidebarJumps::createAndJump(vtworkspace::WorkspaceId window,
+                                 SidebarTarget const& daemonTarget,
+                                 std::optional<SidebarTarget> from)
+{
+    auto daemon = session::switchTargetOf(
+        daemonTarget.daemon, session::AnyWorkspace {}, session::LandingFocus {}, daemonTarget.instance);
+    if (!daemon)
+        return;
+    // Pending on the daemon's row: the workspace it lands on does not exist yet.
+    auto const target = SidebarTarget { .daemon = daemonTarget.daemon,
+                                        .instance = daemonTarget.instance,
+                                        .workspace = 0,
+                                        .tab = {},
+                                        .pane = {} };
+    auto done = start(target, std::move(from), session::SwitchMode::Switch, {});
+    _switching.createWorkspace(
+        window, *std::move(daemon), std::string {}, session::SwitchMode::Switch, std::move(done));
+}
+
+session::SwitchCompletion SidebarJumps::start(SidebarTarget const& target,
+                                              std::optional<SidebarTarget> from,
+                                              session::SwitchMode mode,
+                                              JumpThen then)
+{
+    // Pending before the request: the switch of its mode it replaces is told it ended as this one starts,
+    // and says nothing, as its serial is no longer the one under way; and one that ends at once finds this
+    // one.
     auto const serial = _nextSerial++;
-    auto const switchMode =
-        mode == JumpMode::NewWindow ? session::SwitchMode::Open : session::SwitchMode::Switch;
-    _pending = PendingJump { .serial = serial,
-                             .target = target,
-                             .from = std::move(from),
-                             .mode = switchMode,
-                             .then = {},
-                             .cancel = JumpCancel::None };
+    slotOf(mode) = PendingJump { .serial = serial,
+                                 .target = target,
+                                 .from = std::move(from),
+                                 .then = std::move(then),
+                                 .cancel = JumpCancel::None };
     _announce(JumpEvent::Connecting, target, {});
     _changed();
-    _switching.request(window,
-                       *std::move(switchTarget),
-                       switchMode,
-                       session::NoLandingDeadline,
-                       [alive = std::weak_ptr { _alive },
-                        serial](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
-                           if (auto const self = alive.lock())
-                               (*self)->finish(serial, outcome);
-                       });
+    return [alive = std::weak_ptr { _alive },
+            serial](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+        if (auto const self = alive.lock())
+            (*self)->finish(serial, outcome);
+    };
 }
 
-std::optional<SidebarTarget> SidebarJumps::pending() const
+PendingJumps SidebarJumps::pending() const
 {
-    return _pending ? std::optional { _pending->target } : std::nullopt;
+    auto const targetOf = [this](session::SwitchMode mode) {
+        auto const& jump = slotOf(mode);
+        return jump ? std::optional { jump->target } : std::nullopt;
+    };
+    return PendingJumps { .here = targetOf(session::SwitchMode::Switch),
+                          .newWindow = targetOf(session::SwitchMode::Open) };
 }
 
-void SidebarJumps::cancel(vtworkspace::WorkspaceId window)
+void SidebarJumps::cancel(vtworkspace::WorkspaceId window, JumpMode mode)
 {
-    if (!_pending)
+    auto const switchMode = switchModeOf(mode);
+    auto& jump = slotOf(switchMode);
+    if (!jump)
         return;
-    _pending->cancel = JumpCancel::Requested;
-    _switching.cancel(window, _pending->mode);
+    jump->cancel = JumpCancel::Requested;
+    _switching.cancel(window, switchMode);
 }
 
 void SidebarJumps::finish(uint64_t serial,
                           std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome)
 {
-    // A jump a newer one replaced says nothing: the newer one speaks for the window.
-    if (!_pending || _pending->serial != serial)
+    // A jump a newer one of its mode replaced says nothing: the newer one speaks for the window.
+    auto const slot = std::ranges::find_if(_pending, [serial](std::optional<PendingJump> const& jump) {
+        return jump && jump->serial == serial;
+    });
+    if (slot == _pending.end())
         return;
-    auto const ended = *std::exchange(_pending, std::nullopt);
-    if (auto const event = jumpEventOf(outcome, ended.cancel))
+    auto const ended = *std::exchange(*slot, std::nullopt);
+    auto const event = jumpEventOf(outcome, ended.cancel);
+    if (event)
         _announce(*event, ended.target, outcome ? std::string {} : outcome.error());
-    if (outcome && ended.then)
-        ended.then();
     _changed();
+    // Only once it landed: here, or in the window that shows the target already.
+    if (event == JumpEvent::Landed && ended.then)
+        ended.then(*outcome);
 }
 
 } // namespace contour::window

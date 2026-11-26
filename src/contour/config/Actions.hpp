@@ -246,6 +246,8 @@ struct OpenInNewWindow{};     // open what a sidebar row names in a window of it
 struct ConnectDaemon{};       // connect to a sidebar daemon row's daemon (its Connect button)
 struct StartDaemon{};         // start a sidebar daemon row's local daemon (its Start button)
 struct RemoveDaemon{};        // unlist a sidebar daemon row's daemon for the rest of the run (its Remove button)
+struct HideDaemon{};          // unlist a sidebar daemon row's daemon, kept in the GUI state (Hide from Sidebar)
+struct ShowHiddenDaemon{ uint32_t index = 0; }; // list the Nth (1-based) daemon the Hidden row names again
 // clang-format on
 
 /// The variant of every action alternative, listed once; Action is a class over it.
@@ -402,6 +404,8 @@ using ActionVariant = std::variant<CancelSelection,
                                    ConnectDaemon,
                                    StartDaemon,
                                    RemoveDaemon,
+                                   HideDaemon,
+                                   ShowHiddenDaemon,
                                    SwitchToWorkspace,
                                    OpenWorkspace,
                                    CycleWorkspace,
@@ -670,6 +674,7 @@ concept ParameterizedActionConcept = core::oneOf<T,
                                                  OpenWorkspace,
                                                  MoveTabToWorkspace,
                                                  MoveToTab,
+                                                 ShowHiddenDaemon,
                                                  GoToPane,
                                                  SwitchToDaemon,
                                                  OpenDaemon,
@@ -1006,6 +1011,14 @@ namespace documentation
     constexpr inline std::string_view RemoveDaemon {
         "Takes the daemon a sidebar daemon row names off the sidebar for the rest of the run, as its Remove "
         "button does. A row of the daemon row's menu."
+    };
+    constexpr inline std::string_view HideDaemon {
+        "Takes the daemon a sidebar daemon row names off the sidebar, and keeps that choice: its Hidden row "
+        "offers it back. A row of the daemon row's menu."
+    };
+    constexpr inline std::string_view ShowHiddenDaemon {
+        "Lists the daemon the sidebar's Hidden row names at the 1-based position `index` again. A row of the "
+        "Hidden row's menu."
     };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "

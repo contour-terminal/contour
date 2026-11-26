@@ -125,6 +125,15 @@ struct DaemonInstance
     auto operator<=>(DaemonInstance const&) const = default;
 };
 
+/// A daemon the user chose not to list, as the Hidden row names it.
+struct HiddenDaemon
+{
+    DaemonRef daemon; ///< Which daemon.
+    std::string name; ///< What it is called.
+
+    bool operator==(HiddenDaemon const&) const = default;
+};
+
 /// Whether the user chose to list a daemon in the sidebar.
 enum class SidebarListingChoice : uint8_t
 {
@@ -135,8 +144,10 @@ enum class SidebarListingChoice : uint8_t
 /// Where a section's facts come from.
 enum class SectionFeed : uint8_t
 {
-    WindowLink = 0, ///< The window's own link to the daemon: it may act on it.
-    Observer,       ///< An observer link this process keeps to a daemon no window of it is on.
+    /// A window's link to the daemon, or a window's switch holding its connection on the way in or out: that
+    /// window acts on it.
+    WindowLink = 0,
+    Observer, ///< An observer link this process keeps to a daemon no window of it is on.
 };
 
 /// One daemon as a window's sidebar lists it.

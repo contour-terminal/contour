@@ -143,16 +143,24 @@ TEST_CASE("Cancel ends a pending jump before a connect", "[sidebar][daemon-row]"
     auto const intoWork = SidebarTarget {
         .daemon = Work, .instance = DaemonInstance { 7 }, .workspace = 3, .tab = std::nullopt, .pane = {}
     };
+    auto const here = PendingJumps { .here = intoWork, .newWindow = std::nullopt };
+    auto const opening = PendingJumps { .here = std::nullopt, .newWindow = intoWork };
 
     // A jump into the row's section is what Cancel ends, even while its daemon connects for it.
-    CHECK(cancelRouteOf(Work, intoWork, DaemonLinkState::Connecting) == CancelRoute::Jump);
-    CHECK(cancelRouteOf(Work, intoWork, DaemonLinkState::Connected) == CancelRoute::Jump);
+    CHECK(cancelRouteOf(Work, here, DaemonLinkState::Connecting) == CancelRoute::JumpHere);
+    CHECK(cancelRouteOf(Work, here, DaemonLinkState::Connected) == CancelRoute::JumpHere);
+    // An Open in New Window into it is ended from its row too; the jump in this window first.
+    CHECK(cancelRouteOf(Work, opening, DaemonLinkState::Connecting) == CancelRoute::JumpNewWindow);
+    CHECK(cancelRouteOf(
+              Work, PendingJumps { .here = intoWork, .newWindow = intoWork }, DaemonLinkState::Connected)
+          == CancelRoute::JumpHere);
     // A jump elsewhere leaves this row's connect to its Cancel.
-    CHECK(cancelRouteOf(Starfive, intoWork, DaemonLinkState::Connecting) == CancelRoute::Connect);
-    CHECK(cancelRouteOf(Starfive, std::nullopt, DaemonLinkState::Connecting) == CancelRoute::Connect);
+    CHECK(cancelRouteOf(Starfive, here, DaemonLinkState::Connecting) == CancelRoute::Connect);
+    CHECK(cancelRouteOf(Starfive, opening, DaemonLinkState::Connecting) == CancelRoute::Connect);
+    CHECK(cancelRouteOf(Starfive, PendingJumps {}, DaemonLinkState::Connecting) == CancelRoute::Connect);
     // Nothing under way: nothing to cancel.
-    CHECK(cancelRouteOf(Starfive, std::nullopt, DaemonLinkState::Connected) == CancelRoute::None);
-    CHECK(cancelRouteOf(Starfive, intoWork, DaemonLinkState::NotRunning) == CancelRoute::None);
+    CHECK(cancelRouteOf(Starfive, PendingJumps {}, DaemonLinkState::Connected) == CancelRoute::None);
+    CHECK(cancelRouteOf(Starfive, here, DaemonLinkState::NotRunning) == CancelRoute::None);
 }
 
 TEST_CASE("daemon row faces differ from every tab-status and link glyph, per look", "[sidebar][daemon-row]")
@@ -438,4 +446,23 @@ TEST_CASE("once the words leave the row, the mark's tooltip says them", "[sideba
           == "Failed · host unreachable");
     CHECK(daemonRowToolTipOf("Not running", "", DaemonRowFit::NameShort) == "Not running");
     CHECK(daemonRowToolTipOf("", "", DaemonRowFit::NoWords).empty());
+}
+
+TEST_CASE("Cancel of a connect is offered only on an observer's row", "[sidebar][daemon-row]")
+{
+    // A window adopting the daemon holds its connection, Connecting: the rows of the other windows say so but
+    // offer no Cancel, which would end no connect (only the daemon sections' observer connects end).
+    using enum DaemonRowButton;
+    using Buttons = std::array<DaemonRowButton, 2>;
+    auto facts = DaemonRowFacts { .state = DaemonLinkState::Connecting, .locality = DaemonLocality::Remote };
+    facts.link = DaemonRowLink::Observer;
+    CHECK(daemonRowButtons(facts, RowPending::No) == Buttons { Cancel, None });
+    for (auto const link: { DaemonRowLink::OwnWindow, DaemonRowLink::OtherWindow })
+    {
+        INFO(std::format("link {}", static_cast<int>(link)));
+        facts.link = link;
+        CHECK(daemonRowButtons(facts, RowPending::No) == Buttons { None, None });
+        // The window whose jump it is cancels that jump, whoever holds the link.
+        CHECK(daemonRowButtons(facts, RowPending::Yes) == Buttons { Cancel, None });
+    }
 }

@@ -1506,6 +1506,10 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor sidebarSelectionFillInactive READ sidebarSelectionFillInactive NOTIFY changed)
     Q_PROPERTY(QColor sidebarSelectionInkInactive READ sidebarSelectionInkInactive NOTIFY changed)
     Q_PROPERTY(QColor sidebarLastKnownInk READ sidebarLastKnownInk NOTIFY changed)
+    Q_PROPERTY(QColor toastActionFill READ toastActionFill NOTIFY changed)
+    Q_PROPERTY(QColor toastActionHoverFill READ toastActionHoverFill NOTIFY changed)
+    Q_PROPERTY(QColor toastActionPressedFill READ toastActionPressedFill NOTIFY changed)
+    Q_PROPERTY(QColor toastActionActiveInk READ toastActionActiveInk NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -1680,6 +1684,23 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor sidebarLastKnownInk() const
     {
         return color(config::ChromeColorRole::SidebarLastKnownInk);
+    }
+
+    /// A toast's action button's fills, at rest, hovered and pressed.
+    [[nodiscard]] QColor toastActionFill() const { return color(config::ChromeColorRole::ToastActionFill); }
+    [[nodiscard]] QColor toastActionHoverFill() const
+    {
+        return color(config::ChromeColorRole::ToastActionHoverFill);
+    }
+    [[nodiscard]] QColor toastActionPressedFill() const
+    {
+        return color(config::ChromeColorRole::ToastActionPressedFill);
+    }
+    /// @return A toast action's words under the pointer, holding the keyboard or pressed
+    ///         (config::ChromeColorRole::ToastActionActiveInk).
+    [[nodiscard]] QColor toastActionActiveInk() const
+    {
+        return color(config::ChromeColorRole::ToastActionActiveInk);
     }
 
     /// The Settings window's roles, by the palette's tone.

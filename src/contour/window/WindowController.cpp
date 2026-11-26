@@ -236,32 +236,36 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     [[nodiscard]] vtworkspace::WorkspaceId windowId() const override { return _window._displayed; }
 
-    void jumpTo(SidebarTarget target, JumpMode mode) override
+    void jumpTo(SidebarTarget target, JumpMode mode) override { jumpThen(std::move(target), mode, {}); }
+
+    /// Jumps to @p target as jumpTo() does, then runs @p then once it landed (SidebarJumps::jumpTo()).
+    void jumpThen(SidebarTarget const& target, JumpMode mode, SidebarJumps::JumpThen then)
     {
         auto const listed = controlIdOf(target);
         if (!listed)
             errorLog()("Not jumping from the sidebar: its row names a run of {} that has ended.",
                        target.daemon.value);
-        _jumps.jumpTo(_window._displayed, target, mode, listed, currentPlace());
+        _jumps.jumpTo(_window._displayed, target, mode, listed, currentPlace(), std::move(then));
     }
 
-    [[nodiscard]] std::optional<SidebarTarget> pendingJump() const override { return _jumps.pending(); }
+    /// Makes a new workspace on @p daemon's daemon and jumps there (SidebarJumps::createAndJump()).
+    void createAndJump(SidebarTarget const& daemon)
+    {
+        _jumps.createAndJump(_window._displayed, daemon, currentPlace());
+    }
 
-    void cancelJump() override { _jumps.cancel(_window._displayed); }
+    [[nodiscard]] PendingJumps pendingJumps() const override { return _jumps.pending(); }
 
-    /// @return The name of the daemon the jump under way connects to, as the sidebar lists it; empty while
-    ///         none is under way.
+    void cancelJump(JumpMode mode) override { _jumps.cancel(_window._displayed, mode); }
+
+    /// @return The name of the daemon the jump in this window under way connects to, as the sidebar lists
+    ///         it; empty while none is under way. An Open in New Window is not this window's to show.
     [[nodiscard]] std::string pendingDaemonName() const
     {
-        auto const pending = _jumps.pending();
+        auto const pending = _jumps.pending().here;
         if (!pending)
             return {};
-        auto const sections = _window._manager.app().daemonSections().sections();
-        if (auto const at = std::ranges::find(sections, pending->daemon, &DaemonSection::daemon);
-            at != sections.end() && !at->name.empty())
-            return at->name;
-        auto const parsed = parseDaemonRef(pending->daemon);
-        return parsed ? std::string { parsed->second } : pending->daemon.value;
+        return daemonDisplayName(pending->daemon, _window.sectionOf(pending->daemon));
     }
 
     void reconnect() override
@@ -302,10 +306,9 @@ class WindowController::SidebarHost final: public ISidebarHost
             return jumpControlIdOf(
                 own->instance, source != nullptr ? source->directory() : WorkspaceDirectory {}, target);
         }
-        auto const sections = _window._manager.app().daemonSections().sections();
-        auto const at = std::ranges::find(sections, target.daemon, &DaemonSection::daemon);
-        return at != sections.end() ? jumpControlIdOf(at->instance, at->directory, target)
-                                    : jumpControlIdOf(target.instance, WorkspaceDirectory {}, target);
+        auto const section = _window.sectionOf(target.daemon);
+        return section ? jumpControlIdOf(section->instance, section->directory, target)
+                       : jumpControlIdOf(target.instance, WorkspaceDirectory {}, target);
     }
 
     WindowController& _window;
@@ -359,11 +362,16 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _noticeAnnouncer { std::make_unique<platform::GatedAnnouncer>(
         noticeAnnouncer([this]() -> QObject* { return _osWindow; }),
         [&config = manager.app().config()]() { return config.accessibilityAnnouncements.value(); }) },
-    _notices { _clock, *_noticeAnnouncer, [this](NoticeAction action) {
+    _notices { _clock, *_noticeAnnouncer, [this](NoticeAction action, std::string const& subject) {
                   switch (action)
                   {
                       case NoticeAction::None: break;
                       case NoticeAction::OpenConfigFile: _manager.openConfigFile(); break;
+                      // Hide's Undo: what Show from the Hidden row does.
+                      case NoticeAction::UndoHide:
+                          _manager.app().daemonSections().setListed(DaemonRef { subject },
+                                                                    SidebarListingChoice::Listed);
+                          break;
                   }
               } }
 {
@@ -519,6 +527,16 @@ void WindowController::triggerContextMenuAction(int actionId)
 
 namespace
 {
+    /// @return The @p T that @p held carries, as a request handed it to QML; none for anything else, such as
+    ///         a value QML made up or never had.
+    template <typename T>
+    [[nodiscard]] std::optional<T> heldAs(QVariant const& held)
+    {
+        if (held.metaType() != QMetaType::fromType<T>())
+            return std::nullopt;
+        return held.value<T>();
+    }
+
     /// A tab's colour as its menu sees it: what "Tab Color" ticks, and whether "Reset" has anything to drop.
     struct TabColoring
     {
@@ -1868,17 +1886,23 @@ void WindowController::beginActiveTabColorPick()
     // sidebar shown for it (as beginCurrentWorkspaceColorPick() hangs the workspace's).
     if (_directorySource == nullptr)
         return;
-    auto const displayed = _sidebarHost->displayedTab(_directorySource->directory());
-    if (!displayed)
-        return;
+    if (auto const displayed = _sidebarHost->displayedTab(_directorySource->directory()))
+        requestColorPick(_sidebar->ownRowKey(SidebarRowKind::Tab, displayed->workspace, displayed->tab));
+}
+
+void WindowController::requestColorPick(SidebarRowKey const& row)
+{
     focusSidebar();
     // The rows may not have caught up yet with a tab that has just opened or been switched to.
     _sidebar->refreshNow();
-    emit sidebarTabColorPickRequested(_sidebar->rowIndexOf(SidebarRowKey { .kind = SidebarRowKind::Tab,
-                                                                           .workspace = displayed->workspace,
-                                                                           .tab = displayed->tab,
-                                                                           .pane = PaneKey {} }),
-                                      displayed->tab);
+    // The picker carries the row whole and hands it back with the pick: nothing of it is kept here, so a
+    // later pick from elsewhere colours what it names, not a row a menu once opened the picker for.
+    auto const index = _sidebar->rowIndexOf(row);
+    auto const key = QVariant::fromValue(row);
+    if (row.kind == SidebarRowKind::Tab)
+        emit sidebarTabColorPickRequested(index, key);
+    else
+        emit workspaceColorPickRequested(index, key);
 }
 
 void WindowController::beginSaveLayoutPrompt()
@@ -1986,14 +2010,30 @@ void WindowController::resetTabColor(int index)
         _manager.model().resetTabColor(tab->id(), vtworkspace::TabColorSource::User);
 }
 
-void WindowController::setTabColorOf(quint64 tab, QColor const& color)
+void WindowController::setRowColor(QVariant const& row, QColor const& color)
 {
-    _manager.colorTab(*this, tab, platform::toRGBColor(color));
+    if (color.isValid())
+        colorRow(row, platform::toRGBColor(color));
 }
 
-void WindowController::resetTabColorOf(quint64 tab)
+void WindowController::resetRowColor(QVariant const& row)
 {
-    _manager.colorTab(*this, tab, std::nullopt);
+    colorRow(row, std::nullopt);
+}
+
+void WindowController::colorRow(QVariant const& row, std::optional<vtbackend::RGBColor> color)
+{
+    auto const key = heldAs<SidebarRowKey>(row);
+    if (!key)
+        return;
+    switch (key->kind)
+    {
+        case SidebarRowKind::Workspace: colorSidebarWorkspace(*key, color); break;
+        case SidebarRowKind::Tab: colorSidebarTab(*key, color); break;
+        case SidebarRowKind::Pane:
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: break;
+    }
 }
 
 // {{{ Keyboard focus in the chrome
@@ -3935,19 +3975,7 @@ void WindowController::beginCurrentWorkspaceColorPick()
     if (!shown)
         return;
     // The picker hangs from the workspace's row, in a sidebar shown for it.
-    focusSidebar();
-    emit workspaceColorPickRequested(*shown);
-}
-
-void WindowController::setWorkspaceColor(quint64 workspace, QColor const& color)
-{
-    if (color.isValid())
-        _manager.setWorkspaceColor(*this, workspace, platform::toRGBColor(color));
-}
-
-void WindowController::resetWorkspaceColor(quint64 workspace)
-{
-    _manager.setWorkspaceColor(*this, workspace, std::nullopt);
+    requestColorPick(_sidebar->ownRowKey(SidebarRowKind::Workspace, *shown, 0));
 }
 
 std::optional<uint64_t> WindowController::shownWorkspaceId() const
@@ -4081,35 +4109,30 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
     };
     constexpr Run ColorRow =
         [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
-            // A swatch colours the workspace; a bare one (Custom…) asks for the picker over its row.
+            // A swatch colours the workspace; a bare one (Custom…) asks for the picker over its row, which
+            // commits to the row it was opened for.
             if (auto const color = std::get<actions::SetWorkspaceColor>(what).color)
-                window._manager.setWorkspaceColor(window, key.workspace, color);
+                window.colorSidebarWorkspace(key, color);
             else
-            {
-                window.focusSidebar();
-                emit window.workspaceColorPickRequested(key.workspace);
-            }
+                window.requestColorPick(key);
         };
     constexpr Run ResetRowColor =
         [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
-            window._manager.setWorkspaceColor(window, key.workspace, std::nullopt);
+            window.colorSidebarWorkspace(key, std::nullopt);
         };
     // A tab colours by id, as a workspace does, in this process's model or on its daemon, and the focus stays
     // where it is (TerminalSessionManager::colorTab()).
     constexpr Run ColorTabRow =
         [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
+            // Custom…: the sidebar's picker over the row, as a sidebar placement draws no tab strip.
             if (auto const color = std::get<actions::SetTabColor>(what).color)
-                window._manager.colorTab(window, key.tab, color);
+                window.colorSidebarTab(key, color);
             else
-            {
-                // Custom…: the sidebar's picker over the row, as a sidebar placement draws no tab strip.
-                window.focusSidebar();
-                emit window.sidebarTabColorPickRequested(window._sidebar->rowIndexOf(key), key.tab);
-            }
+                window.requestColorPick(key);
         };
     constexpr Run ResetTabRowColor =
         [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
-            window._manager.colorTab(window, key.tab, std::nullopt);
+            window.colorSidebarTab(key, std::nullopt);
         };
     constexpr Run MoveRowUp = [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
         window.moveWorkspaceBy(key.workspace, -1);
@@ -4164,6 +4187,29 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
             window._sidebar->removeDaemon(window._sidebar->rowIndexOf(key));
         };
+    // Unlisted, and said with an Undo: the toast's action lists it again (the notices' UndoHide).
+    constexpr Run HideRowDaemon =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
+            auto const name = daemonDisplayName(key.daemon, window.sectionOf(key.daemon));
+            window._manager.app().daemonSections().setListed(key.daemon, SidebarListingChoice::Unlisted);
+            window._notices.post(daemonHiddenNotice(name, key.daemon.value));
+        };
+    // The daemon the Hidden row's menu offered at that place when it opened.
+    constexpr Run ShowHiddenRowDaemon =
+        [](WindowController& window, SidebarRowKey const&, actions::Action const& what) {
+            auto const index = std::get<actions::ShowHiddenDaemon>(what).index;
+            if (index >= 1 && index <= window._sidebarMenuHidden.size())
+                window._manager.app().daemonSections().setListed(window._sidebarMenuHidden[index - 1],
+                                                                 SidebarListingChoice::Listed);
+        };
+    // On the window's own daemon, as the tab strip's New Workspace; on another, made there and jumped to.
+    constexpr Run NewRowWorkspace =
+        [](WindowController& window, SidebarRowKey const& key, actions::Action const& what) {
+            if (window.rowOriginOf(key) == command::RowOrigin::Own)
+                window.runMenuBarAction(what);
+            else
+                window._sidebarHost->createAndJump(sidebarTargetOf(key));
+        };
     /// A menu action that names its row by id, and how it is run on it.
     struct ByIdAction
     {
@@ -4192,6 +4238,9 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         ByIdAction { .matches = holds<actions::StartDaemon>, .run = StartRowDaemon },
         ByIdAction { .matches = holds<actions::CancelSwitch>, .run = CancelRowPending },
         ByIdAction { .matches = holds<actions::RemoveDaemon>, .run = RemoveRowDaemon },
+        ByIdAction { .matches = holds<actions::HideDaemon>, .run = HideRowDaemon },
+        ByIdAction { .matches = holds<actions::ShowHiddenDaemon>, .run = ShowHiddenRowDaemon },
+        ByIdAction { .matches = holds<actions::NewWorkspace>, .run = NewRowWorkspace },
     };
     /// A menu close, and what it closes: from the sidebar's menu a close always asks first.
     struct ConfirmedClose
@@ -4204,6 +4253,16 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         ConfirmedClose { .matches = holds<actions::CloseTab>, .kind = CloseKind::Tab },
         ConfirmedClose { .matches = holds<actions::ClosePane>, .kind = CloseKind::Pane },
     };
+    // Another daemon's workspace, tab and pane rows: one table says what runs there, and how (spec §9).
+    auto const otherDaemon = row.kind != SidebarRowKind::Daemon && row.kind != SidebarRowKind::Hidden
+                             && rowOriginOf(row) == command::RowOrigin::OtherDaemon;
+    if (otherDaemon)
+        switch (command::otherDaemonRouteOf(action))
+        {
+            case command::OtherDaemonRoute::NotOffered: return;
+            case command::OtherDaemonRoute::JumpFirst: jumpThenRun(row, action); return;
+            case command::OtherDaemonRoute::InPlace: break; // asked to close, or by id, below
+        }
     if (auto const asked = std::ranges::find_if(
             ConfirmedCloses, [&](ConfirmedClose const& entry) { return entry.matches(action); });
         asked != ConfirmedCloses.end())
@@ -4218,7 +4277,56 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         byId->run(*this, row, action);
         return;
     }
-    runSidebarActionShown(row, action);
+    // What the window shows is its own daemon's: another daemon's row is never run against it.
+    if (!otherDaemon)
+        runSidebarActionShown(row, action);
+}
+
+command::RowOrigin WindowController::rowOriginOf(SidebarRowKey const& row) const
+{
+    return window::rowOriginOf(row.daemon, _manager.daemonRefOf(_displayed));
+}
+
+void WindowController::jumpThenRun(SidebarRowKey const& row, actions::Action const& action)
+{
+    // Go to Pane is the jump itself: it lands on the row's pane.
+    auto then = SidebarJumps::JumpThen {};
+    if (!std::holds_alternative<actions::GoToPane>(action))
+        then = [manager = &_manager, window = _windowId, row, action](vthost::proto::SwitchOutcome outcome) {
+            // Here once the window shows the row -- a switch is told it landed once the window is the row's
+            // daemon's (remote::SwitchTold::OnceLanded) -- else in the window that showed it already and was
+            // raised.
+            auto* const runner = outcome == vthost::proto::SwitchOutcome::Switched
+                                     ? manager->controllerOf(window)
+                                     : manager->controllerShowing(row.daemon, row.workspace);
+            // Run there only as that window's own row: never a second jump.
+            if (runner != nullptr && runner->rowOriginOf(row) == command::RowOrigin::Own)
+                runner->runSidebarAction(row, action);
+        };
+    _sidebarHost->jumpThen(sidebarTargetOf(row), JumpMode::Here, std::move(then));
+}
+
+std::optional<DaemonSection> WindowController::sectionOf(DaemonRef const& daemon) const
+{
+    return listedSection(_manager.app().daemonSections(), daemon);
+}
+
+void WindowController::colorSidebarWorkspace(SidebarRowKey const& row,
+                                             std::optional<vtbackend::RGBColor> color)
+{
+    if (rowOriginOf(row) == command::RowOrigin::Own)
+        _manager.setWorkspaceColor(*this, row.workspace, color);
+    else
+        _manager.app().daemonSections().setWorkspaceColor(row.daemon, row.instance, row.workspace, color);
+}
+
+void WindowController::colorSidebarTab(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color)
+{
+    if (rowOriginOf(row) == command::RowOrigin::Own)
+        _manager.colorTab(*this, row.tab, color);
+    else
+        _manager.app().daemonSections().setTabColor(
+            row.daemon, row.instance, TabRef { .workspace = row.workspace, .tab = row.tab }, color);
 }
 
 void WindowController::askToClose(CloseKind kind, SidebarRowKey const& key)
@@ -4231,56 +4339,93 @@ void WindowController::askToClose(CloseKind kind, SidebarRowKey const& key)
         label = QString::fromStdString(shown.title);
         program = QString::fromStdString(shown.program);
     }
+    // The row goes with the question whole: the ids alone do not say whose daemon they are of.
     emit sidebarCloseConfirmationRequested(
-        static_cast<int>(kind), key.workspace, key.tab, key.pane.value, label, program);
+        QVariant::fromValue(CloseNode { .kind = kind, .row = key }), label, program);
 }
 
-QVariantMap WindowController::closeConfirmation(
-    int kind, quint64 workspace, quint64 tab, QString const& label, QString const& program) const
+QVariant WindowController::ownWorkspaceCloseNode(uint64_t workspace) const
 {
-    if (kind < 0 || std::cmp_greater_equal(kind, CloseKindCount))
+    return QVariant::fromValue(CloseNode {
+        .kind = CloseKind::Workspace, .row = _sidebar->ownRowKey(SidebarRowKind::Workspace, workspace, 0) });
+}
+
+QVariantMap WindowController::closeConfirmation(QVariant const& node,
+                                                QString const& label,
+                                                QString const& program) const
+{
+    auto const closing = heldAs<CloseNode>(node);
+    if (!closing)
         return {};
     auto subject = CloseSubject {
-        .label = label.toStdString(), .tabs = 0, .panes = 0, .program = program.toStdString()
+        .label = label.toStdString(), .tabs = 0, .panes = 0, .program = program.toStdString(), .daemon = {}
     };
-    auto const directory =
-        _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
-    if (auto const* const listed = findWorkspace(directory, workspace))
+    // Another daemon's node counts from that daemon's section, and the dialog names the daemon.
+    auto const& row = closing->row;
+    auto directory = WorkspaceDirectory {};
+    if (rowOriginOf(row) == command::RowOrigin::OtherDaemon)
     {
-        if (static_cast<CloseKind>(kind) == CloseKind::Workspace)
+        auto section = sectionOf(row.daemon);
+        subject.daemon = daemonDisplayName(row.daemon, section);
+        if (section)
+            directory = std::move(section->directory);
+    }
+    else if (_directorySource != nullptr)
+        directory = _directorySource->directory();
+    if (auto const* const listed = findWorkspace(directory, row.workspace))
+    {
+        if (closing->kind == CloseKind::Workspace)
         {
             subject.tabs = listed->tabs.size();
             subject.panes = sessionsOf(listed->tabs).size();
         }
-        else if (auto const* const closing = findTab(*listed, tab))
-            subject.panes = closing->panes.size();
+        else if (auto const* const closed = findTab(*listed, row.tab))
+            subject.panes = closed->panes.size();
     }
-    auto const text = closeDialogText(static_cast<CloseKind>(kind), subject);
+    auto const text = closeDialogText(closing->kind, subject);
     return { { QStringLiteral("heading"), QString::fromStdString(text.heading) },
              { QStringLiteral("message"), QString::fromStdString(text.message) },
              { QStringLiteral("acceptText"), QString::fromStdString(text.acceptText) } };
 }
 
-void WindowController::confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane)
+void WindowController::confirmClose(QVariant const& node)
 {
-    if (kind < 0 || std::cmp_greater_equal(kind, CloseKindCount))
+    auto const closing = heldAs<CloseNode>(node);
+    if (!closing)
         return;
-    switch (static_cast<CloseKind>(kind))
+    auto const& row = closing->row;
+    // Another daemon's node closes there, through its section and by the run it was read from -- also one
+    // that was the window's own when asked, if the window is on another daemon by now. Never a node of the
+    // window's own that happens to share its ids.
+    if (rowOriginOf(row) == command::RowOrigin::OtherDaemon)
     {
-        case CloseKind::Workspace: confirmCloseWorkspace(workspace); break;
+        auto& sections = _manager.app().daemonSections();
+        switch (closing->kind)
+        {
+            case CloseKind::Workspace:
+                sections.closeWorkspace(row.daemon, row.instance, row.workspace);
+                break;
+            case CloseKind::Tab:
+                sections.closeTab(
+                    row.daemon, row.instance, TabRef { .workspace = row.workspace, .tab = row.tab });
+                break;
+            case CloseKind::Pane: sections.closePane(row.daemon, row.instance, row.pane); break;
+        }
+        return;
+    }
+    switch (closing->kind)
+    {
+        case CloseKind::Workspace: confirmCloseWorkspace(row.workspace); break;
         case CloseKind::Tab:
-            runSidebarActionShown(
-                SidebarRowKey {
-                    .kind = SidebarRowKind::Tab, .workspace = workspace, .tab = tab, .pane = PaneKey {} },
-                actions::Action { actions::CloseTab {} });
+            runSidebarActionShown(SidebarRowKey { .kind = SidebarRowKind::Tab,
+                                                  .daemon = row.daemon,
+                                                  .instance = row.instance,
+                                                  .workspace = row.workspace,
+                                                  .tab = row.tab,
+                                                  .pane = PaneKey {} },
+                                  actions::Action { actions::CloseTab {} });
             break;
-        case CloseKind::Pane:
-            runSidebarActionShown(SidebarRowKey { .kind = SidebarRowKind::Pane,
-                                                  .workspace = workspace,
-                                                  .tab = tab,
-                                                  .pane = PaneKey { pane } },
-                                  actions::Action { actions::ClosePane {} });
-            break;
+        case CloseKind::Pane: runSidebarActionShown(row, actions::Action { actions::ClosePane {} }); break;
     }
 }
 
@@ -4326,34 +4471,59 @@ void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::
 
 void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF windowPosition)
 {
-    if (row.key.kind == SidebarRowKind::Hidden)
-        return; // no menu, and nothing to pin
     // Pinned by key: rows shift while the menu is open.
     _sidebarMenuRow = row.key;
     _sidebarMenuAnchor = windowPosition;
+    // The Hidden row offers each hidden daemon back, pinned by its daemon: the row changes as they are shown.
+    if (row.key.kind == SidebarRowKind::Hidden)
+    {
+        _sidebarMenuTabs.clear();
+        _sidebarMenuHidden =
+            std::ranges::to<std::vector>(row.hidden | std::views::transform(&HiddenDaemon::daemon));
+        auto const names =
+            std::ranges::to<std::vector>(row.hidden | std::views::transform(&HiddenDaemon::name));
+        presentSurface(
+            MenuSurface::Sidebar, resolveMenu(command::buildSidebarHiddenMenu(names)), _sidebarMenuAnchor);
+        return;
+    }
+    auto const origin = rowOriginOf(row.key);
     // At the row, not the pointer: the menu key opens it with the pointer anywhere.
     if (row.key.kind == SidebarRowKind::Daemon)
     {
         _sidebarMenuTabs.clear();
         presentSurface(MenuSurface::Sidebar,
-                       resolveMenu(command::buildSidebarDaemonMenu(sidebarDaemonMenuStateOf(row))),
+                       resolveMenu(command::buildSidebarDaemonMenu(sidebarDaemonMenuStateOf(row, origin))),
                        _sidebarMenuAnchor);
         return;
     }
-    auto const directory =
-        _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
+    // The row's own daemon's directory: the window's for its own rows, the section's for another daemon's.
+    auto const directory = [&] {
+        if (origin == command::RowOrigin::Own)
+            return _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
+        auto section = sectionOf(row.key.daemon);
+        return section ? std::move(section->directory) : WorkspaceDirectory {};
+    }();
     auto const* const holder = findWorkspace(directory, row.key.workspace);
     // Its tabs by id, as its row by key: they shift while the menu is open.
     _sidebarMenuTabs = offeredTabsOf(directory);
     auto const moves = menuMovesOf(_manager.hostMovesOf(*this));
     auto const open = openOfferOf(row.key.daemon);
+    // A row of a daemon not connected now is what was last known of it: nothing carries a verb there.
+    auto const freshness = row.staleness == RowStaleness::LastKnown ? command::RowFreshness::LastKnown
+                                                                    : command::RowFreshness::Live;
 
     auto entries = std::vector<command::ContextMenuEntry> {};
     switch (row.key.kind)
     {
-        case SidebarRowKind::Workspace:
-            entries = command::buildWorkspaceMenu(workspaceMenuStateOf(row.key.workspace));
+        case SidebarRowKind::Workspace: {
+            auto state =
+                origin == command::RowOrigin::Own
+                    ? workspaceMenuStateOf(row.key.workspace)
+                    : otherDaemonWorkspaceMenuStateOf(directory, row.key, _manager.model().colorPalette());
+            state.freshness = freshness;
+            entries = command::buildWorkspaceMenu(state);
             break;
+        }
         case SidebarRowKind::Tab: {
             // Every workspace but the tab's own can take it.
             auto others = directory;
@@ -4361,7 +4531,8 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
             // The row's own tab's colour, not the shown one's: "Reset" is offered on what the row's tab has.
             // This process's model says whether the user gave it; a daemon's tab has what its directory
             // lists.
-            auto const* const owned = _manager.ownTabOf(*this, row.key.tab);
+            auto const* const owned =
+                origin == command::RowOrigin::Own ? _manager.ownTabOf(*this, row.key.tab) : nullptr;
             auto const listed = findTab(directory, row.key.workspace, row.key.tab);
             auto const coloring = owned != nullptr
                                       ? coloringOf(*owned)
@@ -4376,7 +4547,9 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
                       joinTargetsOf(directory, TabRef { .workspace = row.key.workspace, .tab = row.key.tab }),
                   .workspaceTabs = holder != nullptr ? holder->tabs.size() : 0,
                   .moves = moves,
-                  .open = open });
+                  .open = open,
+                  .origin = origin,
+                  .freshness = freshness });
             break;
         }
         case SidebarRowKind::Pane: {
@@ -4387,7 +4560,9 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
                   .tabPanes = listed ? listed->tab->panes.size() : 0,
                   .workspaceTabs = listed ? listed->workspace->tabs.size() : 0,
                   .moves = moves,
-                  .open = open });
+                  .open = open,
+                  .origin = origin,
+                  .freshness = freshness });
             break;
         }
         case SidebarRowKind::Daemon:

@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace contour::command
@@ -55,6 +57,62 @@ enum class OpenOffer : uint8_t
     Offered,        ///< Offered.
 };
 
+/// Whose row a menu was opened over.
+enum class RowOrigin : uint8_t
+{
+    Own = 0,     ///< The window's own daemon, or a window with no daemon.
+    OtherDaemon, ///< Another listed daemon: verbs go through its section, or jump there first.
+};
+
+/// How a sidebar menu verb runs on another daemon's row (spec §9).
+enum class OtherDaemonRoute : uint8_t
+{
+    NotOffered = 0, ///< Not on another daemon's row (moves, merges, the tab strip's bulk closes).
+    InPlace,        ///< Through that daemon's section, the window staying where it is.
+    JumpFirst,      ///< Jump to the row, then run it there.
+};
+
+/// What a verb on another daemon's row needs of that daemon's section.
+enum class SectionNeed : uint8_t
+{
+    None = 0, ///< Nothing: a jump, which reaches the daemon itself.
+    Live,     ///< A connected section, which carries it to the daemon: on a last-known row it is disabled.
+};
+
+/// Whether another daemon's row says what its daemon says now, or what was last known of it.
+enum class RowFreshness : uint8_t
+{
+    Live = 0,  ///< Its daemon's section is connected.
+    LastKnown, ///< It is not: the row is what was last known, and nothing carries a verb through its section.
+};
+
+/// One row of the route table: an action, by its alternative, and how it runs on another daemon's row.
+struct OtherDaemonRouteRow
+{
+    actions::Action action;                                ///< The action; only its alternative counts.
+    OtherDaemonRoute route = OtherDaemonRoute::NotOffered; ///< How it runs there.
+    SectionNeed need = SectionNeed::None;                  ///< What it needs of the daemon's section.
+};
+
+/// @return The route table, one row per action a sidebar menu offers, each action once.
+[[nodiscard]] std::span<OtherDaemonRouteRow const> otherDaemonRoutes();
+
+/// @param action A sidebar menu's action.
+/// @return How @p action runs on another daemon's row; NotOffered for any action the table does not name.
+[[nodiscard]] OtherDaemonRoute otherDaemonRouteOf(actions::Action const& action) noexcept;
+
+/// @param action A sidebar menu's action.
+/// @return What @p action needs of another daemon's section; None for any action the table does not name.
+[[nodiscard]] SectionNeed sectionNeedOf(actions::Action const& action) noexcept;
+
+/// Whether a daemon row's menu offers "New Workspace".
+enum class NewWorkspaceOffer : uint8_t
+{
+    NotOffered = 0, ///< Not offered: a `link:` daemon, which no switch can name, or one not reachable now.
+    Offered, ///< Offered: on the window's own daemon, a new workspace; on another, made there, then jumped
+             ///< to.
+};
+
 /// The world, as a workspace row's context menu needs to see it.
 struct WorkspaceMenuState
 {
@@ -70,6 +128,9 @@ struct WorkspaceMenuState
     std::optional<vtbackend::RGBColor> color {};
     MenuColoring coloring = MenuColoring::Available; ///< Whether the window's host keeps the colour.
     OpenOffer open = OpenOffer::Offered;             ///< Whether "Open in New Window" is offered.
+    RowOrigin origin = RowOrigin::Own; ///< Whose row: another daemon's offers only what routes there.
+    /// Whether another daemon's row is what was last known of it: what goes through its section is disabled.
+    RowFreshness freshness = RowFreshness::Live;
 };
 
 /// The workspace row's context menu for @p state.
@@ -95,6 +156,9 @@ struct SidebarTabMenuState
     std::size_t workspaceTabs = 1;
     MenuMoves moves = MenuMoves::Nodes;  ///< What the window's host moves.
     OpenOffer open = OpenOffer::Offered; ///< Whether "Open in New Window" is offered.
+    RowOrigin origin = RowOrigin::Own;   ///< Whose row: another daemon's offers only what routes there.
+    /// Whether another daemon's row is what was last known of it: what goes through its section is disabled.
+    RowFreshness freshness = RowFreshness::Live;
 };
 
 /// The tab row's context menu in the sidebar: the tab strip's menu, "Move to Workspace", "Merge into Tab" and
@@ -114,6 +178,9 @@ struct SidebarPaneMenuState
     std::size_t workspaceTabs = 1;
     MenuMoves moves = MenuMoves::Nodes;  ///< What the window's host moves.
     OpenOffer open = OpenOffer::Offered; ///< Whether "Open in New Window" is offered.
+    RowOrigin origin = RowOrigin::Own;   ///< Whose row: another daemon's offers only what routes there.
+    /// Whether another daemon's row is what was last known of it: what goes through its section is disabled.
+    RowFreshness freshness = RowFreshness::Live;
 };
 
 /// The pane row's context menu.
@@ -132,17 +199,50 @@ enum class DaemonRowVerb : uint8_t
     Remove,   ///< Unlists the daemon for the rest of the run (RemoveDaemon).
 };
 
+/// Whether a daemon row's menu offers "Hide from Sidebar".
+enum class HideOffer : uint8_t
+{
+    NotOffered = 0, ///< Not offered: a window of this process is on the daemon, or it is a `link:` daemon.
+    Offered,        ///< Offered: the daemon is only observed, and a choice kept for it names it next run too.
+};
+
+/// What a daemon row's Cancel ends, which its menu row names.
+enum class DaemonCancelTarget : uint8_t
+{
+    Connect = 0, ///< The connect under way.
+    Jump,        ///< The pending jump into the daemon's section.
+};
+
 /// The world, as a daemon row's context menu needs to see it.
 struct SidebarDaemonMenuState
 {
     /// The row's buttons as verbs, in their order on the row; None for a place with no button.
     std::array<DaemonRowVerb, 2> verbs {};
-    OpenOffer open = OpenOffer::Offered; ///< Not offered for a `link:` daemon, which no switch can name.
+    /// Not offered for a `link:` daemon, which no switch can name, nor for one that cannot be reached now.
+    OpenOffer open = OpenOffer::Offered;
+    DaemonCancelTarget cancels = DaemonCancelTarget::Connect; ///< What its Cancel ends, if it offers one.
+    /// "New Workspace", above the button verbs: on the window's own daemon, or made on another and jumped to.
+    NewWorkspaceOffer newWorkspace = NewWorkspaceOffer::Offered;
+    /// "Hide from Sidebar", set apart with "Remove from Sidebar".
+    HideOffer hide = HideOffer::NotOffered;
 };
 
-/// The daemon row's context menu: "Open in New Window", then what the row's buttons do, in their order.
+/// What a daemon row verb's menu row says: the verb in full, as the button's tooltip says it too.
+/// @param verb    The verb.
+/// @param cancels What a Cancel ends, which it names.
+/// @return Its title; empty for None.
+[[nodiscard]] std::string_view daemonRowVerbTitle(DaemonRowVerb verb, DaemonCancelTarget cancels) noexcept;
+
+/// The daemon row's context menu: "Open in New Window", "New Workspace", then what the row's buttons do, in
+/// their order, and "Hide from Sidebar" and "Remove from Sidebar" set apart.
 /// @param state The daemon row the menu was opened over.
 /// @return The menu, top to bottom.
 [[nodiscard]] std::vector<ContextMenuEntry> buildSidebarDaemonMenu(SidebarDaemonMenuState const& state);
+
+/// The Hidden row's context menu: one "Show ‹name›" per hidden daemon, in order, each running
+/// ShowHiddenDaemon with its 1-based index.
+/// @param names The hidden daemons' names, in the Hidden row's order.
+/// @return The menu, top to bottom.
+[[nodiscard]] std::vector<ContextMenuEntry> buildSidebarHiddenMenu(std::span<std::string const> names);
 
 } // namespace contour::command

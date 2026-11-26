@@ -179,6 +179,9 @@ CommandArguments commandArguments(actions::Action const& action)
             [](MoveTabToWorkspace const& a) -> CommandArguments {
                 return { .id = std::format("{}", a.index), .title = std::format(" {}", a.index) };
             },
+            [](ShowHiddenDaemon const& a) -> CommandArguments {
+                return { .id = std::format("{}", a.index), .title = std::format(" {}", a.index) };
+            },
             [](MoveToTab const& a) -> CommandArguments {
                 return { .id = std::format("{}.{}", a.workspace, a.tab),
                          .title = std::format(" {}.{}", a.workspace, a.tab) };

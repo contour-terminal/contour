@@ -530,10 +530,20 @@ struct DaemonRowFacts
 /// @param verb A daemon row's button or action.
 /// @param link Who holds the row's link.
 /// @return Whether the row can carry it: Connect only where this process holds the link (an observer, or the
-///         window's own); another window's link is that window's to seek again.
+///         window's own); another window's link is that window's to seek again. Cancel, of a connect, only
+///         on an observer's, the one connect the daemon sections end (IDaemonSections::disconnect()); a
+///         pending jump's Cancel is the jump's, whoever holds the link (daemonRowButtons()).
 [[nodiscard]] constexpr bool linkCarries(DaemonRowButton verb, DaemonRowLink link) noexcept
 {
-    return verb != DaemonRowButton::Connect || link != DaemonRowLink::OtherWindow;
+    switch (verb)
+    {
+        case DaemonRowButton::Connect: return link != DaemonRowLink::OtherWindow;
+        case DaemonRowButton::Cancel: return link == DaemonRowLink::Observer;
+        case DaemonRowButton::None:
+        case DaemonRowButton::Start:
+        case DaemonRowButton::Remove: return true;
+    }
+    return true;
 }
 
 /// What activating a daemon row does.
@@ -597,22 +607,27 @@ enum class ConnectRoute : uint8_t
 enum class CancelRoute : uint8_t
 {
     None = 0, ///< Nothing is under way there.
-    Jump,     ///< The pending jump into the daemon's section (ISidebarHost::cancelJump()).
-    Connect,  ///< The connect still connecting (IDaemonSections::disconnect()).
+    JumpHere, ///< The pending jump in this window into the daemon's section (ISidebarHost::cancelJump()).
+    JumpNewWindow, ///< The pending Open in New Window into the daemon's section (ISidebarHost::cancelJump()).
+    Connect,       ///< The connect still connecting (IDaemonSections::disconnect()).
 };
 
 /// Which of what may be under way a daemon row's Cancel ends: a pending jump first, as it is what the user
-/// asked for last and what holds the connect.
+/// asked for last and what holds the connect -- the one in this window before an Open in New Window, when
+/// both go there.
 /// @param row The daemon row's daemon.
-/// @param pending Where the pending jump goes, if one is under way.
+/// @param pending Where the pending jumps go.
 /// @param state The daemon's link state.
-/// @return Jump for a jump into @p row's section; else Connect while it connects; else None.
+/// @return JumpHere or JumpNewWindow for a jump into @p row's section; else Connect while it connects; else
+///         None.
 [[nodiscard]] constexpr CancelRoute cancelRouteOf(DaemonRef const& row,
-                                                  std::optional<SidebarTarget> const& pending,
+                                                  PendingJumps const& pending,
                                                   DaemonLinkState state) noexcept
 {
-    if (pending && pending->daemon == row)
-        return CancelRoute::Jump;
+    if (pending.here && pending.here->daemon == row)
+        return CancelRoute::JumpHere;
+    if (pending.newWindow && pending.newWindow->daemon == row)
+        return CancelRoute::JumpNewWindow;
     if (state == DaemonLinkState::Connecting)
         return CancelRoute::Connect;
     return CancelRoute::None;

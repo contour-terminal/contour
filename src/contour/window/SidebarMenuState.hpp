@@ -177,6 +177,25 @@ struct OfferedTab
                                                           : command::OpenOffer::NotOffered;
 }
 
+/// The world, as another daemon's workspace row's menu sees it: from that daemon's section's directory, which
+/// it counts; its colour kept there (an observed daemon shares the workspace's meta, spec §2); offering only
+/// what runs on another daemon's row (command::otherDaemonRouteOf()).
+/// @param directory The row's daemon's section's directory.
+/// @param row The workspace row.
+/// @param palette The colours its "Workspace Color" submenu offers.
+/// @return The state.
+[[nodiscard]] inline command::WorkspaceMenuState otherDaemonWorkspaceMenuStateOf(
+    WorkspaceDirectory const& directory,
+    SidebarRowKey const& row,
+    std::span<vtbackend::RGBColor const> palette)
+{
+    auto state = workspaceMenuStateOf(
+        directory, row.workspace, command::MenuMoves::Nothing, command::MenuColoring::Available, palette);
+    state.open = openOfferOf(row.daemon);
+    state.origin = command::RowOrigin::OtherDaemon;
+    return state;
+}
+
 /// The menu's verbs mirror the row's buttons one to one (sidebarDaemonMenuStateOf() converts by value).
 static_assert(std::to_underlying(command::DaemonRowVerb::None) == std::to_underlying(DaemonRowButton::None));
 static_assert(std::to_underlying(command::DaemonRowVerb::Connect)
@@ -190,13 +209,68 @@ static_assert(std::to_underlying(command::DaemonRowVerb::Remove)
 static_assert(std::to_underlying(command::DaemonRowVerb::Remove) + 1 == DaemonRowButtonCount,
               "every daemon row button has its verb");
 
+/// @param state A daemon's link state.
+/// @return Whether a window could be opened on the daemon now: not while it is not running, too old, or
+///         failed, where the switch could only fail.
+[[nodiscard]] constexpr command::OpenOffer openOfferOf(DaemonLinkState state) noexcept
+{
+    switch (state)
+    {
+        case DaemonLinkState::NotConnected:
+        case DaemonLinkState::Connecting:
+        case DaemonLinkState::Connected:
+        case DaemonLinkState::Reconnecting:
+        case DaemonLinkState::NeedsInput: return command::OpenOffer::Offered;
+        case DaemonLinkState::NotRunning:
+        case DaemonLinkState::TooOld:
+        case DaemonLinkState::Failed: return command::OpenOffer::NotOffered;
+    }
+    return command::OpenOffer::NotOffered;
+}
+
+/// @param row A row's daemon.
+/// @param own The daemon the window is on; none for a window with no daemon, whose rows are all its own.
+/// @return Whose row it is.
+[[nodiscard]] inline command::RowOrigin rowOriginOf(DaemonRef const& row, std::optional<DaemonRef> const& own)
+{
+    return !own || row == *own ? command::RowOrigin::Own : command::RowOrigin::OtherDaemon;
+}
+
+/// @param row A daemon row.
+/// @return Offered for a daemon only observed -- no window of this process is on it, which keeps it listed
+///         whatever is chosen -- that a switch can name: a choice kept for a `link:` daemon names nothing
+///         next run.
+[[nodiscard]] inline command::HideOffer hideOfferOf(SidebarRow const& row)
+{
+    return row.link == DaemonRowLink::Observer && openOfferOf(row.key.daemon) == command::OpenOffer::Offered
+               ? command::HideOffer::Offered
+               : command::HideOffer::NotOffered;
+}
+
 /// The world, as the daemon row @p row's menu sees it.
 /// @param row A daemon row.
-/// @return Its buttons as verbs (daemonRowButtons()), in their order, and whether "Open in New Window" is
-///         offered (openOfferOf()).
-[[nodiscard]] inline command::SidebarDaemonMenuState sidebarDaemonMenuStateOf(SidebarRow const& row)
+/// @param origin Whether it is the window's own daemon.
+/// @return Its buttons as verbs (daemonRowButtons()), in their order; whether "Open in New Window" is
+///         offered (openOfferOf(), by its daemon and by its state); what its Cancel ends; and whether "New
+///         Workspace" is: always on the window's own daemon, which makes it as the tab strip does; on
+///         another, wherever a window could be opened on it, as the workspace is made there and jumped to;
+///         and whether "Hide from Sidebar" is (hideOfferOf()).
+[[nodiscard]] inline command::SidebarDaemonMenuState sidebarDaemonMenuStateOf(SidebarRow const& row,
+                                                                              command::RowOrigin origin)
 {
-    auto state = command::SidebarDaemonMenuState { .verbs = {}, .open = openOfferOf(row.key.daemon) };
+    auto const offered = openOfferOf(row.key.daemon) == command::OpenOffer::Offered
+                             ? openOfferOf(row.linkState)
+                             : command::OpenOffer::NotOffered;
+    auto const reachable = origin == command::RowOrigin::Own || offered == command::OpenOffer::Offered;
+    auto state = command::SidebarDaemonMenuState {
+        .verbs = {},
+        .open = offered,
+        .cancels = row.pending == RowPending::Yes ? command::DaemonCancelTarget::Jump
+                                                  : command::DaemonCancelTarget::Connect,
+        .newWorkspace =
+            reachable ? command::NewWorkspaceOffer::Offered : command::NewWorkspaceOffer::NotOffered,
+        .hide = hideOfferOf(row),
+    };
     std::ranges::transform(daemonRowButtons(daemonRowFactsOf(row), row.pending),
                            state.verbs.begin(),
                            [](DaemonRowButton button) {

@@ -100,6 +100,32 @@ namespace
         std::set<std::string> _added;
         std::vector<ListedDaemon> _listed;
     };
+
+    /// @param inputs What discovery reports.
+    /// @param labels Labels known besides: the local daemons a window is on.
+    /// @return The labels of the local daemons known this run -- running now, listed earlier, or in
+    ///         @p labels -- the default daemon first, the rest alphabetically.
+    [[nodiscard]] std::vector<std::string> knownLocalLabels(PresenceInputs const& inputs,
+                                                            std::set<std::string> labels)
+    {
+        labels.insert(inputs.runningLocal.begin(), inputs.runningLocal.end());
+        labels.insert(inputs.seenLocalThisRun.begin(), inputs.seenLocalThisRun.end());
+        // std::set holds the labels alphabetically; the default daemon goes first.
+        auto ordered = std::vector<std::string>(labels.begin(), labels.end());
+        std::ranges::stable_partition(ordered,
+                                      [](std::string const& label) { return label == DefaultLocalLabel; });
+        return ordered;
+    }
+
+    /// @return The saved hosts, by name.
+    [[nodiscard]] std::vector<std::pair<std::string, window::SidebarListingChoice>> hostsByName(
+        ListingSettings const& settings)
+    {
+        auto hosts = settings.hosts;
+        std::ranges::stable_sort(
+            hosts, std::less {}, [](auto const& entry) -> std::string const& { return entry.first; });
+        return hosts;
+    }
 } // namespace
 
 std::vector<ListedDaemon> listedDaemons(PresenceInputs const& inputs)
@@ -137,37 +163,24 @@ std::vector<ListedDaemon> listedDaemons(PresenceInputs const& inputs)
     auto const isWindowOn = [&](window::DaemonRef const& daemon) {
         return windowOn.contains(daemon.value);
     };
-    auto const isHidden = [&](window::DaemonRef const& daemon) {
-        return settings.hiddenByUser.contains(daemon.value);
+    auto const isChosen = [&](window::DaemonRef const& daemon, window::SidebarListingChoice configured) {
+        return chosenListing(settings, daemon, configured) == window::SidebarListingChoice::Listed;
     };
 
-    for (auto const& label: inputs.runningLocal)
-        localLabels.insert(label);
-    for (auto const& label: inputs.seenLocalThisRun)
-        localLabels.insert(label);
-
-    // std::set holds the labels alphabetically; the default daemon goes first.
-    auto orderedLabels = std::vector<std::string>(localLabels.begin(), localLabels.end());
-    std::ranges::stable_partition(orderedLabels,
-                                  [](std::string const& label) { return label == DefaultLocalLabel; });
-
     auto listing = Listing {};
-    for (auto const& label: orderedLabels)
+    for (auto const& label: knownLocalLabels(inputs, std::move(localLabels)))
     {
         auto daemon = window::localDaemonRef(label);
-        if (isWindowOn(daemon) || (!isHidden(daemon) && !inputs.removedThisRun.contains(daemon.value)))
+        if (isWindowOn(daemon)
+            || (isChosen(daemon, window::SidebarListingChoice::Listed)
+                && !inputs.removedThisRun.contains(daemon.value)))
             listing.add(std::move(daemon), window::DaemonLocality::Local);
     }
 
-    auto hosts = settings.hosts;
-    std::ranges::stable_sort(
-        hosts, std::less {}, [](auto const& entry) -> std::string const& { return entry.first; });
-    for (auto const& [name, choice]: hosts)
+    for (auto const& [name, choice]: hostsByName(settings))
     {
         auto daemon = window::hostDaemonRef(name);
-        auto const chosen =
-            choice == window::SidebarListingChoice::Listed || settings.shownByUser.contains(daemon.value);
-        if (isWindowOn(daemon) || (chosen && !isHidden(daemon)))
+        if (isWindowOn(daemon) || isChosen(daemon, choice))
             listing.add(std::move(daemon), window::DaemonLocality::Remote);
     }
 
@@ -179,6 +192,36 @@ std::vector<ListedDaemon> listedDaemons(PresenceInputs const& inputs)
         listing.add(std::move(entry.second), window::DaemonLocality::Remote);
 
     return listing.take();
+}
+
+window::SidebarListingChoice chosenListing(ListingSettings const& settings,
+                                           window::DaemonRef const& daemon,
+                                           window::SidebarListingChoice configured)
+{
+    if (settings.hiddenByUser.contains(daemon.value))
+        return window::SidebarListingChoice::Unlisted;
+    if (configured == window::SidebarListingChoice::Listed || settings.shownByUser.contains(daemon.value))
+        return window::SidebarListingChoice::Listed;
+    return window::SidebarListingChoice::Unlisted;
+}
+
+std::vector<window::HiddenDaemon> hiddenDaemons(PresenceInputs const& inputs,
+                                                std::vector<ListedDaemon> const& listed)
+{
+    if (inputs.windowsOn.empty())
+        return {};
+    auto hidden = std::vector<window::HiddenDaemon> {};
+    auto const add = [&](window::DaemonRef daemon, std::string name) {
+        if (inputs.settings.hiddenByUser.contains(daemon.value)
+            && !inputs.removedThisRun.contains(daemon.value)
+            && !std::ranges::contains(listed, daemon, &ListedDaemon::daemon))
+            hidden.push_back(window::HiddenDaemon { .daemon = std::move(daemon), .name = std::move(name) });
+    };
+    for (auto const& label: knownLocalLabels(inputs, {}))
+        add(window::localDaemonRef(label), label);
+    for (auto const& entry: hostsByName(inputs.settings))
+        add(window::hostDaemonRef(entry.first), entry.first);
+    return hidden;
 }
 
 window::DaemonRef daemonRefOf(DaemonAddress const& address, DaemonLinkId link)

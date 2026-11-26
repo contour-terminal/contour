@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <optional>
+#include <string>
 
 #include <QtTest/QSignalSpy>
 
@@ -26,7 +27,11 @@ struct ModelUnderTest
     core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 1h };
     contour::test::RecordingAnnouncer announcer;
     std::optional<NoticeAction> action;
-    NoticeModel model { clock, announcer, [this](NoticeAction taken) { action = taken; } };
+    std::string subject; ///< What the last action taken acted on.
+    NoticeModel model { clock, announcer, [this](NoticeAction taken, std::string const& on) {
+                           action = taken;
+                           subject = on;
+                       } };
 };
 
 } // namespace
@@ -84,4 +89,32 @@ TEST_CASE("NoticeModel: a banner offers its action and can be dismissed", "[cont
     t.action.reset();
     t.model.triggerBannerAction();
     CHECK_FALSE(t.action.has_value());
+}
+
+TEST_CASE("NoticeModel: a toast with an action runs it with its subject, then ends",
+          "[contour][notices][notice]")
+{
+    auto t = ModelUnderTest {};
+    t.model.post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+    REQUIRE(t.model.toastShown());
+    CHECK(t.model.toastText() == "starfive hidden from the sidebar");
+    CHECK(t.model.toastActionText() == "Undo");
+
+    t.model.triggerToastAction();
+
+    CHECK(t.action == NoticeAction::UndoHide);
+    CHECK(t.subject == "host:starfive");
+    CHECK_FALSE(t.model.toastShown());
+    CHECK(t.model.toastActionText().isEmpty());
+}
+
+TEST_CASE("NoticeModel: a toast without an action has no action text", "[contour][notices][notice]")
+{
+    auto t = ModelUnderTest {};
+    t.model.post(Notice { .kind = NoticeKind::Copied, .text = "Copied 3 lines" });
+    CHECK(t.model.toastActionText().isEmpty());
+    t.model.triggerToastAction();
+    CHECK_FALSE(t.action.has_value());
+    // Nothing to take: the toast stays its time.
+    CHECK(t.model.toastShown());
 }

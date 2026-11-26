@@ -350,6 +350,14 @@ enum class ChromeColorRole : uint8_t
     /// A row last known of a daemon that is not connected: its name and marks, a step dimmer than a live
     /// row's ink (spec §11), yet 3:1 on the sidebar's fill.
     SidebarLastKnownInk,
+
+    // A toast's action button (Hide's "Undo"), on the toast's fill.
+    ToastActionFill,        //!< At rest: what sets it apart from the toast's words; none on the Terminal row.
+    ToastActionHoverFill,   //!< Under the pointer, or holding the keyboard.
+    ToastActionPressedFill, //!< Pressed.
+    /// Its words under the pointer, holding the keyboard or pressed: the toast's ink on the native rows,
+    /// inverse video's on the Terminal row, whose hover is the toast's ink as the fill.
+    ToastActionActiveInk,
 };
 
 /// Where a chrome colour comes from.
@@ -453,7 +461,7 @@ inline constexpr std::array SchemeMarkChains {
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::SidebarLastKnownInk) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::ToastActionActiveInk) + 1;
 
 // Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
 // family added between two others then shifts no count.
@@ -494,6 +502,12 @@ inline constexpr size_t SettingsColorRoleEnd = static_cast<size_t>(ChromeColorRo
 inline constexpr size_t SidebarColorRoleBegin = static_cast<size_t>(ChromeColorRole::SidebarFill);
 /// One past the last workspace sidebar colour role.
 inline constexpr size_t SidebarColorRoleEnd = static_cast<size_t>(ChromeColorRole::SidebarLastKnownInk) + 1;
+
+/// The first colour role of a toast's action button.
+inline constexpr size_t ToastActionColorRoleBegin = static_cast<size_t>(ChromeColorRole::ToastActionFill);
+/// One past the last colour role of a toast's action button.
+inline constexpr size_t ToastActionColorRoleEnd =
+    static_cast<size_t>(ChromeColorRole::ToastActionActiveInk) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource

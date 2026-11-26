@@ -149,10 +149,11 @@ filter is only a view: it never changes what a drag or a rename acts on.
   window that runs its sessions in-process, does not offer it, nor does a daemon's row while the daemon is not
   running, too old or failed. An Open in New Window under way goes on while the window switches elsewhere,
   and the other way round.
-    - a daemon: Open in New Window, then what the row's buttons do, in their order and named in full
-      (**Connect**, **Start Daemon**, **Cancel Connecting** or, while a jump into it is under way,
-      **Cancel Jump**), and **Remove from Sidebar** set apart below them; so it stays in reach when a narrow
-      sidebar has dropped its button. Another daemon's workspace, tab and pane rows have no menu yet;
+    - a daemon: Open in New Window, **New Workspace** (on the window's own daemon as the tab strip's; on
+      another, made there and then jumped to), then what the row's buttons do, in their order and named in
+      full as their tooltips name them (**Connect**, **Start Daemon**, **Cancel Connecting** or, while a jump
+      into it is under way, **Cancel Jump**), and **Hide from Sidebar** and **Remove from Sidebar** set apart
+      below them; so it stays in reach when a narrow sidebar has dropped its button;
     - a workspace: **Workspace Color**, Rename…, Mark Seen, New Tab Here, Move Up, Move Down, **Merge into
       Tab** (a workspace of one tab only), Close Workspace… (the last workspace of an in-process window cannot
       be closed);
@@ -161,6 +162,17 @@ filter is only a view: it never changes what a drag or a rename acts on.
       **Merge into Tab** and **Move to New Workspace**;
     - a pane: Go to Pane, Open in New Window, Mark Seen, **Split Vertically**, **Split Horizontally**, **Move to Tab**, **Move to
       New Tab**, **Move to New Workspace**, Close Pane….
+
+**Show, hide, remove.** Which daemons the sidebar lists is chosen in the sidebar itself. **Hide from Sidebar**
+(offered on a daemon no window of this Contour is on, and not on a daemon reached by an unnamed link) takes it
+off and keeps that choice for later runs; a toast says so, and its **Undo** lists it again. Hidden daemons are
+gathered in the last row, "1 hidden daemon", shown while the sidebar lists everything: click it, press Return,
+the Menu key or Shift+F10 on it, and its menu offers **Show ‹name›** for each. **Remove from Sidebar** takes a
+daemon off for this run only, and keeps nothing. The switcher's daemon rows offer the same choice as a
+check box, **Show in Sidebar** (not on the window's own daemon, nor on one any window is on, which are always
+listed). Undo and Show restore what you had chosen before the Hide: a saved host whose configuration lists it,
+or a daemon of this machine, merely loses its Hide; a saved host with `show_in_sidebar: false` is shown by
+your choice. Every one of these is reached by keyboard through the menus; none has a default key.
 
   Move to Tab and Merge into Tab list every other tab, under the name of its workspace; the pane, or the
   tab's panes, join that tab as splits, as a drop on its row does. Move to New Workspace makes a workspace
@@ -175,6 +187,16 @@ filter is only a view: it never changes what a drag or a rename acts on.
   The three close rows (Close Workspace…, Close Tab…, Close Pane…) always ask first, in one confirmation
   that names what ends (the tabs and panes, and the running command where known). Cancel is the default
   button and Escape cancels; the answer closes the row the menu was opened on.
+
+  Another daemon's workspace, tab and pane rows have the same menus, less what cannot cross daemons: no Move
+  Up/Down, Move or Merge row, and none of the tab strip's Move Tab to New Window, Close Other Tabs and Close
+  Tabs to the Right. Rename…, the colours, Mark Seen and the close rows act there in place, through that
+  daemon's connection, and leave the window where it is; the confirmation ends "It runs on ‹daemon›.".
+  New Tab Here and the Split rows jump to the row first and act once the jump lands, in this window or in
+  the window that shows the workspace already; Go to Pane is the jump. A menu opened before its daemon
+  restarted does nothing: what it names belongs to the run that ended. Such rows cannot be dragged, and
+  nothing is dropped on them. A row of what was last known of a daemon that is not connected renames
+  nothing.
 - **Drag** to reorder or move. A row's upper and lower thirds are the gaps beside it, shown as a line where
   the drop lands; its middle is the row itself, shown highlighted. A drop the row refuses shows the refusal.
     - a workspace onto another workspace row: before it in the upper half, after it in the lower half;

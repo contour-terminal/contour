@@ -383,8 +383,8 @@ class ContourGuiApp:
     ///                     which makes it in terminalGuiAction(); tests, which make their own first, pass
     ///                     Ready.
     /// @param presence     What a test replaces of the presence of the listed daemons
-    ///                     (remote::DaemonPresence): how its observers are made and its refreshes timed.
-    ///                     Production's by default.
+    ///                     (remote::DaemonPresence): how its observers are made and dialled, its refreshes
+    ///                     timed, and which daemons it lists. Production's by default.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -742,6 +742,10 @@ class ContourGuiApp:
     ///         construction; GUI thread only.
     [[nodiscard]] window::IDaemonSections& daemonSections() noexcept { return *_daemonPresence; }
 
+    /// @return The presence as the window switching reaches it: what adopts a listed daemon's observer and
+    ///         takes a left daemon's connection back. Exists from construction; GUI thread only.
+    [[nodiscard]] remote::IObserverPool& observerPool() noexcept { return *_daemonPresence; }
+
     /// The path the process was launched as (argv[0]), used to re-spawn contour for a new
     /// window/tab and to open config hyperlinks. Falls back to the app name when argv is not yet
     /// available (any call before run() records it — e.g. a FollowHyperlink/NewTerminal action that
@@ -1040,6 +1044,16 @@ class ContourGuiApp:
     /// @param scope What the row acts on.
     void runMenuBarAction(actions::Action const& action, command::ActionScope scope);
 
+    /// What the GUI verb does the moment its event loop returned, before any window or link is released:
+    /// shuts the presence of the listed daemons down, so that a link stopped afterwards -- one still waiting
+    /// to hand its daemon's connection back gives it back with nothing -- has it dial no observer.
+    void endGuiRun();
+
+    /// Undoes what establishHosting() set up, on every return of the GUI verb: drops the launch hooks,
+    /// unroutes session creation, and stops every link and the tmux attach. The presence is shut down first
+    /// (endGuiRun()), for a return that never ran the event loop.
+    void releaseHosting();
+
   private:
     /// The configured row resolved as the provider would resolve it, for the paths that run before a
     /// provider exists: against the configured density, the accessibility preferences and the OS's material
@@ -1331,9 +1345,6 @@ class ContourGuiApp:
     /// @return Nothing to continue the launch; the line to print, ending it, otherwise.
     [[nodiscard]] std::expected<void, std::string> establishHosting();
 
-    /// Undoes what establishHosting() set up, on every return of the GUI verb: drops the launch hooks,
-    /// unroutes session creation, and stops every link and the tmux attach.
-    void releaseHosting();
     /// Tells the operating system how to start this application again after an installer closed it. A failure
     /// is logged: all it costs is the reopening.
     void registerForRestart();

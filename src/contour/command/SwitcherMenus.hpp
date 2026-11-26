@@ -25,6 +25,15 @@ enum class SwitcherMenuChoice : uint8_t
 {
     Switch = 0,      ///< Switch this window to it, as Return does.
     OpenInNewWindow, ///< Open it in a new window, as Shift+Return does.
+    ShowInSidebar,   ///< On a daemon row: list the daemon in the sidebar, or stop listing it.
+};
+
+/// Whether the sidebar lists a daemon: the command layer's mirror of window::SidebarListingChoice, which this
+/// layer cannot name (tied by a static_assert where the switcher fills it).
+enum class SidebarListing : uint8_t
+{
+    Unlisted = 0, ///< Not listed.
+    Listed,       ///< Listed.
 };
 
 /// Whose workspace the menu is about.
@@ -74,6 +83,7 @@ struct SwitcherChoiceRow
     std::string title {};                                    ///< What it says.
     std::string shortcut {};                                 ///< The key that does the same in the switcher.
     RowAvailability availability = RowAvailability::Enabled; ///< Whether it can be picked.
+    RowCheck check = RowCheck::None;                         ///< Whether it is a check box.
 
     bool operator==(SwitcherChoiceRow const&) const = default;
 };
@@ -87,5 +97,18 @@ using SwitcherMenuRow = std::variant<SwitcherChoiceRow, ContextMenuEntry>;
 /// @return The menu, top to bottom.
 [[nodiscard]] std::vector<SwitcherMenuRow> buildSwitcherRowMenu(SwitcherRowMenuState const& state,
                                                                 ShortcutStyle style);
+
+/// The world, as a switcher daemon row's menu needs to see it.
+struct SwitcherDaemonMenuState
+{
+    /// Whether the sidebar lists the daemon; none where the user has no choice: the window's own daemon, a
+    /// daemon any window of this process is on, or a `link:` daemon.
+    std::optional<SidebarListing> listing;
+};
+
+/// The switcher's daemon row menu: one check box, "Show in Sidebar", checked while the sidebar lists it.
+/// @param state The daemon the menu was opened over.
+/// @return The menu; empty where nothing is offered.
+[[nodiscard]] std::vector<SwitcherMenuRow> buildSwitcherDaemonMenu(SwitcherDaemonMenuState const& state);
 
 } // namespace contour::command

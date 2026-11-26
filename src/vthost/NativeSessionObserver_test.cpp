@@ -531,6 +531,28 @@ TEST_CASE("an observer's MarkSeen clears what it saw, and it is told so", "[vtho
                               }));
 }
 
+TEST_CASE("an observer is told a pane's program status, and not its bell", "[vthost][native][observer]")
+{
+    auto f = ObserverFixture {};
+    auto& host = f.flush.h.host;
+    // As the application's presence dials one: sharing program status.
+    auto& observer = f.observe(ObserverFixture::promotableHello());
+    auto const skip = observer.received.size();
+
+    host.terminal(f.inSecond)->writeToScreen("\033]7501;state=blocked:id=agent\033\\\a");
+    f.settle();
+
+    auto const told = observer.received | std::views::drop(skip);
+    CHECK(std::ranges::any_of(told, [&](proto::DecodedFrame const& frame) {
+        auto const* status = std::get_if<proto::ProgramStatus>(&frame.pdu);
+        return status != nullptr && status->session == f.inSecond.value && status->records.size() == 1;
+    }));
+    // The bell is the attaching window's to ring; the observer learns it from the pane's attention alone.
+    CHECK(std::ranges::none_of(told, [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::SessionBell>(frame.pdu);
+    }));
+}
+
 TEST_CASE("an observer does not keep an exit-when-idle daemon alive", "[vthost][native][observer][control]")
 {
     auto f = ObserverFixture {};

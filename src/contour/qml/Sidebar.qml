@@ -152,25 +152,24 @@ Rectangle {
             item.startRename()
     }
 
-    /// Opens the colour picker over workspace @p workspace's row (the controller's workspaceColorPickRequested):
-    /// "Custom…" in its menu's Workspace Color, or the SetWorkspaceColor action naming no colour.
-    function openWorkspaceColorPicker(workspace) {
-        if (!root.model)
-            return
-        const item = root.colorPickerRow(root.model.workspaceRowIndex(workspace))
-        if (!item)
-            return
-        workspaceColorFlyout.workspace = workspace
-        root.openColorPicker(workspaceColorFlyout, item, item.workspaceColor)
-    }
-
-    /// Opens the colour picker over tab row @p index for tab @p tab (the controller's
-    /// sidebarTabColorPickRequested): "Custom…" in a tab row's menu's Tab Color.
-    function openTabColorPicker(index, tab) {
+    /// Opens the colour picker over workspace row @p index for the row @p key names (the controller's
+    /// workspaceColorPickRequested): "Custom…" in its menu's Workspace Color, or the SetWorkspaceColor action
+    /// naming no colour. The key -- whose daemon's workspace it is -- goes back with the pick.
+    function openWorkspaceColorPicker(index, key) {
         const item = root.colorPickerRow(index)
         if (!item)
             return
-        tabColorFlyout.tab = tab
+        workspaceColorFlyout.row = key
+        root.openColorPicker(workspaceColorFlyout, item, item.workspaceColor)
+    }
+
+    /// Opens the colour picker over tab row @p index for the row @p key names (the controller's
+    /// sidebarTabColorPickRequested): "Custom…" in a tab row's menu's Tab Color.
+    function openTabColorPicker(index, key) {
+        const item = root.colorPickerRow(index)
+        if (!item)
+            return
+        tabColorFlyout.row = key
         root.openColorPicker(tabColorFlyout, item, item.tabColor)
     }
 
@@ -210,6 +209,8 @@ Rectangle {
             if (root.model.currentIndex >= 0)
                 tree.positionViewAtIndex(root.model.currentIndex, ListView.Contain)
         }
+        // The Hidden row, activated: its menu hangs from it, as the Menu key opens it.
+        function onRowMenuRequested(index) { root.openRowMenu(index) }
     }
 
     Connections {
@@ -222,46 +223,46 @@ Rectangle {
         }
         function onSidebarRowRenameRequested(index) { root.renameRow(index) }
         function onSidebarFilterRequested() { root.openFilter() }
-        function onWorkspaceColorPickRequested(workspace) { root.openWorkspaceColorPicker(workspace) }
-        function onSidebarTabColorPickRequested(index, tab) { root.openTabColorPicker(index, tab) }
+        function onWorkspaceColorPickRequested(index, key) { root.openWorkspaceColorPicker(index, key) }
+        function onSidebarTabColorPickRequested(index, key) { root.openTabColorPicker(index, key) }
     }
 
     // The one colour picker of the sidebar's workspaces, hung from the row it colours when it opens. A pick
-    // colours that workspace by id, shown or not, and leaves the window where it is.
+    // colours that row's workspace -- on the row's daemon -- shown or not, and leaves the window where it is.
     TabColorFlyout {
         id: workspaceColorFlyout
         objectName: "sidebarWorkspaceColorFlyout"
-        /// The workspace the picker colours, by its id (WindowController::workspaceColorPickRequested).
-        property var workspace: 0
+        /// The row the picker colours, whole and opaque (WindowController::workspaceColorPickRequested).
+        property var row: undefined
         controller: root.controller
         // Null-guarded: the controller is torn down before this popup on window close.
         onColorPicked: (c) => {
             if (root.controller)
-                root.controller.setWorkspaceColor(workspaceColorFlyout.workspace, c)
+                root.controller.setRowColor(workspaceColorFlyout.row, c)
         }
         onResetRequested: {
             if (root.controller)
-                root.controller.resetWorkspaceColor(workspaceColorFlyout.workspace)
+                root.controller.resetRowColor(workspaceColorFlyout.row)
         }
         onClosed: root.returnFocus()
     }
 
     // The one colour picker of the sidebar's tabs, as the workspaces' above: a sidebar placement draws no tab
-    // strip to hang the tab's own from. A pick colours that tab by id and leaves the focus where it is.
+    // strip to hang the tab's own from. A pick colours that row's tab and leaves the focus where it is.
     TabColorFlyout {
         id: tabColorFlyout
         objectName: "sidebarTabColorFlyout"
-        /// The tab the picker colours, by its id (WindowController::sidebarTabColorPickRequested).
-        property var tab: 0
+        /// The row the picker colours, whole and opaque (WindowController::sidebarTabColorPickRequested).
+        property var row: undefined
         controller: root.controller
         // Null-guarded: the controller is torn down before this popup on window close.
         onColorPicked: (c) => {
             if (root.controller)
-                root.controller.setTabColorOf(tabColorFlyout.tab, c)
+                root.controller.setRowColor(tabColorFlyout.row, c)
         }
         onResetRequested: {
             if (root.controller)
-                root.controller.resetTabColorOf(tabColorFlyout.tab)
+                root.controller.resetRowColor(tabColorFlyout.row)
         }
         onClosed: root.returnFocus()
     }

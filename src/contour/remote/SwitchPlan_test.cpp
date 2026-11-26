@@ -652,4 +652,10 @@ TEST_CASE("supersession follows the table, cause by stage", "[switch]")
           == SupersedeCause::NewerUserRequest);
     CHECK(contour::remote::newerRequestCause(core::platform::SteadyTimePoint {})
           == SupersedeCause::NewerRequest);
+    // The user's is told it switched once the window is rebound, a program's before the window leaves its
+    // daemon: the program is answered on the connection the switch ends.
+    CHECK(contour::remote::switchToldOf(contour::session::NoLandingDeadline)
+          == contour::remote::SwitchTold::OnceLanded);
+    CHECK(contour::remote::switchToldOf(core::platform::SteadyTimePoint {})
+          == contour::remote::SwitchTold::BeforeLeaving);
 }

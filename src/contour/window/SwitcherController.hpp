@@ -9,6 +9,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/platform/OffThreadJobs.hpp>
 #include <contour/session/WindowSwitching.hpp>
+#include <contour/window/DaemonSection.hpp>
 #include <contour/window/SwitcherKeys.hpp>
 #include <contour/window/SwitcherRows.hpp>
 #include <contour/window/SwitcherText.hpp>
@@ -76,6 +77,11 @@ struct SwitcherServices
     /// Runs one of the sidebar's workspace menu rows on that workspace, through the sidebar's menu path.
     std::function<void(vtworkspace::WorkspaceId window, uint64_t workspace, actions::Action const& action)>
         runWorkspaceAction {};
+    /// Whether the sidebar lists a daemon, for its row's "Show in Sidebar"; none where the user has no choice
+    /// (a daemon a window is on, a `link:` daemon). Called on the GUI thread.
+    std::function<std::optional<SidebarListingChoice>(DaemonRef const&)> listingOf {};
+    /// Keeps the user's choice to list a daemon in the sidebar, or not. Called on the GUI thread.
+    std::function<void(DaemonRef const&, SidebarListingChoice)> setListed {};
 };
 
 /// Who chose the selected row: nobody yet, or the user.
@@ -209,8 +215,10 @@ class SwitcherController: public QAbstractListModel
     /// @param delta Rows to move; negative moves up.
     Q_INVOKABLE void step(int delta);
 
-    /// The menu of a workspace row (command::buildSwitcherRowMenu), as ActionContextMenu draws it; empty for
-    /// any other row. What triggerRowMenu() runs is pinned to the row it was built for.
+    /// The menu of a workspace row (command::buildSwitcherRowMenu), or of a daemon row
+    /// (command::buildSwitcherDaemonMenu), as ActionContextMenu draws it; empty for any other row, and for a
+    /// daemon row whose listing is not the user's to choose. What triggerRowMenu() runs is pinned to the row
+    /// it was built for.
     /// @param row The row.
     /// @return The menu rows.
     Q_INVOKABLE QVariantList rowMenu(int row);
@@ -319,9 +327,16 @@ class SwitcherController: public QAbstractListModel
     struct RowMenu
     {
         std::optional<SwitcherRowIdentity> row;           ///< The row it was built for.
+        std::optional<DaemonRef> daemon;                  ///< A daemon row's daemon, its toggle's subject.
         std::vector<command::SwitcherMenuChoice> choices; ///< Its leading entries, by actionId.
         actions::ActionList actions;                      ///< The sidebar's entries, by actionId - choices.
     };
+
+    /// @return The menu of the daemon row @p chosen (command::buildSwitcherDaemonMenu), pinned as
+    /// rowMenu()'s.
+    [[nodiscard]] QVariantList daemonRowMenu(SwitcherRow const& chosen);
+    /// Flips whether the sidebar lists the daemon the menu was opened over.
+    void toggleListing();
 
     [[nodiscard]] SwitcherInputs inputs() const;
     [[nodiscard]] SwitcherView view() const;

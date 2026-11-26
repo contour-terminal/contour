@@ -10,6 +10,7 @@
 #include <contour/window/SidebarTree.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -17,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/Primitives.hpp>
@@ -63,14 +65,21 @@ inline constexpr auto JumpStaleRunReason = std::string_view { "the daemon restar
 
 /// The jumps of one window's sidebar into other daemons' rows.
 ///
-/// One jump is under way at a time: a newer one replaces it (the switching service ends the older for the
-/// user's newer request), and only the newest one's outcome is said; a replaced one says nothing. A row of a
-/// daemon run that has ended is refused before anything is asked, and said so.
+/// One jump per mode is under way at a time -- one in this window, one into a window of its own -- and
+/// neither ends the other, as the switching service keeps them in slots of their own. A newer jump of a mode
+/// replaces that mode's (the switching service ends the older for the user's newer request), and only the
+/// newest one's outcome is said; a replaced one says nothing. Each mode's jump says how it ended, a failure
+/// or a timeout of either among it. A row of a daemon run that has ended is refused before anything is asked,
+/// and said so.
 class SidebarJumps
 {
   public:
     /// Says a jump's progress (SidebarModel::noteJump()).
     using Announce = std::function<void(JumpEvent, SidebarTarget const&, std::string const&)>;
+
+    /// What runs once a jump ended well: told whether this window shows the target (Switched) or another
+    /// window that does was raised (FocusedExisting).
+    using JumpThen = std::function<void(vthost::proto::SwitchOutcome)>;
 
     /// @param switching What switches the window. Borrowed; it must outlive this.
     /// @param announce Says each step of a jump.
@@ -84,39 +93,72 @@ class SidebarJumps
     /// @param controlId The control id of the row's workspace (jumpControlIdOf()): all zero leaves the choice
     ///        to the daemon; StaleRun refuses the jump.
     /// @param from Where the window is now, for a later jump back; none for nowhere.
+    /// @param then What runs once it landed, in this window or by raising another that shows the target; not
+    ///        for a jump that failed, was cancelled or was replaced. Empty for nothing.
     void jumpTo(vtworkspace::WorkspaceId window,
                 SidebarTarget const& target,
                 JumpMode mode,
                 std::expected<std::array<uint8_t, 16>, JumpRefusal> const& controlId,
-                std::optional<SidebarTarget> from);
+                std::optional<SidebarTarget> from,
+                JumpThen then = {});
 
-    /// @return Where the jump under way goes; none while none is.
-    [[nodiscard]] std::optional<SidebarTarget> pending() const;
-
-    /// Ends the jump under way, leaving @p window as it was (session::WindowSwitching::cancel(), for the
-    /// jump's mode); its end then says it was cancelled. Nothing while none is under way.
+    /// Makes a new workspace on another daemon, then shows it in @p window: the jump under way, pending on
+    /// the daemon's row, as any jump is (session::WindowSwitching::createWorkspace()).
     /// @param window The window jumping.
-    void cancel(vtworkspace::WorkspaceId window);
+    /// @param daemonTarget The daemon's row: its daemon and run; its workspace is not read.
+    /// @param from Where the window is now, for a later jump back; none for nowhere.
+    void createAndJump(vtworkspace::WorkspaceId window,
+                       SidebarTarget const& daemonTarget,
+                       std::optional<SidebarTarget> from);
+
+    /// @return Where the jumps under way go, by mode.
+    [[nodiscard]] PendingJumps pending() const;
+
+    /// Ends the jump of @p mode under way, leaving @p window as it was (session::WindowSwitching::cancel());
+    /// its end then says it was cancelled. The other mode's jump goes on. Nothing while none is under way.
+    /// @param window The window jumping.
+    /// @param mode Which jump: the one in this window (Escape, CancelSwitch, the location chip) or the
+    ///        Open in New Window (its own row's Cancel).
+    void cancel(vtworkspace::WorkspaceId window, JumpMode mode);
 
   private:
-    /// The jump under way.
+    /// A jump under way.
     struct PendingJump
     {
-        uint64_t serial = 0;                                    ///< Which jump of the window this is.
-        SidebarTarget target;                                   ///< Where it goes.
-        std::optional<SidebarTarget> from;                      ///< Where the window was.
-        session::SwitchMode mode = session::SwitchMode::Switch; ///< In this window, or a new one.
-        std::function<void()> then;           ///< What runs once it landed; empty for nothing.
+        uint64_t serial = 0;                  ///< Which jump of the window this is.
+        SidebarTarget target;                 ///< Where it goes.
+        std::optional<SidebarTarget> from;    ///< Where the window was.
+        JumpThen then;                        ///< What runs once it landed; empty for nothing.
         JumpCancel cancel = JumpCancel::None; ///< Whether the user asked it to end.
     };
 
-    /// Ends jump @p serial with @p outcome, if it is still the one under way.
+    /// Makes @p target's jump the one under way of @p mode, said to be connecting.
+    /// @return Its serial, and the completion its switch is told.
+    [[nodiscard]] session::SwitchCompletion start(SidebarTarget const& target,
+                                                  std::optional<SidebarTarget> from,
+                                                  session::SwitchMode mode,
+                                                  JumpThen then);
+
+    /// Ends jump @p serial with @p outcome, if it is still the one under way of its mode.
     void finish(uint64_t serial, std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome);
+
+    /// @return The slot the jump of @p mode waits in.
+    [[nodiscard]] std::optional<PendingJump>& slotOf(session::SwitchMode mode) noexcept
+    {
+        return _pending.at(static_cast<std::size_t>(std::to_underlying(mode)));
+    }
+
+    /// @return The slot the jump of @p mode waits in.
+    [[nodiscard]] std::optional<PendingJump> const& slotOf(session::SwitchMode mode) const noexcept
+    {
+        return _pending.at(static_cast<std::size_t>(std::to_underlying(mode)));
+    }
 
     session::WindowSwitching& _switching;
     Announce _announce;
     std::function<void()> _changed;
-    std::optional<PendingJump> _pending;
+    /// The jump under way of each mode, by session::SwitchMode: in this window, and an Open.
+    std::array<std::optional<PendingJump>, 2> _pending;
     uint64_t _nextSerial = 1;
     /// Held by this alone: a completion that outlives it finds it gone.
     std::shared_ptr<SidebarJumps*> _alive;

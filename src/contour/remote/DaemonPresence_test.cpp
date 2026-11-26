@@ -914,9 +914,56 @@ TEST_CASE("DaemonPresence: a verb for a restarted daemon's old instance does not
     CHECK_FALSE(waitUntil(
         [&] { return daemon.clientFrames.count(vthost::proto::PduType::SetWorkspaceColor) > 0; }, 40));
 
+    // A tab's colour and a pane's close, named by the old run, are not sent either.
+    auto const tab =
+        contour::window::TabRef { .workspace = added.id,
+                                  .tab = rig.section(Starfive)->directory.workspaces.back().tabs.front().id };
+    rig.presence->setTabColor(Starfive, old, tab, colour);
+    rig.presence->closePane(Starfive, old, contour::window::PaneKey { added.session.value });
+    CHECK_FALSE(waitUntil(
+        [&] {
+            return daemon.clientFrames.count(vthost::proto::PduType::EditTab) > 0
+                   || daemon.clientFrames.count(vthost::proto::PduType::ClosePane) > 0;
+        },
+        40));
+
     rig.presence->setWorkspaceColor(Starfive, rig.section(Starfive)->instance, added.id, colour);
     CHECK(
         waitUntil([&] { return daemon.clientFrames.count(vthost::proto::PduType::SetWorkspaceColor) == 1; }));
+}
+
+TEST_CASE("DaemonPresence: closePane and setTabColor reach the daemon of their run", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 2);
+    auto rig = PresenceRig { daemon };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] {
+        auto const section = rig.section(Starfive);
+        return section && section->state == DaemonLinkState::Connected
+               && section->directory.workspaces.size() >= 2;
+    }));
+    auto const run = rig.section(Starfive)->instance;
+    auto const listed = rig.section(Starfive)->directory.workspaces.back();
+    REQUIRE_FALSE(listed.tabs.empty());
+    REQUIRE_FALSE(listed.tabs.front().panes.empty());
+    auto const tab = contour::window::TabRef { .workspace = listed.id, .tab = listed.tabs.front().id };
+    auto const pane = listed.tabs.front().panes.front().key;
+    auto const colour = std::optional { vtbackend::RGBColor { 0x11, 0x22, 0x33 } };
+
+    rig.presence->setTabColor(Starfive, run, tab, colour);
+    CHECK(waitUntil([&] {
+        auto const section = rig.section(Starfive);
+        auto const found =
+            section ? contour::window::findTab(section->directory, tab.workspace, tab.tab) : std::nullopt;
+        return found && found->tab->color == colour;
+    }));
+
+    rig.presence->closePane(Starfive, run, pane);
+    CHECK(waitUntil([&] {
+        auto const section = rig.section(Starfive);
+        return section && !contour::window::tabHoldingPane(section->directory, pane);
+    }));
 }
 
 TEST_CASE("DaemonPresence: Hide persists through updateListing and drops the observer", "[presence]")
@@ -933,9 +980,166 @@ TEST_CASE("DaemonPresence: Hide persists through updateListing and drops the obs
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.empty(); }));
 
     rig.presence->setListed(Starfive, contour::window::SidebarListingChoice::Listed);
-    CHECK(rig.persisted.back().shown.contains(Starfive.value));
+    // Its configuration lists it: the Show takes the Hide back and writes nothing of its own.
+    CHECK_FALSE(rig.persisted.back().shown.contains(Starfive.value));
     CHECK_FALSE(rig.persisted.back().hidden.contains(Starfive.value));
     CHECK(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
+}
+
+TEST_CASE("DaemonPresence: Hide then Show restores what the user chose before", "[presence]")
+{
+    // A local daemon with no choice; a host its configuration lists, with no choice; a host its
+    // configuration does not list, which the user showed.
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.discovery->running = { "default", "work" };
+    rig.settings.hosts = { { "starfive", contour::window::SidebarListingChoice::Listed },
+                           { "vega", contour::window::SidebarListingChoice::Unlisted } };
+    rig.stored.shown = { "host:vega" };
+    rig.settings.shownByUser = rig.stored.shown;
+    rig.rebuild();
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.section(contour::window::localDaemonRef("work")).has_value(); }));
+    auto const before = rig.stored;
+
+    for (auto const& ref:
+         { contour::window::localDaemonRef("work"), Starfive, contour::window::hostDaemonRef("vega") })
+    {
+        INFO(ref.value);
+        rig.presence->setListed(ref, contour::window::SidebarListingChoice::Unlisted);
+        CHECK_FALSE(rig.section(ref).has_value());
+        rig.presence->setListed(ref, contour::window::SidebarListingChoice::Listed);
+        CHECK(rig.section(ref).has_value());
+        CHECK(rig.stored.shown == before.shown);
+        CHECK(rig.stored.hidden == before.hidden);
+    }
+}
+
+TEST_CASE("DaemonPresence: Remove drops a not-running daemon for this run only", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.discovery->running = { "default" };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.section(Default).has_value(); }));
+    auto const work = contour::window::localDaemonRef("work");
+    rig.discovery->running = { "default", "work" };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.section(work).has_value(); }));
+    // It stops: listed for the rest of the run all the same.
+    rig.discovery->running = { "default" };
+    rig.presence->refresh();
+    REQUIRE(rig.section(work).has_value());
+
+    rig.presence->remove(work);
+
+    CHECK_FALSE(rig.section(work).has_value());
+    CHECK(rig.persisted.empty());
+    CHECK(rig.presence->hiddenDaemons().empty());
+    // The next run lists it again once it runs: nothing of the Remove was kept.
+    rig.discovery->running = { "default", "work" };
+    rig.rebuild();
+    rig.presence->refresh();
+    CHECK(waitUntil([&] { return rig.section(work).has_value(); }));
+}
+
+// Review (Phase 6, M1): a removed daemon that is running again can be listed again this run.
+TEST_CASE("DaemonPresence: listing a removed daemon takes its Remove back", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    auto const work = contour::window::localDaemonRef("work");
+    rig.discovery->running = { "default", "work" };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.section(work).has_value(); }));
+    rig.presence->remove(work);
+    REQUIRE_FALSE(rig.section(work).has_value());
+    CHECK(rig.presence->listingOf(work) == contour::window::SidebarListingChoice::Unlisted);
+
+    // The switcher's "Show in Sidebar", checked.
+    rig.presence->setListed(work, contour::window::SidebarListingChoice::Listed);
+    CHECK(rig.section(work).has_value());
+    CHECK(rig.presence->listingOf(work) == contour::window::SidebarListingChoice::Listed);
+}
+
+// Review (Phase 6, M2): toggling a host its configuration does not list on and off again left a Hide behind,
+// and with it a permanent "1 hidden daemon" row.
+TEST_CASE("DaemonPresence: Show then Hide of a host the configuration does not list leaves nothing behind",
+          "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.settings.hosts = { { "starfive", contour::window::SidebarListingChoice::Unlisted } };
+    rig.rebuild();
+    rig.presence->refresh();
+    REQUIRE_FALSE(rig.section(Starfive).has_value());
+
+    rig.presence->setListed(Starfive, contour::window::SidebarListingChoice::Listed);
+    CHECK(rig.stored.shown.contains(Starfive.value));
+    rig.presence->setListed(Starfive, contour::window::SidebarListingChoice::Unlisted);
+
+    CHECK(rig.stored.shown.empty());
+    CHECK(rig.stored.hidden.empty());
+    CHECK(rig.presence->hiddenDaemons().empty());
+    CHECK_FALSE(rig.section(Starfive).has_value());
+    CHECK(rig.presence->listingOf(Starfive) == contour::window::SidebarListingChoice::Unlisted);
+}
+
+// Review (Phase 6, M3): with no window on any daemon nothing is shown, yet every choice stands.
+TEST_CASE("DaemonPresence: the switcher's toggle reads what was chosen, not what is shown", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.links.clear();
+    rig.discovery->running = { "default", "work" };
+    rig.settings.hosts = { { "starfive", contour::window::SidebarListingChoice::Listed },
+                           { "vega", contour::window::SidebarListingChoice::Unlisted } };
+    rig.settings.hiddenByUser = { "local:work" };
+    rig.rebuild();
+    rig.presence->refresh();
+    REQUIRE(rig.presence->sections().empty());
+
+    CHECK(rig.presence->listingOf(Default) == contour::window::SidebarListingChoice::Listed);
+    CHECK(rig.presence->listingOf(Starfive) == contour::window::SidebarListingChoice::Listed);
+    CHECK(rig.presence->listingOf(contour::window::localDaemonRef("work"))
+          == contour::window::SidebarListingChoice::Unlisted);
+    CHECK(rig.presence->listingOf(contour::window::hostDaemonRef("vega"))
+          == contour::window::SidebarListingChoice::Unlisted);
+}
+
+TEST_CASE("DaemonPresence: hiddenDaemons follows a hide and a show", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.section(Starfive).has_value(); }));
+    auto told = 0;
+    auto const subscription = rig.presence->onChanged([&] { ++told; });
+
+    rig.presence->setListed(Starfive, contour::window::SidebarListingChoice::Unlisted);
+    CHECK(told >= 1);
+    CHECK(rig.presence->hiddenDaemons()
+          == std::vector { contour::window::HiddenDaemon { .daemon = Starfive, .name = "starfive" } });
+
+    auto const afterHide = told;
+    rig.presence->setListed(Starfive, contour::window::SidebarListingChoice::Listed);
+    CHECK(told > afterHide);
+    CHECK(rig.presence->hiddenDaemons().empty());
+}
+
+TEST_CASE("DaemonPresence: the switcher's toggle is offered only where the user has a choice", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.section(Starfive).has_value(); }));
+
+    CHECK(rig.presence->listingOf(Starfive) == contour::window::SidebarListingChoice::Listed);
+    CHECK(rig.presence->listingOf(contour::window::hostDaemonRef("nowhere"))
+          == contour::window::SidebarListingChoice::Unlisted);
+    // The window's own daemon, and a link no switch can name.
+    CHECK_FALSE(rig.presence->listingOf(Default).has_value());
+    CHECK_FALSE(rig.presence->listingOf(contour::window::linkDaemonRef(3)).has_value());
 }
 
 TEST_CASE("DaemonPresence: the refresh timer re-arms only while a window is visible, and a fire after "
@@ -1342,6 +1546,8 @@ TEST_CASE("DaemonPresence: while a window holds a daemon's connection, its secti
         CHECK(during->state == DaemonLinkState::Connecting);
         CHECK(during->instance == before.instance);
         CHECK(during->directory == before.directory);
+        // A window's switch holds the connection: the rows of other windows offer no Cancel of it.
+        CHECK(during->feed == SectionFeed::WindowLink);
         // Its row offers no Connect meanwhile; one asked for all the same dials nothing.
         rig.presence->connect(Starfive, WorkspaceId { 1 });
         CHECK(rig.observersMade == 1);
@@ -1380,7 +1586,7 @@ TEST_CASE("DaemonPresence: while a window holds a daemon's connection, its secti
         CHECK(during->state == DaemonLinkState::Connected);
         CHECK(during->instance == view.instance);
         CHECK(during->directory == view.directory);
-        CHECK(during->feed == SectionFeed::Observer);
+        CHECK(during->feed == SectionFeed::WindowLink);
         rig.presence->connect(Starfive, WorkspaceId { 1 });
         CHECK(rig.observersMade == 0);
 
@@ -1407,6 +1613,39 @@ TEST_CASE("DaemonPresence: a give-back of nothing clears its own hand-over only"
 
     rig.presence->giveBack(Starfive, second, nullptr);
     CHECK(rig.observersMade == 1);
+}
+
+TEST_CASE(
+    "DaemonPresence: an earlier connection given back stays the observer while a later one is on its way",
+    "[presence][adopt]")
+{
+    // A daemon left, rejoined and left again: the first link's connection comes back while the second's is
+    // still on its way. It observes the daemon from then on; the second coming back with nothing redials
+    // nothing.
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    auto leaving = makeNativeController(daemon.endpoint(),
+                                        rig.timeline,
+                                        ControllerOptions { .role = vthost::proto::ConnectionRole::Observe });
+    leaving->startConnecting();
+    REQUIRE(waitUntil([&] { return leaving->connectionState() == ConnectionState::Connected; }));
+    rig.links.push_back(windowOn(Starfive, leaving.get()));
+    rig.presence->refresh();
+    auto const first = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 3 });
+    auto const second = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 4 });
+    rig.links.pop_back();
+    rig.presence->linkSetChanged();
+
+    rig.presence->giveBack(Starfive, first, std::move(leaving));
+    rig.presence->linkSetChanged();
+    rig.presence->refresh();
+
+    REQUIRE(rig.section(Starfive).has_value());
+    CHECK(rig.section(Starfive)->feed == SectionFeed::Observer);
+    CHECK(rig.section(Starfive)->state == DaemonLinkState::Connected);
+    rig.presence->giveBack(Starfive, second, nullptr);
+    CHECK(rig.observersMade == 0);
+    CHECK(rig.section(Starfive)->state == DaemonLinkState::Connected);
 }
 
 TEST_CASE("DaemonPresence: a link stopping after its hand-over was done dials nothing", "[presence][adopt]")

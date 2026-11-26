@@ -848,7 +848,8 @@ TEST_CASE("UiStyleProvider resolves the colour roles", "[contour][uistyle]")
     auto const mac = UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::MacOS, font));
     auto const toastFill = tokenOf(mac, "colors", "toastFill").value<QColor>();
     CHECK(toastFill.rgb() == QColor(0x28, 0x28, 0x2C).rgb());
-    CHECK(toastFill.alphaF() == Catch::Approx(0.92).margin(0.005));
+    // Opaque: nothing it floats over reads through it (Phase 6 review, M6).
+    CHECK(toastFill.alpha() == 255);
 
     // A palette source follows the application palette, and says so.
     auto notified = 0;

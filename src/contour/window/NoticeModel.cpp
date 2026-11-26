@@ -28,7 +28,7 @@ namespace
 
 NoticeModel::NoticeModel(core::platform::IClock const& clock,
                          platform::Announcer& announcer,
-                         std::function<void(NoticeAction)> onAction,
+                         ActionRunner onAction,
                          QObject* parent):
     QObject(parent), _clock { clock }, _announcer { announcer }, _onAction { std::move(onAction) }
 {
@@ -44,6 +44,12 @@ QString NoticeModel::toastText() const
 QString NoticeModel::toastGlyph() const
 {
     return glyphOf(_queue.toast());
+}
+
+QString NoticeModel::toastActionText() const
+{
+    auto const* const toast = _queue.toast();
+    return toast != nullptr ? QString::fromUtf8(noticeRow(toast->kind).actionText) : QString {};
 }
 
 QString NoticeModel::bannerText() const
@@ -77,6 +83,11 @@ void NoticeModel::setToastHovered(bool hovered)
     settle(_queue.hover(hovered ? ToastHover::Hovered : ToastHover::Away, _clock.now()));
 }
 
+void NoticeModel::setToastFocused(bool focused)
+{
+    settle(_queue.focus(focused ? ToastFocus::Focused : ToastFocus::Away, _clock.now()));
+}
+
 void NoticeModel::dismissBanner()
 {
     settle(_queue.dismissBanner());
@@ -88,7 +99,22 @@ void NoticeModel::triggerBannerAction()
     if (banner == nullptr)
         return;
     if (auto const action = noticeRow(banner->kind).action; action != NoticeAction::None && _onAction)
-        _onAction(action);
+        _onAction(action, banner->subject);
+}
+
+void NoticeModel::triggerToastAction()
+{
+    auto const* const toast = _queue.toast();
+    if (toast == nullptr)
+        return;
+    auto const action = noticeRow(toast->kind).action;
+    if (action == NoticeAction::None)
+        return;
+    // Copied: the action may post a notice, and ending the toast below drops this one.
+    auto const shown = *toast;
+    if (_onAction)
+        _onAction(action, shown.subject);
+    settle(_queue.clear(shown.kind));
 }
 
 void NoticeModel::expireDue()

@@ -1,7 +1,8 @@
 // vim:syntax=qml
 // One button of a daemon row in the sidebar -- Connect, Start, Cancel or Remove (window::DaemonRowButton) --
 // as the kit's ToolbarButton: its words while the row has room for them (in brackets on the Terminal row),
-// else its icon (a one-cell glyph on the Terminal row), its words then its accessible name and tooltip.
+// else its icon (a one-cell glyph on the Terminal row), its words then its accessible name; its tooltip names
+// the verb in full, as the row's menu does.
 // Remove, which has no icon form, keeps its words at every width: it gives way before the buttons shrink.
 // What the button looks like is the table's (UiStyleProvider.daemonRowButton, window::DaemonRowButtonFaces);
 // what it does is the model's (SidebarModel.pressDaemonButton).
@@ -20,7 +21,7 @@ ToolbarButton {
     /// words-only button (Remove) keeps its words whatever the room.
     property bool iconWanted: false
 
-    /// `{ words, label, icon, glyph, command }` of the button on this row.
+    /// `{ words, toolTip, label, icon, glyph, command }` of the button on this row.
     readonly property var face: chromeStyle.daemonRowButton(root.button, root.pending)
     /// Whether the button has an icon-only form on this row.
     readonly property bool hasIcon: (root.face.icon ?? "") !== "" || (root.face.glyph ?? "") !== ""
@@ -39,6 +40,8 @@ ToolbarButton {
 
     objectName: "sidebarDaemonButton"
     accessibleName: root.face.words ?? ""
+    // The verb in full ("Cancel Jump", "Start Daemon"), as the row's menu says it.
+    toolTipText: root.face.toolTip ?? ""
     toolTipCommand: root.face.command ?? ""
     glyph: root.iconOnly ? (root.face.glyph ?? "") : (root.face.label ?? "")
     iconSource: root.iconOnly ? (root.face.icon ?? "") : ""

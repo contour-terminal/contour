@@ -181,7 +181,7 @@ namespace
                     roles.push_back(role);
         };
         note(before.depth == after.depth, { SidebarModel::DepthRole });
-        note(before.title == after.title,
+        note(before.title == after.title && before.hidden.size() == after.hidden.size(),
              { SidebarModel::TitleRole, Qt::DisplayRole, Qt::AccessibleTextRole });
         note(before.reason == after.reason && before.reasonLabel == after.reasonLabel
                  && before.reasonSeparator == after.reasonSeparator
@@ -242,13 +242,13 @@ namespace
         return row.time.kind == TimeKind::Live || row.time.kind == TimeKind::Relative;
     }
 
-    /// The panes under @p row, from @p directory.
-    [[nodiscard]] std::vector<PaneKey> panesUnder(WorkspaceDirectory const& directory,
-                                                  SidebarRowKey const& key)
+    /// The directory's entries of the panes under @p key's row, from @p directory.
+    [[nodiscard]] std::vector<DirectoryPane const*> listedPanesUnder(WorkspaceDirectory const& directory,
+                                                                     SidebarRowKey const& key)
     {
-        auto keys = std::vector<PaneKey> {};
+        auto panes = std::vector<DirectoryPane const*> {};
         if (key.kind == SidebarRowKind::Daemon || key.kind == SidebarRowKind::Hidden)
-            return keys; // names no workspace
+            return panes; // names no workspace
         for (auto const& workspace: directory.workspaces)
         {
             if (workspace.id != key.workspace)
@@ -259,10 +259,19 @@ namespace
                     continue;
                 for (auto const& pane: tab.panes)
                     if (key.kind != SidebarRowKind::Pane || pane.key == key.pane)
-                        keys.push_back(pane.key);
+                        panes.push_back(&pane);
             }
         }
-        return keys;
+        return panes;
+    }
+
+    /// The panes under @p row, from @p directory.
+    [[nodiscard]] std::vector<PaneKey> panesUnder(WorkspaceDirectory const& directory,
+                                                  SidebarRowKey const& key)
+    {
+        return std::ranges::to<std::vector>(
+            listedPanesUnder(directory, key)
+            | std::views::transform([](DirectoryPane const* pane) { return pane->key; }));
     }
 
     /// @return The jump mode @p mode names, as QML passes it; Here for anything else.
@@ -308,8 +317,11 @@ QString accessibleNameOf(SidebarRow const& row)
 
 QString accessibleDescriptionOf(SidebarRow const& row)
 {
+    // The Hidden row says what it holds, and what pressing it does: its menu offers each back.
     if (row.key.kind == SidebarRowKind::Hidden)
-        return counted(HiddenDaemons, static_cast<uint32_t>(row.hidden.size()));
+        return QStringList { counted(HiddenDaemons, static_cast<uint32_t>(row.hidden.size())),
+                             SidebarModel::tr("Show hidden daemons") }
+            .join(QStringLiteral(", "));
     auto const daemon = row.key.kind == SidebarRowKind::Daemon;
     auto parts = QStringList { kindWord(row.key.kind) };
     // A daemon row says its link first: the words of its state, never its dot or its mark.
@@ -427,13 +439,13 @@ bool SidebarModel::isOwnRow(int row) const noexcept
     return ownRowAt(row) != nullptr;
 }
 
-SidebarRowKey SidebarModel::ownWorkspaceKey(uint64_t workspace) const
+SidebarRowKey SidebarModel::ownRowKey(SidebarRowKind kind, uint64_t workspace, uint64_t tab) const
 {
-    return SidebarRowKey { .kind = SidebarRowKind::Workspace,
+    return SidebarRowKey { .kind = kind,
                            .daemon = _own ? _own->daemon : DaemonRef {},
                            .instance = _own ? _own->instance : DaemonInstance {},
                            .workspace = workspace,
-                           .tab = 0,
+                           .tab = tab,
                            .pane = {} };
 }
 
@@ -489,7 +501,11 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
     {
         case KindRole: return static_cast<int>(row->key.kind);
         case DepthRole: return static_cast<int>(row->depth);
-        case TitleRole: return qs(row->title);
+        // The Hidden row has no name of its own: it shows how many daemons it holds.
+        case TitleRole:
+            return row->key.kind == SidebarRowKind::Hidden && row->title.empty()
+                       ? counted(HiddenDaemons, static_cast<uint32_t>(row->hidden.size()))
+                       : qs(row->title);
         case ReasonRole: return qs(row->reason);
         case FullReasonRole: return qs(row->fullReason);
         case GitTextRole: return qs(row->gitText);
@@ -619,8 +635,11 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
     // daemon lists its own workspaces alone.
     auto sections = std::vector<DaemonSection> {};
     auto listing = SidebarListing {};
+    // Kept beside the listing, which names them by span; read only for a window on a daemon.
+    auto hidden = std::vector<HiddenDaemon> {};
     if (_own)
     {
+        hidden = _sections.hiddenDaemons();
         auto listed = _sections.sections();
         auto own = DaemonSection { .daemon = _own->daemon,
                                    .instance = _own->instance,
@@ -642,11 +661,11 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
                                      : std::nullopt;
         listing = sidebarListing(
             SidebarSources {
-                .sections = sections, .own = _own->daemon, .ownMarks = &_attention, .hidden = {} },
+                .sections = sections, .own = _own->daemon, .ownMarks = &_attention, .hidden = hidden },
             _state,
             _clock.now(),
             shown,
-            _host.pendingJump());
+            _host.pendingJumps());
     }
     else
         listing = sidebarListing(directory, _attention, _state, _clock.now(), displayed);
@@ -714,7 +733,8 @@ void SidebarModel::refreshNow()
     if (rowMoved && key)
         emit currentRowChanged();
     auto const workspaceIndex =
-        built.currentWorkspace ? rowIndexOf(ownWorkspaceKey(*built.currentWorkspace)) : -1;
+        built.currentWorkspace ? rowIndexOf(ownRowKey(SidebarRowKind::Workspace, *built.currentWorkspace, 0))
+                               : -1;
     auto const daemonTitle = _own ? _own->name : std::string {};
     auto const countMoved = std::exchange(_sectionCount, built.sections.size()) != built.sections.size();
     auto const titleMoved = std::exchange(_daemonTitle, daemonTitle) != daemonTitle;
@@ -962,7 +982,10 @@ sidebarrows::RowActivation SidebarModel::activateRow(int row, JumpMode mode)
             // The keyboard stays on the daemon row, whatever it did.
             return sidebarrows::RowActivation::Nothing;
         }
-        case SidebarRowKind::Hidden: return sidebarrows::RowActivation::Nothing;
+        case SidebarRowKind::Hidden:
+            // Its menu offers each hidden daemon back; the tree opens it hanging from the row.
+            emit rowMenuRequested(row);
+            return sidebarrows::RowActivation::Nothing;
         case SidebarRowKind::Workspace:
         case SidebarRowKind::Tab:
         case SidebarRowKind::Pane: break;
@@ -1002,12 +1025,12 @@ sidebarrows::RowActivation SidebarModel::activateFirstMatch(int mode)
 
 bool SidebarModel::isJumpPending() const
 {
-    return _host.pendingJump().has_value();
+    return _host.pendingJumps().here.has_value();
 }
 
 void SidebarModel::cancelJump()
 {
-    _host.cancelJump();
+    _host.cancelJump(window::JumpMode::Here);
 }
 
 void SidebarModel::connectDaemon(int row)
@@ -1041,10 +1064,11 @@ void SidebarModel::cancelPending(int row)
     auto const* const shown = daemonRowAt(row);
     if (shown == nullptr)
         return;
-    switch (cancelRouteOf(shown->key.daemon, _host.pendingJump(), shown->linkState))
+    switch (cancelRouteOf(shown->key.daemon, _host.pendingJumps(), shown->linkState))
     {
         case CancelRoute::None: break;
-        case CancelRoute::Jump: _host.cancelJump(); break;
+        case CancelRoute::JumpHere: _host.cancelJump(window::JumpMode::Here); break;
+        case CancelRoute::JumpNewWindow: _host.cancelJump(window::JumpMode::NewWindow); break;
         case CancelRoute::Connect: _sections.disconnect(shown->key.daemon); break;
     }
 }
@@ -1134,19 +1158,30 @@ void SidebarModel::collapse(int row)
 
 void SidebarModel::rename(int row, QString const& name)
 {
-    auto const* const shown = ownRowAt(row);
-    // Another daemon's rows are not the window's to rename.
-    if (shown == nullptr)
+    auto const* const shown = rowAt(row);
+    // A last-known row names a run the daemon may no longer be on: nothing there to rename.
+    if (shown == nullptr || shown->staleness == RowStaleness::LastKnown)
         return;
-    switch (shown->key.kind)
+    // The window's own rows by its host; another daemon's through its section, by the run they were read
+    // from.
+    auto const& key = shown->key;
+    auto const own = isOwn(key);
+    switch (key.kind)
     {
         case SidebarRowKind::Workspace:
-            _host.renameWorkspace(shown->key.workspace, name.toStdString());
+            if (own)
+                _host.renameWorkspace(key.workspace, name.toStdString());
+            else
+                _sections.renameWorkspace(key.daemon, key.instance, key.workspace, name.toStdString());
             break;
-        case SidebarRowKind::Tab:
-            _host.renameTab(TabRef { .workspace = shown->key.workspace, .tab = shown->key.tab },
-                            name.toStdString());
+        case SidebarRowKind::Tab: {
+            auto const tab = TabRef { .workspace = key.workspace, .tab = key.tab };
+            if (own)
+                _host.renameTab(tab, name.toStdString());
+            else
+                _sections.renameTab(key.daemon, key.instance, tab, name.toStdString());
             break;
+        }
         case SidebarRowKind::Pane:
         case SidebarRowKind::Daemon:
         case SidebarRowKind::Hidden: break;
@@ -1155,12 +1190,27 @@ void SidebarModel::rename(int row, QString const& name)
 
 void SidebarModel::markSeen(int row)
 {
-    auto const* const shown = ownRowAt(row);
+    auto const* const shown = rowAt(row);
     if (shown == nullptr)
         return;
-    for (auto const pane: panesUnder(directory(), shown->key))
-        _host.markSeen(pane);
+    if (isOwn(shown->key))
+    {
+        for (auto const pane: panesUnder(directory(), shown->key))
+            _host.markSeen(pane);
+    }
+    else if (auto const section = sectionOf(shown->key.daemon))
+    {
+        // Another daemon keeps its panes' flags: each is told seen at that daemon, as far as its section
+        // states it, for the run the row was read from.
+        for (auto const* const pane: listedPanesUnder(section->directory, shown->key))
+            _sections.markSeen(shown->key.daemon, shown->key.instance, pane->key, paneSeenOf(*pane));
+    }
     noteChanged();
+}
+
+std::optional<DaemonSection> SidebarModel::sectionOf(DaemonRef const& daemon) const
+{
+    return listedSection(_sections, daemon);
 }
 
 QStringList SidebarModel::hoverLines(int row) const
@@ -1174,10 +1224,9 @@ QStringList SidebarModel::hoverLines(int row) const
 
 void SidebarModel::openContextMenu(int row, QPointF windowPosition)
 {
-    // The window's menus act on its own rows, and on every daemon row; another daemon's other rows have none
-    // yet.
-    if (auto const* const shown = rowAt(row);
-        shown != nullptr && (shown->key.kind == SidebarRowKind::Daemon || isOwn(shown->key)))
+    // Every row has its menu: another daemon's offers what runs there (spec §9), the Hidden row each hidden
+    // daemon back. The host decides by the row's kind.
+    if (auto const* const shown = rowAt(row))
         _host.openContextMenu(*shown, windowPosition);
 }
 

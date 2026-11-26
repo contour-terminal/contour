@@ -3483,6 +3483,41 @@ TEST_CASE(
     CHECK_FALSE(rig.arrived->has_value());
 }
 
+TEST_CASE("DaemonLink: abandoning an adopted link whose promotion landed untold withdraws it all the same",
+          "[attach][link][adopt]")
+{
+    // The daemon's answer made a new workspace and promoted the connection on the reactor; the window is
+    // abandoned before the GUI thread was told. The daemon still takes back the workspace it made.
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto const workspaceCount = [&daemon] {
+        return daemon.onDaemon([&daemon] { return daemon.host->model().workspaceCount(); });
+    };
+    auto const before = workspaceCount();
+    auto rig = AdoptRig { daemon };
+    rig.observe();
+    rig.adopt(daemon.promotionOf(0, AdoptingArea, std::nullopt));
+    REQUIRE(waitUntil(
+        [&] {
+            auto const* const controller = rig.link->liveController();
+            return controller != nullptr && controller->role() == vthost::proto::ConnectionRole::Attach;
+        },
+        400,
+        GuiEvents::Held));
+    REQUIRE(workspaceCount() == before + 1);
+
+    rig.link->abandon();
+
+    REQUIRE(waitUntil([&] {
+        drainGuiEvents();
+        return rig.givenBack->calls == 1;
+    }));
+    REQUIRE(rig.givenBack->controller != nullptr);
+    CHECK(rig.givenBack->controller->role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->model().workspaceCount() == before; }));
+    CHECK_FALSE(rig.landed());
+}
+
 namespace
 {
 /// What a presence's dial comes to.

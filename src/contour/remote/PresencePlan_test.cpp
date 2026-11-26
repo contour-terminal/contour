@@ -120,6 +120,78 @@ TEST_CASE("Hide unlists a daemon unless a window is on it", "[presence]")
     CHECK(refsOf(listedDaemons(inputs)) == Refs { "local:default", "host:vega" });
 }
 
+namespace
+{
+/// @return The refs of the hidden daemons, in order.
+[[nodiscard]] std::vector<std::string> refsOf(std::vector<contour::window::HiddenDaemon> const& hidden)
+{
+    auto refs = std::vector<std::string> {};
+    for (auto const& daemon: hidden)
+        refs.push_back(daemon.daemon.value);
+    return refs;
+}
+} // namespace
+
+TEST_CASE("the hidden daemons are the user's hides that are known and not listed", "[presence]")
+{
+    auto inputs = onDefault();
+    inputs.runningLocal = { "default", "work" };
+    inputs.settings.hosts = {
+        { "starfive", SidebarListingChoice::Listed },
+        { "quiet", SidebarListingChoice::Unlisted },
+    };
+
+    SECTION("a running local daemon, hidden, is named")
+    {
+        inputs.settings.hiddenByUser = { "local:work" };
+        auto const hidden = hiddenDaemons(inputs, listedDaemons(inputs));
+        CHECK(refsOf(hidden) == Refs { "local:work" });
+        CHECK(hidden.at(0).name == "work");
+    }
+    SECTION("a local daemon never seen this run is not")
+    {
+        inputs.settings.hiddenByUser = { "local:gone" };
+        CHECK(hiddenDaemons(inputs, listedDaemons(inputs)).empty());
+    }
+    SECTION("a configured host, hidden, is named")
+    {
+        inputs.settings.hiddenByUser = { "host:starfive" };
+        auto const hidden = hiddenDaemons(inputs, listedDaemons(inputs));
+        CHECK(refsOf(hidden) == Refs { "host:starfive" });
+        CHECK(hidden.at(0).name == "starfive");
+    }
+    SECTION("a host its configuration does not list, with no choice, is not")
+    {
+        CHECK(hiddenDaemons(inputs, listedDaemons(inputs)).empty());
+    }
+    SECTION("a removed daemon is not")
+    {
+        inputs.settings.hiddenByUser = { "local:work" };
+        inputs.removedThisRun = { "local:work" };
+        CHECK(hiddenDaemons(inputs, listedDaemons(inputs)).empty());
+    }
+    SECTION("a hidden daemon a window is on is listed, not hidden")
+    {
+        inputs.settings.hiddenByUser = { "local:default", "host:starfive" };
+        inputs.windowsOn.push_back(hostDaemonRef("starfive"));
+        CHECK(hiddenDaemons(inputs, listedDaemons(inputs)).empty());
+    }
+}
+
+TEST_CASE("hidden daemons follow tree order", "[presence]")
+{
+    auto inputs = onDefault();
+    inputs.runningLocal = { "zeta", "default" };
+    inputs.seenLocalThisRun = { "alpha" };
+    inputs.settings.hosts = {
+        { "vega", SidebarListingChoice::Listed },
+        { "starfive", SidebarListingChoice::Unlisted },
+    };
+    inputs.settings.hiddenByUser = { "host:vega", "local:zeta", "host:starfive", "local:alpha" };
+    CHECK(refsOf(hiddenDaemons(inputs, listedDaemons(inputs)))
+          == Refs { "local:alpha", "local:zeta", "host:starfive", "host:vega" });
+}
+
 TEST_CASE("hosts follow the local daemons in name order, unconfigured hosts and links last", "[presence]")
 {
     auto inputs = PresenceInputs {};
@@ -221,4 +293,23 @@ TEST_CASE("a connection's state maps to a link state", "[presence]")
                   ConnectionState::Connected, TransportErrorKind::DaemonAbsent, ObserveSupport::Supported)
               == DaemonLinkState::Connected);
     }
+}
+
+TEST_CASE("chosenListing: the user's Hide wins, then the user's Show or the configuration's listing",
+          "[presence]")
+{
+    using contour::remote::chosenListing;
+    auto const settings = contour::remote::ListingSettings {
+        .hosts = {}, .shownByUser = { "host:vega" }, .hiddenByUser = { "local:work", "host:starfive" }
+    };
+    CHECK(chosenListing(settings, localDaemonRef("default"), SidebarListingChoice::Listed)
+          == SidebarListingChoice::Listed);
+    CHECK(chosenListing(settings, localDaemonRef("work"), SidebarListingChoice::Listed)
+          == SidebarListingChoice::Unlisted);
+    CHECK(chosenListing(settings, hostDaemonRef("starfive"), SidebarListingChoice::Listed)
+          == SidebarListingChoice::Unlisted);
+    CHECK(chosenListing(settings, hostDaemonRef("vega"), SidebarListingChoice::Unlisted)
+          == SidebarListingChoice::Listed);
+    CHECK(chosenListing(settings, hostDaemonRef("rigel"), SidebarListingChoice::Unlisted)
+          == SidebarListingChoice::Unlisted);
 }

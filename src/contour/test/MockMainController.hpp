@@ -748,40 +748,29 @@ class MockMainController: public MainWindowControllerMock
     QStringList replacedLayouts;              ///< Every replaceLayout(), in order.
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
-    /// A workspace colour the sidebar's picker asked for (setWorkspaceColor()), or a reset (no colour).
-    struct WorkspaceColorCall
+    /// A colour the sidebar's picker asked for (setRowColor()), or a reset (no colour).
+    struct RowColorCall
     {
-        quint64 workspace = 0;       ///< The workspace's id.
-        std::optional<QColor> color; ///< The colour; none for resetWorkspaceColor().
+        std::optional<window::SidebarRowKey> row; ///< The row the picker handed back; none for no row.
+        std::optional<QColor> color;              ///< The colour; none for resetRowColor().
     };
-    std::vector<WorkspaceColorCall>
-        workspaceColorCalls; ///< Every setWorkspaceColor() and resetWorkspaceColor().
-    /// Mirrors WindowController::setWorkspaceColor(): records the call.
-    Q_INVOKABLE void setWorkspaceColor(quint64 workspace, QColor const& color)
+    std::vector<RowColorCall> rowColorCalls; ///< Every setRowColor() and resetRowColor(), in order.
+    /// Mirrors WindowController::setRowColor(): records the call.
+    Q_INVOKABLE void setRowColor(QVariant const& row, QColor const& color)
     {
-        workspaceColorCalls.push_back({ .workspace = workspace, .color = color });
+        rowColorCalls.push_back({ .row = rowKeyOf(row), .color = color });
     }
-    /// Mirrors WindowController::resetWorkspaceColor(): records the call.
-    Q_INVOKABLE void resetWorkspaceColor(quint64 workspace)
+    /// Mirrors WindowController::resetRowColor(): records the call.
+    Q_INVOKABLE void resetRowColor(QVariant const& row)
     {
-        workspaceColorCalls.push_back({ .workspace = workspace, .color = std::nullopt });
+        rowColorCalls.push_back({ .row = rowKeyOf(row), .color = std::nullopt });
     }
-    /// A tab colour the sidebar's picker asked for by id (setTabColorOf()), or a reset (no colour).
-    struct TabColorCall
+    /// @return The row key @p row carries; none for anything else.
+    [[nodiscard]] static std::optional<window::SidebarRowKey> rowKeyOf(QVariant const& row)
     {
-        quint64 tab = 0;             ///< The tab's id.
-        std::optional<QColor> color; ///< The colour; none for resetTabColorOf().
-    };
-    std::vector<TabColorCall> tabColorCalls; ///< Every setTabColorOf() and resetTabColorOf().
-    /// Mirrors WindowController::setTabColorOf(): records the call.
-    Q_INVOKABLE void setTabColorOf(quint64 tab, QColor const& color)
-    {
-        tabColorCalls.push_back({ .tab = tab, .color = color });
-    }
-    /// Mirrors WindowController::resetTabColorOf(): records the call.
-    Q_INVOKABLE void resetTabColorOf(quint64 tab)
-    {
-        tabColorCalls.push_back({ .tab = tab, .color = std::nullopt });
+        if (row.metaType() != QMetaType::fromType<window::SidebarRowKey>())
+            return std::nullopt;
+        return row.value<window::SidebarRowKey>();
     }
     /// Mirrors WindowController::tabWorkingDirectory(): what TabItem's hover tooltip asks for the
     /// hovered tab, which a shown window's tab strip can be. No session runs anywhere, so none.
@@ -906,11 +895,12 @@ class MockMainController: public MainWindowControllerMock
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
-    /// Mirrors WindowController::workspaceColorPickRequested(): the sidebar opens its picker over the row.
-    void workspaceColorPickRequested(quint64 workspace);
+    /// Mirrors WindowController::workspaceColorPickRequested(): the sidebar opens its picker over row @p row,
+    /// for the row @p key carries.
+    void workspaceColorPickRequested(int row, QVariant const& key);
     /// Mirrors WindowController::sidebarTabColorPickRequested(): the sidebar opens its picker over tab row
-    /// @p row, for tab @p tab.
-    void sidebarTabColorPickRequested(int row, quint64 tab);
+    /// @p row, for the row @p key carries.
+    void sidebarTabColorPickRequested(int row, QVariant const& key);
 
   private:
     /// Answers a key of the sidebar's tree as the controller does, through the same key table: Escape clears

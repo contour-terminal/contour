@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/command/Shortcut.hpp>
+#include <contour/command/SidebarMenus.hpp>
 #include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
@@ -621,17 +622,30 @@ QVariantMap UiStyleProvider::daemonRowButton(int button, int pending) const
     auto const cells = _groups.layout.sidebar == config::SidebarLook::CellTree;
     auto const words =
         QCoreApplication::translate(std::string(DaemonRowContext).c_str(), std::string(face.words).c_str());
-    auto const plain = words.toStdString();
+    auto const rowPending = pending == std::to_underlying(RowPending::Yes) ? RowPending::Yes : RowPending::No;
+    // The verb in full, as the row's menu says it: one word beside the name, but a tooltip stands alone.
+    auto const toolTip =
+        command::daemonRowVerbTitle(static_cast<command::DaemonRowVerb>(button),
+                                    rowPending == RowPending::Yes ? command::DaemonCancelTarget::Jump
+                                                                  : command::DaemonCancelTarget::Connect);
+    // Translated as its words are: what a screen reader and a tooltip say is the user's language too.
     return { { QStringLiteral("words"), words },
-             { QStringLiteral("label"),
-               cells ? QString::fromStdString(std::vformat(CellButtonFormat, std::make_format_args(plain)))
-                     : words },
+             { QStringLiteral("toolTip"),
+               QCoreApplication::translate(std::string(DaemonRowContext).c_str(),
+                                           std::string(toolTip).c_str()) },
+             { QStringLiteral("label"), buttonWords(words) },
              { QStringLiteral("icon"), cells ? QString {} : nameOf(face.icon) },
              { QStringLiteral("glyph"), cells ? nameOf(face.glyph) : QString {} },
              { QStringLiteral("command"),
-               nameOf(daemonRowButtonCommand(
-                   static_cast<DaemonRowButton>(button),
-                   pending == std::to_underlying(RowPending::Yes) ? RowPending::Yes : RowPending::No)) } };
+               nameOf(daemonRowButtonCommand(static_cast<DaemonRowButton>(button), rowPending)) } };
+}
+
+QString UiStyleProvider::buttonWords(QString const& words) const
+{
+    if (_groups.layout.sidebar != config::SidebarLook::CellTree)
+        return words;
+    auto const plain = words.toStdString();
+    return QString::fromStdString(std::vformat(CellButtonFormat, std::make_format_args(plain)));
 }
 
 int UiStyleProvider::daemonRowFit(qreal available,

@@ -141,6 +141,13 @@ struct PresenceOverrides
 {
     ObserverFactory makeObserver; ///< Makes the observers.
     SwitchTimer refreshTimer;     ///< Fires the refreshes and the redials.
+    /// Finds the local daemons, in place of this machine's runtime directory: a test lists none of its own.
+    std::shared_ptr<cli::IDaemonDiscovery> discovery;
+    /// The saved hosts and listing choices, in place of the configuration's and the GUI state's.
+    std::function<ListingSettings()> settings;
+    ObserverDial observerTransport; ///< Dials an observer, in place of the configuration's way to a daemon.
+    /// The window links, in place of the application's own: a test's links live outside it.
+    std::function<std::vector<WindowLinkView>()> windowLinks;
 };
 
 /// @param daemon A daemon.
@@ -258,7 +265,19 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
     void disconnect(window::DaemonRef const& daemon) override;
     void start(window::DaemonRef const& daemon) override;
     void remove(window::DaemonRef const& daemon) override;
+    /// Keeps the user's choice in the GUI state. Listed takes the daemon's Hide back, and writes a Show only
+    /// where the configuration would not list it (a saved host with `show_in_sidebar: false`, or one no
+    /// configuration names): a local daemon, or a host the configuration lists, merely loses its Hide, so a
+    /// Hide and its Undo leave the GUI state as it was. A `link:` daemon keeps no choice.
     void setListed(window::DaemonRef const& daemon, window::SidebarListingChoice choice) override;
+    [[nodiscard]] std::vector<window::HiddenDaemon> hiddenDaemons() const override;
+
+    /// @param daemon A daemon the switcher lists.
+    /// @return Whether the user and the configuration chose to list it (remote::chosenListing()), for the
+    ///         switcher's "Show in Sidebar" -- what was chosen, whether or not a sidebar shows it now;
+    ///         Unlisted for one removed this run. None where the user has no choice to make: a `link:`
+    ///         daemon, or one a window of this process is on, which is listed whatever the user chose.
+    [[nodiscard]] std::optional<window::SidebarListingChoice> listingOf(window::DaemonRef const& daemon);
     void renameWorkspace(window::DaemonRef const& daemon,
                          window::DaemonInstance instance,
                          uint64_t workspace,
@@ -274,6 +293,13 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
     void closeTab(window::DaemonRef const& daemon,
                   window::DaemonInstance instance,
                   window::TabRef tab) override;
+    void setTabColor(window::DaemonRef const& daemon,
+                     window::DaemonInstance instance,
+                     window::TabRef tab,
+                     std::optional<vtbackend::RGBColor> color) override;
+    void closePane(window::DaemonRef const& daemon,
+                   window::DaemonInstance instance,
+                   window::PaneKey pane) override;
     void closeWorkspace(window::DaemonRef const& daemon,
                         window::DaemonInstance instance,
                         uint64_t workspace) override;
@@ -403,6 +429,9 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
     [[nodiscard]] bool isRunningLocal(window::DaemonRef const& daemon) const;
     /// @return Whether @p daemon is listed, as last decided.
     [[nodiscard]] bool isListed(window::DaemonRef const& daemon) const;
+    /// @return Whether the configuration alone lists @p daemon: a local daemon (while known) is; a saved
+    ///         host by its `show_in_sidebar`; any other host is not.
+    [[nodiscard]] window::SidebarListingChoice configuredListing(window::DaemonRef const& daemon);
     /// @return The newest hand-off mark of @p daemon; null while a window holds none of its connection.
     [[nodiscard]] HandOffMark const* handOffOf(window::DaemonRef const& daemon) const;
     /// Marks @p daemon's connection as held by a window, its section reading @p lastKnown meanwhile.
@@ -431,6 +460,7 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
     std::set<window::DaemonRef> _awaitingStart; ///< Started by start(), not yet found running.
     std::set<window::DaemonRef> _windowsOn;     ///< The daemons a window link was on at the last decision.
     std::vector<ListedDaemon> _listed;          ///< What is listed, as last decided.
+    std::vector<window::HiddenDaemon> _hidden;  ///< What the Hidden row names, as last decided.
     std::map<window::DaemonRef, Observer> _observers; ///< By daemon; only listed daemons no window is on.
     /// The hand-overs under way, by what their give-back names: reconcile() dials no observer of their
     /// daemons. Each is cleared by its own giveBack(), and an Adopting one by a window link to its daemon

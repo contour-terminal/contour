@@ -147,6 +147,7 @@ namespace
                 [](SwitchToWorkspace const& a) { return std::format(", index: {}", a.index); },
                 [](OpenWorkspace const& a) { return std::format(", index: {}", a.index); },
                 [](MoveTabToWorkspace const& a) { return std::format(", index: {}", a.index); },
+                [](ShowHiddenDaemon const& a) { return std::format(", index: {}", a.index); },
                 [](MoveToTab const& a) {
                     return std::format(", workspace: {}, tab: {}", a.workspace, a.tab);
                 },
@@ -477,6 +478,9 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry { "ConnectDaemon", Action { ConnectDaemon {} }, documentation::ConnectDaemon },
         ActionCatalogEntry { "StartDaemon", Action { StartDaemon {} }, documentation::StartDaemon },
         ActionCatalogEntry { "RemoveDaemon", Action { RemoveDaemon {} }, documentation::RemoveDaemon },
+        ActionCatalogEntry { "HideDaemon", Action { HideDaemon {} }, documentation::HideDaemon },
+        ActionCatalogEntry {
+            "ShowHiddenDaemon", Action { ShowHiddenDaemon {} }, documentation::ShowHiddenDaemon },
         ActionCatalogEntry {
             "SwitchToWorkspace", Action { SwitchToWorkspace {} }, documentation::SwitchToWorkspace },
         ActionCatalogEntry { "OpenWorkspace", Action { OpenWorkspace {} }, documentation::OpenWorkspace },

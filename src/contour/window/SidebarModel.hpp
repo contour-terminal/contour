@@ -366,7 +366,7 @@ class ISidebarHost
     ///        for the end.
     virtual void moveNode(SidebarNode const& node, NodeDestination const& destination) = 0;
 
-    /// Opens the context menu of a row.
+    /// Opens the context menu of a row: by its kind, the Hidden row's offering each hidden daemon back.
     /// @param row The row, as the model lists it.
     /// @param windowPosition Where the pointer is, in window coordinates.
     virtual void openContextMenu(SidebarRow const& row, QPointF windowPosition) = 0;
@@ -396,11 +396,13 @@ class ISidebarHost
     /// @param mode In this window, or in a window of its own.
     virtual void jumpTo(SidebarTarget target, JumpMode mode) = 0;
 
-    /// @return Where the jump under way goes; none while no jump is under way.
-    [[nodiscard]] virtual std::optional<SidebarTarget> pendingJump() const = 0;
+    /// @return Where the jumps under way go: the one in this window, and an Open in New Window.
+    [[nodiscard]] virtual PendingJumps pendingJumps() const = 0;
 
-    /// Ends the jump under way, leaving the window as it was. Nothing while none is under way.
-    virtual void cancelJump() = 0;
+    /// Ends the jump of @p mode under way, leaving the window as it was; the other mode's goes on. Nothing
+    /// while none is under way.
+    /// @param mode Which jump.
+    virtual void cancelJump(window::JumpMode mode) = 0;
 
     /// Seeks the window's own daemon again, as the location chip and a lost pane's Reconnect do: the Connect
     /// of the window's own section, which the daemon sections leave to the window that holds the link.
@@ -761,12 +763,11 @@ class SidebarModel: public QAbstractListModel
     /// @param key A row's key.
     /// @return The row's index, or -1 when it is not listed.
     [[nodiscard]] int rowIndexOf(SidebarRowKey const& key) const noexcept;
-    /// @param workspace A workspace's id, as the window's directory lists it.
-    /// @return Its row, or -1 when it is not listed: where the sidebar's colour picker hangs.
-    [[nodiscard]] Q_INVOKABLE int workspaceRowIndex(quint64 workspace) const noexcept
-    {
-        return rowIndexOf(ownWorkspaceKey(workspace));
-    }
+    /// @param kind A workspace or a tab row.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// @param tab The tab's id; 0 for a workspace row.
+    /// @return The key of the window's own row of that node, on its own daemon and that daemon's run.
+    [[nodiscard]] SidebarRowKey ownRowKey(SidebarRowKind kind, uint64_t workspace, uint64_t tab) const;
 
     /// Tells the model whether anyone can see its rows. The one-second timer runs only while they can.
     /// @param presence The sidebar's presence.
@@ -808,9 +809,11 @@ class SidebarModel: public QAbstractListModel
     ///         nothing activated, while no filter is typed and every row is listed.
     sidebarrows::RowActivation activateFirstMatch(int mode);
 
-    /// @return Whether a jump the sidebar started is still under way (ISidebarHost::pendingJump()).
+    /// @return Whether a jump in this window the sidebar started is still under way
+    ///         (ISidebarHost::pendingJumps()).
     [[nodiscard]] Q_INVOKABLE bool isJumpPending() const;
-    /// Ends the jump under way, if one is (ISidebarHost::cancelJump()): Escape in the sidebar, first.
+    /// Ends the jump in this window under way, if one is (ISidebarHost::cancelJump()): Escape in the sidebar,
+    /// first. An Open in New Window goes on: its own row ends it.
     Q_INVOKABLE void cancelJump();
 
     /// Connects to a daemon row's daemon, asking in this window for what it needs (its Connect button), as
@@ -860,11 +863,13 @@ class SidebarModel: public QAbstractListModel
     /// @param row The focused row.
     /// @return The row the focus is on afterwards: @p row, or the row after it when that is its child.
     Q_INVOKABLE int expandOrChild(int row);
-    /// Renames what @p row names: a workspace's label, or the title a tab shows.
-    /// @param row A workspace or tab row; a pane has no name of its own to change.
+    /// Renames what @p row names: a workspace's label, or the title a tab shows; another daemon's through its
+    /// section (IDaemonSections).
+    /// @param row A workspace or tab row; a pane has no name of its own to change, and a last-known row names
+    ///        a run that may be gone.
     /// @param name The new name.
     Q_INVOKABLE void rename(int row, QString const& name);
-    /// Counts every pane under @p row as seen.
+    /// Counts every pane under @p row as seen: the window's own here, another daemon's at that daemon.
     /// @param row The row.
     Q_INVOKABLE void markSeen(int row);
     /// What the hover card of @p row adds: what runs in it and how its last command ended
@@ -872,8 +877,8 @@ class SidebarModel: public QAbstractListModel
     /// @param row The row.
     /// @return One line each; empty for a workspace row and for panes the window does not hold.
     [[nodiscard]] Q_INVOKABLE QStringList hoverLines(int row) const;
-    /// Opens the context menu of @p row: a row of the window's own daemon, or any daemon row.
-    /// @param row The row; another daemon's workspace, tab or pane row opens nothing.
+    /// Opens the context menu of @p row, of any daemon's.
+    /// @param row The row; the Hidden row's offers each hidden daemon back.
     /// @param windowPosition Where the pointer is, in window coordinates.
     Q_INVOKABLE void openContextMenu(int row, QPointF windowPosition);
     /// Narrows the rows to those matching @p text (and the ancestors of a match); empty shows everything.
@@ -904,6 +909,9 @@ class SidebarModel: public QAbstractListModel
     Q_INVOKABLE void dropOnNewWorkspace(QString const& payload);
 
   signals:
+    /// The Hidden row @p row was activated (Return, a click, its accessible press): the tree opens its menu
+    /// hanging from it (openContextMenu()).
+    void rowMenuRequested(int row);
     /// The footer's counts changed.
     void footerChanged();
     /// The row of the tab the window shows changed.
@@ -961,12 +969,13 @@ class SidebarModel: public QAbstractListModel
     /// @return @p row, when it is one of the window's own daemon's (isOwn()); null otherwise.
     [[nodiscard]] SidebarRow const* ownRowAt(int row) const noexcept;
     [[nodiscard]] WorkspaceDirectory directory() const;
+    /// @return The section @p daemon is listed by, as the daemon sections state it now; none for one not
+    /// listed.
+    [[nodiscard]] std::optional<DaemonSection> sectionOf(DaemonRef const& daemon) const;
     [[nodiscard]] Rebuilt build(WorkspaceDirectory const& directory) const;
     /// @return Whether @p key is of the window's own daemon (or the window has none): what the window's own
     ///         verbs act on. Another daemon's rows are reached by a jump.
     [[nodiscard]] bool isOwn(SidebarRowKey const& key) const noexcept;
-    /// @return The key of the window's own workspace @p workspace's row.
-    [[nodiscard]] SidebarRowKey ownWorkspaceKey(uint64_t workspace) const;
     /// Activates @p row as the user asked: the own daemon's is shown, another daemon's jumped to by @p mode.
     [[nodiscard]] sidebarrows::RowActivation activateRow(int row, JumpMode mode);
     /// Replaces the rows with @p next in one model reset: the first build's.

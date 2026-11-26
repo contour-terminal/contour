@@ -53,4 +53,16 @@ std::vector<SwitcherMenuRow> buildSwitcherRowMenu(SwitcherRowMenuState const& st
     return rows;
 }
 
+std::vector<SwitcherMenuRow> buildSwitcherDaemonMenu(SwitcherDaemonMenuState const& state)
+{
+    if (!state.listing)
+        return {};
+    return { SwitcherChoiceRow { .choice = SwitcherMenuChoice::ShowInSidebar,
+                                 .title = "Show in Sidebar",
+                                 .shortcut = {},
+                                 .availability = RowAvailability::Enabled,
+                                 .check = *state.listing == SidebarListing::Listed ? RowCheck::Checked
+                                                                                   : RowCheck::Unchecked } };
+}
+
 } // namespace contour::command

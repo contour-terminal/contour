@@ -792,12 +792,18 @@ class UiStyleProvider: public QObject
     /// @param button A window::DaemonRowButton as its underlying value.
     /// @param pending A window::RowPending as its underlying value: whether a jump into the row's section is
     ///        under way, which decides whether Cancel runs its action (window::daemonRowButtonCommand()).
-    /// @return `{ words, label, icon, glyph, command }`: its words, translated; what it shows with them (in
-    ///         brackets on the Terminal row, CellButtonFormat); its icon-only form, a bundled icon on the
-    ///         native rows and a glyph in cells on the Terminal row, empty for a words-only button; and the
-    ///         action it runs now, whose chord its tooltip names, empty for none. Empty for None or a value
-    ///         outside.
+    /// @return `{ words, toolTip, label, icon, glyph, command }`: its words, translated; its verb in full, as
+    ///         the row's menu names it (command::daemonRowVerbTitle(): "Cancel Jump" while a jump is under
+    ///         way, else "Cancel Connecting"); what it shows with its words (in brackets on the Terminal row,
+    ///         CellButtonFormat); its icon-only form, a bundled icon on the native rows and a glyph in cells
+    ///         on the Terminal row, empty for a words-only button; and the action it runs now, whose chord
+    ///         its tooltip names, empty for none. Empty for None or a value outside.
     [[nodiscard]] Q_INVOKABLE QVariantMap daemonRowButton(int button, int pending) const;
+
+    /// @param words A text button's words, translated.
+    /// @return What the button shows: its words; in brackets on the Terminal row, where a button is a run of
+    ///         cells (CellButtonFormat), as a daemon row's are.
+    [[nodiscard]] Q_INVOKABLE QString buttonWords(QString const& words) const;
 
     /// How much of a daemon row fits (window::daemonRowFitOf()). Each argument is a window::DaemonRowRoom
     /// field, in its order.

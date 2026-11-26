@@ -1883,8 +1883,15 @@ namespace
     }
 } // namespace
 
+void ContourGuiApp::endGuiRun()
+{
+    _daemonPresence->shutdown();
+}
+
 void ContourGuiApp::releaseHosting()
 {
+    // Before any link stops: a stopped link waiting to give its connection back has the presence dial none.
+    endGuiRun();
     // Released before the QApplication was made, the hosting will never have one: a link's ssh attempt that
     // waits for it to serve its prompts gives up. After it was made, this does nothing.
     _applicationReadiness->abandon();
@@ -3749,6 +3756,9 @@ int ContourGuiApp::terminalGuiAction()
     // so it is unit-testable without the event loop. NB: sequenced explicitly — passing exec() as an
     // argument alongside _exitStatus would read _exitStatus before the loop populated it.
     auto const loopResult = QApplication::exec();
+    // At once, before the waits below run queued work: a link handing its connection back as its windows go
+    // must find the presence shut down, or it dials an observer as the application quits.
+    endGuiRun();
     // A probe the app quit before has the last word too: a closed window or an ended session is not a run.
     if (_latencyProbeRequest && !_latencyProbeExitCode)
         _latencyProbeExitCode = endUnfinishedLatencyProbe();
@@ -4570,9 +4580,9 @@ std::unique_ptr<remote::DaemonPresence> ContourGuiApp::makeDaemonPresence(remote
                   return std::make_unique<remote::NativeController>(std::move(config));
               } };
     return std::make_unique<remote::DaemonPresence>(remote::PresenceDeps {
-        .discovery = localDaemonDiscovery(),
+        .discovery = overrides.discovery ? std::move(overrides.discovery) : localDaemonDiscovery(),
         .settings =
-            [this] {
+            overrides.settings ? std::move(overrides.settings) : [this] {
                 auto settings = remote::ListingSettings {};
                 for (auto const& [name, entry]: _config.hosts.value())
                     settings.hosts.emplace_back(name,
@@ -4585,14 +4595,19 @@ std::unique_ptr<remote::DaemonPresence> ContourGuiApp::makeDaemonPresence(remote
                 }
                 return settings;
             },
-        .observerTransport =
-            [dialing](window::DaemonRef const& daemon) { return remote::observerTransport(daemon, dialing); },
+        .observerTransport = overrides.observerTransport
+                                 ? std::move(overrides.observerTransport)
+                                 : remote::ObserverDial { [dialing](window::DaemonRef const& daemon) {
+                                       return remote::observerTransport(daemon, dialing);
+                                   } },
         .interactiveTransport =
             [dialing](window::DaemonRef const& daemon, vtworkspace::WorkspaceId askingWindow) {
                 return remote::interactiveTransport(daemon, askingWindow, dialing);
             },
         .makeObserver = std::move(makeObserver),
-        .windowLinks = [this] { return windowLinkViews(); },
+        .windowLinks = overrides.windowLinks ? std::move(overrides.windowLinks)
+                                             : std::function<std::vector<remote::WindowLinkView>()> {
+                                                   [this] { return windowLinkViews(); } },
         .refreshTimer = overrides.refreshTimer ? std::move(overrides.refreshTimer) : remote::qtSwitchTimer(),
         .visibility =
             [] {
@@ -4884,6 +4899,11 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             [this](vtworkspace::WorkspaceId window, uint64_t workspace, actions::Action const& action) {
                 if (auto* const controller = _sessionManager.controllerDisplaying(window))
                     controller->runWorkspaceMenuAction(workspace, action);
+            },
+        .listingOf = [this](window::DaemonRef const& daemon) { return _daemonPresence->listingOf(daemon); },
+        .setListed =
+            [this](window::DaemonRef const& daemon, window::SidebarListingChoice choice) {
+                _daemonPresence->setListed(daemon, choice);
             },
     };
 }

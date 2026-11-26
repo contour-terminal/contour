@@ -1158,9 +1158,28 @@ std::function<void()> NativeController::endPromotion(std::lock_guard<std::mutex>
     }
     if (!promotion.landed)
         return {};
+    // A promotion that promoted is the window's to withdraw until it was told (withdrawPromotion()).
+    if (result)
+    {
+        _untoldLanding = UntoldLanding { .landed = std::move(promotion.landed), .result = std::move(result) };
+        return [this] {
+            tellLanding();
+        };
+    }
     return [landed = std::move(promotion.landed), result = std::move(result)] {
         landed(result);
     };
+}
+
+void NativeController::tellLanding()
+{
+    auto untold = std::optional<UntoldLanding> {};
+    {
+        auto const lock = std::lock_guard { _mutex };
+        untold = std::exchange(_untoldLanding, std::nullopt);
+    }
+    if (untold)
+        untold->landed(untold->result);
 }
 
 std::function<void()> NativeController::resumePromotion(std::lock_guard<std::mutex> const& held,
@@ -1366,13 +1385,25 @@ void NativeController::withdrawPromotion()
     {
         auto const lock = std::lock_guard { _mutex };
         if (!_promotion)
-            return;
-        auto promotion = *std::exchange(_promotion, std::nullopt);
-        // Dials as the observer it stays; an answer that promoted it all the same is answered by ObserveOnly
-        // (onLayoutBatchEnd). A select not yet written is never written: the post in promote() finds none.
-        _dialTransport = std::move(promotion.transportBefore);
-        _withdrawnSerial = std::exchange(_promotionSerial, std::nullopt);
-        landed = std::move(promotion.landed);
+        {
+            // Answered on the reactor, the GUI not yet told: the attach it became is demoted as withdrawn, so
+            // that the daemon takes back a workspace it made and the restore its answer told.
+            auto untold = std::exchange(_untoldLanding, std::nullopt);
+            if (!untold)
+                return;
+            _demoteCause = vthost::proto::ObserveCause::Withdrawn;
+            landed = std::move(untold->landed);
+        }
+        else
+        {
+            auto promotion = *std::exchange(_promotion, std::nullopt);
+            // Dials as the observer it stays; an answer that promoted it all the same is answered by
+            // ObserveOnly (onLayoutBatchEnd). A select not yet written is never written: the post in
+            // promote() finds none.
+            _dialTransport = std::move(promotion.transportBefore);
+            _withdrawnSerial = std::exchange(_promotionSerial, std::nullopt);
+            landed = std::move(promotion.landed);
+        }
     }
     if (landed)
         platform::postToObject(this, [landed = std::move(landed)] {
@@ -1398,6 +1429,11 @@ std::optional<vtpty::ImageSize> NativeController::lastStatedCell() const
 std::expected<void, SelectError> NativeController::demote(std::shared_ptr<vthost::ITransportFactory> observer)
 {
     Require(observer != nullptr);
+    // Said once, by this demotion, whether or not it is admitted.
+    auto const cause = [this] {
+        auto const lock = std::lock_guard { _mutex };
+        return std::exchange(_demoteCause, vthost::proto::ObserveCause::Demoted);
+    }();
     {
         auto const lock = std::lock_guard { _mutex };
         if (auto admitted = admitRoleChange(); !admitted)
@@ -1419,9 +1455,9 @@ std::expected<void, SelectError> NativeController::demote(std::shared_ptr<vthost
     }
     if (std::exchange(_guiRaiseRole, vthost::proto::RaiseRole::Quiet) != vthost::proto::RaiseRole::Quiet)
         emit raiseRoleChanged();
-    _reactor.post([this] {
+    _reactor.post([this, cause] {
         if (_client != nullptr)
-            std::ignore = _client->observeOnly();
+            std::ignore = _client->observeOnly(cause);
     });
     return {};
 }

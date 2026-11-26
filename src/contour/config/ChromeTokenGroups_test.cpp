@@ -445,7 +445,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
             CHECK(glyph.status == StatusColorRole::Warning);
             CHECK(toastFill.kind == ColorSourceKind::Fixed);
             CHECK(toastFill.rgb == 0x28282C);
-            CHECK(toastFill.alphaPercent == 92);
+            // Opaque: nothing it floats over reads through it (Phase 6 review, M6).
+            CHECK(toastFill.alphaPercent == 100);
             CHECK(toastText.kind == ColorSourceKind::Fixed);
             CHECK(toastText.rgb == 0xFFFFFF);
             CHECK(toastText.alphaPercent == 100);
@@ -1881,7 +1882,8 @@ TEST_CASE("chromeTokens.focusRingTokens", "[chrometokens]")
     CHECK(static_cast<size_t>(ChromeColorRole::HeaderSeparator) + 1
           == static_cast<size_t>(ChromeColorRole::TooltipFill));
     CHECK(static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1 == SidebarColorRoleBegin);
-    CHECK(SidebarColorRoleEnd == ChromeColorRoleCount);
+    CHECK(SidebarColorRoleEnd == ToastActionColorRoleBegin);
+    CHECK(ToastActionColorRoleEnd == ChromeColorRoleCount);
 
     // Native: a ring that marks on the window and no fill. Terminal: no ring, the bar's selection as fill.
     auto const none = contour::config::detail::noColor();
@@ -2578,7 +2580,73 @@ TEST_CASE("the sidebar's colour roles are one family", "[chrometokens][sidebar]"
 {
     using namespace contour::config;
     CHECK(SidebarColorRoleEnd - SidebarColorRoleBegin == 9);
-    CHECK(SidebarColorRoleEnd == ChromeColorRoleCount);
+    CHECK(SidebarColorRoleEnd == ToastActionColorRoleBegin);
+}
+
+// Review (Phase 6, M6): a toast's Undo is a button, not more of its words: on the native rows a fill sets it
+// apart at rest and steps up under the pointer and when pressed; on the Terminal row its brackets do.
+TEST_CASE("a toast's action button is set apart from the toast's words on every row",
+          "[chrometokens][notices]")
+{
+    using namespace contour::config;
+    CHECK(ToastActionColorRoleEnd - ToastActionColorRoleBegin == 4);
+    auto const none = contour::config::detail::noColor();
+    for (auto const index: allStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        auto const row = resolveChromeTokens(style, {});
+        auto const& rest = row.colors[static_cast<size_t>(ChromeColorRole::ToastActionFill)];
+        auto const& hover = row.colors[static_cast<size_t>(ChromeColorRole::ToastActionHoverFill)];
+        auto const& pressed = row.colors[static_cast<size_t>(ChromeColorRole::ToastActionPressedFill)];
+        auto const& activeInk = row.colors[static_cast<size_t>(ChromeColorRole::ToastActionActiveInk)];
+        if (style == ChromeStyle::Terminal)
+        {
+            // Its brackets at rest; under the pointer and pressed, its cells inverted: the toast's ink is the
+            // fill and the toast's fill the words, which read on every bundled scheme as the toast does.
+            CHECK(rest == none);
+            for (auto const* lit: { &hover, &pressed })
+            {
+                REQUIRE(lit->kind == ColorSourceKind::Scheme);
+                CHECK(lit->slot == SchemeSlot::ToastInk);
+                CHECK(lit->alphaPercent == 100);
+            }
+            REQUIRE(activeInk.kind == ColorSourceKind::Scheme);
+            CHECK(activeInk.slot == SchemeSlot::Toast);
+            for (auto const name: defaultColorPaletteNames())
+            {
+                INFO("scheme: " << name);
+                auto palette = vtbackend::ColorPalette {};
+                REQUIRE(defaultColorPalettes(name, palette));
+                auto const colors = chromeSchemeColorsOf(palette);
+                auto const toast = colors.bySlot[static_cast<size_t>(SchemeSlot::Toast)];
+                auto const ink = colors.bySlot[static_cast<size_t>(SchemeSlot::ToastInk)];
+                CHECK(vtbackend::contrastRatio(toast, ink) >= vtbackend::MinimumTextContrast);
+            }
+            continue;
+        }
+        REQUIRE(rest.kind == ColorSourceKind::Fixed);
+        REQUIRE(hover.kind == ColorSourceKind::Fixed);
+        REQUIRE(pressed.kind == ColorSourceKind::Fixed);
+        CHECK(rest.alphaPercent > 0);
+        CHECK(rest.alphaPercent < hover.alphaPercent);
+        CHECK(hover.alphaPercent < pressed.alphaPercent);
+        // Its words, the toast's ink in every state, read on it in every state; the toast's fill is opaque
+        // and fixed.
+        auto const over = [](ChromeColorSource const& source, vtbackend::RGBColor ground) {
+            return vtbackend::mixColor(
+                ground, vtbackend::RGBColor(source.rgb), static_cast<float>(source.alphaPercent) / 100.0f);
+        };
+        auto const& toast = row.colors[static_cast<size_t>(ChromeColorRole::ToastFill)];
+        auto const& ink = row.colors[static_cast<size_t>(ChromeColorRole::ToastText)];
+        REQUIRE(toast.alphaPercent == 100);
+        CHECK(activeInk == ink);
+        for (auto const* state: { &rest, &hover, &pressed })
+        {
+            auto const ground = over(*state, vtbackend::RGBColor(toast.rgb));
+            CHECK(vtbackend::contrastRatio(over(ink, ground), ground) >= vtbackend::MinimumTextContrast);
+        }
+    }
 }
 
 TEST_CASE("sidebar selection ink reaches 4.5:1 on its fill on every row", "[chrometokens][sidebar]")

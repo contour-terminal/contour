@@ -56,6 +56,23 @@ namespace
         auto const parsed = window::parseDaemonRef(daemon);
         return parsed && parsed->first == kind;
     }
+
+    /// @return Whether a listing choice can be kept for @p daemon: not for a `link:` one, which is named by a
+    ///         link of this run, so a choice kept for it would name another daemon in the next one.
+    [[nodiscard]] bool keepsListingChoice(window::DaemonRef const& daemon)
+    {
+        return window::parseDaemonRef(daemon) && !isOfKind(daemon, window::DaemonRefKind::Link);
+    }
+
+    /// @return The session the daemon names tab @p tab of @p directory by (it takes any of the tab's); none
+    ///         for a tab that is gone or has no session.
+    [[nodiscard]] std::optional<uint64_t> sessionNamingTab(window::WorkspaceDirectory const& directory,
+                                                           window::TabRef tab)
+    {
+        if (auto const* const found = tabOf(directory, tab); found != nullptr && !found->panes.empty())
+            return found->panes.front().key.value;
+        return std::nullopt;
+    }
 } // namespace
 
 std::string daemonNameOf(window::DaemonRef const& daemon)
@@ -224,12 +241,8 @@ HandOffId DaemonPresence::expectGiveBack(window::DaemonRef const& daemon, Daemon
 {
     attachLog()("presence: {} comes back from link {}", daemon.value, from.value);
     // Read while the leaving link still feeds it: what the section shows until the connection is back.
-    auto lastKnown = window::DaemonSection {};
-    if (auto const listed = std::ranges::find(_listed, daemon, &ListedDaemon::daemon);
-        listed != _listed.end())
-        lastKnown = sectionOf(*listed, windowLinks());
+    auto lastKnown = listedSection(daemon).value_or(window::DaemonSection {});
     lastKnown.daemon = daemon;
-    lastKnown.feed = window::SectionFeed::Observer;
     lastKnown.shownElsewhere.clear();
     return markHandOff(daemon, HandOff::Returning, std::move(lastKnown));
 }
@@ -380,7 +393,9 @@ window::DaemonSection DaemonPresence::sectionOf(ListedDaemon const& daemon,
         section.state = mark->lastKnown.state;
         section.reason = mark->lastKnown.reason;
         section.directory = mark->lastKnown.directory;
-        section.feed = window::SectionFeed::Observer;
+        // The window's switch holds the connection: its row offers nothing this process could end or seek
+        // again, as for any window's link (a Cancel here would end no connect, a Connect would dial twice).
+        section.feed = window::SectionFeed::WindowLink;
     }
 
     // A local daemon discovery no longer finds serving is not running, unless a live link knows better.
@@ -451,26 +466,60 @@ void DaemonPresence::remove(window::DaemonRef const& daemon)
 
 void DaemonPresence::setListed(window::DaemonRef const& daemon, window::SidebarListingChoice choice)
 {
-    // A `link:` daemon is named by a link of this run: a choice kept for it would name another daemon in
-    // the next one. Its window being on it lists it anyway.
-    if (!window::parseDaemonRef(daemon) || isOfKind(daemon, window::DaemonRefKind::Link))
+    // A `link:` daemon's window being on it lists it anyway.
+    if (!keepsListingChoice(daemon))
         return;
+    // A Show the configuration makes already is not written: Undo of a Hide then leaves no choice behind.
+    auto const configured = configuredListing(daemon);
     _deps.updateListing([&](config::SidebarDaemons& daemons) {
         switch (choice)
         {
             case window::SidebarListingChoice::Listed:
-                daemons.shown.insert(daemon.value);
+                if (configured == window::SidebarListingChoice::Unlisted)
+                    daemons.shown.insert(daemon.value);
                 daemons.hidden.erase(daemon.value);
                 break;
             case window::SidebarListingChoice::Unlisted:
-                daemons.hidden.insert(daemon.value);
+                // The mirror: a Hide the configuration makes already is not written either, so showing and
+                // hiding such a host again leaves no Hide -- and no Hidden row -- behind.
+                if (configured == window::SidebarListingChoice::Listed)
+                    daemons.hidden.insert(daemon.value);
                 daemons.shown.erase(daemon.value);
                 break;
         }
     });
+    // Listing a daemon takes back its Remove of this run: it is the user's newer word on it.
+    if (choice == window::SidebarListingChoice::Listed)
+        _removed.erase(daemon.value);
     _settings.reset();
     reconcile();
     notify();
+}
+
+std::vector<window::HiddenDaemon> DaemonPresence::hiddenDaemons() const
+{
+    return _hidden;
+}
+
+std::optional<window::SidebarListingChoice> DaemonPresence::listingOf(window::DaemonRef const& daemon)
+{
+    if (!keepsListingChoice(daemon) || _windowsOn.contains(daemon))
+        return std::nullopt;
+    // What was chosen, not what is shown: with no window on a daemon nothing is shown, yet the choices stand.
+    if (_removed.contains(daemon.value))
+        return window::SidebarListingChoice::Unlisted;
+    return chosenListing(settings(), daemon, configuredListing(daemon));
+}
+
+window::SidebarListingChoice DaemonPresence::configuredListing(window::DaemonRef const& daemon)
+{
+    auto const parsed = window::parseDaemonRef(daemon);
+    if (!parsed || parsed->first == window::DaemonRefKind::Local)
+        return window::SidebarListingChoice::Listed;
+    auto const& hosts = settings().hosts;
+    auto const host =
+        std::ranges::find_if(hosts, [&](auto const& entry) { return entry.first == parsed->second; });
+    return host != hosts.end() ? host->second : window::SidebarListingChoice::Unlisted;
 }
 
 void DaemonPresence::renameWorkspace(window::DaemonRef const& daemon,
@@ -487,13 +536,9 @@ void DaemonPresence::renameTab(window::DaemonRef const& daemon,
                                window::TabRef tab,
                                std::string name)
 {
-    auto* const controller = controllerFor(daemon, instance);
-    if (controller == nullptr)
-        return;
-    // The daemon names a tab by any session of it.
-    auto const directory = controller->directory();
-    if (auto const* const found = tabOf(directory, tab); found != nullptr && !found->panes.empty())
-        std::ignore = controller->requestRemoteTabRename(found->panes.front().key.value, name);
+    if (auto* const controller = controllerFor(daemon, instance))
+        if (auto const session = sessionNamingTab(controller->directory(), tab))
+            std::ignore = controller->requestRemoteTabRename(*session, name);
 }
 
 void DaemonPresence::setWorkspaceColor(window::DaemonRef const& daemon,
@@ -516,6 +561,24 @@ void DaemonPresence::closeTab(window::DaemonRef const& daemon,
     if (auto const* const found = tabOf(directory, tab))
         for (auto const& pane: found->panes)
             controller->requestClosePane(pane.key.value);
+}
+
+void DaemonPresence::setTabColor(window::DaemonRef const& daemon,
+                                 window::DaemonInstance instance,
+                                 window::TabRef tab,
+                                 std::optional<vtbackend::RGBColor> color)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        if (auto const session = sessionNamingTab(controller->directory(), tab))
+            std::ignore = controller->requestRemoteTabColor(*session, color);
+}
+
+void DaemonPresence::closePane(window::DaemonRef const& daemon,
+                               window::DaemonInstance instance,
+                               window::PaneKey pane)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        controller->requestClosePane(pane.value);
 }
 
 void DaemonPresence::closeWorkspace(window::DaemonRef const& daemon,
@@ -555,29 +618,37 @@ void DaemonPresence::reconcile(std::vector<WindowLinkView> const& links)
         return entry.second.kind == HandOff::Adopting && _windowsOn.contains(entry.second.daemon);
     });
     if (_windowsOn.empty())
-        _listed.clear(); // With no window on a daemon nothing is listed: the settings are not even read.
+    {
+        // With no window on a daemon nothing is listed: the settings are not even read.
+        _listed.clear();
+        _hidden.clear();
+    }
     else
     {
         auto running = std::vector<std::string> {};
         if (_discovered)
             std::ranges::transform(*_discovered, std::back_inserter(running), &cli::DiscoveredDaemon::label);
-        _listed = listedDaemons(PresenceInputs {
+        auto const inputs = PresenceInputs {
             .runningLocal = std::move(running),
             .seenLocalThisRun = _seenLocal,
             .settings = settings(),
             .removedThisRun = _removed,
             .windowsOn = std::ranges::to<std::vector>(_windowsOn),
-        });
+        };
+        _listed = listedDaemons(inputs);
+        _hidden = remote::hiddenDaemons(inputs, _listed);
     }
     for (auto const& daemon: _listed)
         if (auto const parsed = window::parseDaemonRef(daemon.daemon);
             parsed && parsed->first == window::DaemonRefKind::Local)
             _seenLocal.emplace(parsed->second);
 
-    // An observer is wanted only for a listed daemon no window link is on.
+    // An observer is wanted only for a listed daemon no window link is on. One a hand-over will bring back
+    // counts as wanted: none is started meanwhile, but one already there -- an earlier link's connection,
+    // given back while a later one is still on its way -- stays, rather than being retired to be dialled
+    // again.
     auto const wanted = [&](window::DaemonRef const& daemon) {
-        return isListed(daemon) && !_windowsOn.contains(daemon) && !_awaitingStart.contains(daemon)
-               && handOffOf(daemon) == nullptr;
+        return isListed(daemon) && !_windowsOn.contains(daemon) && !_awaitingStart.contains(daemon);
     };
     auto const unwanted = std::ranges::to<std::vector>(
         _observers | std::views::keys
@@ -588,7 +659,8 @@ void DaemonPresence::reconcile(std::vector<WindowLinkView> const& links)
         _observers.erase(daemon);
     }
     for (auto const& daemon: _listed)
-        if (wanted(daemon.daemon) && !_observers.contains(daemon.daemon))
+        if (wanted(daemon.daemon) && handOffOf(daemon.daemon) == nullptr
+            && !_observers.contains(daemon.daemon))
             startObserver(daemon.daemon, _observers[daemon.daemon]);
     pruneRetired();
 }

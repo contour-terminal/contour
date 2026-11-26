@@ -1106,7 +1106,7 @@ SidebarListing listingOf(std::vector<DaemonSection> const& sections,
         state,
         Now,
         std::move(displayed),
-        std::move(pending));
+        PendingJumps { .here = std::move(pending), .newWindow = std::nullopt });
 }
 
 /// A row as one line: its kind's letter, then its daemon, workspace, tab and pane where it has them.
@@ -1183,7 +1183,7 @@ TEST_CASE("SidebarTree.order_is_fixed_and_independent_of_the_window", "[sidebar]
         openedOn(daemonB()),
         Now,
         targetOf(daemonB(), 1, 1),
-        std::nullopt);
+        PendingJumps {});
     auto const daemons = std::ranges::to<std::vector>(
         listing.rows
         | std::views::filter([](SidebarRow const& row) { return row.key.kind == SidebarRowKind::Daemon; })

@@ -3,7 +3,9 @@
 // (WindowController.sidebarCloseConfirmationRequested), and a workspace whose panes run programs asks when it is
 // closed any other way (closeWorkspaceConfirmationRequested). What it says comes from the window's table, one row
 // per kind (WindowController.closeConfirmation), so this item has no per-kind branch: Cancel is the default and
-// Escape cancels; the destructive button calls WindowController.confirmClose with the node's ids.
+// Escape cancels; the destructive button calls WindowController.confirmClose with the node it was asked about.
+// The node -- the kind of close and its row, daemon and run included -- is an opaque value only the dialog holds
+// while it asks: the window keeps nothing of the question, so an answer can only ever close what it was about.
 import QtQuick
 import Contour.Terminal
 
@@ -13,30 +15,23 @@ KitDialog {
 
     /// The window's controller.
     property var controller: null
-    /// The node's kind, a SidebarRows.CloseKind.
-    property int kind: 0
-    /// The ids naming the node; 64-bit, so not ints. A workspace has no tab and no pane.
-    property var workspace: 0
-    property var tab: 0
-    property var pane: 0
+    /// The node asked about (a WindowController CloseNode), opaque here; undefined while nothing is asked.
+    property var node: undefined
     /// The node's name; empty when it has none.
     property string nodeLabel
     /// The running program's name; empty when none is known.
     property string program
 
-    /// What the table says for the node: { heading, message, acceptText }.
-    readonly property var wording: root.controller
-        ? root.controller.closeConfirmation(root.kind, root.workspace, root.tab, root.nodeLabel, root.program)
-        : ({})
+    /// What the table says for the node, worded once as it is asked: { heading, message, acceptText }. Not a
+    /// binding on the node, which the answer drops while the dialog fades out.
+    property var wording: ({})
 
-    /// Asks about the node the arguments name.
-    function ask(nodeKind, workspaceId, tabId, paneId, label, programName) {
-        root.kind = nodeKind
-        root.workspace = workspaceId
-        root.tab = tabId
-        root.pane = paneId
+    /// Asks about @p closeNode, named @p label, running @p programName.
+    function ask(closeNode, label, programName) {
+        root.node = closeNode
         root.nodeLabel = label
         root.program = programName
+        root.wording = root.controller ? root.controller.closeConfirmation(closeNode, label, programName) : ({})
         root.open()
     }
 
@@ -46,5 +41,12 @@ KitDialog {
     rejectText: qsTr("Cancel")
     acceptRole: chromeStyle.statusDanger
     defaultButton: KitDialog.Reject
-    onAccepted: if (root.controller) root.controller.confirmClose(root.kind, root.workspace, root.tab, root.pane)
+    onAccepted: {
+        const closing = root.node
+        root.node = undefined
+        if (root.controller && closing !== undefined)
+            root.controller.confirmClose(closing)
+    }
+    // Cancel or Escape: the question is dropped with its node, and nothing closes.
+    onRejected: root.node = undefined
 }

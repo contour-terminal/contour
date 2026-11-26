@@ -130,6 +130,22 @@ TEST_CASE("a daemon row's verbs round-trip by name", "[actions][parse][sidebar]"
     CHECK(std::holds_alternative<actions::RemoveDaemon>(*actions::fromString("RemoveDaemon")));
 }
 
+TEST_CASE("HideDaemon and ShowHiddenDaemon round-trip by name", "[actions][parse][sidebar]")
+{
+    for (auto const* const name: { "HideDaemon", "ShowHiddenDaemon" })
+    {
+        INFO(name);
+        auto const parsed = actions::fromString(name);
+        REQUIRE(parsed.has_value());
+        CHECK(actions::name(*parsed) == name);
+        // Rows of the sidebar's menus, which name the daemon: bare, they name none.
+        CHECK(actions::isParameterized(*parsed));
+    }
+    CHECK(std::holds_alternative<actions::HideDaemon>(*actions::fromString("HideDaemon")));
+    CHECK(std::holds_alternative<actions::ShowHiddenDaemon>(*actions::fromString("ShowHiddenDaemon")));
+    CHECK(actions::name(actions::Action { actions::ShowHiddenDaemon { .index = 2 } }) == "ShowHiddenDaemon");
+}
+
 TEST_CASE("ToggleSidebarNeedsMe round-trips by name", "[actions][parse][sidebar]")
 {
     auto const parsed = actions::fromString("ToggleSidebarNeedsMe");

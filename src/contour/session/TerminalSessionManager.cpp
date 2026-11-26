@@ -364,6 +364,18 @@ window::WindowController* TerminalSessionManager::controllerDisplaying(
     return found != controllers.end() ? *found : nullptr;
 }
 
+window::WindowController* TerminalSessionManager::controllerShowing(window::DaemonRef const& daemon,
+                                                                    uint64_t workspace) const
+{
+    auto const controllers = _controllersByWindow | std::views::values;
+    auto const found = std::ranges::find_if(controllers, [&](window::WindowController const* controller) {
+        auto const* const source = controller->directorySource();
+        return daemonRefOf(controller->displayedWorkspace()) == daemon && source != nullptr
+               && source->directory().selected == workspace;
+    });
+    return found != controllers.end() ? *found : nullptr;
+}
+
 window::WindowController* TerminalSessionManager::controllerOwning(
     vtworkspace::WorkspaceId workspace) const noexcept
 {
@@ -2144,8 +2156,9 @@ void TerminalSessionManager::closeWorkspace(window::WindowController& window, ui
         confirmCloseWorkspace(window, workspace);
         return;
     }
-    emit window.closeWorkspaceConfirmationRequested(
-        workspace, QString::fromStdString(label), QString::fromStdString(program));
+    emit window.closeWorkspaceConfirmationRequested(window.ownWorkspaceCloseNode(workspace),
+                                                    QString::fromStdString(label),
+                                                    QString::fromStdString(program));
 }
 
 void TerminalSessionManager::confirmCloseWorkspace(window::WindowController& window, uint64_t workspace)

@@ -549,6 +549,42 @@ TEST_CASE("Switcher: the selection stays on New Daemon… while the looking row 
     CHECK(s.selected().kind == SwitcherRowKind::NewDaemon);
 }
 
+TEST_CASE("Switcher: the switcher's toggle hides and shows", "[contour][switcher]")
+{
+    auto s = Switcher {};
+    s.world.listings["local:home"] = window::SidebarListingChoice::Listed;
+    s.open();
+    auto const row = s.rowOf("home", SwitcherRowKind::Daemon);
+    REQUIRE(row >= 0);
+
+    auto menu = s.controller->rowMenu(row);
+    REQUIRE(menu.size() == 1);
+    CHECK(menu[0].toMap()["title"] == "Show in Sidebar");
+    CHECK(menu[0].toMap()["checkable"].toBool());
+    CHECK(menu[0].toMap()["checked"].toBool());
+
+    s.controller->triggerRowMenu(row, menu[0].toMap()["actionId"].toInt());
+    REQUIRE(s.world.listingsSet.size() == 1);
+    CHECK(s.world.listingsSet[0].first == window::localDaemonRef("home"));
+    CHECK(s.world.listingsSet[0].second == window::SidebarListingChoice::Unlisted);
+
+    s.open();
+    menu = s.controller->rowMenu(s.rowOf("home", SwitcherRowKind::Daemon));
+    REQUIRE(menu.size() == 1);
+    CHECK_FALSE(menu[0].toMap()["checked"].toBool());
+    s.controller->triggerRowMenu(s.rowOf("home", SwitcherRowKind::Daemon),
+                                 menu[0].toMap()["actionId"].toInt());
+    REQUIRE(s.world.listingsSet.size() == 2);
+    CHECK(s.world.listingsSet[1].second == window::SidebarListingChoice::Listed);
+
+    SECTION("a daemon whose listing is not the user's to choose has no menu")
+    {
+        s.world.listings.clear();
+        s.open();
+        CHECK(s.controller->rowMenu(s.rowOf("home", SwitcherRowKind::Daemon)).isEmpty());
+    }
+}
+
 TEST_CASE("Switcher: a workspace row's menu leads with the switch, then the sidebar's rows",
           "[contour][switcher]")
 {

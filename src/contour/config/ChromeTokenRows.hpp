@@ -257,12 +257,14 @@ namespace detail
                             .alphaPercent = 100,
                             .level = 0 },
         StatusWarning,
+        // The toast's fill, opaque: whatever it floats over (a breadcrumb, a pane's text) would read through
+        // a translucent one beside its words and its Undo.
         ChromeColorSource { .kind = ColorSourceKind::Fixed,
                             .rgb = 0x28282C,
                             .status = StatusColorRole::Danger,
                             .slot = SchemeSlot::Background,
-                            .alphaPercent = 92,
-                            .level = 0 },
+                            .alphaPercent = 100,
+                            .level = 0 }, // ToastFill
         ChromeColorSource { .kind = ColorSourceKind::Fixed,
                             .rgb = 0xFFFFFF,
                             .status = StatusColorRole::Danger,
@@ -425,6 +427,34 @@ namespace detail
         // sidebar -- and still a mark at 3:1 on the sidebar's light surface, which leaves the light side
         // little room below the tertiary.
         tone(0x000000, 43, 0xFFFFFF, 38), // SidebarLastKnownInk
+        // A toast's action is a button on the toast's own dark fill, whatever the chrome's tone: the toast's
+        // white ink at the kit's fill steps, so "Undo" reads as a control beside the words, not as more of
+        // them (snackbar, AdwToast and InfoBar buttons alike).
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0xFFFFFF,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 14,
+                            .level = 0 }, // ToastActionFill
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0xFFFFFF,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 24,
+                            .level = 0 }, // ToastActionHoverFill
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0xFFFFFF,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 32,
+                            .level = 0 }, // ToastActionPressedFill
+        // Its words stay the toast's in every state: the fills above keep them legible.
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0xFFFFFF,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 }, // ToastActionActiveInk
     };
 
     /// The Windows 11 row's colours: the native ones, with Fluent's own tooltip (#F9F9F9 / #2C2C2C).
@@ -1442,8 +1472,16 @@ namespace detail
                     // to that very ink.
                     ChromeColorSource { .kind = ColorSourceKind::Scheme,
                                         .slot = SchemeSlot::BarInk,
-                                        .alphaPercent =
-                                            TerminalLastKnownInkPercent } }, // SidebarLastKnownInk
+                                        .alphaPercent = TerminalLastKnownInkPercent }, // SidebarLastKnownInk
+                    // A toast's action is a bracketed run of cells, as a daemon row's buttons are
+                    // (CellButtonFormat): its brackets set it apart at rest, with no fill -- the toast is an
+                    // inverse strip already. Under the pointer and pressed its cells are inverted, as a
+                    // selected run of cells is: the toast's ink is the fill and its fill the words, which
+                    // read wherever the toast itself does (a wash of the ink would not, on every scheme).
+                    detail::noColor(),                 // ToastActionFill
+                    schemeColor(SchemeSlot::ToastInk), // ToastActionHoverFill
+                    schemeColor(SchemeSlot::ToastInk), // ToastActionPressedFill
+                    schemeColor(SchemeSlot::Toast) },  // ToastActionActiveInk
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

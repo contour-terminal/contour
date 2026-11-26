@@ -133,8 +133,9 @@ struct FakeSidebarHost final: window::ISidebarHost
     std::optional<window::OwnDaemon> own;                                  ///< What ownDaemon() answers.
     vtworkspace::WorkspaceId window { 1 };                                 ///< What windowId() answers.
     std::vector<std::pair<window::SidebarTarget, window::JumpMode>> jumps; ///< Every jumpTo(), in order.
-    std::optional<window::SidebarTarget> pending;                          ///< What pendingJump() answers.
+    window::PendingJumps pending;                                          ///< What pendingJumps() answers.
     int cancels = 0;                                                       ///< How often cancelJump() ran.
+    std::vector<window::JumpMode> cancelled;                               ///< Each cancelJump()'s mode.
     int reconnects = 0;                                                    ///< How often reconnect() ran.
     int promptRaises = 0;                                                  ///< How often raisePrompt() ran.
 
@@ -144,8 +145,12 @@ struct FakeSidebarHost final: window::ISidebarHost
     {
         jumps.emplace_back(std::move(target), mode);
     }
-    [[nodiscard]] std::optional<window::SidebarTarget> pendingJump() const override { return pending; }
-    void cancelJump() override { ++cancels; }
+    [[nodiscard]] window::PendingJumps pendingJumps() const override { return pending; }
+    void cancelJump(window::JumpMode mode) override
+    {
+        ++cancels;
+        cancelled.push_back(mode);
+    }
     void reconnect() override { ++reconnects; }
     void raisePrompt() override { ++promptRaises; }
 };

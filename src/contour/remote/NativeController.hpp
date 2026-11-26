@@ -477,8 +477,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
         PromotionLanded landed);
 
     /// GUI thread. Ends the promotion under way from this side: @c landed is told "withdrawn"; a later answer
-    /// that promoted is answered by ObserveOnly, so the connection observes again. Nothing while none is
-    /// under way.
+    /// that promoted is answered by ObserveOnly, so the connection observes again. A promotion the daemon
+    /// answered whose @c landed has not been told yet is withdrawn as well: told "withdrawn" in place of its
+    /// workspace, and the next demote() says so to the daemon (ObserveCause::Withdrawn), which takes back
+    /// what the answer did, as for an answer still on its way. Nothing while neither is the case.
     void withdrawPromotion();
 
     /// @return The cell size the last ResizeRequest (or hello) stated to the daemon; nullopt for none. Safe
@@ -1190,6 +1192,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     [[nodiscard]] std::function<void()> endPromotion(std::lock_guard<std::mutex> const& held,
                                                      std::expected<uint64_t, std::string> outcome);
 
+    /// Tells the promotion's caller the landing endPromotion() kept, if withdrawPromotion() did not take it
+    /// back first. GUI thread; takes _mutex.
+    void tellLanding();
+
     /// Asks the promotion under way again on a new connection, whose hello was an observer's: unless the
     /// daemon restarted since it was asked (its workspace ids name others), or cannot promote. Reactor
     /// thread, under _mutex.
@@ -1232,6 +1238,19 @@ class NativeController final: public QObject, public contour::session::SessionFa
     };
     /// The promotion under way, if any. Under _mutex.
     std::optional<Promotion> _promotion;
+    /// A promotion the daemon answered: whom to tell, and what, once the GUI thread runs the post
+    /// endPromotion() made (tellLanding()). Under _mutex.
+    struct UntoldLanding
+    {
+        PromotionLanded landed;                      ///< Told how it ended.
+        std::expected<uint64_t, std::string> result; ///< The workspace selected.
+    };
+    /// The landing the GUI thread has not been told yet, if any: what withdrawPromotion() can still take
+    /// back. Under _mutex.
+    std::optional<UntoldLanding> _untoldLanding;
+    /// What the next demote() says to the daemon: Withdrawn once withdrawPromotion() took back an answered
+    /// promotion, Demoted otherwise. Under _mutex.
+    vthost::proto::ObserveCause _demoteCause = vthost::proto::ObserveCause::Demoted;
     /// The serial the promotion's select went out under on this connection, answered by the batch naming it;
     /// forgotten as the promotion ends or the connection drops. Reactor thread, under _mutex.
     std::optional<uint64_t> _promotionSerial;

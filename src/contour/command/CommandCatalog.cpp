@@ -170,6 +170,8 @@ namespace
         ActionCategory { .name = "ConnectDaemon", .category = CommandCategory::Daemons },
         ActionCategory { .name = "StartDaemon", .category = CommandCategory::Daemons },
         ActionCategory { .name = "RemoveDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "HideDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "ShowHiddenDaemon", .category = CommandCategory::Daemons },
         ActionCategory { .name = "SwitchToWorkspace", .category = CommandCategory::Daemons },
         ActionCategory { .name = "OpenWorkspace", .category = CommandCategory::Daemons },
         ActionCategory { .name = "CycleWorkspace", .category = CommandCategory::Daemons },

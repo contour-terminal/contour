@@ -512,7 +512,7 @@ ThemedWindow
     // This window's toast (window::NoticeModel): centred, in the title band while a band at the top can hold
     // it, else at the content's top -- or its bottom, while the cursor is in the rows the top one would
     // cover, or at the top again over an ended pane's footer. Where it goes is decided as it shows
-    // (WindowController.toastHost: "titleBand", "contentTop" or "contentBottom"); a hovered toast stays. Not an
+    // (WindowController.toastHost: "titleBand", "contentTop" or "contentBottom"); a hovered or focused toast stays. Not an
     // alert to a screen reader: the window's NoticeModel says each notice once, and an AlertMessage would
     // have it said twice.
     Toast {
@@ -522,6 +522,9 @@ ThemedWindow
         property string host: "titleBand"
         text: notices !== null ? notices.toastText : ""
         glyph: notices !== null ? notices.toastGlyph : ""
+        // `!== undefined` for a lightweight mock `win` whose notices predate the toast's action.
+        actionText: notices !== null && notices.toastActionText !== undefined ? notices.toastActionText : ""
+        onActionTriggered: if (noticeToast.notices !== null) noticeToast.notices.triggerToastAction()
         shown: notices !== null && notices.toastShown
         x: (parent.width - width) / 2
         y: host === "titleBand" ? titleBar.y + (titleBar.height - height) / 2
@@ -544,6 +547,11 @@ ThemedWindow
             enabled: noticeToast.shown
             onHoveredChanged: if (noticeToast.notices !== null) noticeToast.notices.setToastHovered(hovered)
         }
+
+        // The keyboard holds it as the pointer does: Tab reaches its action (Hide's Undo), which stays until
+        // the keyboard leaves it. Undo has no chord of its own; the Hidden row's menu is the keyboard's other
+        // path back. A toast that fades out takes the keyboard off its button, and so lets go.
+        onActionFocusedChanged: if (noticeToast.notices !== null) noticeToast.notices.setToastFocused(actionFocused)
     }
 
     // Shown only while the daemon runs another release than this client (see DaemonDriftModel): in the
@@ -711,11 +719,11 @@ ThemedWindow
     Connections {
         target: appWindow.win
         ignoreUnknownSignals: true
-        function onCloseWorkspaceConfirmationRequested(workspace, workspaceLabel, program) {
-            closeDialog.ask(SidebarRows.CloseKind.Workspace, workspace, 0, 0, workspaceLabel, program)
+        function onCloseWorkspaceConfirmationRequested(node, workspaceLabel, program) {
+            closeDialog.ask(node, workspaceLabel, program)
         }
-        function onSidebarCloseConfirmationRequested(kind, workspace, tab, pane, label, program) {
-            closeDialog.ask(kind, workspace, tab, pane, label, program)
+        function onSidebarCloseConfirmationRequested(node, label, program) {
+            closeDialog.ask(node, label, program)
         }
     }
     // }}}

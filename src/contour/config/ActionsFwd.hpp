@@ -178,6 +178,8 @@ struct OpenInNewWindow;
 struct ConnectDaemon;
 struct StartDaemon;
 struct RemoveDaemon;
+struct HideDaemon;
+struct ShowHiddenDaemon;
 
 /// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
 ///
@@ -237,7 +239,8 @@ class ActionList
 /// (WindowController::runSidebarAction()), and a session that runs one bound does nothing. Here rather than
 /// in Actions.hpp so a header that only dispatches actions can constrain on it.
 template <typename T>
-concept SidebarRowActionConcept = std::same_as<T, OpenInNewWindow> || std::same_as<T, ConnectDaemon>
-                                  || std::same_as<T, StartDaemon> || std::same_as<T, RemoveDaemon>;
+concept SidebarRowActionConcept =
+    std::same_as<T, OpenInNewWindow> || std::same_as<T, ConnectDaemon> || std::same_as<T, StartDaemon>
+    || std::same_as<T, RemoveDaemon> || std::same_as<T, HideDaemon> || std::same_as<T, ShowHiddenDaemon>;
 
 } // namespace contour::actions

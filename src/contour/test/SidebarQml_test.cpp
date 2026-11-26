@@ -2309,9 +2309,18 @@ TEST_CASE(
              })
         {
             INFO("row " << static_cast<int>(row) << ", kind " << static_cast<int>(kind));
+            auto const node =
+                contour::window::CloseNode { .kind = kind,
+                                             .row = contour::window::SidebarRowKey {
+                                                 .kind = contour::window::SidebarRowKind::Pane,
+                                                 .daemon = contour::window::DaemonRef { "host:starfive" },
+                                                 .instance = contour::window::DaemonInstance { 7 },
+                                                 .workspace = 1,
+                                                 .tab = 10,
+                                                 .pane = contour::window::PaneKey { 11 } } };
             auto const asked = [&]() -> QObject* {
                 emit scene.controller.sidebarCloseConfirmationRequested(
-                    static_cast<int>(kind), 1, 10, 11, QStringLiteral("billing"), QString {});
+                    QVariant::fromValue(node), QStringLiteral("billing"), QString {});
                 auto* dialog = scene.root->findChild<QObject*>(QStringLiteral("closeConfirmation"));
                 REQUIRE(dialog != nullptr);
                 REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 1000));
@@ -2326,17 +2335,18 @@ TEST_CASE(
             REQUIRE(QTest::qWaitFor([&] { return !dialog->property("opened").toBool(); }, 1000));
             CHECK(scene.controller.confirmedCloses.empty());
 
-            // The destructive button closes exactly the node the menu was opened on.
+            // The destructive button closes exactly the node the menu was opened on: the dialog hands back
+            // the node it was asked with, daemon and run included.
             dialog = asked();
             REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
             REQUIRE(QTest::qWaitFor([&] { return !scene.controller.confirmedCloses.empty(); }, 1000));
             REQUIRE(scene.controller.confirmedCloses.size() == 1);
-            auto const& closed = scene.controller.confirmedCloses.front();
-            CHECK(closed.kind == static_cast<int>(kind));
-            CHECK(closed.workspace == 1);
-            CHECK(closed.tab == 10);
-            CHECK(closed.pane == 11);
+            CHECK(scene.controller.confirmedCloses.front() == node);
             scene.controller.confirmedCloses.clear();
+            // A second press of the destructive button, after the answer, closes nothing more.
+            QMetaObject::invokeMethod(dialog, "accepted");
+            QCoreApplication::processEvents();
+            CHECK(scene.controller.confirmedCloses.empty());
         }
         CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
@@ -4239,9 +4249,34 @@ TEST_CASE("a status mark stays legible on a tinted workspace row (offscreen)", "
     }
 }
 
-TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours it by id (offscreen)",
+namespace
+{
+/// Has @p scene's controller ask for the colour picker of @p kind over the row titled @p title, as
+/// WindowController::requestColorPick() asks: by the row's index, with its key.
+/// @return The row's key, which the pick must hand back.
+contour::window::SidebarRowKey askColorPickOver(SidebarWindow& scene,
+                                                QString const& title,
+                                                contour::window::SidebarRowKind kind)
+{
+    auto const* item = scene.rowTitled(title);
+    REQUIRE(item != nullptr);
+    auto const index = item->property("index").toInt();
+    auto const& rows = scene.controller.sidebarModel().rows();
+    REQUIRE(std::cmp_less(index, rows.size()));
+    auto const key = rows[static_cast<std::size_t>(index)].key;
+    REQUIRE(key.kind == kind);
+    if (kind == contour::window::SidebarRowKind::Tab)
+        emit scene.controller.sidebarTabColorPickRequested(index, QVariant::fromValue(key));
+    else
+        emit scene.controller.workspaceColorPickRequested(index, QVariant::fromValue(key));
+    return key;
+}
+} // namespace
+
+TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours that row (offscreen)",
           "[contour][gui][qml][sidebar]")
 {
+    using contour::window::SidebarRowKind;
     for (auto const row: drawnRows())
     {
         INFO("row " << static_cast<int>(row));
@@ -4252,7 +4287,7 @@ TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours 
         REQUIRE_FALSE(flyout->property("opened").toBool());
 
         // docs, the workspace the window does not show.
-        emit scene.controller.workspaceColorPickRequested(2);
+        auto const docsKey = askColorPickOver(scene, QStringLiteral("docs"), SidebarRowKind::Workspace);
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
         auto* docs = scene.rowTitled(QStringLiteral("docs"));
         REQUIRE(docs != nullptr);
@@ -4260,14 +4295,49 @@ TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours 
 
         auto const picked = QColor { 0x12, 0x34, 0x56 };
         QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
-        REQUIRE(scene.controller.workspaceColorCalls.size() == 1);
-        CHECK(scene.controller.workspaceColorCalls[0].workspace == 2);
-        CHECK(scene.controller.workspaceColorCalls[0].color == picked);
+        REQUIRE(scene.controller.rowColorCalls.size() == 1);
+        CHECK(scene.controller.rowColorCalls[0].row == docsKey);
+        CHECK(scene.controller.rowColorCalls[0].color == picked);
 
         QMetaObject::invokeMethod(flyout, "resetRequested");
-        REQUIRE(scene.controller.workspaceColorCalls.size() == 2);
-        CHECK(scene.controller.workspaceColorCalls[1].workspace == 2);
-        CHECK_FALSE(scene.controller.workspaceColorCalls[1].color.has_value());
+        REQUIRE(scene.controller.rowColorCalls.size() == 2);
+        CHECK(scene.controller.rowColorCalls[1].row == docsKey);
+        CHECK_FALSE(scene.controller.rowColorCalls[1].color.has_value());
+    }
+}
+
+TEST_CASE("the colour picker of another daemon's workspace hangs from that row, not an own one of its id "
+          "(offscreen)",
+          "[contour][gui][qml][sidebar][daemon]")
+{
+    using contour::window::SidebarRowKind;
+    constexpr auto CiColour = vtbackend::RGBColor { 0x2E, 0x8B, 0x57 };
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { workspaceColourScene(row, contour::config::SidebarWorkspaceColorStyle::Tint) };
+        // starfive's ci has the id of the window's own docs: workspace ids start at 1 on every daemon.
+        auto starfive = starfiveSection();
+        starfive.directory.workspaces.front().id = 2;
+        starfive.directory.workspaces.front().color = CiColour;
+        onDaemon(scene, QStringLiteral("local"), contour::window::DaemonLinkState::Connected, { starfive });
+        auto* flyout = scene.window->findChild<QObject*>(QStringLiteral("sidebarWorkspaceColorFlyout"));
+        REQUIRE(flyout != nullptr);
+
+        auto const ciKey = askColorPickOver(scene, QStringLiteral("ci"), SidebarRowKind::Workspace);
+        CHECK(ciKey.daemon == starfive.daemon);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
+        CHECK(flyout->property("parent").value<QQuickItem*>() == scene.rowTitled(QStringLiteral("ci")));
+        // Its keyboard cursor starts on ci's colour, not on docs' none.
+        CHECK(flyout->property("currentColor").value<QColor>()
+              == QColor { CiColour.red, CiColour.green, CiColour.blue });
+
+        auto const picked = QColor { 0x12, 0x34, 0x56 };
+        QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
+        REQUIRE(scene.controller.rowColorCalls.size() == 1);
+        CHECK(scene.controller.rowColorCalls[0].row == ciKey);
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 }
 
@@ -4285,8 +4355,9 @@ TEST_CASE("the sidebar's tab colour picker opens at the tab's row and colours it
         // build, a tab that is not the current one.
         auto* build = scene.rowTitled(QStringLiteral("build"));
         REQUIRE(build != nullptr);
-        constexpr auto BuildTab = quint64 { 11 };
-        emit scene.controller.sidebarTabColorPickRequested(build->property("index").toInt(), BuildTab);
+        auto const buildKey =
+            askColorPickOver(scene, QStringLiteral("build"), contour::window::SidebarRowKind::Tab);
+        CHECK(buildKey.tab == 11);
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
         build = scene.rowTitled(QStringLiteral("build"));
         CHECK(flyout->property("parent").value<QQuickItem*>() == build);
@@ -4296,15 +4367,14 @@ TEST_CASE("the sidebar's tab colour picker opens at the tab's row and colours it
 
         auto const picked = QColor { 0x12, 0x34, 0x56 };
         QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
-        REQUIRE(scene.controller.tabColorCalls.size() == 1);
-        CHECK(scene.controller.tabColorCalls[0].tab == BuildTab);
-        CHECK(scene.controller.tabColorCalls[0].color == picked);
+        REQUIRE(scene.controller.rowColorCalls.size() == 1);
+        CHECK(scene.controller.rowColorCalls[0].row == buildKey);
+        CHECK(scene.controller.rowColorCalls[0].color == picked);
 
         QMetaObject::invokeMethod(flyout, "resetRequested");
-        REQUIRE(scene.controller.tabColorCalls.size() == 2);
-        CHECK(scene.controller.tabColorCalls[1].tab == BuildTab);
-        CHECK_FALSE(scene.controller.tabColorCalls[1].color.has_value());
-        CHECK(scene.controller.workspaceColorCalls.empty());
+        REQUIRE(scene.controller.rowColorCalls.size() == 2);
+        CHECK(scene.controller.rowColorCalls[1].row == buildKey);
+        CHECK_FALSE(scene.controller.rowColorCalls[1].color.has_value());
     }
 }
 // }}}
@@ -4523,12 +4593,28 @@ TEST_CASE("Connect, Start, Cancel and Remove call the model (offscreen)",
         auto const work = contour::window::localDaemonRef("work");
 
         pressAllOf(workIn(DaemonLinkState::NotRunning));
+        // Each says its verb in full on hover, as the row's menu does.
+        if (auto* heading = daemonHeadingOf(scene, QStringLiteral("work")); heading != nullptr)
+        {
+            auto const tips = std::ranges::to<std::vector>(
+                daemonButtonsOf(*heading) | std::views::transform([](QQuickItem const* button) {
+                    return button->property("toolTipText").toString();
+                }));
+            CHECK(tips
+                  == std::vector { QStringLiteral("Start Daemon"), QStringLiteral("Remove from Sidebar") });
+        }
         REQUIRE(calls.size() == 2);
         CHECK(calls[0].verb == decltype(calls[0].verb) { DaemonSectionsCall::Start { .daemon = work } });
         CHECK(calls[1].verb == decltype(calls[1].verb) { DaemonSectionsCall::Remove { .daemon = work } });
 
         calls.clear();
         pressAll(DaemonLinkState::NotConnected);
+        if (auto* heading = daemonHeadingOf(scene, QStringLiteral("starfive")); heading != nullptr)
+        {
+            auto const buttons = daemonButtonsOf(*heading);
+            REQUIRE(buttons.size() == 1);
+            CHECK(buttons[0]->property("toolTipText").toString() == QStringLiteral("Connect"));
+        }
         REQUIRE(calls.size() == 1);
         CHECK(std::holds_alternative<DaemonSectionsCall::Connect>(calls[0].verb));
 
@@ -4540,7 +4626,7 @@ TEST_CASE("Connect, Start, Cancel and Remove call the model (offscreen)",
               == decltype(calls[0].verb) { DaemonSectionsCall::Disconnect { .daemon = starfive } });
 
         calls.clear();
-        scene.controller.sidebarHost().pending =
+        scene.controller.sidebarHost().pending.here =
             contour::window::SidebarTarget { .daemon = starfive,
                                              .instance = contour::window::DaemonInstance { 9 },
                                              .workspace = 5,
@@ -4698,7 +4784,7 @@ TEST_CASE("at its narrowest a daemon row keeps six letters of its name, in every
                 auto scene = SidebarWindow { { .row = row } };
                 auto const section = workIn(state, std::string(daemonName));
                 if (pending == RowPending::Yes)
-                    scene.controller.sidebarHost().pending =
+                    scene.controller.sidebarHost().pending.here =
                         contour::window::SidebarTarget { .daemon = section.daemon,
                                                          .instance = section.instance,
                                                          .workspace = 7,
@@ -4739,6 +4825,7 @@ TEST_CASE("Cancel's tooltip names CancelSwitch's chord only while a jump is unde
     {
         INFO("row " << static_cast<int>(row));
         auto scene = SidebarWindow { { .row = row } };
+        auto toolTip = QString {};
         auto const cancelCommand = [&] {
             onDaemon(scene,
                      QStringLiteral("local"),
@@ -4749,17 +4836,45 @@ TEST_CASE("Cancel's tooltip names CancelSwitch's chord only while a jump is unde
             auto const buttons = daemonButtonsOf(*heading);
             REQUIRE(buttons.size() == 1);
             CHECK(buttons[0]->property("accessibleName").toString() == QStringLiteral("Cancel"));
+            toolTip = buttons[0]->property("toolTipText").toString();
             return buttons[0]->property("toolTipCommand").toString();
         };
         CHECK(cancelCommand().isEmpty());
+        // A tooltip stands alone, so it names the verb in full, as the row's menu does.
+        CHECK(toolTip == QStringLiteral("Cancel Connecting"));
 
-        scene.controller.sidebarHost().pending =
+        scene.controller.sidebarHost().pending.here =
             contour::window::SidebarTarget { .daemon = contour::window::hostDaemonRef("starfive"),
                                              .instance = contour::window::DaemonInstance { 9 },
                                              .workspace = 5,
                                              .tab = std::nullopt,
                                              .pane = {} };
         CHECK(cancelCommand() == QStringLiteral("CancelSwitch"));
+        CHECK(toolTip == QStringLiteral("Cancel Jump"));
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a daemon another window is adopting says Connecting and offers no Cancel (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    // Its connection is that window's switch's: a Cancel here would end nothing (no observer connects).
+    using contour::window::DaemonLinkState;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.showSidebar(static_cast<int>(scene.token("maxWidth")));
+        auto adopted = starfiveIn(DaemonLinkState::Connecting);
+        adopted.feed = contour::window::SectionFeed::WindowLink;
+        onDaemon(scene, QStringLiteral("local"), DaemonLinkState::Connected, { adopted });
+        auto* heading = daemonHeadingOf(scene, QStringLiteral("starfive"));
+        REQUIRE(heading != nullptr);
+        CHECK(daemonButtonsOf(*heading).empty());
+        CHECK(scene.controller.sidebarModel()
+                  .rows()[static_cast<std::size_t>(daemonRowIndex(scene, "starfive"))]
+                  .linkState
+              == DaemonLinkState::Connecting);
         CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
     }
 }
@@ -4823,7 +4938,7 @@ TEST_CASE("the progress mark is static under reduced motion (offscreen)",
         {
             INFO("row " << static_cast<int>(row) << ", reduced " << (motion == MotionPreference::Reduced));
             auto scene = SidebarWindow { { .row = row, .motion = motion } };
-            scene.controller.sidebarHost().pending =
+            scene.controller.sidebarHost().pending.here =
                 contour::window::SidebarTarget { .daemon = contour::window::hostDaemonRef("starfive"),
                                                  .instance = contour::window::DaemonInstance { 9 },
                                                  .workspace = 5,
@@ -4921,23 +5036,23 @@ TEST_CASE("Esc in the sidebar cancels a pending jump, then clears the filter, th
         REQUIRE(QTest::qWaitFor([&] { return field->hasActiveFocus(); }, 1000));
 
         // In the filter field: the jump first, the filter after.
-        host.pending = intoStarfive;
+        host.pending.here = intoStarfive;
         QTest::keyClick(scene.window, Qt::Key_Escape);
         QCoreApplication::processEvents();
         CHECK(host.cancels == 1);
         CHECK(model.isFiltered());
         CHECK(field->hasActiveFocus());
-        host.pending.reset();
+        host.pending.here.reset();
 
         // In the tree: the same order, then the keyboard leaves.
         QTest::keyClick(scene.window, Qt::Key_Down);
         REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
-        host.pending = intoStarfive;
+        host.pending.here = intoStarfive;
         QTest::keyClick(scene.window, Qt::Key_Escape);
         QCoreApplication::processEvents();
         CHECK(host.cancels == 2);
         CHECK(model.isFiltered());
-        host.pending.reset();
+        host.pending.here.reset();
         QTest::keyClick(scene.window, Qt::Key_Escape);
         QCoreApplication::processEvents();
         CHECK_FALSE(model.isFiltered());
@@ -5067,11 +5182,71 @@ TEST_CASE("the Menu key on a daemon row opens its menu with Open in New Window (
         CHECK(menus.front().daemon == contour::window::hostDaemonRef("starfive"));
         // The menu the window builds for that row offers it in a window of its own.
         auto const& shown = scene.controller.sidebarModel().rows().at(static_cast<std::size_t>(starfive));
-        auto const menu =
-            contour::command::buildSidebarDaemonMenu(contour::window::sidebarDaemonMenuStateOf(shown));
+        auto const menu = contour::command::buildSidebarDaemonMenu(
+            contour::window::sidebarDaemonMenuStateOf(shown, contour::command::RowOrigin::OtherDaemon));
         CHECK(std::ranges::count(
                   menu, std::string_view { "Open in New Window" }, &contour::command::ContextMenuEntry::title)
               == 1);
+    }
+}
+
+TEST_CASE("the Menu key on another daemon's tab row opens its menu (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::window::SidebarRowKind;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 contour::window::DaemonLinkState::Connected,
+                 { starfiveSection() });
+        auto& model = scene.controller.sidebarModel();
+        auto const rowOf = [&](SidebarRowKind kind) {
+            return model.rowIndexOf(
+                contour::window::SidebarRowKey { .kind = kind,
+                                                 .daemon = contour::window::hostDaemonRef("starfive"),
+                                                 .instance = contour::window::DaemonInstance { 9 },
+                                                 .workspace = 5,
+                                                 .tab = kind == SidebarRowKind::Tab ? 50U : 0U,
+                                                 .pane = {} });
+        };
+        // Another daemon's workspaces start folded.
+        model.expand(rowOf(SidebarRowKind::Workspace));
+        model.refreshNow();
+        QCoreApplication::processEvents();
+        auto const tab = rowOf(SidebarRowKind::Tab);
+        REQUIRE(tab >= 0);
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        tree->setProperty("currentIndex", tab);
+        auto& menus = scene.controller.sidebarHost().menus;
+        menus.clear();
+
+        QTest::keyClick(scene.window, Qt::Key_Menu);
+        QCoreApplication::processEvents();
+        REQUIRE(menus.size() == 1);
+        CHECK(menus.front().kind == SidebarRowKind::Tab);
+        CHECK(menus.front().daemon == contour::window::hostDaemonRef("starfive"));
+        // The menu the window builds for that row: what runs on another daemon's row, and no move.
+        auto const menu = contour::command::buildSidebarTabMenu(
+            { .tab = { .tabIndex = 0, .tabCount = 1 },
+              .others = {},
+              .joinable = {},
+              .workspaceTabs = 1,
+              .moves = contour::command::MenuMoves::Nodes,
+              .open = contour::window::openOfferOf(menus.front().daemon),
+              .origin = contour::window::rowOriginOf(menus.front().daemon,
+                                                     scene.controller.sidebarHost().own->daemon) });
+        REQUIRE_FALSE(menu.empty());
+        CHECK(menu.front().title == "Open in New Window");
+        CHECK(std::ranges::count(
+                  menu, std::string_view { "Move to Workspace" }, &contour::command::ContextMenuEntry::title)
+              == 0);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
     }
 }
 
@@ -5171,3 +5346,58 @@ TEST_CASE("a last-known row is dimmed and keeps 3:1 (offscreen)", "[contour][gui
             }
 }
 // }}}
+
+TEST_CASE("the hidden row lists hidden daemons and opens its menu by click and by Return (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSections().hidden = { contour::window::HiddenDaemon {
+            .daemon = contour::window::hostDaemonRef("starfive"), .name = "starfive" } };
+        onDaemon(scene, QStringLiteral("local"));
+        auto* hidden = scene.rowTitled(QStringLiteral("1 hidden daemon"));
+        REQUIRE(hidden != nullptr);
+        // Its words start at the sections' edge, where a daemon heading's first part does: its disclosure,
+        // or on a look without one (the Terminal row) its name.
+        scene.layOut();
+        auto* heading = daemonHeadingOf(scene, QStringLiteral("local"));
+        REQUIRE(heading != nullptr);
+        auto const& disclosure = headingPart(*heading, "sidebarDaemonDisclosure");
+        auto const edge = disclosure.isVisible()
+                              ? sceneRectOf(disclosure).left()
+                              : sceneRectOf(headingPart(*heading, "sidebarDaemonName")).left();
+        CHECK(sceneRectOf(rowPart(*hidden, "sidebarRowTitle")).left() == Catch::Approx(edge).margin(0.5));
+        auto& menus = scene.controller.sidebarHost().menus;
+        menus.clear();
+
+        scene.click(*hidden);
+        REQUIRE(menus.size() == 1);
+        CHECK(menus.back().kind == contour::window::SidebarRowKind::Hidden);
+
+        // The keyboard: the tree's current row, and Return.
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        tree->setProperty("currentIndex", hidden->property("index"));
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        REQUIRE(menus.size() == 2);
+        CHECK(menus.back().kind == contour::window::SidebarRowKind::Hidden);
+        // The menu the window builds for it: one Show per hidden daemon.
+        auto const& rows = scene.controller.sidebarModel().rows();
+        auto const names = std::ranges::to<std::vector>(
+            rows.back().hidden | std::views::transform(&contour::window::HiddenDaemon::name));
+        auto const menu = contour::command::buildSidebarHiddenMenu(names);
+        REQUIRE(menu.size() == 1);
+        CHECK(menu.front().title == "Show starfive");
+
+        // Shown again: the row goes.
+        scene.controller.sidebarSections().hidden.clear();
+        scene.controller.sidebarModel().refreshNow();
+        scene.layOut();
+        CHECK(scene.rowTitled(QStringLiteral("1 hidden daemon")) == nullptr);
+    }
+}

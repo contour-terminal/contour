@@ -13,6 +13,7 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -20,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <vtworkspace/Primitives.hpp>
@@ -118,6 +120,9 @@ class IDaemonSections
     /// @param choice Whether to list it.
     virtual void setListed(DaemonRef const& daemon, SidebarListingChoice choice) = 0;
 
+    /// @return The daemons the user chose not to list that the Hidden row offers back, in tree order.
+    [[nodiscard]] virtual std::vector<HiddenDaemon> hiddenDaemons() const = 0;
+
     /// Renames a workspace.
     /// @param daemon    The daemon serving it.
     /// @param instance  The daemon's run the workspace was read from.
@@ -154,6 +159,22 @@ class IDaemonSections
     /// @param tab      The tab.
     virtual void closeTab(DaemonRef const& daemon, DaemonInstance instance, TabRef tab) = 0;
 
+    /// Colours a tab, or clears its colour.
+    /// @param daemon   The daemon serving it.
+    /// @param instance The daemon's run the tab was read from.
+    /// @param tab      The tab.
+    /// @param color    Its colour; none to clear it.
+    virtual void setTabColor(DaemonRef const& daemon,
+                             DaemonInstance instance,
+                             TabRef tab,
+                             std::optional<vtbackend::RGBColor> color) = 0;
+
+    /// Closes a pane.
+    /// @param daemon   The daemon serving it.
+    /// @param instance The daemon's run the pane was read from.
+    /// @param pane     The pane.
+    virtual void closePane(DaemonRef const& daemon, DaemonInstance instance, PaneKey pane) = 0;
+
     /// Closes a workspace.
     /// @param daemon    The daemon serving it.
     /// @param instance  The daemon's run the workspace was read from.
@@ -172,5 +193,29 @@ class IDaemonSections
     /// @return The subscription; @p changed is not called once it is destroyed.
     [[nodiscard]] virtual SectionsSubscription onChanged(std::function<void()> changed) = 0;
 };
+
+/// @param sections The daemon sections.
+/// @param daemon A daemon.
+/// @return The section @p daemon is listed by now; none for one not listed.
+[[nodiscard]] inline std::optional<DaemonSection> listedSection(IDaemonSections const& sections,
+                                                                DaemonRef const& daemon)
+{
+    auto listed = sections.sections();
+    auto const found = std::ranges::find(listed, daemon, &DaemonSection::daemon);
+    return found != listed.end() ? std::optional { std::move(*found) } : std::nullopt;
+}
+
+/// @param daemon  A daemon.
+/// @param section The section @p daemon is listed by, if any (listedSection()).
+/// @return The name the window calls @p daemon by: its section's, else the one its reference carries, else
+///         the reference itself.
+[[nodiscard]] inline std::string daemonDisplayName(DaemonRef const& daemon,
+                                                   std::optional<DaemonSection> const& section)
+{
+    if (section && !section->name.empty())
+        return section->name;
+    auto const parsed = parseDaemonRef(daemon);
+    return parsed ? std::string { parsed->second } : daemon.value;
+}
 
 } // namespace contour::window

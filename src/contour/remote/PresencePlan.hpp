@@ -67,6 +67,28 @@ struct ListedDaemon
 ///         hosts by name, hosts no configuration names by ref, then links by id.
 [[nodiscard]] std::vector<ListedDaemon> listedDaemons(PresenceInputs const& inputs);
 
+/// What the user and the configuration chose for a daemon's listing, whether or not the sidebar can show it
+/// now: the user's Hide wins, then the user's Show or the configuration's listing.
+/// @param settings The listing settings.
+/// @param daemon The daemon.
+/// @param configured What the configuration alone chooses for it: Listed for a local daemon, a saved host's
+///        `show_in_sidebar`, Unlisted for a host no configuration names.
+/// @return Listed or Unlisted.
+[[nodiscard]] window::SidebarListingChoice chosenListing(ListingSettings const& settings,
+                                                         window::DaemonRef const& daemon,
+                                                         window::SidebarListingChoice configured);
+
+/// The daemons the sidebar's Hidden row names: the user hid each (ListingSettings::hiddenByUser), it is known
+/// this run -- a configured saved host, or a local daemon running now or listed earlier this run -- and it
+/// is not listed, as a window on it keeps it listed. A saved host the configuration does not list, with no
+/// choice of the user's, is not hidden (the switcher's toggle offers it), nor is a daemon removed this run.
+/// @param inputs What discovery, the configuration, the GUI state and the windows report.
+/// @param listed What listedDaemons() lists for the same @p inputs.
+/// @return Each once, in tree order (as listedDaemons() orders them), named by its label or host name; none
+///         while no window is on a daemon.
+[[nodiscard]] std::vector<window::HiddenDaemon> hiddenDaemons(PresenceInputs const& inputs,
+                                                              std::vector<ListedDaemon> const& listed);
+
 /// @param address The daemon a link reaches.
 /// @param link    The link, for a daemon no switch can name.
 /// @return `local:<name>` for a Name address, `host:<name>` for a Host, `link:<id>` for Same.

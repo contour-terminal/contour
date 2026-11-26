@@ -36,10 +36,12 @@ struct CloseSubject
     size_t tabs = 0;     ///< How many tabs end with it.
     size_t panes = 0;    ///< How many panes end with it.
     std::string program; ///< The running program or command, where known; empty otherwise.
+    /// The daemon it runs on, where that is not the window's own; empty for the window's own node.
+    std::string daemon;
 };
 
 /// One kind's wording. The format strings take, by position: {0} the label, {1} the tabs as words (`2 tabs`),
-/// {2} the panes as words (`3 panes`), {3} the program.
+/// {2} the panes as words (`3 panes`), {3} the program, {4} the daemon.
 struct CloseDialogRow
 {
     CloseKind kind = CloseKind::Workspace; ///< The kind the row describes.
@@ -47,7 +49,9 @@ struct CloseDialogRow
     std::string_view untitledTitle;        ///< The heading when it has none.
     std::string_view ends;                 ///< What ends with it.
     std::string_view running;              ///< Said after it when a program is known to run.
-    std::string_view destructive;          ///< The destructive button.
+    /// Said last when it runs on another daemon than the window's: what closes is not the window's.
+    std::string_view elsewhere;
+    std::string_view destructive; ///< The destructive button.
 };
 
 /// The rows, in CloseKind order.
@@ -57,18 +61,21 @@ inline constexpr auto CloseDialogRows = std::array {
                      .untitledTitle = "Close this workspace?",
                      .ends = "This ends {1} and {2}.",
                      .running = "“{3}” is still running.",
+                     .elsewhere = "It runs on {4}.",
                      .destructive = "Close Workspace" },
     CloseDialogRow { .kind = CloseKind::Tab,
                      .title = "Close the tab “{0}”?",
                      .untitledTitle = "Close this tab?",
                      .ends = "This ends the tab and its {2}.",
                      .running = "“{3}” is still running.",
+                     .elsewhere = "It runs on {4}.",
                      .destructive = "Close Tab" },
     CloseDialogRow { .kind = CloseKind::Pane,
                      .title = "Close the pane “{0}”?",
                      .untitledTitle = "Close this pane?",
                      .ends = "This ends the pane and its shell.",
                      .running = "“{3}” is still running.",
+                     .elsewhere = "It runs on {4}.",
                      .destructive = "Close Pane" },
 };
 
@@ -104,11 +111,14 @@ namespace detail
     auto const tabs = detail::countOf(subject.tabs, "tab");
     auto const panes = detail::countOf(subject.panes, "pane");
     auto const fill = [&](std::string_view pattern) {
-        return std::vformat(pattern, std::make_format_args(subject.label, tabs, panes, subject.program));
+        return std::vformat(
+            pattern, std::make_format_args(subject.label, tabs, panes, subject.program, subject.daemon));
     };
     auto message = fill(row.ends);
     if (!subject.program.empty())
         message += ' ' + fill(row.running);
+    if (!subject.daemon.empty())
+        message += ' ' + fill(row.elsewhere);
     return { .heading = fill(subject.label.empty() ? row.untitledTitle : row.title),
              .message = std::move(message),
              .acceptText = std::string { row.destructive } };

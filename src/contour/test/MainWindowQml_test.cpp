@@ -5998,8 +5998,9 @@ TEST_CASE("the chip says Connecting and its tooltip names the CancelSwitch chord
     CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
           == QStringLiteral("Connecting to starfive…"));
     // It names no workspace yet, so no separator dangles after the daemon; the dot is a connection's under
-    // way.
+    // way. Nor does it draw the dropdown's caret: a click on it cancels the jump, and drops nothing down.
     CHECK_FALSE(part(*chip, QStringLiteral("workspaceChipSeparator")).isVisible());
+    CHECK_FALSE(part(*chip, QStringLiteral("workspaceChipCaret")).isVisible());
     CHECK(controller.chip()->connectionState()
           == static_cast<int>(contour::window::HostChipState::Reconnecting));
 
@@ -6008,5 +6009,119 @@ TEST_CASE("the chip says Connecting and its tooltip names the CancelSwitch chord
     controller.refreshChip();
     QCoreApplication::processEvents();
     CHECK(tooltipCommand() == QStringLiteral("ShowSwitcher"));
+    CHECK(part(*chip, QStringLiteral("workspaceChipCaret")).isVisible());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the hide toast's Undo is a button on the toast, and taking it ends the toast (offscreen)",
+          "[contour][gui][qml][mainwindow][notices][notice]")
+{
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Fluent, ChromeStyle::Terminal })
+    {
+        INFO("style " << static_cast<int>(style));
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+        showWindow(*root);
+
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        auto* const toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+        auto* const undo = toast->findChild<QQuickItem*>(QStringLiteral("toastAction"));
+        REQUIRE(undo != nullptr);
+        CHECK(undo->isVisible());
+        CHECK(undo->property("accessibleName").toString() == QStringLiteral("Undo"));
+        // Set apart from the toast's words at rest: a fill on the native rows, brackets on the Terminal row,
+        // where a button is a run of cells (Phase 6 review, M6).
+        auto const* const fill = undo->findChild<QQuickItem*>(QStringLiteral("toolbarButtonBackground"));
+        REQUIRE(fill != nullptr);
+        if (style == ChromeStyle::Terminal)
+            CHECK(undo->property("glyph").toString() == QStringLiteral("[Undo]"));
+        else
+        {
+            CHECK(undo->property("glyph").toString() == QStringLiteral("Undo"));
+            CHECK(fill->property("color").value<QColor>().alpha() > 0);
+        }
+        // Inside the pill.
+        CHECK(sceneRectOf(*toast).contains(sceneRectOf(*undo).center()));
+
+        // Its time stands still while the pointer is on its Undo, and runs again once it leaves.
+        QTest::mouseMove(toast->window(), sceneRectOf(*undo).center().toPoint());
+        QCoreApplication::processEvents();
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        QCoreApplication::processEvents();
+        CHECK(controller.notices().toastShown());
+        QTest::mouseMove(toast->window(), QPoint { 2, static_cast<int>(toast->window()->height()) - 2 });
+        QCoreApplication::processEvents();
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        CHECK_FALSE(controller.notices().toastShown());
+
+        // Taken, it ends the toast.
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+
+        QTest::mouseClick(
+            toast->window(), Qt::LeftButton, Qt::NoModifier, sceneRectOf(*undo).center().toPoint());
+        QCoreApplication::processEvents();
+        CHECK_FALSE(controller.notices().toastShown());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+// Review (pass 2, N4): the keyboard holds the hide toast as the pointer does, so a user who tabbed to its
+// Undo does not lose it to the timeout; Return then takes it.
+TEST_CASE("the hide toast stays while the keyboard is on its Undo (offscreen)",
+          "[contour][gui][qml][mainwindow][notices][notice]")
+{
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Fluent, ChromeStyle::Terminal })
+    {
+        INFO("style " << static_cast<int>(style));
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+        showWindow(*root);
+
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        auto* const toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+        auto* const undo = toast->findChild<QQuickItem*>(QStringLiteral("toastAction"));
+        REQUIRE(undo != nullptr);
+        CHECK(undo->activeFocusOnTab());
+
+        undo->forceActiveFocus(Qt::TabFocusReason);
+        REQUIRE(QTest::qWaitFor([&] { return undo->hasActiveFocus(); }, 1000));
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        QCoreApplication::processEvents();
+        CHECK(controller.notices().toastShown());
+
+        // Return takes it, and ends the toast.
+        QTest::keyClick(toast->window(), Qt::Key_Return);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(controller.notices().toastShown());
+
+        // A focused toast let go of runs its whole time again.
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+        undo->forceActiveFocus(Qt::TabFocusReason);
+        REQUIRE(QTest::qWaitFor([&] { return undo->hasActiveFocus(); }, 1000));
+        undo->setFocus(false);
+        REQUIRE(QTest::qWaitFor([&] { return !undo->hasActiveFocus(); }, 1000));
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        CHECK_FALSE(controller.notices().toastShown());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
 }

@@ -436,6 +436,7 @@ class ChromeSnapshotScene
             case ScriptAction::SwitcherNoMatch:
             case ScriptAction::SwitcherDiscovering:
             case ScriptAction::SwitcherRowMenu:
+            case ScriptAction::SwitcherDaemonMenu:
             case ScriptAction::HoverSwitcherRow: openSwitcher(scriptRow(_variant.script).action); break;
             case ScriptAction::ShowNewTabToolTip: showToolTips(ToolTipOf::NewTab); break;
             case ScriptAction::ShowTabToolTip: showToolTips(ToolTipOf::Tab); break;
@@ -443,6 +444,17 @@ class ChromeSnapshotScene
             case ScriptAction::OpenWorkspaceColorPicker: openWorkspaceColorPicker(); break;
             case ScriptAction::OpenSidebarTabColorPicker: openSidebarTabColorPicker(); break;
             case ScriptAction::OpenSidebarDaemonMenu: openSidebarDaemonMenu(); break;
+            case ScriptAction::OpenOtherDaemonWorkspaceMenu:
+                openOtherDaemonMenu(window::SidebarRowKind::Workspace);
+                break;
+            case ScriptAction::OpenOtherDaemonTabMenu:
+                openOtherDaemonMenu(window::SidebarRowKind::Tab);
+                break;
+            case ScriptAction::OpenOtherDaemonPaneMenu:
+                openOtherDaemonMenu(window::SidebarRowKind::Pane);
+                break;
+            case ScriptAction::OpenSidebarHiddenMenu: openSidebarHiddenMenu(); break;
+            case ScriptAction::ShowHiddenToast: showHiddenToast(); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -1652,6 +1664,13 @@ class ChromeSnapshotScene
                                                          .count = 4,
                                                          .joinable = {} };
                 },
+            .runWorkspaceAction = {},
+            // home is listed; the other daemons are not.
+            .listingOf = [](window::DaemonRef const& daemon) -> std::optional<window::SidebarListingChoice> {
+                return daemon == window::localDaemonRef("home") ? window::SidebarListingChoice::Listed
+                                                                : window::SidebarListingChoice::Unlisted;
+            },
+            .setListed = {},
         };
     }
 
@@ -1714,6 +1733,9 @@ class ChromeSnapshotScene
             case ScriptAction::DrillInSwitcher:
                 _switcher->activate(rowTitled("home", window::SwitcherRowKind::Daemon));
                 break;
+            case ScriptAction::SwitcherDaemonMenu:
+                _switcher->setCurrentIndex(rowTitled("home", window::SwitcherRowKind::Daemon));
+                [[fallthrough]];
             case ScriptAction::SwitcherRowMenu: {
                 std::ignore = _switcher->handleKey(Qt::Key_Menu, Qt::NoModifier, 0);
                 auto const* menu = root().findChild<QObject*>(QStringLiteral("switcherRowMenu"));
@@ -1793,6 +1815,26 @@ class ChromeSnapshotScene
         return found;
     }
 
+    /// The sidebar row of model row @p index, once the tree has laid it out.
+    [[nodiscard]] QQuickItem* sidebarRowAt(int index) const
+    {
+        // Scrolled into view first: a row below the sidebar's height is not laid out.
+        // ListView.Contain, the QML enumerator positionViewAtIndex() takes (QQuickItemView is private API).
+        constexpr auto ListViewContain = 4;
+        if (auto* tree = root().findChild<QQuickItem*>(QStringLiteral("sidebarTree")))
+            QMetaObject::invokeMethod(
+                tree, "positionViewAtIndex", Q_ARG(int, index), Q_ARG(int, ListViewContain));
+        QQuickItem* found = nullptr;
+        auto const laidOut = [&] {
+            for (auto* row: itemsNamed(*window().contentItem(), QStringLiteral("sidebarRow")))
+                if (row->isVisible() && row->property("index").toInt() == index)
+                    found = row;
+            return found != nullptr;
+        };
+        REQUIRE(QTest::qWaitFor(laidOut, PopupSettleMs));
+        return found;
+    }
+
     /// Gives build's pane SnapshotLongStatus, rests the pointer on its row and waits for the row's hover
     /// card.
     void hoverSidebarRow()
@@ -1823,10 +1865,13 @@ class ChromeSnapshotScene
     void openWorkspaceColorPicker()
     {
         REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
-        static_cast<void>(sidebarRowTitled(QStringLiteral("billing")));
+        auto const index = sidebarRowTitled(QStringLiteral("billing"))->property("index").toInt();
+        auto const& rows = _controller.sidebarModel().rows();
+        REQUIRE(std::cmp_less(index, rows.size()));
         auto* flyout = root().findChild<QObject*>(QStringLiteral("sidebarWorkspaceColorFlyout"));
         REQUIRE(flyout != nullptr);
-        emit _controller.workspaceColorPickRequested(1);
+        emit _controller.workspaceColorPickRequested(
+            index, QVariant::fromValue(rows[static_cast<std::size_t>(index)].key));
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, PopupSettleMs));
     }
 
@@ -1839,7 +1884,8 @@ class ChromeSnapshotScene
         REQUIRE(std::cmp_less(index, rows.size()));
         auto* flyout = root().findChild<QObject*>(QStringLiteral("sidebarTabColorFlyout"));
         REQUIRE(flyout != nullptr);
-        emit _controller.sidebarTabColorPickRequested(index, rows[static_cast<std::size_t>(index)].key.tab);
+        emit _controller.sidebarTabColorPickRequested(
+            index, QVariant::fromValue(rows[static_cast<std::size_t>(index)].key));
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, PopupSettleMs));
     }
 
@@ -1853,11 +1899,106 @@ class ChromeSnapshotScene
         auto const& rows = _controller.sidebarModel().rows();
         REQUIRE(std::cmp_less(index, rows.size()));
         auto menu = window::PublishedContextMenu {};
-        menu.publish(window::resolveMenuTree(command::buildSidebarDaemonMenu(window::sidebarDaemonMenuStateOf(
-                                                 rows[static_cast<std::size_t>(index)])),
-                                             config::Config {}));
+        menu.publish(window::resolveMenuTree(
+            command::buildSidebarDaemonMenu(window::sidebarDaemonMenuStateOf(
+                rows[static_cast<std::size_t>(index)], command::RowOrigin::OtherDaemon)),
+            config::Config {}));
         auto* popup = root().findChild<QObject*>(QStringLiteral("sidebarContextMenu"));
         REQUIRE(popup != nullptr);
+        _controller.openSidebarContextMenu(menu.model, index, row->mapToScene(QPointF { 0, row->height() }));
+        REQUIRE(QTest::qWaitFor([&] { return popup->property("opened").toBool(); }, PopupSettleMs));
+    }
+
+    /// Opens the Hidden row's menu under it, as WindowController builds it (buildSidebarHiddenMenu()), and
+    /// waits for it.
+    void openSidebarHiddenMenu()
+    {
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
+        auto const& rows = _controller.sidebarModel().rows();
+        auto const at = std::ranges::find(
+            rows, window::SidebarRowKind::Hidden, [](window::SidebarRow const& row) { return row.key.kind; });
+        REQUIRE(at != rows.end());
+        auto const index = static_cast<int>(std::distance(rows.begin(), at));
+        auto const* row = sidebarRowAt(index);
+        REQUIRE(row != nullptr);
+        auto const names =
+            std::ranges::to<std::vector>(at->hidden | std::views::transform(&window::HiddenDaemon::name));
+        auto menu = window::PublishedContextMenu {};
+        menu.publish(window::resolveMenuTree(command::buildSidebarHiddenMenu(names), config::Config {}));
+        auto* popup = root().findChild<QObject*>(QStringLiteral("sidebarContextMenu"));
+        REQUIRE(popup != nullptr);
+        _controller.openSidebarContextMenu(menu.model, index, row->mapToScene(QPointF { 0, row->height() }));
+        REQUIRE(QTest::qWaitFor([&] { return popup->property("opened").toBool(); }, PopupSettleMs));
+    }
+
+    /// Hides starfive as Hide from Sidebar does -- off the tree, first in the Hidden row -- posts the toast
+    /// it shows, as WindowController does, and waits for its fade-in.
+    void showHiddenToast()
+    {
+        auto& sections = _controller.sidebarSections();
+        std::erase_if(sections.listed, [](window::DaemonSection const& section) {
+            return section.daemon == window::hostDaemonRef("starfive");
+        });
+        sections.hidden.insert(
+            sections.hidden.begin(),
+            window::HiddenDaemon { .daemon = window::hostDaemonRef("starfive"), .name = "starfive" });
+        _controller.sidebarModel().refreshNow();
+        _controller.notices().post(window::daemonHiddenNotice("starfive", "host:starfive"));
+        auto const* toast = _root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, PopupSettleMs));
+    }
+
+    /// Opens the menu of starfive's row of @p kind (ci, build, tests) under it, as WindowController builds it
+    /// for another daemon's row, and waits for it.
+    void openOtherDaemonMenu(window::SidebarRowKind kind)
+    {
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
+        auto const& rows = _controller.sidebarModel().rows();
+        auto const at = std::ranges::find_if(rows, [&](window::SidebarRow const& row) {
+            return row.key.kind == kind && row.key.daemon == window::hostDaemonRef("starfive")
+                   && (kind != window::SidebarRowKind::Pane || row.key.pane == window::PaneKey { 51 });
+        });
+        REQUIRE(at != rows.end());
+        auto const index = static_cast<int>(std::distance(rows.begin(), at));
+        auto const& listed = _controller.sidebarSections().listed.back().directory;
+        auto const palette = std::vector<vtbackend::RGBColor> { vtbackend::RGBColor { 0xC0, 0x39, 0x2B },
+                                                                vtbackend::RGBColor { 0x29, 0x80, 0xB9 } };
+        auto const entries = [&] {
+            switch (kind)
+            {
+                case window::SidebarRowKind::Workspace:
+                    return command::buildWorkspaceMenu(
+                        window::otherDaemonWorkspaceMenuStateOf(listed, at->key, palette));
+                case window::SidebarRowKind::Tab:
+                    return command::buildSidebarTabMenu(
+                        { .tab = { .tabIndex = 0, .tabCount = 1, .palette = palette },
+                          .others = window::moveTargetsOf(listed),
+                          .joinable =
+                              window::joinTargetsOf(listed, window::TabRef { .workspace = 5, .tab = 50 }),
+                          .workspaceTabs = 1,
+                          .moves = command::MenuMoves::Nodes,
+                          .open = command::OpenOffer::Offered,
+                          .origin = command::RowOrigin::OtherDaemon });
+                case window::SidebarRowKind::Pane:
+                    return command::buildSidebarPaneMenu(
+                        { .joinable =
+                              window::joinTargetsOf(listed, window::TabRef { .workspace = 5, .tab = 50 }),
+                          .tabPanes = 2,
+                          .workspaceTabs = 1,
+                          .moves = command::MenuMoves::Nodes,
+                          .open = command::OpenOffer::Offered,
+                          .origin = command::RowOrigin::OtherDaemon });
+                case window::SidebarRowKind::Daemon:
+                case window::SidebarRowKind::Hidden: break;
+            }
+            return std::vector<command::ContextMenuEntry> {};
+        }();
+        auto menu = window::PublishedContextMenu {};
+        menu.publish(window::resolveMenuTree(entries, config::Config {}));
+        auto* popup = root().findChild<QObject*>(QStringLiteral("sidebarContextMenu"));
+        REQUIRE(popup != nullptr);
+        auto const* row = sidebarRowAt(index);
         _controller.openSidebarContextMenu(menu.model, index, row->mapToScene(QPointF { 0, row->height() }));
         REQUIRE(QTest::qWaitFor([&] { return popup->property("opened").toBool(); }, PopupSettleMs));
     }
@@ -2088,7 +2229,9 @@ class ChromeSnapshotScene
                 case SnapshotSections::None:
                 case SnapshotSections::TwoDaemons:
                 case SnapshotSections::Pending:
-                case SnapshotSections::NeedsMeEmpty: break;
+                case SnapshotSections::NeedsMeEmpty:
+                case SnapshotSections::OtherDaemonRows:
+                case SnapshotSections::Hidden: break;
             }
             return window::DaemonLinkState::Connected;
         }();
@@ -2105,6 +2248,8 @@ class ChromeSnapshotScene
         auto build = directoryPaneOf(50, "build");
         build.status = { sidebarRecord(vtbackend::ProgramState::Working, {}, std::chrono::seconds { 75 }) };
         starfive.directory.workspaces = { directoryWorkspaceOf(5, "ci", { build }) };
+        if (sections == SnapshotSections::OtherDaemonRows)
+            starfive.directory.workspaces.front().tabs.front().panes.push_back(directoryPaneOf(51, "tests"));
         // The presence lists the window's own daemon too, first: the window's live section takes its place.
         auto work = window::DaemonSection {};
         work.daemon = window::localDaemonRef("work");
@@ -2116,9 +2261,14 @@ class ChromeSnapshotScene
         _controller.sidebarSections().listed = { std::move(work) };
         if (sections != SnapshotSections::NeedsMeEmpty)
             _controller.sidebarSections().listed.push_back(std::move(starfive));
+        if (sections == SnapshotSections::Hidden)
+            _controller.sidebarSections().hidden = {
+                window::HiddenDaemon { .daemon = window::localDaemonRef("home"), .name = "home" },
+                window::HiddenDaemon { .daemon = window::hostDaemonRef("vega"), .name = "vega" },
+            };
         if (sections == SnapshotSections::Pending)
         {
-            _controller.sidebarHost().pending =
+            _controller.sidebarHost().pending.here =
                 window::SidebarTarget { .daemon = window::hostDaemonRef("starfive"),
                                         .instance = window::DaemonInstance { 9 },
                                         .workspace = 5,
@@ -2151,6 +2301,17 @@ class ChromeSnapshotScene
             }
         if (sections == SnapshotSections::NeedsMeEmpty)
             _controller.sidebarModel().setScope(config::SidebarScope::NeedsMe);
+        // starfive's ci and its build tab unfolded, down to their panes.
+        if (sections == SnapshotSections::OtherDaemonRows)
+            for (auto const kind: { window::SidebarRowKind::Workspace, window::SidebarRowKind::Tab })
+            {
+                auto const& listed = _controller.sidebarModel().rows();
+                auto const row = std::ranges::find_if(listed, [&](auto const& shown) {
+                    return shown.key.kind == kind && shown.key.daemon == starfiveRef;
+                });
+                if (row != listed.end())
+                    _controller.sidebarModel().expand(static_cast<int>(std::distance(listed.begin(), row)));
+            }
     }
 
     /// Shows the sidebar at the width its look asks for, once the window is loaded (at its narrowest for

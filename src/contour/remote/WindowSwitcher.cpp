@@ -345,6 +345,34 @@ void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
         failCreate(window, daemon, destination.config.error(), done);
         return;
     }
+    // The creation is the window's switch under way from now on, in the slot of its mode: the user's newer
+    // request or cancel ends it as one being resolved, and the window's close does. A workspace the daemon
+    // makes all the same stays listed, for the user to show or close.
+    auto const slot = slotOf(window, mode);
+    if (auto const busy = _busy.find(slot); busy != _busy.end())
+    {
+        // Copied: ending the switch erases its entry.
+        auto const endUnderWay = busy->second.supersede;
+        if (!endUnderWay || endUnderWay(newerRequestCause(session::NoLandingDeadline)) == Supersession::Kept)
+        {
+            done(std::unexpected(std::string { "a switch of this window is under way" }));
+            return;
+        }
+    }
+    auto const serial = _nextSerial++;
+    auto const waiting = std::make_shared<session::SwitchCompletion>(std::move(done));
+    _busy.insert_or_assign(slot,
+                           Busy { .serial = serial, .supersede = [this, slot, waiting](SupersedeCause cause) {
+                                     if (supersessionOf(cause, SwitchStage::Resolving) == Supersession::Kept)
+                                         return Supersession::Kept;
+                                     _busy.erase(slot);
+                                     if (auto told = std::exchange(*waiting, {}))
+                                     {
+                                         attachLog()("switch: window {}: {}", slot.window, reasonOf(cause));
+                                         told(std::unexpected(std::string { reasonOf(cause) }));
+                                     }
+                                     return Supersession::Ended;
+                                 } });
     auto target =
         ListTarget { .address = destination.address, .transport = destination.config->controller.transport };
     _lister->create(
@@ -354,10 +382,17 @@ void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
          window,
          daemon = session::SwitchTarget { .kind = daemon.kind, .daemon = daemon.daemon, .workspace = {} },
          mode,
-         done = std::move(done)](auto created) mutable {
+         slot,
+         serial,
+         waiting](auto created) mutable {
             auto const self = alive.lock();
-            if (!self)
+            // Ended meanwhile: what the daemon made stays listed, and nothing is shown.
+            if (!self || !*waiting)
                 return;
+            auto done = std::exchange(*waiting, {});
+            if (auto const busy = (*self)->_busy.find(slot);
+                busy != (*self)->_busy.end() && busy->second.serial == serial)
+                (*self)->_busy.erase(busy);
             if (!created)
             {
                 (*self)->failCreate(window, daemon, created.error(), done);
@@ -819,9 +854,11 @@ void WindowSwitcher::handOver(Request const& request, DaemonLinkId to)
         fail(request, adoptable.error());
         return;
     }
-    // Told first, while the window is still the old link's: a switch a program asked for is answered on the
-    // old link's connection, which the rebinding below ends.
-    succeed(request, vthost::proto::SwitchOutcome::Switched);
+    // A switch a program asked for is told first, while the window is still the old link's: it is answered on
+    // the old link's connection, which the rebinding below ends. The user's is told once it landed.
+    auto const told = switchToldOf(request.landBy);
+    if (told == SwitchTold::BeforeLeaving)
+        succeed(request, vthost::proto::SwitchOutcome::Switched);
     // The daemon left keeps the connection as the presence's observer while it stays listed and no other
     // window is on it; else the connection ends with the link. Said before the rebinding below ends it.
     if (auto const left = own->daemonRef())
@@ -836,8 +873,21 @@ void WindowSwitcher::handOver(Request const& request, DaemonLinkId to)
     // Detach last: the old workspace stays in its daemon for whichever window selects it next, the window is
     // the new link's (rebound before its old panes are detached), and the old link ends with it.
     own->switchedAway(request.window);
-    if (auto adopted = target->adoptWindow(request.window); !adopted)
-        errorLog()("switch: window {} stays as it was: {}", request.window.value, adopted.error());
+    auto adopted = target->adoptWindow(request.window);
+    switch (told)
+    {
+        case SwitchTold::OnceLanded:
+            // The window is the other daemon's now: what its completion runs on Switched runs there.
+            if (adopted)
+                succeed(request, vthost::proto::SwitchOutcome::Switched);
+            else
+                fail(request, adopted.error());
+            break;
+        case SwitchTold::BeforeLeaving:
+            if (!adopted)
+                errorLog()("switch: window {} stays as it was: {}", request.window.value, adopted.error());
+            break;
+    }
 }
 
 void WindowSwitcher::succeed(Request const& request, vthost::proto::SwitchOutcome outcome)

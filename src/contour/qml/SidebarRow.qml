@@ -102,18 +102,21 @@ Item {
     readonly property bool isHidden: row.kind === SidebarRows.SidebarRowKind.Hidden
     /// Whether the row is one line: a workspace's, a daemon's and the hidden daemons' rows are.
     readonly property bool oneLine: row.isWorkspace || row.isDaemon || row.isHidden
-    /// The room above a daemon row that follows another section: a blank line on the Terminal row, a gap of
-    /// the row's spacing elsewhere, so the sections read apart.
-    readonly property real sectionGap: !row.isDaemon || row.index === 0 ? 0
+    /// The room above a daemon row that follows another section, and above the hidden daemons' row, which is
+    /// a section of its own: a blank line on the Terminal row, a gap of the row's spacing elsewhere, so the
+    /// sections read apart.
+    readonly property real sectionGap: !(row.isDaemon || row.isHidden) || row.index === 0 ? 0
                                      : row.cellTree ? chromeStyle.sidebar.rowHeight : chromeStyle.space.s4
     /// Whether the row is what was last known of a daemon that is not connected: a workspace, tab or pane row
     /// drawn in the dimmer last-known ink, its marks too, as spec §11 says. The daemon row itself speaks for
     /// the live link and keeps its ink.
     readonly property bool lastKnown: row.staleness === SidebarRows.RowStaleness.LastKnown && !row.isDaemon
     // A workspace and a tab have names of their own, which the user can change; a pane, a daemon and the
-    // hidden daemons' row have none here.
-    readonly property bool renamable: row.kind === SidebarRows.SidebarRowKind.Workspace
-                                      || row.kind === SidebarRows.SidebarRowKind.Tab
+    // hidden daemons' row have none here, and a last-known row names a run that may be gone
+    // (SidebarModel.rename() does nothing for it).
+    readonly property bool renamable: (row.kind === SidebarRows.SidebarRowKind.Workspace
+                                       || row.kind === SidebarRows.SidebarRowKind.Tab)
+                                      && !row.lastKnown
     readonly property bool cellTree: chromeStyle.sidebar.look === chromeStyle.sidebar.cellTree
     readonly property bool hasReason: row.secondLine === SidebarRows.SecondLine.Status
     readonly property bool hasProgress: row.timeKind === SidebarRows.TimeKind.Progress && row.progress >= 0
@@ -461,7 +464,8 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.topMargin: row.firstLineTop
+        // Below the gap above a row that opens a section of its own (the hidden daemons').
+        anchors.topMargin: row.sectionGap + row.firstLineTop
         height: row.firstLineHeight
 
         // The gap between the name and what trails it: at least a cell on the Terminal row, where the space
@@ -624,9 +628,10 @@ Item {
                 progress: row.hasProgress ? row.progress : -1
             }
 
-            // A tab with nothing to say keeps the glyph's column, so the titles of a tab list stay aligned.
+            // A tab with nothing to say keeps the glyph's column, so the titles of a tab list stay aligned. The
+            // hidden daemons' row is no tab: it starts at the sections' own edge, under none of them.
             Item {
-                visible: !row.isWorkspace && !glyphSlot.known
+                visible: !row.isWorkspace && !row.isHidden && !glyphSlot.known
                 anchors.verticalCenter: parent.verticalCenter
                 width: chromeStyle.snapToCells(glyphSlot.edge)
                 height: glyphSlot.implicitHeight
@@ -654,7 +659,9 @@ Item {
             objectName: "sidebarRowTitle"
             visible: !renameLoader.active
             anchors.left: lead.right
-            anchors.leftMargin: row.leadGap
+            // No gap after a lead that draws nothing (the hidden daemons' row): its words start at the
+            // sections' edge, where a daemon heading's first part does.
+            anchors.leftMargin: lead.implicitWidth > 0 ? row.leadGap : 0
             anchors.right: trail.left
             anchors.rightMargin: firstLine.titleGap
             anchors.verticalCenter: parent.verticalCenter

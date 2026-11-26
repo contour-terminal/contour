@@ -241,7 +241,7 @@ namespace
         std::chrono::system_clock::time_point now;
         std::string lowerFilter;
         std::optional<SidebarTarget> displayed;
-        std::optional<SidebarTarget> pending;
+        PendingJumps pending;
 
         /// @return Whether a filter or the Needs-me scope narrows the rows, expanding every ancestor it
         /// keeps.
@@ -319,7 +319,9 @@ namespace
     [[nodiscard]] bool scopeKeeps(Building const& context, SidebarRowKey const& key, Urgency urgency)
     {
         return context.state.scope == config::SidebarScope::All || needsMe(urgency)
-               || onPathTo(context.displayed, key) || onPathTo(context.pending, key);
+               || onPathTo(context.displayed, key) || std::ranges::any_of(JumpModes, [&](JumpMode mode) {
+                      return onPathTo(context.pending.of(mode), key);
+                  });
     }
 
     TabBlock tabBlockOf(Building const& context,
@@ -581,17 +583,20 @@ namespace
                                     [](SidebarRow const& r) { return r.selection != RowSelection::None; });
             heading.selection =
                 holdsDisplayed && !showsDisplayed ? RowSelection::ContainsSelected : RowSelection::None;
-            if (inSection(context.pending, section))
+            if (std::ranges::any_of(
+                    JumpModes, [&](JumpMode mode) { return inSection(context.pending.of(mode), section); }))
                 heading.pending = RowPending::Yes;
         }
 
-        // The pending jump's row is the deepest row shown on the way to its target.
+        // A pending jump's row is the deepest row shown on the way to its target.
         auto const sectionRows = std::span { rows }.subspan(firstRow);
         auto const newestFirst = sectionRows | std::views::reverse;
-        if (auto const target = std::ranges::find_if(
-                newestFirst, [&](SidebarRow const& r) { return onPathTo(context.pending, r.key); });
-            target != newestFirst.end())
-            target->pending = RowPending::Yes;
+        for (auto const mode: JumpModes)
+            if (auto const target = std::ranges::find_if(
+                    newestFirst,
+                    [&](SidebarRow const& r) { return onPathTo(context.pending.of(mode), r.key); });
+                target != newestFirst.end())
+                target->pending = RowPending::Yes;
 
         // A section whose link is down lists what was last known of it.
         auto const staleness = section.directory.workspaces.empty()
@@ -620,7 +625,7 @@ SidebarListing sidebarListing(SidebarSources const& sources,
                               SidebarState const& state,
                               std::chrono::system_clock::time_point now,
                               std::optional<SidebarTarget> displayed,
-                              std::optional<SidebarTarget> pending)
+                              PendingJumps pending)
 {
     static auto const nothingSeen = TabAttention {};
     auto const context = Building { .state = state,
@@ -683,7 +688,7 @@ SidebarListing sidebarListing(WorkspaceDirectory const& directory,
                                     .now = now,
                                     .lowerFilter = asciiLowered(state.filter),
                                     .displayed = displayed,
-                                    .pending = std::nullopt };
+                                    .pending = {} };
     auto listing = SidebarListing {};
     appendSection(context,
                   Section { .meta = noDaemon,

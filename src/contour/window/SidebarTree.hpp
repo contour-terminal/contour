@@ -19,6 +19,7 @@
 /// ended where its daemon stated that (DirectoryPane::finishedAt); without it, no time, as
 /// vthost::proto::FinishedCommand carries no timestamp to measure from.
 #include <contour/config/TabBarMode.hpp>
+#include <contour/window/CloseDialogTable.hpp>
 #include <contour/window/DaemonSection.hpp>
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/StatusKinds.hpp>
@@ -71,6 +72,18 @@ struct SidebarRowKey
     PaneKey pane;                                    ///< The pane's key; zero for a workspace or tab row.
 
     auto operator<=>(SidebarRowKey const&) const = default;
+};
+
+/// What a close confirmation asks about: the kind of close, and the row it was asked on, whole. It travels
+/// through the dialog and back into the commit as an opaque value, so the close acts on exactly that node --
+/// on its own daemon and run -- whatever the window shows or whichever daemon it is on by the time the user
+/// answers. Workspace ids start at 1 on every daemon, so the ids alone never say whose node it is.
+struct CloseNode
+{
+    CloseKind kind = CloseKind::Workspace; ///< What closes: the row's workspace, its tab, or its pane.
+    SidebarRowKey row;                     ///< The row, with its daemon and that daemon's run.
+
+    auto operator<=>(CloseNode const&) const = default;
 };
 
 /// What a row's right-hand side shows, which decides how often it is re-formatted.
@@ -216,6 +229,27 @@ enum class JumpMode : uint8_t
     NewWindow, ///< In a window of its own.
 };
 
+/// Every JumpMode, in order.
+inline constexpr auto JumpModes = std::array { JumpMode::Here, JumpMode::NewWindow };
+
+/// The jumps a window's sidebar has under way: one per JumpMode, neither ending the other.
+struct PendingJumps
+{
+    /// In this window: what the location chip shows, and what Escape and CancelSwitch end.
+    std::optional<SidebarTarget> here;
+    /// Into a window of its own: ended from its own row.
+    std::optional<SidebarTarget> newWindow;
+
+    /// @param mode A jump's mode.
+    /// @return The jump of @p mode under way, if any.
+    [[nodiscard]] std::optional<SidebarTarget> const& of(JumpMode mode) const noexcept
+    {
+        return mode == JumpMode::Here ? here : newWindow;
+    }
+
+    bool operator==(PendingJumps const&) const = default;
+};
+
 /// Whether a row says what its daemon says now, or what it said last.
 enum class RowStaleness : uint8_t
 {
@@ -254,15 +288,6 @@ enum class StatusSlot : uint8_t
     Link,     ///< The daemon's link state: its section's daemon is not connected.
     Urgency,  ///< The row's rolled-up urgency.
     Pending,  ///< A jump to the row, or into its section, is under way.
-};
-
-/// A daemon the user chose not to list, as the Hidden row names it.
-struct HiddenDaemon
-{
-    DaemonRef daemon; ///< Which daemon.
-    std::string name; ///< What it is called.
-
-    bool operator==(HiddenDaemon const&) const = default;
 };
 
 /// One row of the sidebar.
@@ -393,14 +418,14 @@ struct SidebarSources
 /// @param state What is folded, the scope and the filter.
 /// @param now The wall clock the times are measured against.
 /// @param displayed What this window shows, if anything: its tab is Selected.
-/// @param pending Where a jump under way goes: its row and its daemon's row are Pending, and the Needs-me
-///                scope keeps it.
+/// @param pending Where the jumps under way go: each one's row and its daemon's row are Pending, and the
+///                Needs-me scope keeps them.
 /// @return The listing; its workspaces span every section.
 [[nodiscard]] SidebarListing sidebarListing(SidebarSources const& sources,
                                             SidebarState const& state,
                                             std::chrono::system_clock::time_point now,
                                             std::optional<SidebarTarget> displayed,
-                                            std::optional<SidebarTarget> pending);
+                                            PendingJumps pending);
 
 /// Flattens @p directory into the rows the sidebar draws and the workspace rows a count needs, in one pass: a
 /// window with no daemon, one section with an empty DaemonRef and no Daemon row.

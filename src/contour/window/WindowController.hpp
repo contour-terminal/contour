@@ -677,23 +677,25 @@ class WindowController:
     /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
     Q_INVOKABLE void confirmCloseWorkspace(quint64 workspace);
     /// What the close confirmation says for a node (window::closeDialogText): the wording of its kind's
-    /// table row, with the count of what ends with it taken from the directory.
-    /// @param kind A window::CloseKind as an int.
-    /// @param workspace The node's workspace id.
-    /// @param tab The node's tab id; 0 for a workspace.
+    /// table row, with the count of what ends with it taken from the directory of the node's daemon.
+    /// @param node The window::CloseNode the confirmation was asked with
+    /// (sidebarCloseConfirmationRequested(),
+    ///        closeWorkspaceConfirmationRequested()).
     /// @param label The node's name; empty when it has none.
     /// @param program The running program, where known; empty otherwise.
-    /// @return `{ heading, message, acceptText }`; an empty map for an unknown kind.
-    [[nodiscard]] Q_INVOKABLE QVariantMap closeConfirmation(
-        int kind, quint64 workspace, quint64 tab, QString const& label, QString const& program) const;
-    /// Closes the node the user confirmed closing, as sidebarCloseConfirmationRequested() asked. The node is
-    /// named by its ids, so a close acts on the row the menu was opened on, not on what the window shows; one
-    /// that is gone already closes nothing.
-    /// @param kind A window::CloseKind as an int.
-    /// @param workspace The node's workspace id.
-    /// @param tab The node's tab id; 0 for a workspace.
-    /// @param pane The node's pane key; 0 for a workspace or a tab.
-    Q_INVOKABLE void confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane);
+    /// @return `{ heading, message, acceptText }`; an empty map for a value that is no close node.
+    [[nodiscard]] Q_INVOKABLE QVariantMap closeConfirmation(QVariant const& node,
+                                                            QString const& label,
+                                                            QString const& program) const;
+    /// Closes the node the user confirmed closing. The node names its row whole, daemon and run included, so
+    /// a close acts on the row the question was asked about -- the window's own, or another daemon's there --
+    /// not on what the window shows now; one that is gone already closes nothing.
+    /// @param node The window::CloseNode the confirmation was asked with.
+    Q_INVOKABLE void confirmClose(QVariant const& node);
+    /// @param workspace A workspace of the daemon (or process) this window is on now, by its id.
+    /// @return The close node a confirmation of closing it is asked with
+    /// (closeWorkspaceConfirmationRequested()).
+    [[nodiscard]] QVariant ownWorkspaceCloseNode(uint64_t workspace) const;
     // }}}
     /// Asks the QML to open this window's "save layout as" name prompt (the keyboard/palette entry point
     /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
@@ -737,22 +739,18 @@ class WindowController:
     /// application's color, only the user's own choice.
     /// @param index The tab's row in this window.
     Q_INVOKABLE void resetTabColor(int index);
-    /// Colours tab @p tab on the user's behalf, by id, without showing it: the sidebar's colour picker hands
-    /// its choice here. On its daemon for a window a daemon serves (TerminalSessionManager::colorTab()).
-    /// @param tab The tab's id, as the window's directory lists it.
-    /// @param color The colour the user picked.
-    Q_INVOKABLE void setTabColorOf(quint64 tab, QColor const& color);
-    /// Drops the user's colour from tab @p tab, by id, without showing it; as resetTabColor() otherwise.
-    /// @param tab The tab's id, as the window's directory lists it.
-    Q_INVOKABLE void resetTabColorOf(quint64 tab);
-    /// Colours workspace @p workspace on the user's behalf, shown or not, without showing it: the sidebar's
-    /// colour picker hands its choice here (TerminalSessionManager::setWorkspaceColor).
-    /// @param workspace The workspace's id, as the window's directory lists it.
-    /// @param color The colour the user picked.
-    Q_INVOKABLE void setWorkspaceColor(quint64 workspace, QColor const& color);
-    /// Takes workspace @p workspace's colour away, shown or not, without showing it.
-    /// @param workspace The workspace's id, as the window's directory lists it.
-    Q_INVOKABLE void resetWorkspaceColor(quint64 workspace);
+    /// Colours the workspace or tab of a sidebar row on the user's behalf, shown or not, without showing it:
+    /// the sidebar's colour picker hands its choice here. The row is named whole, daemon and run included,
+    /// so the pick colours the row the picker was opened for: the window's own here
+    /// (TerminalSessionManager::setWorkspaceColor(), colorTab()), another daemon's there.
+    /// @param row The window::SidebarRowKey the picker was opened with (workspaceColorPickRequested(),
+    ///        sidebarTabColorPickRequested()); nothing for a value that is no workspace or tab row.
+    /// @param color The colour the user picked; nothing for an invalid one.
+    Q_INVOKABLE void setRowColor(QVariant const& row, QColor const& color);
+    /// Takes the colour of a sidebar row's workspace or tab away, as setRowColor() colours it; a tab falls
+    /// back to the colour its program gave it, if any.
+    /// @param row The window::SidebarRowKey the picker was opened with.
+    Q_INVOKABLE void resetRowColor(QVariant const& row);
     Q_INVOKABLE void closeTabAtIndex(int index);
     Q_INVOKABLE void closeOtherTabs(int index);
     Q_INVOKABLE void closeTabsToRight(int index);
@@ -1735,15 +1733,18 @@ class WindowController:
     /// Requests that the tab at @p index open its color picker. Per-window, exactly like
     /// tabTitleEditRequested: the delegate whose row matches @p index opens its TabColorFlyout.
     void tabColorPickRequested(int index);
-    /// Requests that the sidebar open its colour picker over workspace @p workspace's row: "Custom…" in a
-    /// workspace menu's "Workspace Color", or the SetWorkspaceColor action naming no colour.
-    /// @param workspace The workspace's id, as the window's directory lists it.
-    void workspaceColorPickRequested(quint64 workspace);
-    /// Requests that the sidebar open its colour picker over tab row @p row: "Custom…" in a sidebar tab
-    /// menu's "Tab Color". The sidebar's own, as a sidebar placement draws no tab strip to hang one from.
-    /// @param row The tab's row in the sidebar's model.
-    /// @param tab The tab's id, which the picker's choice colours (setTabColorOf()).
-    void sidebarTabColorPickRequested(int row, quint64 tab);
+    /// Requests that the sidebar open its colour picker over a workspace's row: "Custom…" in a workspace
+    /// menu's "Workspace Color", or the SetWorkspaceColor action naming no colour. The picker holds @p key
+    /// and hands it back with the pick (setRowColor()); the window keeps nothing of it.
+    /// @param row The row's index in the sidebar's model, which the picker hangs from.
+    /// @param key The row's window::SidebarRowKey: whose daemon's workspace the pick colours.
+    void workspaceColorPickRequested(int row, QVariant const& key);
+    /// Requests that the sidebar open its colour picker over a tab's row: "Custom…" in a sidebar tab menu's
+    /// "Tab Color", or the SetTabColor action naming no colour where no tab strip is drawn. As
+    /// workspaceColorPickRequested() otherwise.
+    /// @param row The row's index in the sidebar's model, which the picker hangs from.
+    /// @param key The row's window::SidebarRowKey: whose daemon's tab the pick colours.
+    void sidebarTabColorPickRequested(int row, QVariant const& key);
     /// Requests that this window show its About dialog.
     void aboutRequested();
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
@@ -1827,22 +1828,20 @@ class WindowController:
     /// @param tab The tab's vtworkspace::TabId value.
     void closeTabConfirmationWithdrawn(quint64 tab);
     /// A close from the sidebar's menu always asks first, whatever runs in the node: QML shows the one
-    /// confirmation dialog, worded by closeConfirmation(), and calls confirmClose() on the destructive
-    /// button.
-    /// @param kind A window::CloseKind as an int.
-    /// @param workspace The node's workspace id.
-    /// @param tab The node's tab id; 0 for a workspace.
-    /// @param pane The node's pane key; 0 for a workspace or a tab.
+    /// confirmation dialog, worded by closeConfirmation(), and calls confirmClose() with @p node on the
+    /// destructive button. The dialog holds the node; the window keeps nothing of the question.
+    /// @param node The window::CloseNode: the kind of close and the menu's row, whole.
     /// @param label The row's title.
     /// @param program The program the row's status is about; empty when unknown.
-    void sidebarCloseConfirmationRequested(
-        int kind, quint64 workspace, quint64 tab, quint64 pane, QString const& label, QString const& program);
+    void sidebarCloseConfirmationRequested(QVariant const& node,
+                                           QString const& label,
+                                           QString const& program);
     /// Closing a workspace may end running programs, so the window asks first (the same question as for a
-    /// tab, over every pane of the workspace); a dialog calls confirmCloseWorkspace() on "Close".
-    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// tab, over every pane of the workspace), with the dialog the sidebar's closes use.
+    /// @param node The window::CloseNode of the workspace (ownWorkspaceCloseNode()).
     /// @param workspaceLabel The workspace's label; empty when it has none.
     /// @param program The running program's name; empty when no pane could name one.
-    void closeWorkspaceConfirmationRequested(quint64 workspace,
+    void closeWorkspaceConfirmationRequested(QVariant const& node,
                                              QString const& workspaceLabel,
                                              QString const& program);
     void activeSessionChanged();
@@ -2160,6 +2159,9 @@ class WindowController:
     /// The tabs that menu offered, by id: a Move to Tab row resolves by them, not by the places as they are
     /// now.
     std::vector<OfferedTab> _sidebarMenuTabs;
+    /// The daemons the Hidden row's menu offered, in its order: a Show resolves by them, not by the Hidden
+    /// row as it is now.
+    std::vector<DaemonRef> _sidebarMenuHidden;
     QPointF _sidebarMenuAnchor; ///< Where that menu was asked for, in window coordinates.
     /// Runs @p run once the directory shows @p workspace: now when it does, else after selecting it. A @p run
     /// that is Waiting (its pane is not there yet) stays pending, as a jump does, until the layout lands;
@@ -2173,6 +2175,21 @@ class WindowController:
     void runSidebarAction(SidebarRowKey const& row, actions::Action const& action);
     /// Runs @p action on what the window shows, once @p row is shown (the tail of runSidebarAction()).
     void runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action);
+    /// @return Whether @p row is of the window's own daemon (or the window has none), or of another one.
+    [[nodiscard]] command::RowOrigin rowOriginOf(SidebarRowKey const& row) const;
+    /// Jumps to another daemon's @p row, then runs @p action there once it landed: in this window, or in the
+    /// window that showed the row already (command::OtherDaemonRoute::JumpFirst).
+    void jumpThenRun(SidebarRowKey const& row, actions::Action const& action);
+    /// @return The section @p daemon is listed by now; none for one not listed.
+    [[nodiscard]] std::optional<DaemonSection> sectionOf(DaemonRef const& daemon) const;
+    /// Colours @p row's workspace, or clears its colour: the window's own here, another daemon's there.
+    void colorSidebarWorkspace(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color);
+    /// Colours @p row's tab, or clears its colour: the window's own here, another daemon's there.
+    void colorSidebarTab(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color);
+    /// Opens the sidebar's colour picker over @p row, which a pick then colours: the request for its kind.
+    void requestColorPick(SidebarRowKey const& row);
+    /// Colours, or clears the colour of, the workspace or tab of the row @p row carries (setRowColor()).
+    void colorRow(QVariant const& row, std::optional<vtbackend::RGBColor> color);
     /// Asks, through sidebarCloseConfirmationRequested(), whether to close the node @p key stands for.
     void askToClose(CloseKind kind, SidebarRowKey const& key);
     /// Builds and presents the menu of sidebar row @p row.

@@ -573,7 +573,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// Closes the workspace @p workspace that @p window lists, with all its tabs and panes. A workspace that
     /// may be running a program is asked about first, as a tab is: the window raises
-    /// closeWorkspaceConfirmationRequested(), and confirmCloseWorkspace() closes it. An in-process window's
+    /// closeWorkspaceConfirmationRequested(), and its confirmClose() closes it. An in-process window's
     /// last workspace is kept: closing it would leave the window with nothing to show.
     /// @param window The window the user acts in.
     /// @param workspace The workspace's id, as the window's directory lists it.
@@ -1789,6 +1789,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The controller displaying it, or nullptr.
     [[nodiscard]] window::WindowController* controllerDisplaying(
         vtworkspace::WorkspaceId workspace) const noexcept;
+
+    /// @param daemon A daemon, as the sidebar names it.
+    /// @param workspace One of its workspaces, by the daemon's id.
+    /// @return The window that shows @p workspace of @p daemon as its own; null for none.
+    [[nodiscard]] window::WindowController* controllerShowing(window::DaemonRef const& daemon,
+                                                              uint64_t workspace) const;
 
     /// The controller whose window owns @p workspace, shown or not, or nullptr.
     /// @param workspace The workspace.

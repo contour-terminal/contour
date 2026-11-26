@@ -144,6 +144,26 @@ class WindowSwitching
                          SwitchLandBy landBy,
                          SwitchCompletion done) = 0;
 
+    /// Creates a workspace labelled @p label on @p daemon, then switches @p window to it or opens it; never
+    /// blocks. Fails by default: a window with no switching service makes no workspace elsewhere.
+    /// @param window The window asking.
+    /// @param daemon The daemon; its workspace spec is not read.
+    /// @param label The new workspace's label; empty for none.
+    /// @param mode Switch the window, or open a new one.
+    /// @param done Told how the switch went, or why no workspace was made.
+    virtual void createWorkspace(vtworkspace::WorkspaceId window,
+                                 SwitchTarget const& daemon,
+                                 std::string label,
+                                 SwitchMode mode,
+                                 SwitchCompletion done)
+    {
+        std::ignore = window;
+        std::ignore = daemon;
+        std::ignore = label;
+        std::ignore = mode;
+        done(std::unexpected(std::string { "no workspace can be made there from this window" }));
+    }
+
     /// Told by the manager that @p window closed: a switch of it still under way ends, as cancelled. Nothing
     /// by default.
     /// @param window The window's workspace, as request() named it.

@@ -1068,9 +1068,24 @@ void NativeSession::sessionPermissionRequested(SessionId session, proto::Permiss
     send(0, proto::DecodedPdu { request });
 }
 
+namespace
+{
+    /// @param event A session event.
+    /// @return Whether an observer is told it: what a sidebar lists of a pane (its program status), and none
+    ///         of what a viewer acts on (a bell, a notification, a clipboard write) or draws (the input echo
+    ///         and soft fonts of a screen it does not mirror).
+    [[nodiscard]] bool reachesObservers(proto::SessionEventPdu const& event) noexcept
+    {
+        return std::holds_alternative<proto::ProgramStatus>(event);
+    }
+} // namespace
+
 void NativeSession::emitSessionEvent(proto::SessionEventPdu const& event)
 {
-    if (_phase != ConnectionPhase::Viewing || _closed)
+    if (_closed)
+        return;
+    if (_phase != ConnectionPhase::Viewing
+        && !(_phase == ConnectionPhase::Observing && reachesObservers(event)))
         return;
     // Widening the narrow event set into the catalog variant the encoder speaks.
     std::visit([this](auto const& alternative) { send(0, proto::DecodedPdu { alternative }); }, event);

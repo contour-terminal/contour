@@ -204,6 +204,12 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption { .action = "RemoveDaemon",
                                 .reason =
                                     "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "HideDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "ShowHiddenDaemon",
+                                .reason =
+                                    "a row of the sidebar's Hidden row menu, which knows which daemon" },
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },

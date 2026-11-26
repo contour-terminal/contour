@@ -6326,7 +6326,7 @@ TEST_CASE("TerminalSessionManager: closing a workspace that runs a program asks 
     f.manager().closeWorkspace(f.controller(), f.first.value);
 
     REQUIRE(asked.count() == 1);
-    CHECK(asked.first().at(0).toULongLong() == f.first.value);
+    CHECK(asked.first().at(0).value<contour::window::CloseNode>().row.workspace == f.first.value);
     CHECK(asked.first().at(1).toString() == QStringLiteral("build"));
     CHECK(asked.first().at(2).toString() == QStringLiteral("make"));
     CHECK_FALSE(f.factory->createdPtys[0]->isClosed());
@@ -6550,7 +6550,7 @@ TEST_CASE("TerminalSessionManager: against a daemon that keeps no colour, the co
     factory.colorSupport = contour::session::WorkspaceColorSupport::Supported;
     window->beginCurrentWorkspaceColorPick();
     REQUIRE(picks.count() == 1);
-    CHECK(picks.front().front().toULongLong() == 10);
+    CHECK(picks.front().at(1).value<contour::window::SidebarRowKey>().workspace == 10);
 }
 
 TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutations to its daemon",
@@ -6602,10 +6602,10 @@ TEST_CASE("TerminalSessionManager: a daemon's window routes the workspace mutati
     // No program can be known there, so closing asks; the answer closes the workspace in one request.
     manager.closeWorkspace(*window.controller, 10);
     REQUIRE(asked.count() == 1);
-    CHECK(asked.first().at(0).toULongLong() == 10);
+    CHECK(asked.first().at(0).value<contour::window::CloseNode>().row.workspace == 10);
     CHECK(asked.first().at(1).toString() == QStringLiteral("build"));
     CHECK(factory.closed.empty());
-    manager.confirmCloseWorkspace(*window.controller, 10);
+    window->confirmClose(asked.first().at(0));
     CHECK(factory.closed == std::vector<uint64_t> { 10 });
 
     manager.releaseBinding(binding);
@@ -6677,20 +6677,22 @@ TEST_CASE("TerminalSessionManager: a daemon's window colours a sidebar tab row's
         window->triggerSidebarContextMenuAction(custom["actionId"].toInt());
         REQUIRE(picks.count() == 1);
         CHECK(picks.at(0).at(0).toInt() == rowOfTab(20, 200));
-        CHECK(picks.at(0).at(1).value<quint64>() == 200);
+        CHECK(picks.at(0).at(1).value<contour::window::SidebarRowKey>().tab == 200);
         CHECK(stripPicks.count() == 0);
         CHECK(binding.source.selected.empty());
         CHECK_FALSE(window->rowActionPending());
 
-        window->setTabColorOf(200, QColor { 0x12, 0x34, 0x56 });
-        window->resetTabColorOf(200);
+        window->setRowColor(picks.at(0).at(1), QColor { 0x12, 0x34, 0x56 });
+        window->resetRowColor(picks.at(0).at(1));
         CHECK(factory.coloredTabs
               == Coloured { { 2000, vtbackend::RGBColor { 0x12, 0x34, 0x56 } }, { 2000, std::nullopt } });
     }
     SECTION("a tab the daemon does not list is not asked about")
     {
-        window->setTabColorOf(999, QColor { 0x12, 0x34, 0x56 });
-        window->resetTabColorOf(999);
+        auto const unlisted =
+            QVariant::fromValue(window->sidebar().ownRowKey(contour::window::SidebarRowKind::Tab, 20, 999));
+        window->setRowColor(unlisted, QColor { 0x12, 0x34, 0x56 });
+        window->resetRowColor(unlisted);
         CHECK(factory.coloredTabs.empty());
     }
     manager.releaseBinding(binding);
@@ -6949,8 +6951,8 @@ TEST_CASE("TerminalSessionManager: a daemon window's sidebar routes the workspac
     CHECK(factory.moved[1] == std::pair<uint64_t, uint32_t> { 10, 3 });
     window.controller->closeCurrentWorkspace();
     REQUIRE(asked.count() == 1);
-    CHECK(asked.first().at(0).toULongLong() == 10);
-    window.controller->confirmCloseWorkspace(10);
+    CHECK(asked.first().at(0).value<contour::window::CloseNode>().row.workspace == 10);
+    window.controller->confirmClose(asked.first().at(0));
     CHECK(factory.closed == std::vector<uint64_t> { 10 });
 
     manager.releaseBinding(binding);
