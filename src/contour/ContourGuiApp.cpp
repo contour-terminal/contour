@@ -1189,6 +1189,8 @@ remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost:
             .timeline = _startupTimeline,
             .powerMonitor = _powerMonitor.get(),
             .backoff = {},
+            .homeDirectory = _sessionManager.homeDirectory(),
+            .localIdentity = _hostIdentity,
         },
         .hostLabel = std::move(hostLabel),
         .locality = locality,

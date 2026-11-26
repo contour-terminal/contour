@@ -1764,6 +1764,17 @@ struct PaneNotification
     bool operator==(PaneNotification const&) const = default;
 };
 
+/// A pane's working directory as its pane header shows it (never home-abbreviated: the daemon sends the real
+/// path), and whether it is on the daemon's machine.
+struct WireDirectory
+{
+    std::string path = {}; ///< UTF-8.
+    /// vtbackend::ContextLocality of @ref path (0 Unknown, 1 Local, 2 Foreign), as WireCommandBlock carries
+    /// it; a value a newer peer names is kept as it is.
+    uint8_t locality = 0;
+    bool operator==(WireDirectory const&) const = default;
+};
+
 /// Server→client (Capability::DaemonFollow): what changed about a pane of a workspace this connection does
 /// not select, and the working directory as shown of any pane, a mirrored one's included. Absent optionals
 /// mean "unchanged", so one PDU carries every field that changed.
@@ -1774,7 +1785,7 @@ struct PaneSummary
 {
     uint64_t session = 0;                                   ///< The pane's session.
     std::optional<std::string> title = std::nullopt;        ///< The new title, if it changed.
-    std::optional<std::string> cwd = std::nullopt;          ///< The new working directory, if it changed.
+    std::optional<WireDirectory> cwd = std::nullopt;        ///< The new working directory, if it changed.
     OutputActivity activity = OutputActivity::None;         ///< Whether the pane printed something.
     std::optional<FinishedCommand> finished = std::nullopt; ///< A command that finished, if one did.
     PaneBell bell = PaneBell::Silent;                       ///< Whether the pane rang the bell.

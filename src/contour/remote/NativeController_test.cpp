@@ -4687,6 +4687,59 @@ TEST_CASE("a PaneSummary updates the directory without a mirror", "[attach][cont
     controller.stop();
 }
 
+TEST_CASE("a PaneSummary's directory is home-abbreviated only when it is local",
+          "[attach][controller][directory]")
+{
+    // The machine the daemon runs on, as its ServerHello states it.
+    auto const daemonMachine =
+        vtbackend::HostIdentity { .machineId = "0123456789abcdef0123456789abcdef", .hostname = "box" };
+    auto daemon = DaemonFixture {};
+    daemon.identity = daemonMachine;
+    daemon.restartHost();
+    std::ignore = daemon.seedSession("first");
+    auto const second = addWorkspace(daemon);
+    auto const reported = [&](vtbackend::HostIdentity const& self, std::string const& url) {
+        auto timeline = TestTimeline {};
+        auto const controller =
+            makeNativeController(daemon.endpoint(),
+                                 timeline,
+                                 ControllerOptions { .homeDirectory = "/home/test", .localIdentity = self });
+        requireConnected(*controller);
+        REQUIRE(waitUntil([&] { return paneOf(*controller, second.id).key.value == second.session.value; }));
+        daemon.onDaemon([&] {
+            daemon.host->terminal(second.session)->writeToScreen(std::format("\033]7;{}\033\\", url));
+            return 0;
+        });
+        // The pane's last directory the daemon told, once it names the repository.
+        auto shown = std::string {};
+        std::ignore = waitUntil([&] {
+            shown = paneOf(*controller, second.id).cwd;
+            return shown.ends_with("/repo");
+        });
+        controller->stop();
+        return shown;
+    };
+
+    SECTION("this machine's, beneath the home")
+    {
+        CHECK(reported(daemonMachine, "file:///home/test/repo") == "~/repo");
+    }
+    SECTION("another machine's, of the same path")
+    {
+        CHECK(reported(daemonMachine, "file://elsewhere.example/home/test/repo") == "/home/test/repo");
+    }
+    SECTION("a sibling of the home")
+    {
+        CHECK(reported(daemonMachine, "file:///home/tester/repo") == "/home/tester/repo");
+    }
+    SECTION("a daemon on another machine, however it is reached: an ssh-forwarded socket looks local")
+    {
+        auto const elsewhere =
+            vtbackend::HostIdentity { .machineId = "fedcba9876543210fedcba9876543210", .hostname = "laptop" };
+        CHECK(reported(elsewhere, "file:///home/test/repo") == "/home/test/repo");
+    }
+}
+
 namespace
 {
 

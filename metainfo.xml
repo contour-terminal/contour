@@ -125,6 +125,7 @@
           <li>Fixes a tab's name from <code>contour rename tab:… NAME</code> not being shown: the sidebar, the tab strip and the switcher now name the tab by it, as they do a workspace by its name, and show its title again once it is cleared (experimental)</li>
           <li>Fixes the status line at the top (<code>status_line.position: top</code>) having the page's first row drawn over it, and a row moving a row down while it was selected</li>
           <li>Fixes the sidebar's tab rows of a window without a daemon showing "Terminal" instead of the title the shell set, until something else changed</li>
+          <li>Shows a working directory beneath your home as <code>~/…</code> in the sidebar, as the pane header does, for a directory on this machine only: a path an ssh session or another machine's daemon reports is shown in full</li>
           <li>Fixes Contour on Windows ending when a terminal is resized just as its program exits</li>
           <li>Fixes an image in one tab sometimes being drawn with another tab's picture, stretched to its size, such as a frame of a GIF played earlier in another tab flashing in place of the current one</li>
           <li>Fixes inline images drawn smaller than they were sent, such as the Mermaid diagrams Claude Code renders at twice their size, looking jagged: each pixel now averages the image pixels it covers instead of picking one of them, so text and thin lines in a picture stay smooth, and transparent edges keep their colour</li>

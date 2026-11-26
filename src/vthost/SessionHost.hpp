@@ -205,6 +205,9 @@ struct ShownDirectory
 {
     std::string path;                                         ///< UTF-8; empty for none.
     ShownDirectorySource source = ShownDirectorySource::None; ///< Where @ref path comes from.
+    /// Whether @ref path names the daemon's own machine: a process's directory always does, a reported one as
+    /// its OSC 7 / OSC 3008 context says. Part of equality, so the same path from another machine is a move.
+    vtbackend::ContextLocality locality = vtbackend::ContextLocality::Unknown;
 
     bool operator==(ShownDirectory const&) const = default;
 };
@@ -1844,8 +1847,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param session A hosted session.
     /// @return The directory the pane is shown in, as its pane header names it: the one its shell reported by
     ///         OSC 3008 / OSC 7 on whichever host (vtbackend::CwdPurpose::Display), else the process's.
-    ///         UTF-8. Nullopt for an unknown session or an unknown directory.
-    [[nodiscard]] std::optional<std::string> shownWorkingDirectoryOf(vtworkspace::SessionId session) const;
+    ///         UTF-8, with whether it is on this machine. Nullopt for an unknown session or an unknown
+    ///         directory.
+    [[nodiscard]] std::optional<ShownDirectory> shownWorkingDirectoryOf(vtworkspace::SessionId session) const;
 
     /// Tells the subscribers that @p session's shown directory moved (WorkingDirectoryChangedSignal), and has
     /// its workspace's git state looked up again, when it differs from the one told before. Loop thread.

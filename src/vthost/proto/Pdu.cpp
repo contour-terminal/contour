@@ -1142,6 +1142,9 @@ namespace
         SummaryHasCwd = 0b0010,
         SummaryHasFinished = 0b0100,
         SummaryHasNotifications = 0b1000,
+        /// The directory's locality, appended after the notifications: an older client never tests the bit,
+        /// and leaves the byte unread.
+        SummaryHasCwdLocality = 0b1'0000,
     };
 
     /// The presence bits of a FinishedCommand's optionals.
@@ -1158,14 +1161,14 @@ namespace
         out.u8(std::to_underlying(pdu.bell));
         auto mask = uint8_t { 0 };
         mask |= pdu.title ? SummaryHasTitle : 0;
-        mask |= pdu.cwd ? SummaryHasCwd : 0;
+        mask |= pdu.cwd ? (SummaryHasCwd | SummaryHasCwdLocality) : 0;
         mask |= pdu.finished ? SummaryHasFinished : 0;
         mask |= !pdu.notifications.empty() ? SummaryHasNotifications : 0;
         out.u8(mask);
         if (pdu.title)
             out.string(*pdu.title);
         if (pdu.cwd)
-            out.string(*pdu.cwd);
+            out.string(pdu.cwd->path);
         if (pdu.finished)
         {
             auto finishedMask = uint8_t { 0 };
@@ -1188,6 +1191,8 @@ namespace
                 out.u8(std::to_underlying(notification.occasion));
             }
         }
+        if (pdu.cwd)
+            out.u8(pdu.cwd->locality);
     }
 
     /// The presence bits of a WorkspaceMeta's optionals, in the order its fields follow the mask.
@@ -2560,8 +2565,9 @@ namespace
             return std::unexpected(error);
         pdu.activity = enumOrElse(activity, OutputActivity::Output, OutputActivity::None);
         pdu.bell = enumOrElse(bell, PaneBell::Rang, PaneBell::Silent);
+        auto cwd = std::optional<std::string> {};
         if (!decodeOptionalString(in, mask, SummaryHasTitle, pdu.title, error)
-            || !decodeOptionalString(in, mask, SummaryHasCwd, pdu.cwd, error))
+            || !decodeOptionalString(in, mask, SummaryHasCwd, cwd, error))
             return std::unexpected(error);
         if ((mask & SummaryHasFinished) != 0)
         {
@@ -2573,6 +2579,12 @@ namespace
         if ((mask & SummaryHasNotifications) != 0)
             if (auto const decoded = decodeVector(in, pdu.notifications, decodePaneNotification); !decoded)
                 return std::unexpected(decoded.error());
+        // Absent from a daemon before it was sent: Unknown, which no client abbreviates.
+        auto locality = uint8_t { 0 };
+        if ((mask & SummaryHasCwdLocality) != 0 && !assign(in.u8(), locality, error))
+            return std::unexpected(error);
+        if (cwd)
+            pdu.cwd = WireDirectory { .path = *std::move(cwd), .locality = locality };
         return pdu;
     }
 
