@@ -14,6 +14,7 @@
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
+#include <contour/window/SidebarJumps.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
@@ -523,15 +524,6 @@ struct FooterRoom
 /// @return The map.
 [[nodiscard]] QVariantMap sidebarCommandMap();
 
-/// How far a jump to a row has come, as SidebarModel::noteJump() announces it.
-enum class JumpEvent : uint8_t
-{
-    Connecting = 0, ///< The jump waits for its daemon's link.
-    Landed,         ///< The jump arrived where it went.
-    Cancelled,      ///< The user cancelled it.
-    Failed,         ///< Its daemon could not be reached.
-};
-
 /// The sidebar's rows as a QAbstractListModel.
 ///
 /// After the first build the model never resets: a rebuild is diffed against the rows it replaces by
@@ -880,8 +872,8 @@ class SidebarModel: public QAbstractListModel
     /// @param row The row.
     /// @return One line each; empty for a workspace row and for panes the window does not hold.
     [[nodiscard]] Q_INVOKABLE QStringList hoverLines(int row) const;
-    /// Opens the context menu of @p row.
-    /// @param row The row.
+    /// Opens the context menu of @p row: a row of the window's own daemon, or any daemon row.
+    /// @param row The row; another daemon's workspace, tab or pane row opens nothing.
     /// @param windowPosition Where the pointer is, in window coordinates.
     Q_INVOKABLE void openContextMenu(int row, QPointF windowPosition);
     /// Narrows the rows to those matching @p text (and the ancestors of a match); empty shows everything.

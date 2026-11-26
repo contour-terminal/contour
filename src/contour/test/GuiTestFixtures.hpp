@@ -164,6 +164,8 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         vtworkspace::WorkspaceId window;       ///< The window asking.
         contour::session::SwitchTarget target; ///< Where to go.
         contour::session::SwitchMode mode {};  ///< Switch or open.
+        /// Told the outcome, when the test completes it; empty for one failed or handed on at once.
+        contour::session::SwitchCompletion done {};
     };
 
     void request(vtworkspace::WorkspaceId window,
@@ -172,11 +174,27 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
                  contour::session::SwitchLandBy landBy,
                  contour::session::SwitchCompletion done) override
     {
-        requests.push_back({ .window = window, .target = target, .mode = mode });
         if (failWith)
+        {
+            requests.push_back({ .window = window, .target = target, .mode = mode, .done = {} });
             done(std::unexpected(*failWith));
+        }
         else if (forwardTo != nullptr)
+        {
+            requests.push_back({ .window = window, .target = target, .mode = mode, .done = {} });
             forwardTo->request(window, std::move(target), mode, landBy, std::move(done));
+        }
+        else
+            requests.push_back(
+                { .window = window, .target = std::move(target), .mode = mode, .done = std::move(done) });
+    }
+
+    /// Records the cancel, and hands it on.
+    void cancel(vtworkspace::WorkspaceId window, contour::session::SwitchMode mode) override
+    {
+        cancels.push_back(window);
+        if (forwardTo != nullptr)
+            forwardTo->cancel(window, mode);
     }
 
     /// Lists nothing: a test of the popup's listing builds a real switcher.
@@ -207,8 +225,9 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         return {};
     }
 
-    std::vector<std::string> createdLabels; ///< The labels createWorkspace() was asked for, in order.
-    std::vector<Request> requests;          ///< Every request, in order.
+    std::vector<std::string> createdLabels;        ///< The labels createWorkspace() was asked for, in order.
+    std::vector<Request> requests;                 ///< Every request, in order.
+    std::vector<vtworkspace::WorkspaceId> cancels; ///< The windows a cancel was asked for, in order.
     std::optional<std::string> failWith {}; ///< When set, every request fails at once with this reason.
     /// When set (and failWith is not), every request is handed on to it: a test of a real switcher behind
     /// the app's manager. It must outlive the requests.

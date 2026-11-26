@@ -793,15 +793,16 @@ Delivery NativeClient::closePane(uint64_t session)
 }
 
 std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace,
-                                                      std::optional<uint64_t> directoryFrom)
+                                                      std::optional<uint64_t> directoryFrom,
+                                                      std::optional<proto::CreationToken> creation)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
     if (!shares(proto::Capability::DaemonFollow))
         return std::nullopt;
     // Held only once the daemon states it with the layout batch that answers (handleNotice): a workspace it
     // does not have leaves the selection as it was, and a new one (0) is named by that batch alone.
-    auto const serial = send(proto::DecodedPdu {
-        proto::SelectWorkspace { .workspace = workspace, .directoryFromSession = directoryFrom } });
+    auto const serial = send(proto::DecodedPdu { proto::SelectWorkspace {
+        .workspace = workspace, .directoryFromSession = directoryFrom, .creationToken = creation } });
     if (serial == 0)
         return std::nullopt;
     // An observer's select promotes it, once the batch answering this one states the selection.
@@ -830,12 +831,12 @@ Delivery NativeClient::sendMarkSeen(uint64_t session, proto::SeenSerials seen)
     return Delivery::Sent;
 }
 
-Delivery NativeClient::observeOnly()
+Delivery NativeClient::observeOnly(proto::ObserveCause cause)
 {
     // A daemon that did not negotiate it would read it as a PDU it does not know: it is not sent at all.
     if (!shares(proto::Capability::Observe))
         return Delivery::Unsupported;
-    auto const serial = send(proto::DecodedPdu { proto::ObserveOnly {} });
+    auto const serial = send(proto::DecodedPdu { proto::ObserveOnly { .cause = cause } });
     if (serial == 0)
         return Delivery::Unsupported;
     // What a reconnect resumes, and what the controller reads: an observer selects nothing. A daemon that

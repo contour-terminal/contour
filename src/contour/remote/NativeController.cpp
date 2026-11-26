@@ -629,10 +629,13 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 // An upgrade is a reconnect to the same daemon: adoptReconnect() keeps every binding then.
                 // The next connection is an attempt of its own: what the lost one made headway in is not its.
                 beginAttachAttempt(lock);
+                ++_connectionLosses;
                 _client = nullptr;
                 _inputConnection = 0;
                 // A promotion's select is answered on its connection or not at all: the reconnect lands it.
                 _promotionSerial.reset();
+                // A withdrawn one's answer is lost with it: the reconnect is an observer's.
+                _withdrawnSerial.reset();
                 forgetInputEchoes();
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
@@ -840,6 +843,12 @@ vthost::client::ConnectionState NativeController::connectionState() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _connection;
+}
+
+uint64_t NativeController::connectionLosses() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _connectionLosses;
 }
 
 void NativeController::setUserAttention(UserAttention attention)
@@ -1077,11 +1086,22 @@ void NativeController::onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end
             tellPromotion =
                 endPromotion(lock, _client != nullptr ? _client->selectedWorkspace() : uint64_t { 0 });
         }
+        // A withdrawn promotion's select answered: one that promoted the connection all the same is demoted
+        // again, so both ends agree it observes -- said as withdrawn, so that the daemon takes back a
+        // workspace the promotion made and puts back the restore its answer told, neither shown by anyone.
+        auto answersWithdrawn = false;
+        if (_withdrawnSerial && end.causeSerial >= *_withdrawnSerial)
+        {
+            _withdrawnSerial.reset();
+            answersWithdrawn = true;
+            if (_client != nullptr && _client->role() == vthost::proto::ConnectionRole::Attach)
+                std::ignore = _client->observeOnly(vthost::proto::ObserveCause::Withdrawn);
+        }
         // The client holds the selection the daemon stated with this batch: an attach's alone, as an observer
         // shows none, whatever a batch the daemon ended before a demotion states.
         if (_client != nullptr && _role == vthost::proto::ConnectionRole::Attach)
             _selected = _client->selectedWorkspace();
-        if (end.restoredWorkspaces != 0 || end.restoredTabs != 0)
+        if (!answersWithdrawn && (end.restoredWorkspaces != 0 || end.restoredTabs != 0))
             restored =
                 vthost::RestoredCounts { .workspaces = end.restoredWorkspaces, .tabs = end.restoredTabs };
         for (auto const& [request, asked]: answered)
@@ -1109,14 +1129,14 @@ std::function<void()> NativeController::endPromotion(std::lock_guard<std::mutex>
         return {};
     auto promotion = *std::exchange(_promotion, std::nullopt);
     _promotionSerial.reset();
-    auto result = outcome.and_then([&promotion](uint64_t selected) -> std::expected<uint64_t, std::string> {
+    auto const asked = promotion.request.workspace;
+    auto result = outcome.and_then([asked](uint64_t selected) -> std::expected<uint64_t, std::string> {
         if (selected == 0)
-            return std::unexpected(promotion.workspace != 0
-                                       ? std::format("the daemon has no workspace {}", promotion.workspace)
-                                       : std::string { "the daemon could not make a workspace" });
-        if (promotion.workspace != 0 && selected != promotion.workspace)
+            return std::unexpected(asked != 0 ? std::format("the daemon has no workspace {}", asked)
+                                              : std::string { "the daemon could not make a workspace" });
+        if (asked != 0 && selected != asked)
             return std::unexpected(
-                std::format("the daemon selected workspace {} instead of {}", selected, promotion.workspace));
+                std::format("the daemon selected workspace {} instead of {}", selected, asked));
         return selected;
     });
     if (result)
@@ -1149,7 +1169,8 @@ std::function<void()> NativeController::resumePromotion(std::lock_guard<std::mut
     // Ids of the run it was asked in: a daemon that restarted since names none of its workspaces by them,
     // whichever of its own shares the id, nor knows the session a new one was to start beside.
     auto const instance = client.daemonInstance();
-    if (_promotion->daemonInstance != 0 && instance != 0 && instance != _promotion->daemonInstance)
+    if (_promotion->request.daemonInstance != 0 && instance != 0
+        && instance != _promotion->request.daemonInstance)
         return endPromotion(
             held, std::unexpected(std::string { "the daemon restarted before the promotion landed" }));
     if (!promotes(client.negotiated()) || !askPromotion(held, client))
@@ -1160,10 +1181,12 @@ std::function<void()> NativeController::resumePromotion(std::lock_guard<std::mut
 bool NativeController::askPromotion(std::lock_guard<std::mutex> const& /*held*/, NativeClient& client)
 {
     // The area first: the daemon holds it for the viewer setup the select runs.
-    client.requestResize(unbox<uint32_t>(_promotion->area.columns),
-                         unbox<uint32_t>(_promotion->area.lines),
-                         toWireCell(_promotion->cell));
-    _promotionSerial = client.selectWorkspace(_promotion->workspace, _promotion->directoryFromSession);
+    auto const& request = _promotion->request;
+    client.requestResize(
+        unbox<uint32_t>(request.area.columns), unbox<uint32_t>(request.area.lines), toWireCell(request.cell));
+    // The same token on every ask: a daemon that served an earlier one selects what that made.
+    _promotionSerial =
+        client.selectWorkspace(request.workspace, request.directoryFromSession, request.creation);
     return _promotionSerial.has_value();
 }
 
@@ -1299,30 +1322,29 @@ std::expected<void, SelectError> NativeController::admitRoleChange() const
 }
 
 std::expected<void, SelectError> NativeController::promote(
-    uint64_t workspace,
-    std::optional<uint64_t> directoryFromSession,
-    vtpty::PageSize area,
-    std::optional<vtpty::ImageSize> cell,
-    std::shared_ptr<vthost::ITransportFactory> interactive,
-    PromotionLanded landed)
+    PromotionRequest request, std::shared_ptr<vthost::ITransportFactory> interactive, PromotionLanded landed)
 {
     Require(interactive != nullptr);
+    Require(request.workspace != 0 || request.creation.has_value());
     {
         auto const lock = std::lock_guard { _mutex };
         if (auto admitted = admitRoleChange(); !admitted)
             return admitted;
         if (_role != vthost::proto::ConnectionRole::Observe || !promotes(_negotiated))
             return std::unexpected(SelectError::Unsupported);
-        _promotion = Promotion { .workspace = workspace,
-                                 .directoryFromSession = directoryFromSession,
-                                 .area = area,
-                                 .cell = cell,
-                                 .daemonInstance = _daemonInstance,
+        // Ids of another run name other workspaces, or none: refused before anything is asked.
+        if (request.daemonInstance != 0 && request.daemonInstance != _daemonInstance)
+            return std::unexpected(SelectError::DaemonRestarted);
+        auto const geometryLock = std::lock_guard { _geometryMutex };
+        _lastStatedArea = request.area;
+        _lastReportedCell = request.cell;
+        // The run asked of, should the request not name one: what a reconnect's instance is checked against.
+        if (request.daemonInstance == 0)
+            request.daemonInstance = _daemonInstance;
+        _withdrawnSerial.reset();
+        _promotion = Promotion { .request = std::move(request),
                                  .transportBefore = std::exchange(_dialTransport, std::move(interactive)),
                                  .landed = std::move(landed) };
-        auto const geometryLock = std::lock_guard { _geometryMutex };
-        _lastStatedArea = area;
-        _lastReportedCell = cell;
     }
     _reactor.post([this] {
         auto const lock = std::lock_guard { _mutex };
@@ -1336,6 +1358,41 @@ std::expected<void, SelectError> NativeController::promote(
         }
     });
     return {};
+}
+
+void NativeController::withdrawPromotion()
+{
+    auto landed = PromotionLanded {};
+    {
+        auto const lock = std::lock_guard { _mutex };
+        if (!_promotion)
+            return;
+        auto promotion = *std::exchange(_promotion, std::nullopt);
+        // Dials as the observer it stays; an answer that promoted it all the same is answered by ObserveOnly
+        // (onLayoutBatchEnd). A select not yet written is never written: the post in promote() finds none.
+        _dialTransport = std::move(promotion.transportBefore);
+        _withdrawnSerial = std::exchange(_promotionSerial, std::nullopt);
+        landed = std::move(promotion.landed);
+    }
+    if (landed)
+        platform::postToObject(this, [landed = std::move(landed)] {
+            landed(std::unexpected(std::string { "the promotion was withdrawn" }));
+        });
+}
+
+std::optional<vtpty::PageSize> NativeController::clientArea() const
+{
+    // Both, in the documented order: composedClientArea() reads the layouts (_mutex) and the pane grids
+    // (_geometryMutex).
+    auto const lock = std::lock_guard { _mutex };
+    auto const geometryLock = std::lock_guard { _geometryMutex };
+    return composedClientArea().or_else([this] { return _lastStatedArea; });
+}
+
+std::optional<vtpty::ImageSize> NativeController::lastStatedCell() const
+{
+    auto const geometryLock = std::lock_guard { _geometryMutex };
+    return _lastReportedCell;
 }
 
 std::expected<void, SelectError> NativeController::demote(std::shared_ptr<vthost::ITransportFactory> observer)

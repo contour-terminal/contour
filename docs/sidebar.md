@@ -143,14 +143,23 @@ filter is only a view: it never changes what a drag or a rename acts on.
 - **Double-click** a workspace's or a tab's name to rename it, or press **F2** on its row. Return commits,
   Escape cancels. A workspace's or a tab's name is shared: every window of the daemon and every `object.renamed` subscriber of the
   [control API](control-api.md) hears it, and `contour rename` addresses the object by it (`tab:logs`).
-- **Right-click** for the row's menu:
+- **Right-click** for the row's menu. Every row's menu begins with **Open in New Window** (as Shift+Return), which
+  opens what the row names in a window of its own and leaves this window where it is; a window that shows it
+  already is raised instead, with the row's tab active. A row of a daemon reached by an unnamed link, or of a
+  window that runs its sessions in-process, does not offer it, nor does a daemon's row while the daemon is not
+  running, too old or failed. An Open in New Window under way goes on while the window switches elsewhere,
+  and the other way round.
+    - a daemon: Open in New Window, then what the row's buttons do, in their order and named in full
+      (**Connect**, **Start Daemon**, **Cancel Connecting** or, while a jump into it is under way,
+      **Cancel Jump**), and **Remove from Sidebar** set apart below them; so it stays in reach when a narrow
+      sidebar has dropped its button. Another daemon's workspace, tab and pane rows have no menu yet;
     - a workspace: **Workspace Color**, Rename…, Mark Seen, New Tab Here, Move Up, Move Down, **Merge into
       Tab** (a workspace of one tab only), Close Workspace… (the last workspace of an in-process window cannot
       be closed);
     - a tab: the tab strip's menu (Tab Color, Rename…, and its close row reads Close Tab…), then **Split
       Vertically** and **Split Horizontally**, which split the tab's active pane, then **Move to Workspace**,
       **Merge into Tab** and **Move to New Workspace**;
-    - a pane: Go to Pane, Mark Seen, **Split Vertically**, **Split Horizontally**, **Move to Tab**, **Move to
+    - a pane: Go to Pane, Open in New Window, Mark Seen, **Split Vertically**, **Split Horizontally**, **Move to Tab**, **Move to
       New Tab**, **Move to New Workspace**, Close Pane….
 
   Move to Tab and Merge into Tab list every other tab, under the name of its workspace; the pane, or the
@@ -158,7 +167,7 @@ filter is only a view: it never changes what a drag or a rename acts on.
   named as any new one is, which an in-process window then shows. Move to New Workspace is greyed out for a workspace's
   only tab, which already is a workspace of its own.
 
-  Workspace Color, Mark Seen, Rename…, Move Up, Move Down and the Move and Merge rows act on the row the menu
+  Open in New Window, Workspace Color, Mark Seen, Rename…, Move Up, Move Down and the Move and Merge rows act on the row the menu
   was opened on and leave the window where it is. The rest (Go to Pane, New Tab Here, the Split rows and the
   tab strip's own commands) act on what the window shows, so the window shows that row first; a Split row
   then splits the pane the row names, or the tab's active pane.
@@ -272,8 +281,14 @@ front instead. A blank line sets each section apart. Clicking the row, Return, �
 sidebar the locality icon goes first, then Remove, then the button shrinks to its icon (a one-cell mark on the
 Terminal row: `→` Connect, `▶` Start, `⎋` Cancel), then the link's words move into the mark's tooltip, and last
 the name elides in the middle, never to fewer than six of its letters; Connect, Start or Cancel always stays. While a jump into a section is under way its row shows `⧗`, pulsing gently unless you reduce
-motion; **Cancel**, the `CancelSwitch` action or Escape in the sidebar ends it (Cancel on a daemon still
-connecting, with no jump under way, ends that connect). Whenever a daemon is not
+motion; **Cancel**, the `CancelSwitch` action (in the command palette, unbound by default) or Escape in the
+sidebar ends it and leaves the window where it was (Cancel on a daemon still connecting, with no jump under
+way, ends that connect). With the sidebar hidden the location chip says where the jump goes ("starfive
+Connecting…"), and a click on it cancels the jump. A jump to a daemon the sidebar lists takes over the
+connection that keeps its rows current rather than dialling a second one, lands on the row's tab and pane, and
+the daemon you leave keeps your window's connection to stay listed live while no other window is on it; a
+second click while a jump is under way goes to the second row, and a row of a daemon that has restarted since
+it was listed is refused ("the daemon restarted"). Whenever a daemon is not
 connected, its rows are what was last known of it: drawn in a dimmer ink, with no running mark, and counted
 neither in the footer nor on the workspace chip.
 

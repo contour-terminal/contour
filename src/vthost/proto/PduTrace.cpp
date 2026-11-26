@@ -675,10 +675,14 @@ namespace
                    "SelectWorkspace",
                    +[](DecodedPdu const& pdu) {
                        auto const& select = std::get<SelectWorkspace>(pdu);
-                       return select.directoryFromSession ? std::format("workspace={} from={}",
-                                                                        select.workspace,
-                                                                        *select.directoryFromSession)
-                                                          : std::format("workspace={}", select.workspace);
+                       auto text = select.directoryFromSession
+                                       ? std::format("workspace={} from={}",
+                                                     select.workspace,
+                                                     *select.directoryFromSession)
+                                       : std::format("workspace={}", select.workspace);
+                       if (select.creationToken)
+                           text += " once";
+                       return text;
                    } },
         TraceRow { PduType::ReportFocus,
                    "ReportFocus",

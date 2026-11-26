@@ -720,8 +720,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// Serves an observer's SelectWorkspace: promotes the connection to a viewer of the workspace it names,
     /// through the viewer setup an attach runs (becomeViewer), the held display applied before its plan;
-    /// workspace 0 has that plan create one, started where the session the request names is. A workspace the
-    /// daemon does not have, or cannot make, promotes nothing: the connection stays (or becomes again) an
+    /// workspace 0 has that plan create one, started where the session the request names is -- unless its
+    /// creation token already made one that still holds a tab, which is then selected instead. A workspace
+    /// the daemon does not have, or cannot make, promotes nothing: the connection stays (or becomes again) an
     /// observer. Answered, whatever came of it, by a layout batch naming the request and stating the
     /// selection as it stands, as a viewer's select is; a promotion that is the first viewer since a restore
     /// also states the restore announcement with it (LayoutBatchEnd::restoredWorkspaces).
@@ -734,6 +735,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// free at once -- stops counting in the census, fires client.detached, and is summarized every pane.
     /// Refused unless the connection shares what an observer must (proto::sharesObserving). Answered by a
     /// layout batch naming the request and selecting nothing, so the client tells what was pushed before it.
+    /// One that says its promotion was withdrawn (proto::ObserveCause::Withdrawn) also undoes what the
+    /// promotion's answer did, which nobody was shown: a workspace it made that no other client shows is
+    /// closed, and the restore its answer told is the next viewer's to be told.
     /// @param frame The frame read.
     void serveDemotion(proto::DecodedFrame const& frame);
 
@@ -1596,8 +1600,20 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         std::optional<vtbackend::ColorPreference> colorPreference {}; ///< The scheme it shows, when stated.
     };
     StatedDisplay _statedDisplay;
-    /// The restore announcement a promotion took, told by the layout batch end that answers it. Loop thread.
-    std::optional<RestoredCounts> _restoreToAnnounce;
+    /// The restore announcement a promotion took, told by the layout batch end that answers it, and put back
+    /// (SessionHost::returnRestoreAnnouncement) should the connection end or be demoted first. Loop thread.
+    std::vector<RestoredWorkspace> _restoreToAnnounce;
+    /// What the connection's last promotion did, kept until it is demoted: what a demotion saying the
+    /// promotion was withdrawn undoes (serveDemotion()).
+    struct PromotionDone
+    {
+        /// The workspace it made for its creation token, by this ask or an earlier one whose answer was lost;
+        /// 0 for one it selected.
+        vtworkspace::WorkspaceId made {};
+        std::vector<RestoredWorkspace> announced; ///< The restore its answer tells.
+    };
+    /// The last promotion's, until a demotion. Loop thread.
+    std::optional<PromotionDone> _promotionDone;
     /// The directory the hello stated the attach's own session starts in (@ref attachSpawnRequest); empty for
     /// none. Kept for the first tab an OpenFirstTab asks for, which is the attach's session as well.
     std::filesystem::path _attachDirectory;

@@ -123,6 +123,8 @@ struct ObserverOptions
     std::shared_ptr<vthost::IExtensionHosting> extensions {};
     /// What makes each session's PTY; unset, a MockPty.
     vthost::PtyFactory ptyFactory {};
+    /// What the host restores as it starts; nothing by default.
+    std::optional<vthost::WorkspaceRestore> restore = std::nullopt;
 };
 
 /// Two workspaces of one session each, the fakes the census and the control API are told through, and
@@ -135,7 +137,8 @@ struct ObserverFixture
     explicit ObserverFixture(ObserverOptions options = {}):
         flush { .services = { .daemon = daemon, .control = control },
                 .extensions = std::move(options.extensions),
-                .ptyFactory = std::move(options.ptyFactory) }
+                .ptyFactory = std::move(options.ptyFactory),
+                .restore = std::move(options.restore) }
     {
     }
 
@@ -192,6 +195,29 @@ struct ObserverFixture
         NativeSessionFlushTester::receive(
             *client.session, proto::SelectWorkspace { .workspace = workspace }, serial);
         settle();
+    }
+
+    /// Has a new observer ask to be promoted to a workspace made for @p token, and lets what it is sent go
+    /// out.
+    /// @return The workspace the observer selects now; 0 for none.
+    uint64_t promoteToNew(proto::CreationToken const& token)
+    {
+        auto& client = observe(promotableHello());
+        NativeSessionFlushTester::receive(
+            *client.session, proto::SelectWorkspace { .workspace = 0, .creationToken = token }, 5);
+        settle();
+        auto const ends = batchEndsOf(client);
+        auto const answer = std::ranges::find(ends, uint64_t { 5 }, &proto::LayoutBatchEnd::causeSerial);
+        REQUIRE(answer != ends.end());
+        return answer->selected;
+    }
+
+    /// @return A creation token unlike any other @p seed names.
+    [[nodiscard]] static proto::CreationToken tokenOf(uint8_t seed)
+    {
+        auto token = proto::CreationToken {};
+        token.fill(std::byte { seed });
+        return token;
     }
 
     /// Has @p client ask to observe only, and lets what it is sent go out.
@@ -568,6 +594,174 @@ TEST_CASE("a promotion that is the first viewer since a restore is told it by it
     CHECK(end.restoredTabs == 1);
     // Told once: no later window is.
     CHECK_FALSE(h.host.takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
+}
+
+TEST_CASE("a re-asked promotion to workspace 0 with the same token selects what it made",
+          "[vthost][native][observer]")
+{
+    auto f = ObserverFixture {};
+    auto const before = f.flush.h.host.model().workspaceCount();
+    auto const token = ObserverFixture::tokenOf(1);
+
+    auto const made = f.promoteToNew(token);
+    auto const again = f.promoteToNew(token);
+
+    CHECK(made != 0);
+    CHECK(again == made);
+    CHECK(f.flush.h.host.model().workspaceCount() == before + 1);
+}
+
+TEST_CASE("a promotion to workspace 0 with a new token makes another", "[vthost][native][observer]")
+{
+    auto f = ObserverFixture {};
+    auto const before = f.flush.h.host.model().workspaceCount();
+
+    auto const made = f.promoteToNew(ObserverFixture::tokenOf(1));
+    auto const another = f.promoteToNew(ObserverFixture::tokenOf(2));
+
+    CHECK(made != 0);
+    CHECK(another != 0);
+    CHECK(another != made);
+    CHECK(f.flush.h.host.model().workspaceCount() == before + 2);
+}
+
+TEST_CASE("a withdrawn promotion to workspace 0 closes the workspace it made, a demotion keeps it",
+          "[vthost][native][observer]")
+{
+    // The client dropped the answer of a promotion it withdrew: nobody shows what it made, and nobody will.
+    for (auto const cause: { proto::ObserveCause::Withdrawn, proto::ObserveCause::Demoted })
+    {
+        INFO("cause " << static_cast<int>(cause));
+        auto f = ObserverFixture {};
+        auto& host = f.flush.h.host;
+        auto const before = host.model().workspaceCount();
+        auto& client = f.observe(ObserverFixture::promotableHello());
+        NativeSessionFlushTester::receive(
+            *client.session,
+            proto::SelectWorkspace { .workspace = 0, .creationToken = ObserverFixture::tokenOf(1) },
+            5);
+        f.settle();
+        auto const ends = ObserverFixture::batchEndsOf(client);
+        auto const answer = std::ranges::find(ends, uint64_t { 5 }, &proto::LayoutBatchEnd::causeSerial);
+        REQUIRE(answer != ends.end());
+        auto const made = answer->selected;
+        REQUIRE(made != 0);
+        REQUIRE(host.model().workspaceCount() == before + 1);
+
+        NativeSessionFlushTester::receive(*client.session, proto::ObserveOnly { .cause = cause }, 6);
+        f.settle();
+
+        CHECK(client.session->phase() == NativeSession::ConnectionPhase::Observing);
+        if (cause == proto::ObserveCause::Withdrawn)
+        {
+            CHECK(host.model().workspace(vtworkspace::WorkspaceId { made }) == nullptr);
+            CHECK(host.model().workspaceCount() == before);
+        }
+        else
+            CHECK(host.model().workspace(vtworkspace::WorkspaceId { made }) != nullptr);
+    }
+}
+
+TEST_CASE("the restore announcement a withdrawn promotion's answer told is told to the next viewer",
+          "[vthost][native][observer][restore]")
+{
+    auto snapshot = vthost::WorkspaceSnapshot {};
+    for ([[maybe_unused]] auto const workspace: std::views::iota(0, 2))
+        snapshot.workspaces.push_back(vthost::WorkspaceLayoutSnapshot {
+            .tabs = {
+                vthost::TabSnapshot { .root = vthost::PaneNode { .pane = vthost::PaneSnapshot {} } } } });
+    auto f =
+        ObserverFixture { ObserverOptions { .restore = vthost::WorkspaceRestore { .snapshot = snapshot } } };
+    auto& host = f.flush.h.host;
+    auto const restored = host.model().workspaceAt(0)->id().value;
+    auto& observer = f.observe(ObserverFixture::promotableHello());
+    auto const skip = observer.received.size();
+    NativeSessionFlushTester::receive(*observer.session, proto::SelectWorkspace { .workspace = restored }, 5);
+    f.settle();
+    auto const ends = ObserverFixture::batchEndsOf(observer, skip);
+    auto const answer = std::ranges::find(ends, uint64_t { 5 }, &proto::LayoutBatchEnd::causeSerial);
+    REQUIRE(answer != ends.end());
+    REQUIRE(answer->restoredWorkspaces == 2);
+
+    NativeSessionFlushTester::receive(
+        *observer.session, proto::ObserveOnly { .cause = proto::ObserveCause::Withdrawn }, 6);
+    f.settle();
+
+    auto& window = f.attachSelecting(f.first);
+    auto const* hello = serverHelloOf(window.received);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->restoredWorkspaces == 2);
+    CHECK(hello->restoredTabs == 2);
+}
+
+TEST_CASE("a remembered token whose workspace closed makes a new one", "[vthost][native][observer]")
+{
+    auto f = ObserverFixture {};
+    auto& host = f.flush.h.host;
+    auto const token = ObserverFixture::tokenOf(1);
+    auto const made = f.promoteToNew(token);
+    REQUIRE(made != 0);
+    REQUIRE(host.closeWorkspace(vtworkspace::WorkspaceId { made }).has_value());
+    f.settle();
+    auto const before = host.model().workspaceCount();
+
+    auto const again = f.promoteToNew(token);
+
+    CHECK(again != 0);
+    CHECK(again != made);
+    CHECK(host.model().workspaceCount() == before + 1);
+}
+
+TEST_CASE("tokens beyond the memory forget the oldest", "[vthost][native][observer]")
+{
+    auto f = ObserverFixture {};
+    auto& host = f.flush.h.host;
+    auto const oldest = ObserverFixture::tokenOf(0);
+    auto const made = f.promoteToNew(oldest);
+    REQUIRE(made != 0);
+    // As many later promotions as the host remembers.
+    for (auto const seed:
+         std::views::iota(uint8_t { 1 }, static_cast<uint8_t>(vthost::PromotionTokenMemory + 1)))
+        host.rememberWorkspaceMadeFor(ObserverFixture::tokenOf(seed), vtworkspace::WorkspaceId { made });
+    REQUIRE(host.workspaceMadeFor(ObserverFixture::tokenOf(1)) == vtworkspace::WorkspaceId { made });
+    auto const before = host.model().workspaceCount();
+
+    auto const again = f.promoteToNew(oldest);
+
+    CHECK(again != made);
+    CHECK(host.model().workspaceCount() == before + 1);
+}
+
+TEST_CASE("the restore announcement a dropped promotion took is told to the next viewer",
+          "[vthost][native][observer][restore]")
+{
+    auto snapshot = vthost::WorkspaceSnapshot {};
+    for ([[maybe_unused]] auto const workspace: std::views::iota(0, 2))
+        snapshot.workspaces.push_back(vthost::WorkspaceLayoutSnapshot {
+            .tabs = {
+                vthost::TabSnapshot { .root = vthost::PaneNode { .pane = vthost::PaneSnapshot {} } } } });
+    auto f =
+        ObserverFixture { ObserverOptions { .restore = vthost::WorkspaceRestore { .snapshot = snapshot } } };
+    auto& host = f.flush.h.host;
+    auto const restored = host.model().workspaceAt(0)->id().value;
+    auto& observer = f.observe(ObserverFixture::promotableHello());
+
+    auto const skip = observer.received.size();
+
+    // Promoted, its answer spawned but not yet run: the connection drops first.
+    NativeSessionFlushTester::receive(*observer.session, proto::SelectWorkspace { .workspace = restored }, 5);
+    REQUIRE(observer.session->phase() == NativeSession::ConnectionPhase::Viewing);
+    REQUIRE(NativeSessionFlushTester::letGo(*observer.session, f.flush.h.loop, f.flush.clock));
+    observer.session.reset();
+    f.settle();
+    REQUIRE(ObserverFixture::batchEndsOf(observer, skip).empty());
+
+    auto& window = f.attachSelecting(f.first);
+
+    auto const* hello = serverHelloOf(window.received);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->restoredWorkspaces == 2);
+    CHECK(hello->restoredTabs == 2);
 }
 
 TEST_CASE("an observer's promotion to workspace 0 starts the shell where the pane that asked is",

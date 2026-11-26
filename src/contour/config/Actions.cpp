@@ -473,6 +473,11 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry {
             "MoveToNewWorkspace", Action { MoveToNewWorkspace {} }, documentation::MoveToNewWorkspace },
         ActionCatalogEntry {
+            "OpenInNewWindow", Action { OpenInNewWindow {} }, documentation::OpenInNewWindow },
+        ActionCatalogEntry { "ConnectDaemon", Action { ConnectDaemon {} }, documentation::ConnectDaemon },
+        ActionCatalogEntry { "StartDaemon", Action { StartDaemon {} }, documentation::StartDaemon },
+        ActionCatalogEntry { "RemoveDaemon", Action { RemoveDaemon {} }, documentation::RemoveDaemon },
+        ActionCatalogEntry {
             "SwitchToWorkspace", Action { SwitchToWorkspace {} }, documentation::SwitchToWorkspace },
         ActionCatalogEntry { "OpenWorkspace", Action { OpenWorkspace {} }, documentation::OpenWorkspace },
         ActionCatalogEntry { "CycleWorkspace", Action { CycleWorkspace {} }, documentation::CycleWorkspace },

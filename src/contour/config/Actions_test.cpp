@@ -105,6 +105,31 @@ TEST_CASE("CancelSwitch round-trips by name", "[actions][parse][sidebar]")
     CHECK_FALSE(actions::isParameterized(*parsed));
 }
 
+TEST_CASE("OpenInNewWindow round-trips by name", "[actions][parse][sidebar]")
+{
+    auto const parsed = actions::fromString("OpenInNewWindow");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::OpenInNewWindow>(*parsed));
+    CHECK(actions::name(*parsed) == "OpenInNewWindow");
+    // A row of the sidebar's menus, which name the row: bare, it names none.
+    CHECK(actions::isParameterized(*parsed));
+}
+
+TEST_CASE("a daemon row's verbs round-trip by name", "[actions][parse][sidebar]")
+{
+    for (auto const* const name: { "ConnectDaemon", "StartDaemon", "RemoveDaemon" })
+    {
+        INFO(name);
+        auto const parsed = actions::fromString(name);
+        REQUIRE(parsed.has_value());
+        CHECK(actions::name(*parsed) == name);
+        CHECK(actions::isParameterized(*parsed));
+    }
+    CHECK(std::holds_alternative<actions::ConnectDaemon>(*actions::fromString("ConnectDaemon")));
+    CHECK(std::holds_alternative<actions::StartDaemon>(*actions::fromString("StartDaemon")));
+    CHECK(std::holds_alternative<actions::RemoveDaemon>(*actions::fromString("RemoveDaemon")));
+}
+
 TEST_CASE("ToggleSidebarNeedsMe round-trips by name", "[actions][parse][sidebar]")
 {
     auto const parsed = actions::fromString("ToggleSidebarNeedsMe");

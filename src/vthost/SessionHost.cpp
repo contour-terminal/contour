@@ -1188,15 +1188,42 @@ SessionHost::RealizedWorkspace SessionHost::realizeRestoredWorkspace(WorkspaceId
 std::optional<RestoredCounts> SessionHost::takeRestoreAnnouncement(
     std::function<bool(uint64_t)> const& follows)
 {
-    auto const restored = std::exchange(_restoreAnnouncement, {});
-    auto counts = RestoredCounts {};
-    for (auto const& entry:
-         restored | std::views::filter([&](auto const& w) { return follows(w.workspace); }))
-    {
-        ++counts.workspaces;
-        counts.tabs += entry.tabs;
-    }
+    auto const counts = countRestored(takeRestoreEntries(follows));
     return counts.workspaces > 0 ? std::optional { counts } : std::nullopt;
+}
+
+std::vector<RestoredWorkspace> SessionHost::takeRestoreEntries(std::function<bool(uint64_t)> const& follows)
+{
+    // Handed over once, whatever @p follows names: what it does not is told to no one.
+    auto const restored = std::exchange(_restoreAnnouncement, {});
+    return std::ranges::to<std::vector>(
+        restored | std::views::filter([&](auto const& w) { return follows(w.workspace); }));
+}
+
+void SessionHost::returnRestoreAnnouncement(std::vector<RestoredWorkspace> entries)
+{
+    // Ahead of anything held meanwhile, so the announcement keeps the snapshot's order.
+    _restoreAnnouncement.insert(_restoreAnnouncement.begin(), entries.begin(), entries.end());
+}
+
+std::optional<WorkspaceId> SessionHost::workspaceMadeFor(proto::CreationToken const& token) const
+{
+    auto const made = std::ranges::find(_madeForTokens, token, &decltype(_madeForTokens)::value_type::first);
+    if (made == _madeForTokens.end())
+        return std::nullopt;
+    // One that ended -- closed, or its last tab gone -- is no longer there to select.
+    auto const* workspace = _model.workspace(made->second);
+    if (workspace == nullptr || workspace->tabCount() == 0)
+        return std::nullopt;
+    return made->second;
+}
+
+void SessionHost::rememberWorkspaceMadeFor(proto::CreationToken const& token, WorkspaceId workspace)
+{
+    std::erase_if(_madeForTokens, [&token](auto const& entry) { return entry.first == token; });
+    _madeForTokens.emplace_back(token, workspace);
+    while (_madeForTokens.size() > PromotionTokenMemory)
+        _madeForTokens.pop_front();
 }
 
 std::vector<SessionId> SessionHost::takeUnrestoredScreens(std::function<bool(SessionId)> const& follows)

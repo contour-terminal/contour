@@ -16,6 +16,7 @@
 #include <contour/session/InProcessDirectory.hpp>
 #include <contour/session/NodeDragSession.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/session/WindowSwitching.hpp>
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/CloseDialogTable.hpp>
@@ -1454,6 +1455,11 @@ class WindowController:
     /// the tab and pane are shown then), and it is counted as seen once shown. Replaces a pending jump.
     /// @param target The pane to show.
     void jumpToPane(PaneKey target);
+    /// Activates what a jump from another window or daemon names, once this window shows its workspace: the
+    /// pane (jumpToPane()), or, for a tab alone, the tab with its own active pane. Nothing for neither, or
+    /// for a tab the directory does not list.
+    /// @param focus The tab and pane.
+    void land(session::LandingFocus const& focus);
     /// Shows @p workspace because the user picked it (a sidebar row): selects it, and gives up a pending
     /// jump, row action or follow, as the user went elsewhere.
     /// @param workspace The workspace's id, as the window's directory lists it.

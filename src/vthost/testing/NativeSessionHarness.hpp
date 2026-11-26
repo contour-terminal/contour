@@ -646,11 +646,14 @@ struct FlushHarness
     std::shared_ptr<vthost::IExtensionHosting> extensions {};
     /// What makes each session's PTY; unset, a MockPty.
     vthost::PtyFactory ptyFactory {};
+    /// What the host restores as it starts; nothing by default.
+    std::optional<vthost::WorkspaceRestore> restore = std::nullopt;
     core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + std::chrono::seconds { 10 } };
     NativeHarness h { HarnessOptions { .ptyFactory = ptyFactory,
                                        .extensions = extensions,
                                        .services = services,
                                        .clock = &clock,
+                                       .restore = restore,
                                        .workspaceGit = workspaceGit } };
     std::deque<FlushClient> clients {};
     /// Last: every client is let go, and its reader run out, before anything it reaches is destroyed.

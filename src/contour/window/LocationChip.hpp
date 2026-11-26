@@ -495,6 +495,46 @@ enum class SidebarShown : uint8_t
     return LocationChipPlace::None;
 }
 
+/// What the chip says at each fit step while a jump connects to another daemon: that daemon, "Connecting…"
+/// while the chip has room for it, no workspace, and the tooltip naming where it goes and that a click
+/// cancels it.
+/// @param daemon    The daemon the jump connects to.
+/// @param translate Gives a source sentence's translation.
+/// @return One row per step.
+template <typename Translate = SourceText>
+[[nodiscard]] std::vector<LocationChipStepText> locationChipPendingStepTexts(
+    std::string_view daemon, Translate const& translate = Translate {})
+{
+    auto const daemonClusters = clustersOf(daemon);
+    auto const tooltip = detail::filled(
+        std::string(translate(QT_TRANSLATE_NOOP("LocationChip", "Connecting to %1… · Click to cancel"))),
+        std::array<std::string_view, 1> { daemon });
+    return std::ranges::to<std::vector<LocationChipStepText>>(
+        LocationChipSteps | std::views::transform([&](LocationChipStep const& step) {
+            return LocationChipStepText {
+                .fit = step.fit,
+                .key = step.key,
+                .daemon = detail::daemonTextOf(daemon, daemonClusters, step.fit),
+                .status = step.fit == LocationChipFit::Full
+                              ? std::string(translate(QT_TRANSLATE_NOOP("LocationChip", "Connecting…")))
+                              : std::string {},
+                .workspace = {},
+                .tooltip = tooltip,
+            };
+        }));
+}
+
+/// @param daemon    The daemon a jump connects to.
+/// @param translate Gives a source sentence's translation.
+/// @return What a screen reader says of the chip meanwhile: `Connecting to starfive…`.
+template <typename Translate = SourceText>
+[[nodiscard]] std::string locationChipPendingAccessibleName(std::string_view daemon,
+                                                            Translate const& translate = Translate {})
+{
+    return detail::filled(std::string(translate(QT_TRANSLATE_NOOP("LocationChip", "Connecting to %1…"))),
+                          std::array<std::string_view, 1> { daemon });
+}
+
 /// @param place Where the chip shows.
 /// @return The word QML switches on: "none", "band" or "sidebar".
 [[nodiscard]] constexpr std::string_view locationChipPlaceName(LocationChipPlace place) noexcept

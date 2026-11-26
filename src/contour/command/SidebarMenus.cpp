@@ -46,6 +46,21 @@ namespace
     {
         return state.moves == MenuMoves::Nodes;
     }
+
+    /// Whether the row's menu offers "Open in New Window": not for a row no switch can name.
+    template <typename State>
+    bool opensInNewWindow(State const& state) noexcept
+    {
+        return state.open == OpenOffer::Offered;
+    }
+
+    /// Every row's "Open in New Window", which opens what the row names in a window of its own.
+    template <typename State>
+    [[nodiscard]] typename detail::MenuTable<State>::Row openInNewWindowRow()
+    {
+        return detail::MenuTable<State>::command(actions::OpenInNewWindow {}, "Open in New Window")
+            .shownWhen(opensInNewWindow<State>);
+    }
     // }}}
 
     // {{{ Workspace rows
@@ -82,6 +97,10 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
+            openInNewWindowRow<WorkspaceMenuState>(),
+
+            WorkspaceTable::separator(),
+
             // As the tab menu's "Tab Color"; its "Custom…" opens the picker over the workspace's row.
             WorkspaceTable::submenu(
                 "Workspace Color",
@@ -138,6 +157,8 @@ namespace
     [[nodiscard]] std::span<TabTable::Row const> sidebarTabMenuTemplate()
     {
         static auto const rows = std::array {
+            openInNewWindowRow<SidebarTabMenuState>(),
+            TabTable::separator(),
             TabTable::rows(tabStripRows),
             TabTable::separator(),
             // Each splits the tab's active pane.
@@ -176,6 +197,10 @@ namespace
 
         static auto const rows = std::array {
             PaneTable::command(GoToPane {}, "Go to Pane"),
+            openInNewWindowRow<SidebarPaneMenuState>(),
+
+            PaneTable::separator(),
+
             PaneTable::command(MarkSeen {}, "Mark Seen"),
             PaneTable::command(SplitVertical {}, "Split Vertically"),
             PaneTable::command(SplitHorizontal {}, "Split Horizontally"),
@@ -191,6 +216,82 @@ namespace
             PaneTable::separator(),
 
             PaneTable::command(ClosePane {}, "Close Pane…"),
+        };
+        return rows;
+    }
+    // }}}
+
+    // {{{ Daemon rows
+    using DaemonTable = detail::MenuTable<SidebarDaemonMenuState>;
+
+    /// Where a verb's row stands in the daemon row's menu.
+    enum class DaemonVerbSection : uint8_t
+    {
+        Buttons = 0, ///< With what the row's buttons do.
+        Removal,     ///< Set apart below them: it takes the row away.
+    };
+
+    /// What one daemon row verb's menu row says and runs.
+    struct DaemonVerbRow
+    {
+        DaemonRowVerb verb;                                     ///< The verb.
+        std::string_view title;                                 ///< What the row says: the button's words.
+        actions::Action action {};                              ///< What it runs on the row.
+        DaemonVerbSection section = DaemonVerbSection::Buttons; ///< Where its row stands.
+    };
+
+    /// One row per verb, in enumerator order; None has no menu row.
+    [[nodiscard]] std::span<DaemonVerbRow const> daemonVerbRows()
+    {
+        static auto const rows = std::array {
+            DaemonVerbRow { .verb = DaemonRowVerb::None, .title = {}, .action = {} },
+            DaemonVerbRow {
+                .verb = DaemonRowVerb::Connect, .title = "Connect", .action = actions::ConnectDaemon {} },
+            DaemonVerbRow {
+                .verb = DaemonRowVerb::Start, .title = "Start", .action = actions::StartDaemon {} },
+            DaemonVerbRow {
+                .verb = DaemonRowVerb::Cancel, .title = "Cancel", .action = actions::CancelSwitch {} },
+            DaemonVerbRow { .verb = DaemonRowVerb::Remove,
+                            .title = "Remove",
+                            .action = actions::RemoveDaemon {},
+                            .section = DaemonVerbSection::Removal },
+        };
+        return rows;
+    }
+
+    /// The rows of the row's buttons whose verbs stand in @p section, in the buttons' order.
+    [[nodiscard]] std::vector<ContextMenuEntry> daemonVerbEntries(SidebarDaemonMenuState const& state,
+                                                                  DaemonVerbSection section)
+    {
+        auto entries = std::vector<ContextMenuEntry> {};
+        for (auto const verb: state.verbs)
+            if (verb != DaemonRowVerb::None)
+            {
+                auto const& row = daemonVerbRows()[static_cast<std::size_t>(verb)];
+                if (row.section == section)
+                    entries.push_back(detail::commandEntry(std::string { row.title }, row.action));
+            }
+        return entries;
+    }
+
+    [[nodiscard]] std::vector<ContextMenuEntry> buttonRows(SidebarDaemonMenuState const& state)
+    {
+        return daemonVerbEntries(state, DaemonVerbSection::Buttons);
+    }
+
+    [[nodiscard]] std::vector<ContextMenuEntry> removeRows(SidebarDaemonMenuState const& state)
+    {
+        return daemonVerbEntries(state, DaemonVerbSection::Removal);
+    }
+
+    [[nodiscard]] std::span<DaemonTable::Row const> sidebarDaemonMenuTemplate()
+    {
+        static auto const rows = std::array {
+            openInNewWindowRow<SidebarDaemonMenuState>(),
+            DaemonTable::separator(),
+            DaemonTable::rows(buttonRows),
+            DaemonTable::separator(),
+            DaemonTable::rows(removeRows),
         };
         return rows;
     }
@@ -215,6 +316,13 @@ std::vector<ContextMenuEntry> buildSidebarTabMenu(SidebarTabMenuState const& sta
 std::vector<ContextMenuEntry> buildSidebarPaneMenu(SidebarPaneMenuState const& state)
 {
     auto entries = PaneTable::buildRows(sidebarPaneMenuTemplate(), state);
+    detail::dropRedundantSeparators(entries);
+    return entries;
+}
+
+std::vector<ContextMenuEntry> buildSidebarDaemonMenu(SidebarDaemonMenuState const& state)
+{
+    auto entries = DaemonTable::buildRows(sidebarDaemonMenuTemplate(), state);
     detail::dropRedundantSeparators(entries);
     return entries;
 }

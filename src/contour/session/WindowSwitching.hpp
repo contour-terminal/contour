@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/window/DaemonSection.hpp>
+#include <contour/window/PaneKey.hpp>
+
 #include <core/platform/Clock.hpp>
 
 #include <cstdint>
@@ -76,12 +79,24 @@ using WorkspaceTarget =
     return WorkspaceNamed { .spec = std::string { spec } };
 }
 
+/// What a switch's window activates once it shows the workspace: the row's tab, and its pane.
+struct LandingFocus
+{
+    std::optional<uint64_t> tab;         ///< The daemon's tab id; none for the workspace's active tab.
+    std::optional<window::PaneKey> pane; ///< The pane; none for the tab's active pane.
+    bool operator==(LandingFocus const&) const = default;
+};
+
 /// Where a switch goes: a daemon (same, local label or saved host) and optionally one of its workspaces.
 struct SwitchTarget
 {
     vthost::proto::SwitchDaemonKind kind {}; ///< Same, Label or Host.
     std::string daemon;                      ///< The label or host name; empty for Same.
     WorkspaceTarget workspace {};            ///< Which of its workspaces; AnyWorkspace to decide.
+    LandingFocus focus {};                   ///< What the window activates once it shows the workspace.
+    /// The run of the daemon the workspace was named in; 0 for unknown (a program's switch). A switch naming
+    /// a run the daemon is no longer on fails: a restarted daemon may reuse the id for another workspace.
+    window::DaemonInstance instance {};
     bool operator==(SwitchTarget const&) const = default;
 };
 
@@ -133,6 +148,17 @@ class WindowSwitching
     /// by default.
     /// @param window The window's workspace, as request() named it.
     virtual void windowClosed(vtworkspace::WorkspaceId window) { std::ignore = window; }
+
+    /// Ends @p window's switch of @p mode under way as the user cancelled it: the window stays as it was, and
+    /// the switch's completion is told it was cancelled. A switch of the other mode goes on. Nothing by
+    /// default, and nothing while none is under way.
+    /// @param window The window's workspace, as request() named it.
+    /// @param mode Which of its switches: the one in place, or an Open.
+    virtual void cancel(vtworkspace::WorkspaceId window, SwitchMode mode)
+    {
+        std::ignore = window;
+        std::ignore = mode;
+    }
 };
 
 } // namespace contour::session

@@ -1882,6 +1882,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::MoveToTab const& event);
     bool operator()(actions::MoveToNewTab);
     bool operator()(actions::MoveToNewWorkspace);
+    // The sidebar's row actions name no row bare: their menus run them on the row they were opened over
+    // (WindowController::runSidebarAction()), and nothing reaches a session that would know which.
+    template <actions::SidebarRowActionConcept RowAction>
+    bool operator()(RowAction /*action*/)
+    {
+        return false;
+    }
     bool operator()(actions::SpeakSelection);
     bool operator()(actions::StopSpeaking);
     bool operator()(actions::SetTabBarVisibility);

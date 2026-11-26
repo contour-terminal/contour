@@ -2021,3 +2021,43 @@ TEST_CASE("SidebarModel: a dropped sidebar queues no rebuild", "[contour][sideba
     CHECK(t.sections.subscriberCount() == 1);
     CHECK(t.sidebar().isRebuildPending());
 }
+
+TEST_CASE("SidebarModel: a pending jump marks its row and its daemon row Connecting with Cancel",
+          "[contour][sidebar][jump]")
+{
+    // Spec §5.1: the row the jump goes to and its daemon's heading both show the pending mark, and the
+    // heading offers Cancel alone, where Connect was; the rest of the tree is as it was.
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    auto const workspace = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Starfive, StarfiveRun, 5));
+    REQUIRE(daemon >= 0);
+    REQUIRE(workspace >= 0);
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::PendingRole).toInt()
+          == static_cast<int>(RowPending::No));
+
+    t.host.pending = SidebarTarget {
+        .daemon = Starfive, .instance = StarfiveRun, .workspace = 5, .tab = std::nullopt, .pane = {}
+    };
+    t.sidebar().refreshNow();
+
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::PendingRole).toInt()
+          == static_cast<int>(RowPending::Yes));
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::PendingRole).toInt()
+          == static_cast<int>(RowPending::Yes));
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::DaemonButtonsRole).toList()
+          == QVariantList { static_cast<int>(sidebarrows::DaemonRowButton::Cancel),
+                            static_cast<int>(sidebarrows::DaemonRowButton::None) });
+    CHECK(t.sidebar().isJumpPending());
+    auto const own = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Home, HomeRun, 1));
+    REQUIRE(own >= 0);
+    CHECK(t.sidebar().index(own).data(SidebarModel::PendingRole).toInt() == static_cast<int>(RowPending::No));
+
+    // Landed: the marks go.
+    t.host.pending.reset();
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::PendingRole).toInt()
+          == static_cast<int>(RowPending::No));
+    CHECK_FALSE(t.sidebar().isJumpPending());
+}

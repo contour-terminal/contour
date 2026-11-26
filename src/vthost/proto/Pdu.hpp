@@ -1705,6 +1705,10 @@ enum class WindowFocus : uint8_t
 /// Client→server (Capability::DaemonFollow): select the one workspace this connection displays in full.
 /// The daemon pushes that workspace's layout and screens in full, and the other workspaces' panes as
 /// PaneSummary only.
+/// What a promotion that asks for a new workspace (SelectWorkspace::workspace 0) names itself by: random
+/// bytes the client draws once per promotion and sends again with every re-ask of it.
+using CreationToken = std::array<std::byte, 16>;
+
 struct SelectWorkspace
 {
     /// The daemon workspace to select; 0 asks the daemon to create one and select it.
@@ -1716,6 +1720,15 @@ struct SelectWorkspace
     /// Optional by omission, with no presence byte: it is written only when engaged, so a field appended
     /// after it must make the encoder always write this one, or a decoder would read the later field as this.
     std::optional<uint64_t> directoryFromSession = std::nullopt;
+    /// A promotion's "make at most one": a re-ask selects what it made. Only a creation (@ref workspace 0)
+    /// carries one; the daemon remembers which workspace it made for each token
+    /// (SessionHost::workspaceMadeFor), so a select asked again after its answer was lost selects that
+    /// workspace instead of making another.
+    ///
+    /// Appended after @ref directoryFromSession, which is then always written (0 standing for none, as no
+    /// session has that id). A written directory is followed by a byte saying whether a token comes (1) or
+    /// not (0), then the token's 16 bytes: a body that ends before that byte names none.
+    std::optional<CreationToken> creationToken = std::nullopt;
     bool operator==(SelectWorkspace const&) const = default;
 };
 
@@ -1968,10 +1981,21 @@ struct MarkSeen
     bool operator==(MarkSeen const&) const = default;
 };
 
+/// Why a connection asks to observe only.
+enum class ObserveCause : uint8_t
+{
+    Demoted = 0, ///< Its window leaves what it showed.
+    /// The promotion it asked for was withdrawn before its answer came: nothing of what the answer selected
+    /// was shown, so a workspace the promotion made is the daemon's to take back.
+    Withdrawn,
+};
+
 /// Client→server (Capability::Observe): the viewer connection stops showing its workspace and observes the
-/// daemon instead, as a connection of ConnectionRole::Observe does. No body; there is no reply.
+/// daemon instead, as a connection of ConnectionRole::Observe does. There is no reply. The body is empty for
+/// a demotion; a withdrawn promotion's states its cause in one byte, which a daemon from before it ignores.
 struct ObserveOnly
 {
+    ObserveCause cause = ObserveCause::Demoted; ///< Why.
     bool operator==(ObserveOnly const&) const = default;
 };
 

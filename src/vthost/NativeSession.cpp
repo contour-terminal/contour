@@ -413,6 +413,9 @@ NativeSession::~NativeSession()
 {
     _upgradeLink->session = nullptr;
     _host.noteClientDetached(this, _detachKind);
+    // A promotion's restore announcement its answer never carried out: the next viewer is told it.
+    if (!_restoreToAnnounce.empty())
+        _host.returnRestoreAnnouncement(std::exchange(_restoreToAnnounce, {}));
     // Beside the count it mirrors, so that the event and connectedClients() never disagree; only for a
     // connection that was told attached.
     if (_phase == ConnectionPhase::Viewing)
@@ -1197,7 +1200,7 @@ core::async::Task<void> NativeSession::endLayoutBatch(SpawnedFlowClaim claim)
         {
             // The batch states the connection's selection, which a workspace it ended may have moved, and the
             // restore a promotion it answers is the first viewer of: told once.
-            auto const restored = std::exchange(_restoreToAnnounce, std::nullopt).value_or(RestoredCounts {});
+            auto const restored = countRestored(std::exchange(_restoreToAnnounce, {}));
             send(0,
                  proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = _layoutBatchCause,
                                                              .selected = _selectedWorkspace,
@@ -2529,7 +2532,15 @@ void NativeSession::servePromotion(proto::DecodedFrame const& frame, proto::Sele
 {
     // What the viewer setup's plan selects: the workspace named, or one it creates -- after the held display
     // is applied, so its first shell spawns at the size the window shows.
+    // A creation asked again -- its answer lost with the connection that asked first -- selects what the
+    // first ask made, so a promotion makes at most one workspace.
+    auto const madeBefore = select.workspace == 0 && select.creationToken
+                                ? _host.workspaceMadeFor(*select.creationToken)
+                                : std::nullopt;
     auto const intent = [&]() -> std::optional<proto::AttachIntent> {
+        if (madeBefore)
+            return proto::AttachIntent { .kind = proto::AttachIntentKind::Select,
+                                         .workspace = madeBefore->value };
         if (select.workspace == 0)
             return proto::AttachIntent { .kind = proto::AttachIntentKind::NewWorkspace };
         if (_host.model().workspace(vtworkspace::WorkspaceId { select.workspace }) != nullptr)
@@ -2555,9 +2566,21 @@ void NativeSession::servePromotion(proto::DecodedFrame const& frame, proto::Sele
             becomeObserver();
         }
         else
+        {
+            auto const madeNow = intent->kind == proto::AttachIntentKind::NewWorkspace;
+            if (madeNow && select.creationToken)
+                _host.rememberWorkspaceMadeFor(*select.creationToken,
+                                               vtworkspace::WorkspaceId { _selectedWorkspace });
             // Told to the first viewer since the restore, as an attach's ServerHello tells it: by the batch
-            // that answers, there being no hello to carry it.
-            _restoreToAnnounce = _host.takeRestoreAnnouncement([](uint64_t) { return true; });
+            // that answers, there being no hello to carry it. Held until then: a connection that ends first
+            // puts it back for the next viewer (returnRestoreAnnouncement()).
+            _restoreToAnnounce = _host.takeRestoreEntries([](uint64_t) { return true; });
+            _promotionDone = PromotionDone {
+                .made = madeNow || madeBefore ? vtworkspace::WorkspaceId { _selectedWorkspace }
+                                              : vtworkspace::WorkspaceId {},
+                .announced = _restoreToAnnounce,
+            };
+        }
     }
     // Answered as a viewer's select is, whatever came of it: the batch states the selection, 0 for an
     // observer still.
@@ -2572,7 +2595,25 @@ void NativeSession::serveDemotion(proto::DecodedFrame const& frame)
         return;
     }
     connectionLog()("{}: demoting the viewer of workspace {} to an observer", _id, _selectedWorkspace);
+    auto const cause = std::get<proto::ObserveOnly>(frame.pdu).cause;
+    auto const promotion = std::exchange(_promotionDone, std::nullopt);
+    // Its answer was written, the restore with it: becomeObserver() has none left to put back.
+    auto const answerTold = _restoreToAnnounce.empty();
     becomeObserver();
+    if (cause == proto::ObserveCause::Withdrawn && promotion)
+    {
+        // The client dropped the answer unseen: what it told is the next viewer's to be told, and a
+        // workspace it made for nobody else to show goes again, as a promotion never made would have left it.
+        if (answerTold && !promotion->announced.empty())
+            _host.returnRestoreAnnouncement(promotion->announced);
+        if (promotion->made.value != 0 && _host.clientsShowing(promotion->made.value).empty())
+        {
+            connectionLog()("{}: closing workspace {}, made for a promotion that was withdrawn",
+                            _id,
+                            promotion->made.value);
+            std::ignore = _host.closeWorkspace(promotion->made);
+        }
+    }
     // Answered by a batch naming the request and selecting nothing: what the daemon pushed before it, a batch
     // stating the workspace it showed among them, the client knows to be older than its demotion.
     answerWithLayoutBatch(frame.serial);
@@ -2586,6 +2627,9 @@ void NativeSession::becomeObserver()
     // Leaves the attached clients while it still reads as the viewer of its workspace, which is then free at
     // once; its area, cell and refinements stop counting, as a departing client's do.
     _host.noteClientDemoted(this);
+    // A restore the promotion was to tell, its answer not yet written, is the next viewer's to be told.
+    if (!_restoreToAnnounce.empty())
+        _host.returnRestoreAnnouncement(std::exchange(_restoreToAnnounce, {}));
     _clientTicket = {};
     _services.control.get().clientDetached(std::format("{}", _id));
     _phase = ConnectionPhase::Observing;

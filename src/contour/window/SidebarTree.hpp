@@ -194,6 +194,21 @@ struct SidebarTarget
     bool operator==(SidebarTarget const&) const = default;
 };
 
+/// @param key A row of a workspace, a tab, a pane or a daemon.
+/// @return What the row names, as a jump goes there: its workspace, and the tab and pane a tab or pane row
+///         names; a daemon row names its daemon's default workspace (workspace 0, which no workspace is).
+[[nodiscard]] inline SidebarTarget sidebarTargetOf(SidebarRowKey const& key)
+{
+    auto target = SidebarTarget {
+        .daemon = key.daemon, .instance = key.instance, .workspace = key.workspace, .tab = {}, .pane = {}
+    };
+    if (key.kind == SidebarRowKind::Tab || key.kind == SidebarRowKind::Pane)
+        target.tab = key.tab;
+    if (key.kind == SidebarRowKind::Pane)
+        target.pane = key.pane;
+    return target;
+}
+
 /// Where a jump to a row lands.
 enum class JumpMode : uint8_t
 {

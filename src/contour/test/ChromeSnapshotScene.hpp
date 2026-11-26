@@ -46,6 +46,7 @@
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/StickyHeaderChrome.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/SwitcherController.hpp>
@@ -441,6 +442,7 @@ class ChromeSnapshotScene
             case ScriptAction::HoverSidebarRow: hoverSidebarRow(); break;
             case ScriptAction::OpenWorkspaceColorPicker: openWorkspaceColorPicker(); break;
             case ScriptAction::OpenSidebarTabColorPicker: openSidebarTabColorPicker(); break;
+            case ScriptAction::OpenSidebarDaemonMenu: openSidebarDaemonMenu(); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -1841,6 +1843,25 @@ class ChromeSnapshotScene
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, PopupSettleMs));
     }
 
+    /// Opens starfive's daemon row menu under its row, as the Menu key has WindowController publish it, and
+    /// waits for it.
+    void openSidebarDaemonMenu()
+    {
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
+        auto const* row = sidebarRowTitled(QStringLiteral("starfive"));
+        auto const index = row->property("index").toInt();
+        auto const& rows = _controller.sidebarModel().rows();
+        REQUIRE(std::cmp_less(index, rows.size()));
+        auto menu = window::PublishedContextMenu {};
+        menu.publish(window::resolveMenuTree(command::buildSidebarDaemonMenu(window::sidebarDaemonMenuStateOf(
+                                                 rows[static_cast<std::size_t>(index)])),
+                                             config::Config {}));
+        auto* popup = root().findChild<QObject*>(QStringLiteral("sidebarContextMenu"));
+        REQUIRE(popup != nullptr);
+        _controller.openSidebarContextMenu(menu.model, index, row->mapToScene(QPointF { 0, row->height() }));
+        REQUIRE(QTest::qWaitFor([&] { return popup->property("opened").toBool(); }, PopupSettleMs));
+    }
+
     /// Rests the pointer on @p point of the window. Two moves, because a move to where the pointer already
     /// is sends nothing.
     void pointAt(QPoint point) const
@@ -2096,12 +2117,17 @@ class ChromeSnapshotScene
         if (sections != SnapshotSections::NeedsMeEmpty)
             _controller.sidebarSections().listed.push_back(std::move(starfive));
         if (sections == SnapshotSections::Pending)
+        {
             _controller.sidebarHost().pending =
                 window::SidebarTarget { .daemon = window::hostDaemonRef("starfive"),
                                         .instance = window::DaemonInstance { 9 },
                                         .workspace = 5,
                                         .tab = 50,
                                         .pane = {} };
+            // What the window's chip reads of the jump (WindowController::chipInputs()).
+            _controller.pendingDaemon = QStringLiteral("starfive");
+            _controller.refreshChip();
+        }
         _controller.sidebarModel().refreshNow();
         // starfive opens folded, as every daemon the window did not open on; unfolded here so its rows show.
         auto const& rows = _controller.sidebarModel().rows();

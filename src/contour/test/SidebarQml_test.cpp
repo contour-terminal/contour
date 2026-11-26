@@ -20,6 +20,7 @@
 #include <contour/window/LocationChip.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarControls.hpp>
+#include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/StatusUrgency.hpp>
@@ -5035,6 +5036,42 @@ TEST_CASE("the Menu key and Shift+F10 open a daemon row's menu (offscreen)",
         REQUIRE(menus.size() == 2);
         for (auto const& key: menus)
             CHECK(key.kind == contour::window::SidebarRowKind::Daemon);
+    }
+}
+
+TEST_CASE("the Menu key on a daemon row opens its menu with Open in New Window (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        // Another daemon's row, which the window's own menus did not reach before.
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 contour::window::DaemonLinkState::Connected,
+                 { starfiveSection() });
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        auto const starfive = daemonRowIndex(scene, "starfive");
+        tree->setProperty("currentIndex", starfive);
+        auto& menus = scene.controller.sidebarHost().menus;
+        menus.clear();
+
+        QTest::keyClick(scene.window, Qt::Key_Menu);
+        QCoreApplication::processEvents();
+        REQUIRE(menus.size() == 1);
+        CHECK(menus.front().kind == contour::window::SidebarRowKind::Daemon);
+        CHECK(menus.front().daemon == contour::window::hostDaemonRef("starfive"));
+        // The menu the window builds for that row offers it in a window of its own.
+        auto const& shown = scene.controller.sidebarModel().rows().at(static_cast<std::size_t>(starfive));
+        auto const menu =
+            contour::command::buildSidebarDaemonMenu(contour::window::sidebarDaemonMenuStateOf(shown));
+        CHECK(std::ranges::count(
+                  menu, std::string_view { "Open in New Window" }, &contour::command::ContextMenuEntry::title)
+              == 1);
     }
 }
 

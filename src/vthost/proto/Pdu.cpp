@@ -1093,8 +1093,11 @@ namespace
     {
     }
 
-    void encodeBody(Writer&, ObserveOnly const&)
+    void encodeBody(Writer& out, ObserveOnly const& pdu)
     {
+        // A demotion's body stays empty, as before the cause was stated.
+        if (pdu.cause != ObserveCause::Demoted)
+            out.u8(std::to_underlying(pdu.cause));
     }
 
     void encodeBody(Writer& out, OpenFirstTab const& pdu)
@@ -1137,8 +1140,16 @@ namespace
     void encodeBody(Writer& out, SelectWorkspace const& pdu)
     {
         out.varint(pdu.workspace);
-        if (pdu.directoryFromSession)
-            out.varint(*pdu.directoryFromSession);
+        // A creation token follows the directory, which must then be written, if only as the 0 that names
+        // none; and a written directory is always followed by whether a token comes, so a field appended
+        // later has a fixed place to follow.
+        auto const token = pdu.workspace == 0 ? pdu.creationToken : std::nullopt;
+        if (!pdu.directoryFromSession && !token)
+            return;
+        out.varint(pdu.directoryFromSession.value_or(0));
+        out.u8(token ? 1 : 0);
+        if (token)
+            out.bytes(*token);
     }
 
     void encodeBody(Writer& out, ReportFocus const& pdu)
@@ -2513,9 +2524,17 @@ namespace
         return Goodbye {};
     }
 
-    DecodeResult decodeObserveOnly(Reader&)
+    DecodeResult decodeObserveOnly(Reader& in)
     {
-        return ObserveOnly {};
+        // A sender from before the cause states none: a demotion. A cause this daemon does not know is one.
+        auto pdu = ObserveOnly {};
+        auto error = DecodeError {};
+        auto cause = uint8_t { 0 };
+        if (in.remaining() != 0 && !assign(in.u8(), cause, error))
+            return std::unexpected(error);
+        if (cause == std::to_underlying(ObserveCause::Withdrawn))
+            pdu.cause = ObserveCause::Withdrawn;
+        return pdu;
     }
 
     DecodeResult decodeOpenFirstTab(Reader& in)
@@ -2539,6 +2558,21 @@ namespace
             if (!assign(in.varint(), session, error))
                 return std::unexpected(error);
             pdu.directoryFromSession = session;
+        }
+        // A sender from before the token ends here; one after it says whether a token follows.
+        auto carriesToken = uint8_t { 0 };
+        if (in.remaining() != 0 && !assign(in.u8(), carriesToken, error))
+            return std::unexpected(error);
+        if (carriesToken != 0)
+        {
+            auto const token = in.bytes(std::tuple_size_v<CreationToken>);
+            if (!token)
+                return std::unexpected(token.error());
+            pdu.creationToken.emplace();
+            std::ranges::copy(*token, pdu.creationToken->begin());
+            // Written as 0 only to make room for the token: no session has that id.
+            if (pdu.directoryFromSession == uint64_t { 0 })
+                pdu.directoryFromSession = std::nullopt;
         }
         return pdu;
     }

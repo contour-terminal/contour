@@ -44,7 +44,11 @@ std::vector<SwitcherMenuRow> buildSwitcherRowMenu(SwitcherRowMenuState const& st
     auto separator = ContextMenuEntry {};
     separator.kind = ContextMenuEntryKind::Separator;
     rows.emplace_back(std::move(separator));
-    for (auto& entry: buildWorkspaceMenu(state.workspace))
+    // The leading choices already open it in a new window, by the switcher's own rules: the sidebar's row for
+    // that is left out.
+    auto workspace = state.workspace;
+    workspace.open = OpenOffer::NotOffered;
+    for (auto& entry: buildWorkspaceMenu(workspace))
         rows.emplace_back(std::move(entry));
     return rows;
 }

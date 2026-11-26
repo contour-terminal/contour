@@ -39,6 +39,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -992,6 +993,10 @@ inline void startIn(SessionSpawnRequest& request, std::filesystem::path const& d
     request.commandOverride->workingDirectory = directory;
 }
 
+/// How many promotions' creation tokens a host remembers the workspace of (SessionHost::workspaceMadeFor),
+/// the oldest dropped: a promotion is asked again only after a dropped connection, so the last few suffice.
+inline constexpr std::size_t PromotionTokenMemory = 16;
+
 /// How long a restored session waits for its shell's first OSC 133 `A` before typing initialInput anyway
 /// (a shell without prompt marks). Measured on the loop's injected clock.
 inline constexpr auto InitialInputFallback = std::chrono::seconds { 2 };
@@ -1796,6 +1801,30 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] std::optional<RestoredCounts> takeRestoreAnnouncement(
         std::function<bool(uint64_t)> const& follows);
 
+    /// Hands over, once, the workspaces the restore brought back that @p follows names, for a client to be
+    /// told: what takeRestoreAnnouncement() counts. Whoever takes them and cannot tell them puts them back
+    /// (returnRestoreAnnouncement()).
+    /// @param follows Whether the asking client follows a workspace, by its id.
+    /// @return The entries, in snapshot order; empty when there are none to tell.
+    [[nodiscard]] std::vector<RestoredWorkspace> takeRestoreEntries(
+        std::function<bool(uint64_t)> const& follows);
+
+    /// Puts back a restore announcement a client was handed but never told (its connection ended first).
+    /// @param entries What takeRestoreEntries() handed over, the next client told them instead.
+    void returnRestoreAnnouncement(std::vector<RestoredWorkspace> entries);
+
+    /// @param token A promotion's creation token (proto::SelectWorkspace::creationToken).
+    /// @return The workspace made for @p token, while it is remembered and still holds a tab; nullopt
+    ///         otherwise, when a promotion naming it makes one anew.
+    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceMadeFor(
+        proto::CreationToken const& token) const;
+
+    /// Remembers that @p workspace was made for the promotion naming @p token, forgetting the oldest token
+    /// beyond PromotionTokenMemory.
+    /// @param token The promotion's creation token.
+    /// @param workspace The workspace it made.
+    void rememberWorkspaceMadeFor(proto::CreationToken const& token, vtworkspace::WorkspaceId workspace);
+
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
 
@@ -2128,13 +2157,6 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param workspace The workspace to realize every tab into (the host's own, freshly created).
     /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
     void realizeStartupLayout(vtworkspace::WorkspaceId workspace, vtworkspace::Layout const& layout);
-
-    /// A workspace a restore brought back.
-    struct RestoredWorkspace
-    {
-        uint64_t workspace = 0; ///< Its id.
-        uint32_t tabs = 0;      ///< The tabs of it with at least one spawned pane.
-    };
 
     /// What realizing one workspace of a restore brought back.
     struct RealizedWorkspace
@@ -2768,6 +2790,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::vector<std::string> _degradations;
     std::vector<RestoredWorkspace>
         _restoreAnnouncement {}; ///< What @ref takeRestoreAnnouncement has yet to tell.
+    /// The workspace each recent promotion's creation token made, oldest first; at most PromotionTokenMemory.
+    /// Loop thread.
+    std::deque<std::pair<proto::CreationToken, vtworkspace::WorkspaceId>> _madeForTokens;
 
     /// The UUIDs and names of workspaces, tabs and panes. Declared before the model, whose events bind into
     /// it.

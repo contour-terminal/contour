@@ -155,7 +155,9 @@ inline constexpr std::array MenuReachabilityExemptions {
         .reason = "reached from the palette and key bindings; it needs the attention ledger" },
     MenuReachabilityExemption {
         .action = "CancelSwitch",
-        .reason = "reached from key bindings and the Cancel of the daemon row the jump goes into" },
+        .reason =
+            "reached from the palette, key bindings, the location chip and the Cancel of the daemon row "
+            "the jump goes into" },
     MenuReachabilityExemption { .action = "MarkSeen",
                                 .reason =
                                     "reached from the palette, key bindings and the sidebar's row menus" },
@@ -191,6 +193,17 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption {
         .action = "MoveToNewWorkspace",
         .reason = "reached from the palette, key bindings and the sidebar's pane and tab menus" },
+    MenuReachabilityExemption { .action = "OpenInNewWindow",
+                                .reason = "a row of every sidebar row's menu, which knows which row" },
+    MenuReachabilityExemption { .action = "ConnectDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "StartDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "RemoveDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },

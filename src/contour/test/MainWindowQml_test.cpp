@@ -5958,3 +5958,55 @@ TEST_CASE("Main.qml shows the ssh prompts of its window and answers them (offscr
     CHECK(answers.front().answer == "hunter2");
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+TEST_CASE("the chip says Connecting and its tooltip names the CancelSwitch chord (offscreen)",
+          "[contour][gui][qml][mainwindow][chip][jump]")
+{
+    // Correction 17: with the sidebar hidden, a jump under way is said by the chip in the band -- where it
+    // goes, that it is connecting -- and a click on it cancels the jump, so its tooltip names CancelSwitch's
+    // chord rather than the switcher's.
+    using contour::config::TabPlacement;
+    auto const style =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(style));
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3,
+                                                      .tabBarVisibility = TabBarVisibility::Always,
+                                                      .daemonName = QStringLiteral("local") } };
+    controller.setTabPlacement(TabPlacement::Sidebar);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+    showWindow(*root);
+    auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+    REQUIRE(chip != nullptr);
+    auto const tooltipCommand = [&] {
+        for (auto* child: chip->findChildren<QObject*>())
+            if (child->property("toolTipName").toString() == QStringLiteral("workspaceChipToolTip"))
+                return child->property("shortcutCommand").toString();
+        return QString {};
+    };
+    CHECK(tooltipCommand() == QStringLiteral("ShowSwitcher"));
+
+    controller.pendingDaemon = QStringLiteral("starfive");
+    controller.refreshChip();
+    QCoreApplication::processEvents();
+
+    CHECK(chip->isVisible());
+    CHECK(part(*chip, QStringLiteral("workspaceChipDaemon")).property("text").toString()
+          == QStringLiteral("starfive"));
+    CHECK(tooltipCommand() == QStringLiteral("CancelSwitch"));
+    CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
+          == QStringLiteral("Connecting to starfive…"));
+    // It names no workspace yet, so no separator dangles after the daemon; the dot is a connection's under
+    // way.
+    CHECK_FALSE(part(*chip, QStringLiteral("workspaceChipSeparator")).isVisible());
+    CHECK(controller.chip()->connectionState()
+          == static_cast<int>(contour::window::HostChipState::Reconnecting));
+
+    // Landed: the chip is the window's again.
+    controller.pendingDaemon.clear();
+    controller.refreshChip();
+    QCoreApplication::processEvents();
+    CHECK(tooltipCommand() == QStringLiteral("ShowSwitcher"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}

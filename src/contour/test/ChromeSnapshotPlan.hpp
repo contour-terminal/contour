@@ -150,6 +150,12 @@ enum class SnapshotScript : uint8_t
     /// sidebar-daemon-not-running at the sidebar's narrowest, starfive under a long name: the daemon row as
     /// it gives way (its words gone, its name elided in the middle, its buttons icons).
     SidebarDaemonNarrow,
+    /// sidebar-pending-row with the sidebar hidden: the location chip back in the band, saying where the jump
+    /// goes.
+    LocationChipPending,
+    /// sidebar-daemon-not-running with starfive's row menu open, as the Menu key opens it: Open in New
+    /// Window, then its buttons' Start and Remove.
+    SidebarDaemonMenu,
 };
 
 /// What the workspace sidebar of a script shows.
@@ -256,6 +262,7 @@ enum class ScriptAction : uint8_t
     HoverSidebarRow, //!< build's sidebar row given a long status, the pointer resting on it: its hover card.
     OpenWorkspaceColorPicker,  //!< The sidebar's colour picker over billing's row, as Custom… opens it.
     OpenSidebarTabColorPicker, //!< The sidebar's tab colour picker over build's row, as its Custom… opens it.
+    OpenSidebarDaemonMenu,     //!< starfive's daemon row menu, opened under the row as the Menu key opens it.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -2504,6 +2511,17 @@ inline constexpr auto SnapshotScripts = std::array {
                         .tabCount = 3,
                         .sidebar = SnapshotSidebar::Tree,
                         .sections = SnapshotSections::Narrow },
+    SnapshotScriptRow { .script = SnapshotScript::LocationChipPending,
+                        .name = "location-chip-pending",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Hidden,
+                        .sections = SnapshotSections::Pending },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonMenu,
+                        .name = "sidebar-daemon-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarDaemonMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NotRunning },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

@@ -265,20 +265,6 @@ namespace
         return keys;
     }
 
-    /// @return What a row of a workspace, tab or pane names, as a jump goes there; a daemon row names its
-    ///         daemon's default workspace (workspace 0, which no workspace is).
-    [[nodiscard]] SidebarTarget targetOf(SidebarRowKey const& key)
-    {
-        auto target = SidebarTarget {
-            .daemon = key.daemon, .instance = key.instance, .workspace = key.workspace, .tab = {}, .pane = {}
-        };
-        if (key.kind == SidebarRowKind::Tab || key.kind == SidebarRowKind::Pane)
-            target.tab = key.tab;
-        if (key.kind == SidebarRowKind::Pane)
-            target.pane = key.pane;
-        return target;
-    }
-
     /// @return The jump mode @p mode names, as QML passes it; Here for anything else.
     [[nodiscard]] JumpMode jumpModeOf(int mode) noexcept
     {
@@ -984,7 +970,7 @@ sidebarrows::RowActivation SidebarModel::activateRow(int row, JumpMode mode)
     // Another daemon's row, and any row opened beside, is jumped to; the keyboard stays where it was.
     if (mode == JumpMode::NewWindow || !isOwn(shown->key))
     {
-        _host.jumpTo(targetOf(shown->key), mode);
+        _host.jumpTo(sidebarTargetOf(shown->key), mode);
         return sidebarrows::RowActivation::Nothing;
     }
     switch (shown->key.kind)
@@ -1082,7 +1068,7 @@ void SidebarModel::openInNewWindow(int row)
     auto const* const shown = rowAt(row);
     if (shown == nullptr || shown->key.kind == SidebarRowKind::Hidden)
         return;
-    _host.jumpTo(targetOf(shown->key), JumpMode::NewWindow);
+    _host.jumpTo(sidebarTargetOf(shown->key), JumpMode::NewWindow);
 }
 
 void SidebarModel::setExpansion(int row, RowExpansion wanted)
@@ -1188,8 +1174,10 @@ QStringList SidebarModel::hoverLines(int row) const
 
 void SidebarModel::openContextMenu(int row, QPointF windowPosition)
 {
-    // The window's menus act on its own rows; another daemon's have none yet.
-    if (auto const* const shown = ownRowAt(row))
+    // The window's menus act on its own rows, and on every daemon row; another daemon's other rows have none
+    // yet.
+    if (auto const* const shown = rowAt(row);
+        shown != nullptr && (shown->key.kind == SidebarRowKind::Daemon || isOwn(shown->key)))
         _host.openContextMenu(*shown, windowPosition);
 }
 

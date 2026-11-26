@@ -18,10 +18,14 @@ namespace contour::session
 /// Names a daemon and one of its workspaces as a switch does.
 /// @param daemon The daemon, as the sidebar names it.
 /// @param workspace Which of its workspaces.
+/// @param focus The tab and pane within it the row names, for the window to activate once it shows it.
+/// @param instance The run of the daemon the row was listed in, which the switch refuses once it ended.
 /// @return A local daemon by its label (SwitchDaemonKind::Name), a saved host by its name (Host); none for a
 ///         `link:` daemon, which no switch can name, and for a reference that does not parse.
 [[nodiscard]] inline std::optional<SwitchTarget> switchTargetOf(window::DaemonRef const& daemon,
-                                                                WorkspaceTarget workspace)
+                                                                WorkspaceTarget workspace,
+                                                                LandingFocus focus,
+                                                                window::DaemonInstance instance)
 {
     auto const parsed = window::parseDaemonRef(daemon);
     if (!parsed)
@@ -39,7 +43,9 @@ namespace contour::session
         return std::nullopt;
     return SwitchTarget { .kind = *kind,
                           .daemon = std::string { parsed->second },
-                          .workspace = std::move(workspace) };
+                          .workspace = std::move(workspace),
+                          .focus = std::move(focus),
+                          .instance = instance };
 }
 
 } // namespace contour::session

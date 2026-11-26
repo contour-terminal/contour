@@ -1287,6 +1287,13 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SidebarHiddenChip:
                 static_cast<void>(checkSidebarScript(scene, variant));
                 break;
+            case SnapshotScript::LocationChipPending: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                // The sidebar hidden, the chip in the band says where the jump goes.
+                auto const chips = visibleItemsNamed(content, QStringLiteral("workspaceChip"));
+                REQUIRE(chips == 1);
+                break;
+            }
             case SnapshotScript::SidebarChipDropdown: {
                 static_cast<void>(checkSidebarScript(scene, variant));
                 // The dropdown is the full switcher, hanging below the chip.
@@ -1372,7 +1379,8 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SidebarDaemonTooOld:
             case SnapshotScript::SidebarPendingRow:
             case SnapshotScript::SidebarNeedsMeEmpty:
-            case SnapshotScript::SidebarDaemonNarrow: {
+            case SnapshotScript::SidebarDaemonNarrow:
+            case SnapshotScript::SidebarDaemonMenu: {
                 static_cast<void>(checkSidebarScript(scene, variant));
                 // The tree names the window's daemon in its heading row; no chip names it in the sidebar's
                 // head or the band, and the switcher is a control of the title row.

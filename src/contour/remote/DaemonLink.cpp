@@ -62,6 +62,37 @@ namespace
         return found != layouts.end() ? LayoutSnapshot { *found } : LayoutSnapshot {};
     }
 
+    /// What a connection leaving for the presence dials through until it is given back: nothing. A drop
+    /// meanwhile ends it, and the hand-back then finds it not Connected and gives back nothing.
+    class LeavingTransport final: public vthost::ITransportFactory
+    {
+      public:
+        [[nodiscard]] core::async::Task<
+            std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+        connect(core::net::EventLoop& /*loop*/) override
+        {
+            co_return std::unexpected(vthost::TransportError {
+                .kind = vthost::TransportErrorKind::Refused,
+                .message = "the window left the daemon",
+            });
+        }
+
+        [[nodiscard]] std::string describe() const override { return "a daemon the window left"; }
+    };
+
+    /// @return Why a promotion was not asked of the daemon, in words for the user.
+    [[nodiscard]] std::string promotionRefusalText(SelectError error)
+    {
+        switch (error)
+        {
+            case SelectError::NotConnected: return "the connection to the daemon is not up";
+            case SelectError::Unsupported: return "the daemon cannot show this connection a workspace";
+            case SelectError::Busy: return "the connection is busy showing another workspace";
+            case SelectError::DaemonRestarted: return "the daemon restarted";
+        }
+        return "the daemon refused";
+    }
+
     /// @return @p failure, or what a connection lost without a word says.
     [[nodiscard]] std::string failureOrLost(std::string failure)
     {
@@ -120,6 +151,16 @@ DaemonLink::DaemonLink(Id id,
                        DaemonLinkConfig config,
                        IDaemonLinkHost& host,
                        session::TerminalSessionManager& sessions):
+    DaemonLink(AdoptKey {}, id, std::move(config), nullptr, host, sessions)
+{
+}
+
+DaemonLink::DaemonLink(AdoptKey /*key*/,
+                       Id id,
+                       DaemonLinkConfig config,
+                       std::unique_ptr<NativeController> observing,
+                       IDaemonLinkHost& host,
+                       session::TerminalSessionManager& sessions):
     _id(id),
     _host(host),
     _sessions(sessions),
@@ -127,7 +168,8 @@ DaemonLink::DaemonLink(Id id,
     _locality(config.locality),
     _upkeep(config.upkeep),
     _clientRelease(config.clientRelease),
-    _controller(std::make_unique<NativeController>(config.controller)),
+    _origin(observing ? LinkOrigin::Adopted : LinkOrigin::Dialled),
+    _controller(observing ? std::move(observing) : std::make_unique<NativeController>(config.controller)),
     _siblingTemplate(std::move(config)),
     _role(roleOf(_siblingTemplate))
 {
@@ -139,12 +181,131 @@ DaemonLink::DaemonLink(Id id,
     connectController();
 }
 
+std::unique_ptr<DaemonLink> DaemonLink::adopt(Id id,
+                                              DaemonLinkConfig config,
+                                              std::unique_ptr<NativeController> observing,
+                                              PromotionRequest request,
+                                              std::shared_ptr<vthost::ITransportFactory> interactive,
+                                              GiveBack giveBack,
+                                              IDaemonLinkHost& host,
+                                              session::TerminalSessionManager& sessions)
+{
+    Require(observing != nullptr);
+    auto link = std::make_unique<DaemonLink>(
+        AdoptKey {}, id, std::move(config), std::move(observing), host, sessions);
+    link->_giveBack = std::move(giveBack);
+    // Told on the GUI thread, posted to the controller: only while the link is there to hear it, for the
+    // controller may outlive it, handed back.
+    auto promoted =
+        link->_controller->promote(std::move(request),
+                                   std::move(interactive),
+                                   [guard = QPointer<QObject> { &link->_receiver },
+                                    self = link.get()](std::expected<uint64_t, std::string> landed) {
+                                       if (guard)
+                                           self->promotionLanded(std::move(landed));
+                                   });
+    // Not from inside adopt(): its caller is yet to keep the link its arrival may end.
+    if (!promoted)
+        QMetaObject::invokeMethod(
+            &link->_receiver,
+            [self = link.get(), reason = promotionRefusalText(promoted.error())] {
+                self->promotionLanded(std::unexpected(reason));
+            },
+            Qt::QueuedConnection);
+    return link;
+}
+
 DaemonLink::~DaemonLink()
 {
     // Before the controller's destructor waits for a stop end() began, which tells this link when done.
     _postTarget->withdraw();
     if (!isStopped())
         _sessions.releaseBinding(*this);
+    // Told once, whatever path the link took: a give-back never told is told the connection goes with it.
+    tellGiveBack(nullptr);
+}
+
+void DaemonLink::promotionLanded(std::expected<uint64_t, std::string> landed)
+{
+    // A link that is leaving, or stopped, has decided what becomes of its connection already.
+    if (_leaving || !isLive())
+        return;
+    if (landed)
+    {
+        // An adopted controller was Connected all along: attached as its promotion lands, not as it connects.
+        attachLog()("switch: the adopted connection shows workspace {}.", *landed);
+        _state = AttachState::Attached;
+        offerDaemonRestartIfDrifted();
+        _host.linkChanged(*this);
+        followLayout();
+        return;
+    }
+    attachLog()("switch: the adopted connection shows no workspace: {}.", landed.error());
+    reportArrival(std::unexpected(landed.error()));
+    // Still an observer, demoted back by the promotion's end: the presence takes it back.
+    if (isLive())
+    {
+        _leaving = LeaveKind::KeepAsObserver;
+        end();
+    }
+}
+
+void DaemonLink::tellGiveBack(std::unique_ptr<NativeController> controller)
+{
+    if (auto giveBack = std::exchange(_giveBack, GiveBack {}))
+        giveBack(std::move(controller));
+}
+
+void DaemonLink::leaveDaemon(LeaveKind kind, GiveBack giveBack)
+{
+    requireGuiThread();
+    if (giveBack)
+        _giveBack = std::move(giveBack);
+    // Stopped already, or handed back: nothing is left to keep.
+    auto const stopping = isStopped() && _leaving != LeaveKind::KeepAsObserver;
+    if (_controller == nullptr || stopping)
+    {
+        tellGiveBack(nullptr);
+        return;
+    }
+    _leaving = kind;
+    if (kind == LeaveKind::KeepAsObserver)
+    {
+        // Off the wire at once: a promotion under way is withdrawn, a promoted connection demoted. Until it
+        // is given back it dials nothing; the presence gives it its own transport then.
+        _controller->withdrawPromotion();
+        if (_controller->demote(std::make_shared<LeavingTransport>()))
+            return;
+        // Not demoted -- reconnecting, say: kept, it would reconnect through the window's transport, may
+        // prompt, and attach as a viewer until its panes let it go. It ends instead.
+        _leaving = LeaveKind::End;
+    }
+    // An ended link waiting to hand its connection back stops it instead; any other stops it as it ends.
+    if (_state == AttachState::Ended)
+    {
+        stopEnded();
+        tellGiveBack(nullptr);
+    }
+}
+
+void DaemonLink::handBackOnceUnbound()
+{
+    if (_state != AttachState::Ended || _leaving != LeaveKind::KeepAsObserver || _controller == nullptr
+        || _controller->bindsPanes())
+        return;
+    if (_controller->connectionState() == vthost::client::ConnectionState::Connected
+        && _controller->role() == vthost::proto::ConnectionRole::Observe)
+    {
+        // Nothing of the link listens to it any more: it is the presence's.
+        QObject::disconnect(_controller.get(), nullptr, &_receiver, nullptr);
+        tellGiveBack(std::move(_controller));
+        _host.linkEnded();
+        return;
+    }
+    // Lost meanwhile, or never an observer: stopped, as a link that ends stops its connection.
+    _leaving = LeaveKind::End;
+    stopEnded();
+    tellGiveBack(nullptr);
 }
 
 void DaemonLink::requireGuiThread() const
@@ -156,7 +317,9 @@ void DaemonLink::requireGuiThread() const
 
 session::SessionFactory& DaemonLink::sessions() noexcept
 {
-    return anyController();
+    // Asked only of a link a window is bound to: one that handed its connection back serves no window.
+    Require(anyController() != nullptr);
+    return *anyController();
 }
 
 std::string_view DaemonLink::hostLabel() const noexcept
@@ -189,7 +352,8 @@ std::optional<window::DaemonRef> DaemonLink::daemonRef() const
 
 NativeController::ResumeFallback DaemonLink::resumeFallback() const
 {
-    return anyController().resumeFallback();
+    auto const* const controller = anyController();
+    return controller != nullptr ? controller->resumeFallback() : NativeController::ResumeFallback::Nothing;
 }
 
 void DaemonLink::resumeAsLaunch()
@@ -201,12 +365,19 @@ void DaemonLink::resumeAsLaunch()
 
 bool DaemonLink::bindsPanes() const
 {
-    return anyController().bindsPanes();
+    auto const* const controller = anyController();
+    return controller != nullptr && controller->bindsPanes();
 }
 
 bool DaemonLink::isFinished() const
 {
-    return _state == AttachState::Ended && !anyController().isWindingDown() && !bindsPanes();
+    // A connection still to be handed back is not done with: its hand-back is queued after the last pane
+    // unbound, and a link destroyed before it ran would take the connection with it.
+    if (_leaving == LeaveKind::KeepAsObserver && _controller != nullptr)
+        return false;
+    auto const* const controller = anyController();
+    return _state == AttachState::Ended && (controller == nullptr || !controller->isWindingDown())
+           && !bindsPanes();
 }
 
 void DaemonLink::lastWindowReleased()
@@ -219,13 +390,39 @@ void DaemonLink::end()
 {
     if (isStopped())
         return;
+    _state = AttachState::Ended;
+    _sessions.releaseBinding(*this);
+    if (_leaving == LeaveKind::KeepAsObserver && _controller != nullptr)
+    {
+        // Kept running, demoted: handed back once the panes of its window let it go, one by one as their
+        // new link detaches them -- or at once, from the event loop, should none be bound.
+        QObject::connect(
+            _controller.get(),
+            &NativeController::paneUnbound,
+            &_receiver,
+            [this] { handBackOnceUnbound(); },
+            Qt::QueuedConnection);
+        QMetaObject::invokeMethod(&_receiver, [this] { handBackOnceUnbound(); }, Qt::QueuedConnection);
+        _host.linkEnded();
+        return;
+    }
+    stopEnded();
+    tellGiveBack(nullptr);
+}
+
+void DaemonLink::stopEnded()
+{
+    auto* const controller = anyController();
+    if (controller == nullptr)
+    {
+        _host.linkEnded();
+        return;
+    }
     // stop(), with the controller's stop off the GUI thread: it waits up to DefaultDetachBound for the daemon
     // to see this client detach, which a daemon that stopped reading makes it wait in full, and the
     // application lives on meanwhile (the quick terminal, a local window). The link is not finished until
     // the controller has wound down, so it outlives the stop, and is told when that is.
-    _state = AttachState::Ended;
-    _sessions.releaseBinding(*this);
-    anyController().stopInBackground([target = _postTarget, this] {
+    controller->stopInBackground([target = _postTarget, this] {
         target->post([this] {
             if (isFinished())
                 _host.linkEnded();
@@ -234,7 +431,7 @@ void DaemonLink::end()
     // From now on only: the panes of its closed windows let its controller go one by one, and the last one
     // has the link destroyed.
     QObject::connect(
-        &anyController(),
+        controller,
         &NativeController::paneUnbound,
         &_receiver,
         [this] {
@@ -258,6 +455,8 @@ void DaemonLink::installAttachWindowBinder()
 void DaemonLink::connectController()
 {
     requireGuiThread();
+    // An adopted observer's losses are the presence's: only those from now on are this link's to hear.
+    _connectionLossesSeen = _controller->connectionLosses();
     // The launch's link, for the boot window; one taking a workspace over, or opening one for a switch,
     // installs it as it opens its window.
     if (isBootLink())
@@ -267,7 +466,8 @@ void DaemonLink::connectController()
         &NativeController::layoutChanged,
         &_receiver,
         [this] {
-            if (isStopped())
+            // A link leaving its daemon shows nothing more of it: its window is another link's to fill.
+            if (isStopped() || _leaving)
                 return;
             // First: a Reconnect from a footer has the panes lost with the connection take their sessions
             // back before the layout is reconciled, which would otherwise find no live pane for them and
@@ -308,6 +508,7 @@ void DaemonLink::connectController()
             // connection's own words. @see TerminalSessionManager::connectionClosed
             _sessions.connectionClosed(*this, _controller->failure());
             _controller->stop();
+            tellGiveBack(nullptr);
             // One that never got a window has nothing left to serve.
             if (!isBootLink() && _sessions.windowsBoundTo(*this).empty())
             {
@@ -380,6 +581,9 @@ void DaemonLink::connectController()
         },
         Qt::QueuedConnection);
 #endif
+    // An adopted connection is up already: adopt() promotes it instead.
+    if (_origin == LinkOrigin::Adopted)
+        return;
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots; the
     // application waits for them through pollAttached() just before the first window. The signals above are
     // connected first, so nothing the connection emits meanwhile is lost. A cold start's daemon start is part
@@ -418,7 +622,9 @@ void DaemonLink::stop()
     // Also once ended: lastWindowReleased() posts this stop, and the application's teardown may stop the
     // link before that event runs. Left running, the reactor would go on writing the mirrors of the sessions
     // the teardown deletes. Idempotent, as is a given-up controller's stop.
-    anyController().stop();
+    if (auto* const controller = anyController())
+        controller->stop();
+    tellGiveBack(nullptr);
 }
 
 void DaemonLink::onConfigurationReloaded()
@@ -716,11 +922,19 @@ void DaemonLink::failSwitch(std::string const& reason)
         pending.landed(std::unexpected(reason));
 }
 
-void DaemonLink::noteConnectionForSwitch()
+DaemonLink::ConnectionLoss DaemonLink::noteConnectionLosses()
+{
+    auto const losses = _controller->connectionLosses();
+    return std::exchange(_connectionLossesSeen, losses) == losses ? ConnectionLoss::None
+                                                                  : ConnectionLoss::Lost;
+}
+
+void DaemonLink::noteConnectionForSwitch(ConnectionLoss loss)
 {
     using vthost::client::ConnectionState;
     auto const state = _controller->connectionState();
-    if (state == ConnectionState::Connected || state == ConnectionState::Connecting)
+    if (loss == ConnectionLoss::None
+        && (state == ConnectionState::Connected || state == ConnectionState::Connecting))
         return;
     failSwitch(failureOrLost(_controller->failure()));
     if (!arrivalDue())
@@ -729,6 +943,7 @@ void DaemonLink::noteConnectionForSwitch()
     // stays as it was, and nothing here needs the link any more.
     reportArrival(std::unexpected(failureOrLost(_controller->failure())));
     _controller->stop();
+    tellGiveBack(nullptr);
     if (_sessions.windowsBoundTo(*this).empty())
         end();
 }
@@ -778,6 +993,9 @@ void DaemonLink::abandon()
     endSwitchWait("the switch was given up");
     if (auto* const switched = arrival())
         switched->landed = {};
+    // An adopted connection was the presence's: it goes back there, its promotion withdrawn.
+    if (_origin == LinkOrigin::Adopted)
+        leaveDaemon(LeaveKind::KeepAsObserver, {});
     end();
 }
 
@@ -1034,16 +1252,29 @@ void DaemonLink::applyShownLayout()
     if (seeding)
     {
         _shown->selection = TabSelection::Keep;
-        // A window a tab was torn off to activates that tab, once.
-        if (auto* const own = std::get_if<OpeningRole>(&_role); own != nullptr && own->opening.activeTab)
-            if (auto const tab =
-                    _controller->tabPairedWith(*std::exchange(own->opening.activeTab, std::nullopt)))
-                _sessions.model().activateTab(local, *tab);
+        applyLandingFocus(local);
     }
     _sessions.deliverRestoreSummaryTo(local);
     // A jump that selected this workspace shows its pane now that the layout is here.
     if (auto* const controller = _sessions.controllerDisplaying(local))
         controller->completePendingJump();
+}
+
+void DaemonLink::applyLandingFocus(vtworkspace::WorkspaceId local)
+{
+    // Taken out, so a later seeding activates nothing: a window a tab was torn off to activates that tab, a
+    // window a switch lands in what its row named.
+    auto focus = session::LandingFocus {};
+    if (auto* const own = std::get_if<OpeningRole>(&_role))
+        focus = session::LandingFocus { .tab = std::exchange(own->opening.activeTab, std::nullopt),
+                                        .pane = std::exchange(own->opening.activePane, std::nullopt) };
+    else if (auto* const switched = arrival())
+        focus = std::exchange(switched->focus, session::LandingFocus {});
+    if (focus.tab)
+        if (auto const tab = _controller->tabPairedWith(*focus.tab))
+            _sessions.model().activateTab(local, *tab);
+    if (focus.pane)
+        std::ignore = _sessions.showPane(local, *focus.pane);
 }
 
 void DaemonLink::openWindowForMovedPanes()
@@ -1127,13 +1358,16 @@ void DaemonLink::connectReconnectSignals()
             if (!isLive())
                 return;
             _sessions.setHostConnection(*this, _controller->connectionState());
+            // Heard queued: a connection lost meanwhile may be up again by now, and only the count says so.
+            auto const loss = noteConnectionLosses();
             // What a given-up switch selected again is the connection's own: the one sought now resumes it.
-            if (_controller->connectionState() != vthost::client::ConnectionState::Connected)
+            if (loss == ConnectionLoss::Lost
+                || _controller->connectionState() != vthost::client::ConnectionState::Connected)
                 _revertTo.reset();
             // A switch fails when the connection goes before the workspace it waits for is shown.
             if (_switch || arrivalDue())
             {
-                noteConnectionForSwitch();
+                noteConnectionForSwitch(loss);
                 if (!isLive())
                     return;
             }
@@ -1150,7 +1384,9 @@ void DaemonLink::connectReconnectSignals()
                 end();
                 return;
             }
-            if (_controller->connectionState() == vthost::client::ConnectionState::Connected)
+            // An adopted link is attached as its promotion lands (promotionLanded()).
+            if (_controller->connectionState() == vthost::client::ConnectionState::Connected
+                && _origin == LinkOrigin::Dialled)
             {
                 _state = AttachState::Attached;
                 offerDaemonRestartIfDrifted();

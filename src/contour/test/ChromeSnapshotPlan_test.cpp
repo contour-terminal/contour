@@ -943,6 +943,8 @@ TEST_CASE("snapshot plan: the daemon sections' scripts are listed and named", "[
         Expected {
             SnapshotScript::SidebarNeedsMeEmpty, "sidebar-needs-me-empty", SnapshotSections::NeedsMeEmpty },
         Expected { SnapshotScript::SidebarDaemonNarrow, "sidebar-daemon-narrow", SnapshotSections::Narrow },
+        Expected { SnapshotScript::LocationChipPending, "location-chip-pending", SnapshotSections::Pending },
+        Expected { SnapshotScript::SidebarDaemonMenu, "sidebar-daemon-menu", SnapshotSections::NotRunning },
     };
     for (auto const& expected: Scripts)
     {
@@ -950,8 +952,11 @@ TEST_CASE("snapshot plan: the daemon sections' scripts are listed and named", "[
         INFO(row.name);
         CHECK(row.name == expected.name);
         CHECK(row.sections == expected.sections);
-        // Drawn over sidebar-tree's workspaces, the sidebar shown.
-        CHECK(row.sidebar == SnapshotSidebar::Tree);
+        // Drawn over sidebar-tree's workspaces, the sidebar shown -- but for the chip of a jump under way,
+        // which comes back to the band as the sidebar hides.
+        CHECK(row.sidebar
+              == (expected.script == SnapshotScript::LocationChipPending ? SnapshotSidebar::Hidden
+                                                                         : SnapshotSidebar::Tree));
         CHECK(row.tabCount == scriptRow(SnapshotScript::SidebarTree).tabCount);
     }
     // Every script that lists sections is one of these.

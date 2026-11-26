@@ -12,6 +12,7 @@
 #include <contour/window/SwitcherStatus.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -214,6 +215,63 @@ using ShownHere = std::function<std::optional<vtworkspace::WorkspaceId>(uint64_t
     std::span<WorkspaceRow const> rows,
     std::span<window::SidebarRow const> sidebarWorkspaces,
     vtworkspace::WorkspaceId window);
+
+/// How far a switch under way has come, as what may end it sees it.
+enum class SwitchStage : uint8_t
+{
+    Resolving = 0, ///< Its target is being resolved: listed, or read from a directory.
+    Connecting,    ///< It selected, or connected to, its target, which has not shown yet.
+    WaitingForTab, ///< Its target showed, holding no tab: that is for the user to end.
+};
+
+/// Number of @c SwitchStage enumerators, derived from the last one.
+inline constexpr auto SwitchStageCount = static_cast<std::size_t>(SwitchStage::WaitingForTab) + 1;
+
+/// What ends a switch under way ahead of its own outcome.
+enum class SupersedeCause : uint8_t
+{
+    NewerRequest = 0, ///< A program's newer switch of the window (one with a landing time).
+    WindowClosed,     ///< The window is gone: whatever the switch started goes with it.
+    NewerUserRequest, ///< The user's newer switch of the window (one with no landing time): a second click.
+    UserCancelled,    ///< The user cancelled it (the CancelSwitch action, Escape in the sidebar, Cancel).
+};
+
+/// Number of @c SupersedeCause enumerators, derived from the last one.
+inline constexpr auto SupersedeCauseCount = static_cast<std::size_t>(SupersedeCause::UserCancelled) + 1;
+
+/// Whether a switch ended for a SupersedeCause.
+enum class Supersession : uint8_t
+{
+    Kept = 0, ///< The switch goes on.
+    Ended,    ///< The switch was undone and told it was cancelled; its window is free.
+};
+
+/// The stage from which on a cause ends a switch, indexed by @c SupersedeCause.
+inline constexpr auto SupersedingFrom = std::array<SwitchStage, SupersedeCauseCount> {
+    SwitchStage::WaitingForTab, // NewerRequest: a program never takes a window from a switch that can land.
+    SwitchStage::Resolving,     // WindowClosed
+    SwitchStage::Resolving,     // NewerUserRequest: the user's last click wins.
+    SwitchStage::Resolving,     // UserCancelled
+};
+
+/// Whether a switch at @p stage ends for @p cause: a program's newer request ends only a wait for a tab; the
+/// user's, a cancel and a close end any stage.
+/// @param cause What would end it.
+/// @param stage How far it has come.
+/// @return Ended or Kept.
+[[nodiscard]] constexpr Supersession supersessionOf(SupersedeCause cause, SwitchStage stage) noexcept
+{
+    return stage >= SupersedingFrom.at(static_cast<std::size_t>(cause)) ? Supersession::Ended
+                                                                        : Supersession::Kept;
+}
+
+/// @param landBy When the newer request must land by: a program's has a time, the user's none
+///        (session::NoLandingDeadline).
+/// @return What a newer request of the window is, as a cause.
+[[nodiscard]] constexpr SupersedeCause newerRequestCause(session::SwitchLandBy const& landBy) noexcept
+{
+    return landBy ? SupersedeCause::NewerRequest : SupersedeCause::NewerUserRequest;
+}
 
 /// How a workspace is named to the user: its name, else its active tab's title, else "workspace N".
 /// @param name The workspace's name; empty for none.

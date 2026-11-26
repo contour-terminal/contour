@@ -10,10 +10,14 @@
 
 #include <core/platform/Clock.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <iterator>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -40,6 +44,12 @@ namespace detail::tags
 
 /// Names a link among the application's.
 using DaemonLinkId = boxed::boxed<uint32_t, detail::tags::DaemonLinkId>;
+
+class NativeController;
+
+/// Where a left daemon's connection goes: back to the presence, or nowhere (null: it was stopped). Called
+/// exactly once (DaemonLink::leaveDaemon()).
+using GiveBack = std::function<void(std::unique_ptr<NativeController>)>;
 
 /// Runs @p fire once, on the GUI thread, @p delay from now: the time source of a switch's deadline and of a
 /// switch question's expiry, injected so that a test fires it by hand. Nothing cancels a fire: one for a
@@ -146,5 +156,22 @@ class IDaemonLinkHost
     ///         switch. The one the application's switcher is built with.
     [[nodiscard]] virtual SwitchDeadline const& switchDeadline() = 0;
 };
+
+/// Destroys the elements of @p items that @p picks names, once they are out of @p items: an element's
+/// destructor may reach back into @p items -- a link's tells its give-back, which has the presence walk the
+/// application's links -- and must find there only what stays. The rest keep their order.
+/// @param items What is held, by owner.
+/// @param picks Whether an element is to be destroyed.
+template <typename T, typename Picks>
+void destroyWhere(std::vector<std::unique_ptr<T>>& items, Picks picks)
+{
+    auto const leaving = std::ranges::stable_partition(
+        items, [&](std::unique_ptr<T> const& item) { return !std::invoke(picks, item); });
+    auto taken = std::vector<std::unique_ptr<T>>(std::make_move_iterator(leaving.begin()),
+                                                 std::make_move_iterator(leaving.end()));
+    items.erase(leaving.begin(), leaving.end());
+    // Here, with @p items holding only what stays.
+    taken.clear();
+}
 
 } // namespace contour::remote

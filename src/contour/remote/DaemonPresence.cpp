@@ -96,6 +96,16 @@ std::vector<WindowLinkView> mergedLinks(std::vector<WindowLinkView> links)
     return links;
 }
 
+NativeController::Config observerConfigOf(NativeController::Config config,
+                                          vthost::client::BackoffSchedule backoff)
+{
+    config.role = vthost::proto::ConnectionRole::Observe;
+    config.backoff = backoff;
+    config.resumeFallback = NativeController::ResumeFallback::Nothing;
+    config.switchRequests = NativeController::SwitchRequests::Answered;
+    return config;
+}
+
 DaemonPresence::DaemonPresence(PresenceDeps deps): _deps(std::move(deps))
 {
 }
@@ -186,22 +196,98 @@ std::vector<window::DaemonRef> DaemonPresence::listed() const
     return std::ranges::to<std::vector>(_listed | std::views::transform(&ListedDaemon::daemon));
 }
 
-std::unique_ptr<NativeController> DaemonPresence::adoptObserver(window::DaemonRef const& daemon)
+Adoption DaemonPresence::adoptObserver(window::DaemonRef const& daemon, window::DaemonInstance instance)
 {
     auto const found = _observers.find(daemon);
+    auto const listed = std::ranges::find(_listed, daemon, &ListedDaemon::daemon);
     if (found == _observers.end() || !found->second.controller
-        || found->second.controller->connectionState() != ConnectionState::Connected)
-        return nullptr;
+        || found->second.controller->connectionState() != ConnectionState::Connected
+        || listed == _listed.end())
+        return {};
+    // An observer of another run than the window's target names would show another daemon's workspace ids.
+    auto const running = window::DaemonInstance { found->second.controller->daemonInstance().value_or(0) };
+    if (instance != window::DaemonInstance {} && running != instance)
+        return {};
+    // What the section reads until the window's link feeds it: the run and workspaces the observer holds, so
+    // that the rows stay, and the jump's marks with them; Connecting, as the jump is.
+    auto lastKnown = sectionOf(*listed, windowLinks());
+    lastKnown.state = DaemonLinkState::Connecting;
+    lastKnown.reason.clear();
     auto adopted = std::move(found->second.controller);
     // Its receiver goes with the entry: nothing of the presence listens to it any more.
     _observers.erase(found);
-    return adopted;
+    return Adoption { .controller = std::move(adopted),
+                      .handOff = markHandOff(daemon, HandOff::Adopting, std::move(lastKnown)) };
 }
 
-void DaemonPresence::giveBack(window::DaemonRef const& daemon, std::unique_ptr<NativeController> demoted)
+HandOffId DaemonPresence::expectGiveBack(window::DaemonRef const& daemon, DaemonLinkId from)
 {
+    attachLog()("presence: {} comes back from link {}", daemon.value, from.value);
+    // Read while the leaving link still feeds it: what the section shows until the connection is back.
+    auto lastKnown = window::DaemonSection {};
+    if (auto const listed = std::ranges::find(_listed, daemon, &ListedDaemon::daemon);
+        listed != _listed.end())
+        lastKnown = sectionOf(*listed, windowLinks());
+    lastKnown.daemon = daemon;
+    lastKnown.feed = window::SectionFeed::Observer;
+    lastKnown.shownElsewhere.clear();
+    return markHandOff(daemon, HandOff::Returning, std::move(lastKnown));
+}
+
+HandOffId DaemonPresence::markHandOff(window::DaemonRef const& daemon,
+                                      HandOff kind,
+                                      window::DaemonSection lastKnown)
+{
+    auto const id = HandOffId { _nextHandOff++ };
+    _handOffs.insert_or_assign(
+        id, HandOffMark { .daemon = daemon, .kind = kind, .lastKnown = std::move(lastKnown) });
+    return id;
+}
+
+DaemonPresence::HandOffMark const* DaemonPresence::handOffOf(window::DaemonRef const& daemon) const
+{
+    // The newest: the one drawn last speaks for the connection as it stands now.
+    auto const marks = _handOffs | std::views::values | std::views::reverse;
+    auto const found = std::ranges::find(marks, daemon, &HandOffMark::daemon);
+    return found != marks.end() ? &*found : nullptr;
+}
+
+ObserverWanted DaemonPresence::wantsObserver(window::DaemonRef const& daemon, DaemonLinkId leaving) const
+{
+    if (!isListed(daemon))
+        return ObserverWanted::No;
+    auto const others = windowLinks();
+    auto const otherIsOn = std::ranges::any_of(
+        others, [&](WindowLinkView const& link) { return link.daemon == daemon && link.link != leaving; });
+    return otherIsOn ? ObserverWanted::No : ObserverWanted::Yes;
+}
+
+std::optional<window::DaemonSection> DaemonPresence::listedSection(window::DaemonRef const& daemon) const
+{
+    auto const found = std::ranges::find(_listed, daemon, &ListedDaemon::daemon);
+    if (found == _listed.end())
+        return std::nullopt;
+    return sectionOf(*found, windowLinks());
+}
+
+void DaemonPresence::giveBack(window::DaemonRef const& daemon,
+                              HandOffId handOff,
+                              std::unique_ptr<NativeController> demoted)
+{
+    // Whatever comes back, the window no longer holds the daemon's connection in this hand-over.
+    auto const cleared = _handOffs.erase(handOff) != 0;
     if (!demoted)
+    {
+        // Nothing came back: the daemon is observed again as any listed one is -- decided again only when
+        // this hand-over was what kept it from that. A link that ends otherwise is a change of the link set,
+        // decided again there; one stopped as the application quits dials nothing.
+        if (cleared)
+        {
+            reconcile();
+            notify();
+        }
         return;
+    }
     // Stopping it, or keeping it as an observer, would end the panes still bound under their window.
     Require(!demoted->bindsPanes());
     auto const links = windowLinks();
@@ -285,6 +371,17 @@ window::DaemonSection DaemonPresence::sectionOf(ListedDaemon const& daemon,
                 section.reason = controller->failure();
         }
     }
+    else if (auto const* const mark = handOffOf(daemon.daemon))
+    {
+        // A window holds the daemon's connection on its way in or out: no link and no observer feeds the
+        // section meanwhile, so it reads what was last known, keeping its rows and the run they are of.
+        section.instance = mark->lastKnown.instance;
+        section.name = mark->lastKnown.name.empty() ? section.name : mark->lastKnown.name;
+        section.state = mark->lastKnown.state;
+        section.reason = mark->lastKnown.reason;
+        section.directory = mark->lastKnown.directory;
+        section.feed = window::SectionFeed::Observer;
+    }
 
     // A local daemon discovery no longer finds serving is not running, unless a live link knows better.
     if (daemon.locality == window::DaemonLocality::Local && _discovered && !isRunningLocal(daemon.daemon))
@@ -294,7 +391,9 @@ window::DaemonSection DaemonPresence::sectionOf(ListedDaemon const& daemon,
 
 void DaemonPresence::connect(window::DaemonRef const& daemon, vtworkspace::WorkspaceId askingWindow)
 {
-    if (!isListed(daemon) || _windowsOn.contains(daemon))
+    // A daemon whose connection a window holds on its way in or out is connected already: a second dial would
+    // only be stopped again, after it may have asked for a password.
+    if (!isListed(daemon) || _windowsOn.contains(daemon) || handOffOf(daemon) != nullptr)
         return;
     if (auto const parsed = window::parseDaemonRef(daemon);
         !parsed || parsed->first == window::DaemonRefKind::Link)
@@ -329,7 +428,8 @@ void DaemonPresence::disconnect(window::DaemonRef const& daemon)
 void DaemonPresence::start(window::DaemonRef const& daemon)
 {
     auto const parsed = window::parseDaemonRef(daemon);
-    if (!parsed || parsed->first != window::DaemonRefKind::Local || !isListed(daemon))
+    if (!parsed || parsed->first != window::DaemonRefKind::Local || !isListed(daemon)
+        || handOffOf(daemon) != nullptr)
         return;
     // Dialled afresh once discovery finds it serving: not before, which would find it absent.
     if (auto const found = _observers.find(daemon); found != _observers.end())
@@ -450,6 +550,10 @@ void DaemonPresence::reconcile(std::vector<WindowLinkView> const& links)
     if (_lifecycle == Lifecycle::ShutDown)
         return;
     _windowsOn = windowsOnOf(links);
+    // A window that adopted a daemon's observer and is attached feeds its section now: the hand-over is done.
+    std::erase_if(_handOffs, [this](auto const& entry) {
+        return entry.second.kind == HandOff::Adopting && _windowsOn.contains(entry.second.daemon);
+    });
     if (_windowsOn.empty())
         _listed.clear(); // With no window on a daemon nothing is listed: the settings are not even read.
     else
@@ -472,7 +576,8 @@ void DaemonPresence::reconcile(std::vector<WindowLinkView> const& links)
 
     // An observer is wanted only for a listed daemon no window link is on.
     auto const wanted = [&](window::DaemonRef const& daemon) {
-        return isListed(daemon) && !_windowsOn.contains(daemon) && !_awaitingStart.contains(daemon);
+        return isListed(daemon) && !_windowsOn.contains(daemon) && !_awaitingStart.contains(daemon)
+               && handOffOf(daemon) == nullptr;
     };
     auto const unwanted = std::ranges::to<std::vector>(
         _observers | std::views::keys

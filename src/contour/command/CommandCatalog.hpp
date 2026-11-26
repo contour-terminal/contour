@@ -25,19 +25,11 @@ namespace contour::command
 /// @return Every distinct command, in no particular order (the palette sorts it).
 [[nodiscard]] std::vector<Command> collectCommands(std::span<CommandSource const* const> sources);
 
-/// Whether the palette lists a catalogue action.
-enum class PaletteListing : uint8_t
-{
-    Listed = 0, ///< Listed, bound or not.
-    Hidden,     ///< Not listed, even when bound: running it from the palette could do nothing yet.
-};
-
 /// One row of the palette's category column: which group a catalogue action is listed under.
 struct ActionCategory
 {
     std::string_view name {};                         ///< The action's catalogue name, e.g. "SplitVertical".
     CommandCategory category = CommandCategory::Pane; ///< The group it is listed under.
-    PaletteListing palette = PaletteListing::Listed;  ///< Whether the palette lists it at all.
 };
 
 /// The category column, one row per catalogue action, in catalogue order.
@@ -55,11 +47,6 @@ struct ActionCategory
 /// @param action The action to classify.
 /// @return Its category.
 [[nodiscard]] CommandCategory commandCategory(actions::Action const& action) noexcept;
-
-/// Whether the palette lists @p action, from the category column.
-/// @param action The action.
-/// @return Its listing.
-[[nodiscard]] PaletteListing paletteListing(actions::Action const& action) noexcept;
 
 /// Every action that is runnable without an argument, straight from the action catalog.
 ///

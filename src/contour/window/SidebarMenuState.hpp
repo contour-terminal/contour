@@ -2,7 +2,9 @@
 #pragma once
 
 #include <contour/command/SidebarMenus.hpp>
+#include <contour/window/DaemonSection.hpp>
 #include <contour/window/DropZonePolicy.hpp>
+#include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
@@ -14,6 +16,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace contour::window
@@ -161,6 +164,45 @@ struct OfferedTab
         case HostMoves::Nothing: return command::MenuMoves::Nothing;
     }
     return command::MenuMoves::Nodes;
+}
+
+/// @param daemon The daemon of a row's section; empty for a window with no daemon.
+/// @return Whether the row's menu offers "Open in New Window": a local daemon by its label and a saved host
+/// by
+///         its name are named by a switch; a `link:` daemon, and a window with no daemon, are not.
+[[nodiscard]] inline command::OpenOffer openOfferOf(DaemonRef const& daemon)
+{
+    auto const parsed = parseDaemonRef(daemon);
+    return parsed && parsed->first != DaemonRefKind::Link ? command::OpenOffer::Offered
+                                                          : command::OpenOffer::NotOffered;
+}
+
+/// The menu's verbs mirror the row's buttons one to one (sidebarDaemonMenuStateOf() converts by value).
+static_assert(std::to_underlying(command::DaemonRowVerb::None) == std::to_underlying(DaemonRowButton::None));
+static_assert(std::to_underlying(command::DaemonRowVerb::Connect)
+              == std::to_underlying(DaemonRowButton::Connect));
+static_assert(std::to_underlying(command::DaemonRowVerb::Start)
+              == std::to_underlying(DaemonRowButton::Start));
+static_assert(std::to_underlying(command::DaemonRowVerb::Cancel)
+              == std::to_underlying(DaemonRowButton::Cancel));
+static_assert(std::to_underlying(command::DaemonRowVerb::Remove)
+              == std::to_underlying(DaemonRowButton::Remove));
+static_assert(std::to_underlying(command::DaemonRowVerb::Remove) + 1 == DaemonRowButtonCount,
+              "every daemon row button has its verb");
+
+/// The world, as the daemon row @p row's menu sees it.
+/// @param row A daemon row.
+/// @return Its buttons as verbs (daemonRowButtons()), in their order, and whether "Open in New Window" is
+///         offered (openOfferOf()).
+[[nodiscard]] inline command::SidebarDaemonMenuState sidebarDaemonMenuStateOf(SidebarRow const& row)
+{
+    auto state = command::SidebarDaemonMenuState { .verbs = {}, .open = openOfferOf(row.key.daemon) };
+    std::ranges::transform(daemonRowButtons(daemonRowFactsOf(row), row.pending),
+                           state.verbs.begin(),
+                           [](DaemonRowButton button) {
+                               return static_cast<command::DaemonRowVerb>(std::to_underlying(button));
+                           });
+    return state;
 }
 
 } // namespace contour::window

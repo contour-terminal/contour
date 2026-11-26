@@ -558,12 +558,11 @@ TEST_CASE("ActionCommandSource does not offer a nameless AttachToHost", "[contou
     CHECK_FALSE(hasCommand(ActionCommandSource {}.commands(), "AttachToHost"));
 }
 
-TEST_CASE("the palette does not list CancelSwitch, bound or not", "[contour][palette][sidebar]")
+TEST_CASE("the palette lists CancelSwitch, bound or not", "[contour][palette][sidebar]")
 {
-    // It ends a sidebar jump under way, and the sidebar's jumps report none yet: from the palette it would
-    // end nothing.
-    CHECK(paletteListing(actions::CancelSwitch {}) == PaletteListing::Hidden);
-    CHECK_FALSE(hasCommand(ActionCommandSource {}.commands(), "CancelSwitch"));
+    // It ends the sidebar's jump under way, which the window tracks: the palette offers it as it offers
+    // every action, and a binding of it lists it once.
+    CHECK(hasCommand(ActionCommandSource {}.commands(), "CancelSwitch"));
     auto mappings = config::InputMappings {};
     mappings.keyMappings.push_back(
         config::KeyInputMapping { .modes { vtbackend::MatchModes {} },
@@ -571,7 +570,7 @@ TEST_CASE("the palette does not list CancelSwitch, bound or not", "[contour][pal
                                   .input = vtbackend::Key::F6,
                                   .binding = { { actions::CancelSwitch {}, actions::SplitVertical {} } } });
     auto const bound = BoundCommandSource { mappings }.commands();
-    CHECK_FALSE(hasCommand(bound, "CancelSwitch"));
+    CHECK(hasCommand(bound, "CancelSwitch"));
     CHECK(hasCommand(bound, "SplitVertical"));
 }
 

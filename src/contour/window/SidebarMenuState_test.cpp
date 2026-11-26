@@ -148,3 +148,64 @@ TEST_CASE("a workspace's menu state is its place, the count, and what its only t
     CHECK_FALSE(unlisted.color.has_value());
     CHECK(unlisted.coloring == contour::command::MenuColoring::Unavailable);
 }
+
+TEST_CASE("a daemon row's menu state mirrors its buttons", "[sidebarmenu]")
+{
+    auto daemonRow =
+        [](DaemonRef daemon, DaemonLinkState state, DaemonLocality locality, RowPending pending) {
+            auto row = SidebarRow {};
+            row.key = SidebarRowKey { .kind = SidebarRowKind::Daemon,
+                                      .daemon = std::move(daemon),
+                                      .instance = {},
+                                      .workspace = 0,
+                                      .tab = 0,
+                                      .pane = {} };
+            row.linkState = state;
+            row.locality = locality;
+            row.link = DaemonRowLink::Observer;
+            row.pending = pending;
+            return row;
+        };
+    auto const verbsOf = [](SidebarRow const& row) {
+        auto const buttons = daemonRowButtons(daemonRowFactsOf(row), row.pending);
+        auto verbs = std::array<contour::command::DaemonRowVerb, 2> {};
+        std::ranges::transform(buttons, verbs.begin(), [](DaemonRowButton button) {
+            switch (button)
+            {
+                case DaemonRowButton::None: return contour::command::DaemonRowVerb::None;
+                case DaemonRowButton::Connect: return contour::command::DaemonRowVerb::Connect;
+                case DaemonRowButton::Start: return contour::command::DaemonRowVerb::Start;
+                case DaemonRowButton::Cancel: return contour::command::DaemonRowVerb::Cancel;
+                case DaemonRowButton::Remove: return contour::command::DaemonRowVerb::Remove;
+            }
+            return contour::command::DaemonRowVerb::None;
+        });
+        return verbs;
+    };
+    using contour::command::DaemonRowVerb;
+    using contour::command::OpenOffer;
+
+    auto const stopped =
+        daemonRow(localDaemonRef("work"), DaemonLinkState::NotRunning, DaemonLocality::Local, RowPending::No);
+    auto const stoppedState = sidebarDaemonMenuStateOf(stopped);
+    CHECK(stoppedState.verbs == std::array { DaemonRowVerb::Start, DaemonRowVerb::Remove });
+    CHECK(stoppedState.verbs == verbsOf(stopped));
+    CHECK(stoppedState.open == OpenOffer::Offered);
+
+    auto const connecting = daemonRow(
+        hostDaemonRef("starfive"), DaemonLinkState::Connecting, DaemonLocality::Remote, RowPending::No);
+    CHECK(sidebarDaemonMenuStateOf(connecting).verbs == verbsOf(connecting));
+    CHECK(sidebarDaemonMenuStateOf(connecting).verbs[0] == DaemonRowVerb::Cancel);
+
+    auto const jumping = daemonRow(
+        hostDaemonRef("starfive"), DaemonLinkState::Connected, DaemonLocality::Remote, RowPending::Yes);
+    CHECK(sidebarDaemonMenuStateOf(jumping).verbs
+          == std::array { DaemonRowVerb::Cancel, DaemonRowVerb::None });
+
+    // A daemon no switch can name: reached by a link, or none at all.
+    auto const linked =
+        daemonRow(linkDaemonRef(3), DaemonLinkState::Connected, DaemonLocality::Remote, RowPending::No);
+    CHECK(sidebarDaemonMenuStateOf(linked).open == OpenOffer::NotOffered);
+    CHECK(openOfferOf(DaemonRef {}) == OpenOffer::NotOffered);
+    CHECK(openOfferOf(hostDaemonRef("starfive")) == OpenOffer::Offered);
+}

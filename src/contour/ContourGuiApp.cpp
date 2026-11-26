@@ -576,10 +576,13 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                          : std::make_unique<remote::WindowSwitcher>(
                                _sessionManager,
                                *this,
+                               // A jump to a daemon the presence observes takes its observer over.
+                               *_daemonPresence,
                                remote::makeControlWorkspaceLister(SwitchListingTimeout),
                                // A pick is the switcher popup, scoped to the daemon; it re-enters the switch.
                                [this](remote::SwitchPickRequest const& pick) { return showSwitchPick(pick); },
-                               _switchDeadline)),
+                               _switchDeadline,
+                               core::systemRandom())),
     _switchDirectory(switchDirectory ? std::move(switchDirectory) : makeSwitchDirectory()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
@@ -715,12 +718,13 @@ ContourGuiApp::~ContourGuiApp()
         _askpassBroker->shutdown();
     // A link stopped below may wait for a QApplication that will not come now.
     _applicationReadiness->abandon();
+    // Its observers' reactors end here, while every member they may reach still exists: the members
+    // declared after the presence are destroyed before it is. First, so that a link stopped below, giving its
+    // connection back with nothing, has the presence dial no observer as the application quits.
+    _daemonPresence->shutdown();
     // While the session manager they release their windows from still exists: the links outlive it.
     for (auto const& link: _daemonLinks)
         link->stop();
-    // Its observers' reactors end here, while every member they may reach still exists: the members
-    // declared after the presence are destroyed before it is.
-    _daemonPresence->shutdown();
 }
 
 #ifdef CONTOUR_EXTENSIONS
@@ -1276,6 +1280,29 @@ remote::DaemonLink& ContourGuiApp::startSwitchLink(remote::DaemonLinkConfig conf
     return startDaemonLink(std::move(config));
 }
 
+remote::DaemonLink& ContourGuiApp::adoptSwitchLink(remote::DaemonLinkConfig config,
+                                                   std::unique_ptr<remote::NativeController> observing,
+                                                   remote::PromotionRequest request,
+                                                   std::shared_ptr<vthost::ITransportFactory> interactive,
+                                                   remote::GiveBack giveBack)
+{
+    if (config.address.kind == vthost::proto::SwitchDaemonKind::Host)
+        _hostsReached.insert(config.address.name);
+    auto& link =
+        *_daemonLinks.emplace_back(remote::DaemonLink::adopt(remote::DaemonLinkId { _nextDaemonLinkId++ },
+                                                             std::move(config),
+                                                             std::move(observing),
+                                                             std::move(request),
+                                                             std::move(interactive),
+                                                             std::move(giveBack),
+                                                             *this,
+                                                             _sessionManager));
+    // As startDaemonLink(): the first link to a daemon takes back what a restart of it restores.
+    remote::passOnLaunchResume(switchableLinks());
+    _daemonPresence->linkSetChanged();
+    return link;
+}
+
 void ContourGuiApp::startWindowLink(remote::DaemonLinkConfig config)
 {
     // Awaited by nobody: it opens its window once its connection shows the workspace it selects.
@@ -1309,9 +1336,11 @@ remote::ElsewhereNotices ContourGuiApp::elsewhereNotices()
 void ContourGuiApp::destroyEndedLinks()
 {
     // A link whose closed windows still hold a pane waits: it asks again as its last pane lets it go.
-    // Each window's drift badge reads its own link's model (WindowController::daemonDrift).
-    std::erase_if(_daemonLinks,
-                  [this](auto const& link) { return link->isFinished() && _awaitedLinkId != link->id(); });
+    // Each window's drift badge reads its own link's model (WindowController::daemonDrift). Taken out before
+    // any is destroyed: a link's destructor tells its give-back, which may walk the links.
+    remote::destroyWhere(_daemonLinks, [this](auto const& link) {
+        return link->isFinished() && _awaitedLinkId != link->id();
+    });
     // Queued from linkEnded(), so never while the app is destroyed: a link stopped then starts no observer.
     _daemonPresence->linkSetChanged();
 }
@@ -4529,16 +4558,14 @@ std::unique_ptr<remote::DaemonPresence> ContourGuiApp::makeDaemonPresence(remote
             : remote::ObserverFactory { [this](window::DaemonRef const& daemon,
                                                std::shared_ptr<vthost::ITransportFactory> transport,
                                                vthost::client::BackoffSchedule backoff) {
-                  auto config = daemonLinkConfig(std::move(transport),
-                                                 {},
-                                                 {},
-                                                 window::DaemonLocality::Remote,
-                                                 remote::DaemonAddress {})
-                                    .controller;
-                  config.role = vthost::proto::ConnectionRole::Observe;
-                  config.backoff = backoff;
-                  config.resumeFallback = remote::NativeController::ResumeFallback::Nothing;
-                  config.switchRequests = remote::NativeController::SwitchRequests::Declined;
+                  // A window may adopt it, keeping its configuration for life (remote::observerConfigOf()).
+                  auto config = remote::observerConfigOf(daemonLinkConfig(std::move(transport),
+                                                                          {},
+                                                                          {},
+                                                                          window::DaemonLocality::Remote,
+                                                                          remote::DaemonAddress {})
+                                                             .controller,
+                                                         backoff);
                   attachLog()("presence: observing {}", daemon.value);
                   return std::make_unique<remote::NativeController>(std::move(config));
               } };
@@ -4621,6 +4648,7 @@ std::vector<remote::WindowLinkView> ContourGuiApp::windowLinkViews()
         if (!link->isAttached() || controller == nullptr)
             continue;
         auto view = remote::WindowLinkView {
+            .link = link->id(),
             .daemon = remote::daemonRefOf(link->address(), link->id()),
             .instance = window::DaemonInstance { controller->daemonInstance().value_or(0) },
             .name = std::string { link->hostLabel() },

@@ -420,3 +420,28 @@ TEST_CASE("locationChip.otherWorkspaceClauseIsTheTranslatorsToCase", "[LocationC
               HostChipState::Disconnected, Urgency::NeedsYou, Disclosure::Collapsed)
           == "Disconnected, another workspace needs you, collapsed");
 }
+
+TEST_CASE("a pending jump with the sidebar hidden puts the chip in the band, saying where it goes",
+          "[LocationChip][jump]")
+{
+    // Correction 17: with no sidebar to mark the row, a daemon window's chip is in the band whatever the
+    // band's centre holds, and while a jump is under way it names the daemon the jump connects to.
+    for (auto const centre: { BarCentre::Breadcrumb, BarCentre::Tabs, BarCentre::Empty, BarCentre::Title })
+    {
+        INFO("centre " << static_cast<int>(centre));
+        CHECK(
+            locationChipPlace(
+                BarPresence::Shown, centre, DaemonHosting::Daemon, SidebarShown::No, HostChipState::Connected)
+            == LocationChipPlace::Band);
+    }
+
+    auto const texts = locationChipPendingStepTexts("starfive");
+    REQUIRE(texts.size() == LocationChipSteps.size());
+    CHECK(texts.front().fit == LocationChipFit::Full);
+    CHECK(texts.front().daemon == "starfive");
+    CHECK(texts.front().status == "Connecting…");
+    CHECK(texts.front().tooltip == "Connecting to starfive… · Click to cancel");
+    // The workspace it goes to is not this window's: no workspace is named until it lands.
+    CHECK(std::ranges::all_of(texts, [](auto const& text) { return text.workspace.empty(); }));
+    CHECK(locationChipPendingAccessibleName("starfive") == "Connecting to starfive…");
+}

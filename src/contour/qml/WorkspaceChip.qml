@@ -146,6 +146,9 @@ Item {
             width += root.gap + root._span(fontMetrics, status)
         if (root.namesDaemonOnly)
             return width
+        // A jump's chip, connecting elsewhere, names no workspace: no separator and no label.
+        if (root.jumpPending)
+            return width
         if (daemon !== "")
             width += root.gap + root._span(fontMetrics, chromeStyle.breadcrumbGlyph)
         return width + (leading ? root.gap : 0) + root._span(strongMetrics, workspace)
@@ -166,7 +169,13 @@ Item {
         }
     }
 
-    onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
+    /// Whether a jump from the sidebar into another daemon is under way: the chip says where it goes, and a
+    /// click on it cancels the jump, as the CancelSwitch action does.
+    readonly property bool jumpPending: !!root.chip && root.chip.jumpPending
+
+    onClicked: if (root.jumpPending && root.controller && root.controller.cancelSidebarJump)
+        root.controller.cancelSidebarJump()
+    else if (root.controller && root.controller.showWorkspaceDropdown)
         root.controller.showWorkspaceDropdown(root.dropdownAnchor())
 
     implicitWidth: row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5)
@@ -201,10 +210,11 @@ Item {
              : root.colors.chipFill
     }
 
-    // What a click does, with the chord that does the same: the window's switcher opens centred from the key.
+    // What a click does, with the chord that does the same: the window's switcher opens centred from the key;
+    // while a jump is under way, the click cancels it, as CancelSwitch does.
     KitToolTipHost {
         text: root.step.tooltip ?? ""
-        shortcutCommand: "ShowSwitcher"
+        shortcutCommand: root.jumpPending ? "CancelSwitch" : "ShowSwitcher"
         toolTipName: "workspaceChipToolTip"
     }
 
@@ -280,7 +290,7 @@ Item {
 
         Text {
             objectName: "workspaceChipSeparator"
-            visible: root.daemonText !== "" && !root.namesDaemonOnly
+            visible: root.daemonText !== "" && !root.namesDaemonOnly && !root.jumpPending
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             leftPadding: root.gap
@@ -292,7 +302,7 @@ Item {
 
         Text {
             objectName: "workspaceChipLabel"
-            visible: !root.namesDaemonOnly
+            visible: !root.namesDaemonOnly && !root.jumpPending
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             // The room after whatever leads: the dot or the daemon segment.

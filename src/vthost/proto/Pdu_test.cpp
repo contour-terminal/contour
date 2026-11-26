@@ -1003,9 +1003,21 @@ TEST_CASE("ObserveOnly is a bodiless PDU of tag 65 that round-trips and ignores 
 {
     STATIC_CHECK(std::to_underlying(PduType::ObserveOnly) == 65);
     CHECK(roundTrip(DecodedPdu { ObserveOnly {} }) == DecodedPdu { ObserveOnly {} });
+    CHECK(bodyOf(DecodedPdu { ObserveOnly {} }).empty());
     auto appended = Writer {};
     appended.u8(7);
     CHECK(decodeAs<ObserveOnly>(frameOf(PduType::ObserveOnly, appended.view())) == ObserveOnly {});
+}
+
+TEST_CASE("ObserveOnly states a withdrawn promotion in one byte", "[vthost][pdu][observer]")
+{
+    auto const withdrawn = ObserveOnly { .cause = ObserveCause::Withdrawn };
+    CHECK(roundTrip(DecodedPdu { withdrawn }) == DecodedPdu { withdrawn });
+    // One byte: what a daemon from before the cause ignores, reading a demotion, as it always did.
+    CHECK(bodyOf(DecodedPdu { withdrawn }).size() == 1);
+    auto stated = Writer {};
+    stated.u8(std::to_underlying(ObserveCause::Withdrawn));
+    CHECK(decodeAs<ObserveOnly>(frameOf(PduType::ObserveOnly, stated.view())) == withdrawn);
 }
 
 TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty", "[vthost][proto]")
@@ -2465,6 +2477,35 @@ TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vtho
     STATIC_CHECK(std::to_underlying(PduType::ReportFocus) == 52);
     STATIC_CHECK(std::to_underlying(PduType::NotifyRole) == 53);
     STATIC_CHECK(std::to_underlying(PduType::PaneSummary) == 54);
+}
+
+TEST_CASE("SelectWorkspace round-trips a creation token", "[vthost][pdu][proto]")
+{
+    auto token = CreationToken {};
+    std::ranges::generate(token, [next = 0xA0]() mutable { return static_cast<std::byte>(next++); });
+    // With a directory, and without one: then it is written as the 0 that names none, and read back as none.
+    for (auto const from: { std::optional<uint64_t> {}, std::optional<uint64_t> { 7 } })
+    {
+        auto const select =
+            SelectWorkspace { .workspace = 0, .directoryFromSession = from, .creationToken = token };
+        CHECK(roundTrip(DecodedPdu { select }) == DecodedPdu { select });
+    }
+    // Only a creation carries one: a select of a workspace that exists makes nothing.
+    auto const existing = SelectWorkspace { .workspace = 4, .creationToken = token };
+    CHECK(roundTrip(DecodedPdu { existing }) == DecodedPdu { SelectWorkspace { .workspace = 4 } });
+}
+
+TEST_CASE("a SelectWorkspace from before the token reads as none", "[vthost][pdu][proto]")
+{
+    auto older = Writer {};
+    older.varint(0); // the workspace: a creation
+    older.varint(7); // the session whose directory it starts in
+    CHECK(decodeAs<SelectWorkspace>(frameOf(PduType::SelectWorkspace, older.view()))
+          == SelectWorkspace { .workspace = 0, .directoryFromSession = 7 });
+    // A token cut short is a truncated body, not none.
+    older.u8(1);
+    older.bytes(std::array { std::byte { 1 }, std::byte { 2 } });
+    CHECK_FALSE(decodePdu(frameOf(PduType::SelectWorkspace, older.view())).has_value());
 }
 
 TEST_CASE("Goodbye is a bodiless PDU of tag 60 that round-trips and ignores appended bytes",

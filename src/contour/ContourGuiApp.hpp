@@ -816,6 +816,11 @@ class ContourGuiApp:
     [[nodiscard]] std::expected<remote::DaemonLinkConfig, std::string> linkConfigFor(
         remote::DaemonAddress const& daemon, vtworkspace::WorkspaceId window) override;
     remote::DaemonLink& startSwitchLink(remote::DaemonLinkConfig config) override;
+    remote::DaemonLink& adoptSwitchLink(remote::DaemonLinkConfig config,
+                                        std::unique_ptr<remote::NativeController> observing,
+                                        remote::PromotionRequest request,
+                                        std::shared_ptr<vthost::ITransportFactory> interactive,
+                                        remote::GiveBack giveBack) override;
 
     /// The editor of the shells' startup files, behind the shell-integration card and Settings.
     [[nodiscard]] platform::IShellRcEditor& shellRcEditor() noexcept { return *_shellRcEditor; }

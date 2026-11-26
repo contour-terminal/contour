@@ -46,7 +46,9 @@ namespace
     /// @return Whether the dot shows: only a chip that names a daemon has one.
     [[nodiscard]] bool dotShownFor(LocationChipInputs const& inputs) noexcept
     {
-        return !inputs.daemon.empty() && daemonDotOf(inputs.locality, inputs.state) == DaemonDot::Shown;
+        // A jump under way shows a connection under way, wherever the window's own daemon runs.
+        auto const state = inputs.pendingDaemon.empty() ? inputs.state : HostChipState::Reconnecting;
+        return !inputs.daemon.empty() && daemonDotOf(inputs.locality, state) == DaemonDot::Shown;
     }
 
     /// @param a One state of the chip.
@@ -56,7 +58,7 @@ namespace
     [[nodiscard]] bool sameSurface(LocationChipInputs const& a, LocationChipInputs const& b) noexcept
     {
         return a.daemon == b.daemon && a.hosting == b.hosting && a.locality == b.locality
-               && a.state == b.state && a.workspace == b.workspace;
+               && a.state == b.state && a.workspace == b.workspace && a.pendingDaemon == b.pendingDaemon;
     }
 } // namespace
 
@@ -118,12 +120,19 @@ QString LocationChipModel::daemonName() const
 
 int LocationChipModel::connectionState() const noexcept
 {
-    return static_cast<int>(std::to_underlying(_inputs.state));
+    return static_cast<int>(std::to_underlying(shownState()));
 }
 
 QString LocationChipModel::stateGlyph() const
 {
-    return toQString(daemonStateGlyph(_inputs.state));
+    return toQString(daemonStateGlyph(shownState()));
+}
+
+HostChipState LocationChipModel::shownState() const noexcept
+{
+    // A jump connects elsewhere: the dot and the words take a connection's look under way, not the window's
+    // own link's.
+    return jumpPending() ? HostChipState::Reconnecting : _inputs.state;
 }
 
 QStringList LocationChipModel::stateGlyphs()
@@ -133,6 +142,8 @@ QStringList LocationChipModel::stateGlyphs()
 
 QString LocationChipModel::accessibleName() const
 {
+    if (jumpPending())
+        return toQString(locationChipPendingAccessibleName(_inputs.pendingDaemon, QtTranslated {}));
     return toQString(locationChipAccessibleName(_inputs.daemon, _inputs.workspace, QtTranslated {}));
 }
 
@@ -150,8 +161,11 @@ QString LocationChipModel::accessibleDescription() const
 QVariantList LocationChipModel::buildSteps() const
 {
     auto steps = QVariantList {};
-    for (auto const& text:
-         locationChipStepTexts(_inputs.state, _inputs.daemon, _inputs.workspace, QtTranslated {}))
+    auto const texts =
+        jumpPending()
+            ? locationChipPendingStepTexts(_inputs.pendingDaemon, QtTranslated {})
+            : locationChipStepTexts(_inputs.state, _inputs.daemon, _inputs.workspace, QtTranslated {});
+    for (auto const& text: texts)
         steps.push_back(
             QVariantMap { { QStringLiteral("fit"), static_cast<int>(std::to_underlying(text.fit)) },
                           { QStringLiteral("key"), toQString(text.key) },

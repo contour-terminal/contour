@@ -1648,13 +1648,26 @@ nothing: a batch the daemon ended before it read the request still states the wo
 client adopts no selection from one whose `causeSerial` is older than its `ObserveOnly`. Likewise the client
 becomes an attach on the batch answering its promotion's select, not on any batch that states a selection.
 
+A promotion survives a dropped connection exactly once. A promotion to workspace 0 carries a creation token
+(`SelectWorkspace::creationToken`, 16 random bytes, appended: written only for workspace 0, after
+`directoryFromSession`, which is then always written -- 0 for none -- and followed by a byte saying whether a
+token comes, so a body that ends before it names none). The host remembers the workspace each of the last
+`PromotionTokenMemory` (16) tokens made (`SessionHost::workspaceMadeFor`); a re-ask naming a remembered token
+whose workspace still holds a tab selects that workspace instead of making another, and any other makes one and
+is remembered. The restore announcement a promotion took is held by the connection until the batch answering
+it is written; a connection that ends or is demoted first puts it back (`returnRestoreAnnouncement`), so the
+next viewer is told it.
+
 On the client side the role is runtime state of `contour::remote::NativeController` (`Config::role`,
 `role()`), read by every hello: `promote()` states the adopting window's area and cell, then selects; it is
 refused without `LayoutBatch` (nothing would answer it). The connection observes until the answer: one dropped
 before it reconnects with an Observe hello and asks again, unless the daemon restarted meanwhile (its
 `daemonInstance` changed: the workspace id names another), which fails the promotion and launches nothing; so
 does a connection that ends for good, and an answer selecting another workspace than asked, which is demoted
-again. `select()` is refused while the connection observes or a promotion is under way. `demote()` sends
+again. `promote()` takes a `PromotionRequest` naming the daemon run its workspace id is of, and is refused at
+once (`DaemonRestarted`) when that is not the run connected; a re-ask after a drop sends the same creation
+token. `withdrawPromotion()` ends a promotion under way from the window's side: its caller is told it was
+withdrawn, and an answer that promoted the connection all the same is answered by `ObserveOnly`. `select()` is refused while the connection observes or a promotion is under way. `demote()` sends
 `ObserveOnly`, refused unless the daemon shares what an observer's hello must. Each also swaps the transport the
 next dial goes through -- an interactive one for a window, one that prompts for nothing and starts no daemon
 for an observer -- read once per dial; a promotion that fails puts the observer's back. An Observe hello that a daemon answers without `Observe` (it read

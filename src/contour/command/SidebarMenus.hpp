@@ -6,6 +6,7 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -47,6 +48,13 @@ enum class MenuColoring : uint8_t
     Available,       ///< Yes: a window that lists its own workspaces, or a daemon that keeps the colour.
 };
 
+/// Whether a row's menu offers "Open in New Window".
+enum class OpenOffer : uint8_t
+{
+    NotOffered = 0, ///< Not offered: a row of a `link:` daemon, or of no daemon, which no switch can name.
+    Offered,        ///< Offered.
+};
+
 /// The world, as a workspace row's context menu needs to see it.
 struct WorkspaceMenuState
 {
@@ -61,6 +69,7 @@ struct WorkspaceMenuState
     /// The colour the user gave the workspace; none while it is uncoloured.
     std::optional<vtbackend::RGBColor> color {};
     MenuColoring coloring = MenuColoring::Available; ///< Whether the window's host keeps the colour.
+    OpenOffer open = OpenOffer::Offered;             ///< Whether "Open in New Window" is offered.
 };
 
 /// The workspace row's context menu for @p state.
@@ -84,7 +93,8 @@ struct SidebarTabMenuState
     std::vector<TabChoiceGroup> joinable {}; ///< The tabs it can merge into: every one but itself.
     /// How many tabs its workspace holds: a new workspace for its only one would only rebuild the one it has.
     std::size_t workspaceTabs = 1;
-    MenuMoves moves = MenuMoves::Nodes; ///< What the window's host moves.
+    MenuMoves moves = MenuMoves::Nodes;  ///< What the window's host moves.
+    OpenOffer open = OpenOffer::Offered; ///< Whether "Open in New Window" is offered.
 };
 
 /// The tab row's context menu in the sidebar: the tab strip's menu, "Move to Workspace", "Merge into Tab" and
@@ -102,12 +112,37 @@ struct SidebarPaneMenuState
     /// How many tabs its workspace holds: with tabPanes, whether the pane is all its workspace holds, which a
     /// new workspace for it would only rebuild.
     std::size_t workspaceTabs = 1;
-    MenuMoves moves = MenuMoves::Nodes; ///< What the window's host moves.
+    MenuMoves moves = MenuMoves::Nodes;  ///< What the window's host moves.
+    OpenOffer open = OpenOffer::Offered; ///< Whether "Open in New Window" is offered.
 };
 
 /// The pane row's context menu.
 /// @param state The pane the menu was opened over.
 /// @return The menu, top to bottom.
 [[nodiscard]] std::vector<ContextMenuEntry> buildSidebarPaneMenu(SidebarPaneMenuState const& state);
+
+/// What one of a daemon row's buttons does, as its menu offers it: the command layer's mirror of
+/// window::DaemonRowButton, which this layer cannot name (window::sidebarDaemonMenuStateOf() ties the two).
+enum class DaemonRowVerb : uint8_t
+{
+    None = 0, ///< No button in this place.
+    Connect,  ///< Connects to the daemon (ConnectDaemon).
+    Start,    ///< Starts the local daemon (StartDaemon).
+    Cancel,   ///< Ends what is under way there: a pending jump into it, or a connect (CancelSwitch).
+    Remove,   ///< Unlists the daemon for the rest of the run (RemoveDaemon).
+};
+
+/// The world, as a daemon row's context menu needs to see it.
+struct SidebarDaemonMenuState
+{
+    /// The row's buttons as verbs, in their order on the row; None for a place with no button.
+    std::array<DaemonRowVerb, 2> verbs {};
+    OpenOffer open = OpenOffer::Offered; ///< Not offered for a `link:` daemon, which no switch can name.
+};
+
+/// The daemon row's context menu: "Open in New Window", then what the row's buttons do, in their order.
+/// @param state The daemon row the menu was opened over.
+/// @return The menu, top to bottom.
+[[nodiscard]] std::vector<ContextMenuEntry> buildSidebarDaemonMenu(SidebarDaemonMenuState const& state);
 
 } // namespace contour::command

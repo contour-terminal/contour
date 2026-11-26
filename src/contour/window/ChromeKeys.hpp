@@ -124,8 +124,7 @@ inline constexpr std::array ChromeKeyRows {
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Home, ChromeKeyModifier::None, ChromeCommand::FocusFirst },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::End, ChromeKeyModifier::None, ChromeCommand::FocusLast },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Return, ChromeKeyModifier::None, ChromeCommand::Activate },
-    // The keyboard's way to "Open in New Window" (spec §6). Its pointer way, a row menu entry, comes with the
-    // row menus of every daemon's rows.
+    // The keyboard's way to "Open in New Window" (spec §6); its pointer way is the row menu's entry.
     ChromeKeyRow {
         ChromeArea::Sidebar, ChromeKey::Return, ChromeKeyModifier::Shift, ChromeCommand::OpenInNewWindow },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Escape, ChromeKeyModifier::None, ChromeCommand::Leave },

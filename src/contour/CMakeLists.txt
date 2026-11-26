@@ -268,6 +268,7 @@ set(_header_files
     window/PopupAnchor.hpp
     window/Utf16Offsets.hpp
     window/SidebarDaemonRow.hpp
+    window/SidebarJumps.hpp
     window/SidebarSections.hpp
     window/SidebarTree.hpp
     window/SidebarTabColor.hpp
@@ -411,6 +412,7 @@ if(CONTOUR_FRONTEND_GUI)
         remote/SwitchGuard.hpp
         remote/SwitchHost.hpp
         remote/DaemonPresence.hpp
+        remote/ObserverPool.hpp
         remote/ElsewhereRaise.hpp
         remote/PresencePlan.hpp
         remote/PresenceTransport.hpp
@@ -443,6 +445,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/Permission.cpp
         session/PermissionPrompt.cpp
         window/NoticeModel.cpp
+        window/SidebarJumps.cpp
         window/SidebarModel.cpp
         window/LocationChipModel.cpp
         window/QuickTerminalController.cpp
@@ -1102,6 +1105,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/Permission_test.cpp
             session/PermissionPrompt_test.cpp
             window/NoticeModel_test.cpp
+            window/SidebarJumps_test.cpp
             window/SidebarModel_test.cpp
             window/LocationChipModel_test.cpp
             test/MainWindowControllerMock.hpp

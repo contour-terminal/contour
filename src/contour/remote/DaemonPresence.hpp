@@ -11,6 +11,8 @@
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/platform/OffThreadJobs.hpp>
 #include <contour/remote/DaemonLinkHost.hpp>
+#include <contour/remote/NativeController.hpp>
+#include <contour/remote/ObserverPool.hpp>
 #include <contour/remote/PresencePlan.hpp>
 #include <contour/remote/PresenceTransport.hpp>
 #include <contour/window/DaemonSections.hpp>
@@ -49,6 +51,7 @@ enum class AppVisibility : uint8_t
 /// One attached window link of this process, as the presence reads it.
 struct WindowLinkView
 {
+    DaemonLinkId link {};            ///< Which link it is.
     window::DaemonRef daemon;        ///< The daemon it is on.
     window::DaemonInstance instance; ///< That daemon's run.
     std::string name; ///< What its section is called; empty for the daemon's own name (daemonNameOf()).
@@ -78,6 +81,14 @@ using ObserverFactory =
     std::function<std::unique_ptr<NativeController>(window::DaemonRef const& daemon,
                                                     std::shared_ptr<vthost::ITransportFactory> transport,
                                                     vthost::client::BackoffSchedule backoff)>;
+
+/// @param config What an observer is built with otherwise: its transport, settings and timeline.
+/// @param backoff How long it waits before each reconnect.
+/// @return @p config as an observer's: proto::ConnectionRole::Observe, never resuming into a launch, and
+///         answering switch requests -- which a daemon never sends an observer, but which the connection is
+///         to answer for life once a window adopts it (DaemonLink::adopt()), as its Config is fixed.
+[[nodiscard]] NativeController::Config observerConfigOf(NativeController::Config config,
+                                                        vthost::client::BackoffSchedule backoff);
 
 /// How the presence dials a daemon in the background (remote::observerTransport()).
 using ObserverDial = std::function<std::expected<std::shared_ptr<vthost::ITransportFactory>, DialRefusal>(
@@ -161,7 +172,7 @@ struct PresenceOverrides
 /// refresh, so that a choice another process made is seen.
 ///
 /// Threading: GUI thread only. The observers' signals are taken on it.
-class DaemonPresence final: public window::IDaemonSections
+class DaemonPresence final: public window::IDaemonSections, public IObserverPool
 {
   public:
     /// @param deps What the presence needs of the application. Nothing is called before the first refresh()
@@ -207,18 +218,39 @@ class DaemonPresence final: public window::IDaemonSections
     /// @return The listed daemons, in tree order, as last decided.
     [[nodiscard]] std::vector<window::DaemonRef> listed() const;
 
-    /// Hands @p daemon's observer to a window that lands on it, so that no second connection is dialled.
+    /// Hands @p daemon's observer to a window that lands on it, so that no second connection is dialled; the
+    /// daemon is marked as handed over until the adopting link is attached, or gives the connection back.
+    /// Meanwhile its section reads Connecting, keeping the run and workspaces the observer last held, and
+    /// neither connect() nor start() dials it.
     /// @param daemon The daemon.
-    /// @return The observer, which the window owns from now on; null unless it is Connected.
-    [[nodiscard]] std::unique_ptr<NativeController> adoptObserver(window::DaemonRef const& daemon);
+    /// @param instance The run of it the window's target names; 0 for one it does not know.
+    /// @return The observer, which the window owns from now on, and what its give-back names; none unless it
+    ///         is Connected, and of run @p instance.
+    [[nodiscard]] Adoption adoptObserver(window::DaemonRef const& daemon,
+                                         window::DaemonInstance instance) override;
 
-    /// Takes back a connection a window left (demoted to an observer).
+    /// Takes back a connection a window left (demoted to an observer), and clears the hand-off mark @p
+    /// handOff names.
     /// @param daemon The daemon it reaches.
+    /// @param handOff The hand-over it ends; 0 for one the presence never marked (a link that left with End).
     /// @param demoted The connection, which must bind no pane: its window unbinds them first, as stopping it
     ///        would end them under the window. Kept as the daemon's observer -- dialling as one from now on
     ///        -- only if it is Connected, an observer, no window link is on the daemon, the daemon is still
-    ///        listed and has no observer yet; stopped otherwise.
-    void giveBack(window::DaemonRef const& daemon, std::unique_ptr<NativeController> demoted);
+    ///        listed and has no observer yet; stopped otherwise. Null: nothing comes back, and the daemon is
+    ///        observed again as any listed one is -- decided again only if a mark was cleared, so that a link
+    ///        stopping as the application quits dials nothing.
+    void giveBack(window::DaemonRef const& daemon,
+                  HandOffId handOff,
+                  std::unique_ptr<NativeController> demoted) override;
+
+    /// Marks @p daemon's connection as coming back from link @p from: until it is given back, the daemon's
+    /// section reads what it last read through the link, and no observer of it is dialled.
+    /// @return What the link's give-back names.
+    [[nodiscard]] HandOffId expectGiveBack(window::DaemonRef const& daemon, DaemonLinkId from) override;
+    [[nodiscard]] ObserverWanted wantsObserver(window::DaemonRef const& daemon,
+                                               DaemonLinkId leaving) const override;
+    [[nodiscard]] std::optional<window::DaemonSection> listedSection(
+        window::DaemonRef const& daemon) const override;
 
     // window::IDaemonSections
     [[nodiscard]] std::vector<window::DaemonSection> sections() const override;
@@ -296,6 +328,24 @@ class DaemonPresence final: public window::IDaemonSections
         Armed,
     };
 
+    /// Why a daemon's connection is in no observer entry for now, while a window holds it.
+    enum class HandOff : uint8_t
+    {
+        Adopting = 0, ///< Handed to a window landing on it, whose link is not attached yet.
+        Returning,    ///< Coming back from a window leaving it, once its panes let it go.
+    };
+
+    /// One hand-over under way of a daemon's connection: what keeps the daemon from being dialled, and what
+    /// its section reads meanwhile, for neither a window link nor an observer feeds it.
+    struct HandOffMark
+    {
+        window::DaemonRef daemon;         ///< The daemon whose connection a window holds.
+        HandOff kind = HandOff::Adopting; ///< Which way it goes.
+        /// The daemon's section as it last read, kept while the mark stands: Connecting while adopted, the
+        /// link's last reading while it comes back.
+        window::DaemonSection lastKnown;
+    };
+
     /// Whether the presence still observes anything.
     enum class Lifecycle : uint8_t
     {
@@ -353,6 +403,13 @@ class DaemonPresence final: public window::IDaemonSections
     [[nodiscard]] bool isRunningLocal(window::DaemonRef const& daemon) const;
     /// @return Whether @p daemon is listed, as last decided.
     [[nodiscard]] bool isListed(window::DaemonRef const& daemon) const;
+    /// @return The newest hand-off mark of @p daemon; null while a window holds none of its connection.
+    [[nodiscard]] HandOffMark const* handOffOf(window::DaemonRef const& daemon) const;
+    /// Marks @p daemon's connection as held by a window, its section reading @p lastKnown meanwhile.
+    /// @return What the give-back names.
+    [[nodiscard]] HandOffId markHandOff(window::DaemonRef const& daemon,
+                                        HandOff kind,
+                                        window::DaemonSection lastKnown);
     /// @return Whether @p observer's dial failed for a reason that may pass.
     [[nodiscard]] static bool isRetryable(Observer const& observer);
     /// @return The controller a verb on @p daemon's run @p instance goes to; null for none.
@@ -375,6 +432,11 @@ class DaemonPresence final: public window::IDaemonSections
     std::set<window::DaemonRef> _windowsOn;     ///< The daemons a window link was on at the last decision.
     std::vector<ListedDaemon> _listed;          ///< What is listed, as last decided.
     std::map<window::DaemonRef, Observer> _observers; ///< By daemon; only listed daemons no window is on.
+    /// The hand-overs under way, by what their give-back names: reconcile() dials no observer of their
+    /// daemons. Each is cleared by its own giveBack(), and an Adopting one by a window link to its daemon
+    /// being attached.
+    std::map<HandOffId, HandOffMark> _handOffs;
+    uint64_t _nextHandOff = 1; ///< What the next hand-over is named.
     /// Stopped (or stopping) controllers kept until they are stopped and bind no pane.
     std::vector<std::unique_ptr<NativeController>> _retired;
     std::optional<vthost::proto::WindowFocus> _focus; ///< The process's focus as last told.

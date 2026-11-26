@@ -36,6 +36,7 @@ using contour::remote::DialRefusal;
 using contour::remote::ListingSettings;
 using contour::remote::PresenceDeps;
 using contour::remote::WindowLinkView;
+using contour::remote::testing::controllerConfig;
 using contour::remote::testing::ControllerOptions;
 using contour::remote::testing::DaemonFixture;
 using contour::remote::testing::makeNativeController;
@@ -181,7 +182,8 @@ DaemonRef const Default = contour::window::localDaemonRef("default");
 [[nodiscard]] WindowLinkView windowOn(DaemonRef daemon,
                                       contour::remote::NativeController* controller = nullptr)
 {
-    return WindowLinkView { .daemon = std::move(daemon),
+    return WindowLinkView { .link = {},
+                            .daemon = std::move(daemon),
                             .instance = {},
                             .name = {},
                             .locality = contour::window::DaemonLocality::Local,
@@ -396,9 +398,10 @@ TEST_CASE("DaemonPresence: a window landing on an observed daemon adopts it, no 
     rig.presence->refresh();
     REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
 
-    auto adopted = rig.presence->adoptObserver(Starfive);
+    auto adoption = rig.presence->adoptObserver(Starfive, {});
+    auto& adopted = adoption.controller;
     REQUIRE(adopted != nullptr);
-    CHECK(rig.presence->adoptObserver(Starfive) == nullptr); // handed out once
+    CHECK(rig.presence->adoptObserver(Starfive, {}).controller == nullptr); // handed out once
     rig.links.push_back(windowOn(Starfive, adopted.get()));
     rig.presence->linkSetChanged();
     rig.presence->refresh();
@@ -419,15 +422,15 @@ TEST_CASE("DaemonPresence: giveBack makes it the daemon's observer once more", "
     REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
 
     // A window takes it, shows a workspace, and leaves the daemon again.
-    auto adopted = rig.presence->adoptObserver(Starfive);
+    auto adoption = rig.presence->adoptObserver(Starfive, {});
+    auto& adopted = adoption.controller;
     REQUIRE(adopted != nullptr);
     auto const landed = std::make_shared<std::optional<std::expected<uint64_t, std::string>>>();
     REQUIRE(
         adopted
-            ->promote(workspaces.front(),
-                      std::nullopt,
-                      vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) },
-                      std::nullopt,
+            ->promote(daemon.promotionOf(workspaces.front(),
+                                         vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) },
+                                         std::nullopt),
                       makeTestTlsTransport(daemon.endpoint()),
                       [landed](std::expected<uint64_t, std::string> result) { *landed = std::move(result); })
             .has_value());
@@ -435,7 +438,7 @@ TEST_CASE("DaemonPresence: giveBack makes it the daemon's observer once more", "
     REQUIRE(adopted->demote(makeTestTlsTransport(daemon.endpoint())).has_value());
     REQUIRE(adopted->role() == vthost::proto::ConnectionRole::Observe);
 
-    rig.presence->giveBack(Starfive, std::move(adopted));
+    rig.presence->giveBack(Starfive, adoption.handOff, std::move(adopted));
     rig.presence->refresh();
 
     CHECK_FALSE(waitUntil([&] { return daemon.clientFrames.hellos().size() > 1; }, 40));
@@ -452,7 +455,8 @@ TEST_CASE("DaemonPresence: giveBack while a window is on the daemon stops it", "
     auto rig = PresenceRig { daemon };
     rig.presence->refresh();
     REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
-    auto adopted = rig.presence->adoptObserver(Starfive);
+    auto adoption = rig.presence->adoptObserver(Starfive, {});
+    auto& adopted = adoption.controller;
     REQUIRE(adopted != nullptr);
 
     // Meanwhile another window's own link is on the daemon.
@@ -461,7 +465,7 @@ TEST_CASE("DaemonPresence: giveBack while a window is on the daemon stops it", "
     rig.links.push_back(windowOn(Starfive, window.get()));
     REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 2; }));
 
-    rig.presence->giveBack(Starfive, std::move(adopted));
+    rig.presence->giveBack(Starfive, adoption.handOff, std::move(adopted));
     CHECK(daemon.waitUntilOnDaemon([&] { return daemon.live.size() == 1; }));
     CHECK(window->connectionState() == ConnectionState::Connected);
     CHECK(rig.section(Starfive)->feed == SectionFeed::WindowLink);
@@ -1217,4 +1221,243 @@ TEST_CASE("DaemonPresence: shutdown stops every observer, and starts none after"
     rig.presence->connect(Starfive, WorkspaceId { 1 });
     CHECK(rig.observersMade == 1);
     CHECK(rig.presence->sections().empty());
+}
+
+TEST_CASE("DaemonPresence: a recompute while an observer is handed over dials no second one",
+          "[presence][adopt]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
+
+    // A window takes it; its link is not attached yet, so no window link is on the daemon.
+    auto adoption = rig.presence->adoptObserver(Starfive, {});
+    auto& adopted = adoption.controller;
+    REQUIRE(adopted != nullptr);
+    rig.presence->linkSetChanged();
+    rig.presence->linkSetChanged();
+
+    CHECK_FALSE(waitUntil([&] { return daemon.clientFrames.hellos().size() > 1; }, 40));
+    CHECK(rig.observersMade == 1);
+    // Once the adopting link is attached, the hand-over is done: nothing is dialled either.
+    rig.links.push_back(windowOn(Starfive, adopted.get()));
+    rig.presence->linkChanged();
+    rig.links.pop_back();
+    rig.presence->giveBack(Starfive, adoption.handOff, std::move(adopted));
+    CHECK(rig.observersMade == 1);
+}
+
+TEST_CASE("DaemonPresence: an observer of an earlier run is not handed over", "[presence][adopt]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
+    REQUIRE(!rig.observers.empty());
+    auto const running = rig.observers.back()->daemonInstance().value_or(0);
+    REQUIRE(running != 0);
+
+    CHECK(rig.presence->adoptObserver(Starfive, contour::window::DaemonInstance { running + 1 }).controller
+          == nullptr);
+
+    // Still the daemon's observer, and handed to a window that names its run.
+    CHECK(rig.section(Starfive)->feed == SectionFeed::Observer);
+    auto adoption = rig.presence->adoptObserver(Starfive, contour::window::DaemonInstance { running });
+    auto& adopted = adoption.controller;
+    CHECK(adopted != nullptr);
+    rig.presence->giveBack(Starfive, adoption.handOff, std::move(adopted));
+}
+
+TEST_CASE("DaemonPresence: a connection coming back keeps the daemon from being dialled", "[presence][adopt]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    // A window is on the daemon, and leaves it: its connection comes back once its panes let it go.
+    auto leaving = makeNativeController(daemon.endpoint(),
+                                        rig.timeline,
+                                        ControllerOptions { .role = vthost::proto::ConnectionRole::Observe });
+    leaving->startConnecting();
+    REQUIRE(waitUntil([&] { return leaving->connectionState() == ConnectionState::Connected; }));
+    rig.links.push_back(windowOn(Starfive, leaving.get()));
+    rig.presence->refresh();
+    REQUIRE(rig.observersMade == 0);
+    auto const handOff = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 3 });
+    rig.links.pop_back();
+
+    rig.presence->linkSetChanged();
+    rig.presence->refresh();
+
+    CHECK(rig.observersMade == 0);
+    rig.presence->giveBack(Starfive, handOff, std::move(leaving));
+    CHECK(rig.observersMade == 0);
+    REQUIRE(rig.section(Starfive).has_value());
+    CHECK(rig.section(Starfive)->feed == SectionFeed::Observer);
+    CHECK(rig.section(Starfive)->state == DaemonLinkState::Connected);
+}
+
+TEST_CASE("DaemonPresence: a give-back of nothing clears the mark and dials again", "[presence][adopt]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.links.push_back(windowOn(Starfive));
+    rig.presence->refresh();
+    auto const handOff = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 3 });
+    rig.links.pop_back();
+    rig.presence->linkSetChanged();
+    REQUIRE(rig.observersMade == 0);
+
+    rig.presence->giveBack(Starfive, handOff, nullptr);
+
+    CHECK(rig.observersMade == 1);
+    CHECK(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
+}
+
+TEST_CASE("DaemonPresence: while a window holds a daemon's connection, its section keeps what it showed",
+          "[presence][adopt]")
+{
+    // What the sidebar lists of the daemon -- its rows, and the run a pending jump's marks are matched by --
+    // stays through the hand-over, which neither a window link nor an observer feeds.
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 2);
+    auto rig = PresenceRig { daemon };
+
+    SECTION("handed to a window landing on it: Connecting, and no second dial")
+    {
+        rig.presence->refresh();
+        REQUIRE(waitUntil([&] {
+            auto const section = rig.section(Starfive);
+            return section && section->state == DaemonLinkState::Connected
+                   && section->directory.workspaces.size() >= 2;
+        }));
+        auto const before = *rig.section(Starfive);
+
+        auto adoption = rig.presence->adoptObserver(Starfive, {});
+        REQUIRE(adoption.controller != nullptr);
+        // As the application does once the adopting link is made, before it is attached.
+        rig.presence->linkSetChanged();
+
+        auto const during = rig.section(Starfive);
+        REQUIRE(during.has_value());
+        CHECK(during->state == DaemonLinkState::Connecting);
+        CHECK(during->instance == before.instance);
+        CHECK(during->directory == before.directory);
+        // Its row offers no Connect meanwhile; one asked for all the same dials nothing.
+        rig.presence->connect(Starfive, WorkspaceId { 1 });
+        CHECK(rig.observersMade == 1);
+        CHECK(rig.interactiveAsked.empty());
+
+        rig.links.push_back(windowOn(Starfive, adoption.controller.get()));
+        rig.presence->linkChanged();
+        CHECK(rig.section(Starfive)->feed == SectionFeed::WindowLink);
+        rig.links.pop_back();
+        rig.presence->giveBack(Starfive, adoption.handOff, std::move(adoption.controller));
+    }
+    SECTION("coming back from a window leaving it: what the link last read")
+    {
+        auto leaving =
+            makeNativeController(daemon.endpoint(),
+                                 rig.timeline,
+                                 ControllerOptions { .role = vthost::proto::ConnectionRole::Observe });
+        leaving->startConnecting();
+        REQUIRE(waitUntil([&] {
+            return leaving->connectionState() == ConnectionState::Connected
+                   && leaving->directory().workspaces.size() >= 2;
+        }));
+        auto view = windowOn(Starfive, leaving.get());
+        view.instance = contour::window::DaemonInstance { leaving->daemonInstance().value_or(0) };
+        view.directory = leaving->directory();
+        rig.links.push_back(view);
+        rig.presence->refresh();
+        REQUIRE(rig.observersMade == 0);
+
+        auto const handOff = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 3 });
+        rig.links.pop_back();
+        rig.presence->linkSetChanged();
+
+        auto const during = rig.section(Starfive);
+        REQUIRE(during.has_value());
+        CHECK(during->state == DaemonLinkState::Connected);
+        CHECK(during->instance == view.instance);
+        CHECK(during->directory == view.directory);
+        CHECK(during->feed == SectionFeed::Observer);
+        rig.presence->connect(Starfive, WorkspaceId { 1 });
+        CHECK(rig.observersMade == 0);
+
+        rig.presence->giveBack(Starfive, handOff, std::move(leaving));
+        CHECK(rig.observersMade == 0);
+    }
+}
+
+TEST_CASE("DaemonPresence: a give-back of nothing clears its own hand-over only", "[presence][adopt]")
+{
+    // A daemon left, rejoined and left again before the first connection came back: the first give-back
+    // leaves the second hand-over standing.
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.links.push_back(windowOn(Starfive));
+    rig.presence->refresh();
+    auto const first = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 3 });
+    auto const second = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 4 });
+    rig.links.pop_back();
+    rig.presence->linkSetChanged();
+
+    rig.presence->giveBack(Starfive, first, nullptr);
+    CHECK(rig.observersMade == 0);
+
+    rig.presence->giveBack(Starfive, second, nullptr);
+    CHECK(rig.observersMade == 1);
+}
+
+TEST_CASE("DaemonPresence: a link stopping after its hand-over was done dials nothing", "[presence][adopt]")
+{
+    // As the application quits: the window that jumped to the daemon has its adopted link attached, and its
+    // stop tells the give-back nothing. Nothing is left to observe the daemon for: the quit dials nothing.
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
+    auto adoption = rig.presence->adoptObserver(Starfive, {});
+    REQUIRE(adoption.controller != nullptr);
+    rig.links.push_back(windowOn(Starfive, adoption.controller.get()));
+    rig.presence->linkChanged();
+    REQUIRE(rig.observersMade == 1);
+
+    adoption.controller->stop();
+    rig.links.pop_back();
+    rig.presence->giveBack(Starfive, adoption.handOff, nullptr);
+
+    CHECK(rig.observersMade == 1);
+}
+
+TEST_CASE("DaemonPresence: once shut down, a give-back dials nothing", "[presence][adopt]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.links.push_back(windowOn(Starfive));
+    rig.presence->refresh();
+    auto const handOff = rig.presence->expectGiveBack(Starfive, contour::remote::DaemonLinkId { 3 });
+    rig.links.pop_back();
+
+    rig.presence->shutdown();
+    rig.presence->giveBack(Starfive, handOff, nullptr);
+
+    CHECK(rig.observersMade == 0);
+}
+
+TEST_CASE("DaemonPresence: observers are built to answer switch requests", "[presence][adopt]")
+{
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto config = controllerConfig(daemon.endpoint(), timeline, ControllerOptions {});
+    config.switchRequests = contour::remote::NativeController::SwitchRequests::Declined;
+    auto const backoff = vthost::client::BackoffSchedule { .first = 10ms, .ceiling = 50ms };
+
+    auto const observer = contour::remote::observerConfigOf(std::move(config), backoff);
+
+    // A daemon never asks an observer to switch; a window that adopts it must answer.
+    CHECK(observer.switchRequests == contour::remote::NativeController::SwitchRequests::Answered);
+    CHECK(observer.role == vthost::proto::ConnectionRole::Observe);
+    CHECK(observer.resumeFallback == contour::remote::NativeController::ResumeFallback::Nothing);
+    CHECK(observer.backoff.first == backoff.first);
 }

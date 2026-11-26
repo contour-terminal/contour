@@ -153,10 +153,7 @@ namespace
         ActionCategory { .name = "FilterWorkspaces", .category = CommandCategory::View },
         ActionCategory { .name = "ToggleSidebarNeedsMe", .category = CommandCategory::View },
         ActionCategory { .name = "JumpToNextAttention", .category = CommandCategory::Window },
-        // Hidden while the sidebar's jumps report nothing pending (ISidebarHost::pendingJump()): it would end
-        // nothing.
-        ActionCategory {
-            .name = "CancelSwitch", .category = CommandCategory::Window, .palette = PaletteListing::Hidden },
+        ActionCategory { .name = "CancelSwitch", .category = CommandCategory::Window },
         ActionCategory { .name = "MarkSeen", .category = CommandCategory::Window },
         ActionCategory { .name = "RenameWorkspace", .category = CommandCategory::Window },
         ActionCategory { .name = "MoveWorkspaceUp", .category = CommandCategory::Window },
@@ -169,6 +166,10 @@ namespace
         ActionCategory { .name = "MoveToTab", .category = CommandCategory::Pane },
         ActionCategory { .name = "MoveToNewTab", .category = CommandCategory::Pane },
         ActionCategory { .name = "MoveToNewWorkspace", .category = CommandCategory::Pane },
+        ActionCategory { .name = "OpenInNewWindow", .category = CommandCategory::Window },
+        ActionCategory { .name = "ConnectDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "StartDaemon", .category = CommandCategory::Daemons },
+        ActionCategory { .name = "RemoveDaemon", .category = CommandCategory::Daemons },
         ActionCategory { .name = "SwitchToWorkspace", .category = CommandCategory::Daemons },
         ActionCategory { .name = "OpenWorkspace", .category = CommandCategory::Daemons },
         ActionCategory { .name = "CycleWorkspace", .category = CommandCategory::Daemons },
@@ -227,8 +228,7 @@ namespace
     {
         for (auto const& binding: bindings)
             for (auto const& action: binding.binding)
-                if (paletteListing(action) == PaletteListing::Listed)
-                    target.push_back(makeCommand(action));
+                target.push_back(makeCommand(action));
     }
 } // namespace
 
@@ -240,11 +240,6 @@ std::span<ActionCategory const> actionCategories() noexcept
 CommandCategory commandCategory(actions::Action const& action) noexcept
 {
     return ActionCategories[action.index()].category;
-}
-
-PaletteListing paletteListing(actions::Action const& action) noexcept
-{
-    return ActionCategories[action.index()].palette;
 }
 
 std::vector<Command> collectCommands(std::span<CommandSource const* const> sources)
@@ -280,8 +275,7 @@ std::vector<Command> ActionCommandSource::commands() const
         // A parameterized action's prototype names no profile / no tab / no characters, so running it
         // would do nothing (or something arbitrary). Its concrete instances arrive via the other
         // sources, which know what argument to give it.
-        if (actions::isParameterized(entry.prototype)
-            || paletteListing(entry.prototype) == PaletteListing::Hidden)
+        if (actions::isParameterized(entry.prototype))
             continue;
         result.push_back(makeCommand(entry.prototype));
     }

@@ -549,8 +549,11 @@ class NativeClient final
     ///         nothing was written, unless the daemon shares Capability::DaemonFollow.
     /// @param directoryFrom The session of the pane asking for a new workspace (@p workspace 0): the new
     ///        workspace's first shell starts in its working directory. Ignored for any other workspace.
+    /// @param creation The token of a promotion asking for a new workspace (@p workspace 0), which the daemon
+    ///        makes once per token (proto::SelectWorkspace::creationToken). Ignored for any other workspace.
     std::optional<uint64_t> selectWorkspace(uint64_t workspace,
-                                            std::optional<uint64_t> directoryFrom = std::nullopt);
+                                            std::optional<uint64_t> directoryFrom = std::nullopt,
+                                            std::optional<proto::CreationToken> creation = std::nullopt);
 
     /// Tells the daemon whether this connection's window has the user's focus, from which it decides which
     /// window raises for a bell or a notification, and which panes the window shows: a pane a focused window
@@ -574,8 +577,10 @@ class NativeClient final
     /// from then on, and every pane reaches it as a summary. The selection reads as none at once, and a
     /// layout batch the daemon ended before it read the request states no selection here: only the batch
     /// answering it (with Capability::LayoutBatch) and those after it do.
+    /// @param cause Why: a demotion, or the answer to a promotion withdrawn meanwhile, whose workspace the
+    ///        daemon may then take back.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::Observe.
-    [[nodiscard]] Delivery observeOnly();
+    [[nodiscard]] Delivery observeOnly(proto::ObserveCause cause = proto::ObserveCause::Demoted);
 
     /// Asks the daemon to open the first tab of the workspace this connection selects, which holds none (a
     /// launch that named it).

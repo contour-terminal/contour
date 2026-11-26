@@ -218,6 +218,8 @@ class MainWindowControllerMock: public QAbstractListModel
     /// A daemon window's daemon, as the chip names it; empty falls back to the attached host. Says nothing of
     /// what serves the window: that is `daemonHosting`.
     QString daemonName {};
+    /// The daemon a jump from the sidebar connects to, as the chip says it; empty while none is.
+    QString pendingDaemon {};
     /// What serves the window, as TerminalSessionManager::hostingOf() answers it: set by a test beside the
     /// name (setDaemon(), rebindHost() or setHosting()), never worked out from it.
     window::DaemonHosting daemonHosting = window::DaemonHosting::InProcess;
@@ -336,6 +338,8 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::showAbout(): asks the window for its About dialog.
     Q_INVOKABLE void showAbout() { emit aboutRequested(); }
+    /// Mirrors WindowController::cancelSidebarJump(): the sidebar's host is asked to end its jump.
+    Q_INVOKABLE void cancelSidebarJump() { _sidebar.cancelJump(); }
     /// Mirrors WindowController::dropPayloadOf(): nothing here is a node drag.
     Q_INVOKABLE [[nodiscard]] int dropPayloadOf(QString const&) const { return 0; }
     /// Mirrors WindowController::dropZoneAt(): nothing is a drop target here.
@@ -929,6 +933,7 @@ class MainWindowControllerMock: public QAbstractListModel
             .band = band.band,
             .centre = band.centre,
             .sidebar = sidebarWidth() > 0 ? window::SidebarShown::Yes : window::SidebarShown::No,
+            .pendingDaemon = pendingDaemon.toStdString(),
         };
     }
 

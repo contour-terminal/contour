@@ -328,7 +328,7 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 | `FilterWorkspaces` | none | none | Opens the sidebar's filter with the keyboard in it, showing the sidebar first when hidden. |
 | `ToggleSidebarNeedsMe` | none | none | Lists only the rows on the way to a pane that needs you (blocked, failed, or done and not seen), plus the tab shown; again lists everything. Shows the sidebar first when hidden. Also the sidebar's Needs-me control and View ▸ Show Only What Needs Me. |
 | `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
-| `CancelSwitch` | none | none | Ends a jump the sidebar started that is still under way, leaving the window where it was; nothing while none is. It does not end a daemon's connect, which the daemon row's Cancel ends. Not listed in the command palette. |
+| `CancelSwitch` | none | none | Ends a jump the sidebar started that is still under way, leaving the window where it was; nothing while none is. It does not end a daemon's connect, which the daemon row's Cancel ends. |
 | `MarkSeen` | none | none | Marks the active pane's output as seen. |
 | `RenameWorkspace` | none | none | Renames the current workspace inline. |
 | `SetWorkspaceColor` | none | none | Colours the current workspace: `color: '#RRGGBB'` applies that colour; without it, opens the colour picker on the workspace's row in the sidebar. |
@@ -336,6 +336,8 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 | `MoveWorkspaceUp`, `MoveWorkspaceDown` | `Ctrl+Shift+Alt+PageUp` / `PageDown` | `⌃⇧⌘↑` / `⌃⇧⌘↓` | Moves the current workspace one place in the sidebar's list. |
 | `CloseWorkspace` | none | none | Closes the current workspace and everything in it, after asking. The last workspace of an in-process window cannot be closed. |
 | `GoToPane` | none | none | Shows the pane a sidebar row names; a row of the pane menu. |
+| `OpenInNewWindow` | none | none | Opens what a sidebar row names in a window of its own, or raises a window that shows it; a row of every sidebar row's menu (Shift+Return in the sidebar does the same). |
+| `ConnectDaemon`, `StartDaemon`, `RemoveDaemon` | none | none | What a sidebar daemon row's Connect, Start and Remove buttons do; rows of the daemon row's menu. |
 | `MoveTabToWorkspace` | `index:` (1-based, required) | | Moves the current tab into the Nth workspace. |
 
 `NewWorkspace` is listed under [Switching daemons and workspaces](#switching-daemons-and-workspaces); the
