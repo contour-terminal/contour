@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/remote/transport/testing/ChannelStrings.hpp>
 #include <vtextension/wasm/remote/transport/testing/ClosingReceive.hpp>
 #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 #include <vtextension/wasm/testing/Wine.hpp>
