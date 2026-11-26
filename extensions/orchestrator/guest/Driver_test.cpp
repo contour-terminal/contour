@@ -739,7 +739,7 @@ struct Served
     /// Loads the driver and answers its poll.
     void load()
     {
-        driver.emplace(Driver::load(host, host.ids, configJson(), info, observer));
+        driver.emplace(Driver::load(host, host.ids, config, info, observer));
         while (host.completeRunning() > 0)
             driver->update(Hint::Procs);
     }
@@ -767,7 +767,8 @@ struct Served
 
     FakeGuestHost host;
     RecordingObserver observer;
-    HostInfo info = hostInfo(); ///< What the host resolved, handed to load().
+    HostInfo info = hostInfo();        ///< What the host resolved, handed to load().
+    std::string config = configJson(); ///< The configuration handed to load().
     std::optional<Driver> driver;
 };
 
@@ -2097,3 +2098,30 @@ TEST_CASE("a failed write drops nothing else", "[guest]")
 }
 
 // }}}
+
+TEST_CASE("an automatic start is stepped as a dispatch with a fresh session, with no tab served",
+          "[guest][driver][automation]")
+{
+    auto served = Served {};
+    served.config = configJson();
+    served.config.insert(served.config.rfind('}'),
+                         R"(, "automation": { "enabled": true,
+                               "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] } )");
+    served.host.answers["gh-prs"] = Answer {
+        .exitCode = 0,
+        .stdoutText =
+            R"([[7,"change 7","https://github.com/contour-terminal/contour/pull/7","feature-7","master",)"
+            R"(false,false,"",[],[["CheckRun","build",null,"COMPLETED","FAILURE",null]],"MERGEABLE",)"
+            R"("2026-11-13T12:00:00Z"]])"
+    };
+    served.load();
+
+    CHECK(served.driver->servedTabs() == 0);
+    auto const dispatched = served.observer.inputsOf<Dispatch>();
+    REQUIRE(dispatched.size() == 1);
+    CHECK(dispatched.front().origin == RunOrigin::Rule);
+    CHECK(dispatched.front().item == ItemRef { ChangeRequestRef { 7 } });
+    CHECK(dispatched.front().session == "00000001-0000-4000-8000-000000000000");
+    CHECK(dispatched.front().wallMs == served.host.clock.wallMs);
+    CHECK(served.host.startsOf("git-fetch") == 1);
+}
