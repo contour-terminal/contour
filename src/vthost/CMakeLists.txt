@@ -127,6 +127,8 @@ add_library(vthost STATIC
     ServiceControl_launchd.hpp
     ServiceControl_systemd.cpp
     ServiceControl_systemd.hpp
+    AttentionLedger.cpp
+    AttentionLedger.hpp
     Linger.cpp
     Linger.hpp
     ServiceControl_win32.cpp
@@ -409,6 +411,7 @@ if(VTHOST_TESTING)
         PduPump_test.cpp
         ServiceControl_launchd_test.cpp
         ServiceControl_systemd_test.cpp
+        AttentionLedger_test.cpp
         Linger_test.cpp
         ServiceControl_test.cpp
         SocketFileListener_test.cpp

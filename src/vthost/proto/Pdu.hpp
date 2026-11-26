@@ -106,6 +106,8 @@ enum class PduType : uint8_t
     Goodbye = 60,
     OpenFirstTab = 61,
     SetWorkspaceColor = 62,
+    PaneAttentionState = 63,
+    MarkSeen = 64,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1710,9 +1712,16 @@ struct SelectWorkspace
 
 /// Client→server (Capability::DaemonFollow): the window gained or lost focus. The daemon routes bells,
 /// clipboard writes and switch requests by the most recently focused window.
+///
+/// With Capability::DaemonAttention it also names the panes the window shows, whose output the daemon then
+/// does not flag for attention. A sender states them only to a daemon sharing the capability; the encoder
+/// always writes their count after the focus, which an older daemon, reading the focus alone, leaves unread.
 struct ReportFocus
 {
     WindowFocus focus = WindowFocus::Unfocused; ///< The window's focus now.
+    /// The sessions of the panes the window shows. Appended after @ref focus: a body from a sender from
+    /// before the field ends before it and reads as none.
+    std::vector<uint64_t> shownSessions = {};
     bool operator==(ReportFocus const&) const = default;
 };
 
@@ -1910,6 +1919,46 @@ struct SetWorkspaceColor
     bool operator==(SetWorkspaceColor const&) const = default;
 };
 
+/// The serials a window has seen of one pane's attention: every flag raised at or before them is
+/// acknowledged. The daemon's ledger and MarkSeen speak it alike.
+struct SeenSerials
+{
+    uint64_t activity = 0;         ///< The output serial seen; 0 acknowledges none.
+    uint64_t bell = 0;             ///< The bell serial seen; 0 acknowledges none.
+    uint64_t finished = 0;         ///< The finished-command serial seen; 0 acknowledges none.
+    uint64_t statusGeneration = 0; ///< The status generation seen.
+    bool operator==(SeenSerials const&) const = default;
+};
+
+/// Server→client (Capability::DaemonAttention): what one pane raised for the user's attention, as the
+/// daemon's attention ledger states it, in full each time it changes. Each flag carries the ledger serial
+/// that raised it last, which a window hands back in MarkSeen once it showed the pane.
+struct PaneAttentionState
+{
+    uint64_t session = 0;                           ///< The pane's session.
+    OutputActivity activity = OutputActivity::None; ///< Whether the pane printed output not yet seen.
+    uint64_t activitySerial = 0;      ///< The serial that raised @ref activity last; 0 for none.
+    PaneBell bell = PaneBell::Silent; ///< Whether the pane rang a bell not yet seen.
+    uint64_t bellSerial = 0;          ///< The serial of the latest bell; 0 for none.
+    /// The command that finished unseen, if one did.
+    std::optional<FinishedCommand> finished = std::nullopt;
+    uint64_t finishedSerial = 0; ///< The serial of the latest finish; 0 for none.
+    /// When @ref finished finished, in milliseconds since the Unix epoch (an svarint on the wire).
+    std::optional<int64_t> finishedAtUnixMs = std::nullopt;
+    uint64_t seenStatusGeneration = 0; ///< The highest status generation a window reported seen.
+    bool operator==(PaneAttentionState const&) const = default;
+};
+
+/// Client→server (Capability::DaemonAttention): the window showed a pane and saw its attention up to these
+/// serials. The daemon clears what they cover and tells every window sharing the capability. An unknown
+/// session changes nothing; there is no reply.
+struct MarkSeen
+{
+    uint64_t session = 0;  ///< The pane's session.
+    SeenSerials seen = {}; ///< What the window saw.
+    bool operator==(MarkSeen const&) const = default;
+};
+
 /// @param summary A pane's summary.
 /// @return Whether it carries something a window raises for: a finished command, a bell, a notification.
 [[nodiscard]] inline bool carriesRaise(PaneSummary const& summary) noexcept
@@ -2071,7 +2120,9 @@ using DecodedPdu = std::variant<Invalid,
                                 CloseWorkspace,
                                 Goodbye,
                                 OpenFirstTab,
-                                SetWorkspaceColor>;
+                                SetWorkspaceColor,
+                                PaneAttentionState,
+                                MarkSeen>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -60,12 +60,14 @@
 #include <vtcontrol/Uuid.hpp>
 // Part of this header's contract, not an implementation detail: the settings a host is constructed
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
+#include <vthost/AttentionLedger.hpp>
 #include <vthost/CarriedDelivery.hpp>
 #include <vthost/CellPixelBounds.hpp>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/CommandInterruption.hpp>
 #include <vthost/ConnectionId.hpp>
 #include <vthost/ExtensionHosting.hpp>
+#include <vthost/FlushPolicy.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PermissionWire.hpp>
@@ -172,6 +174,10 @@ struct CommandBlockFinishedSignal
 {
     vtbackend::CommandBlockSummary summary; ///< What the terminal announced.
 };
+
+/// @param block A finished command block, as its terminal announced it.
+/// @return How it finished, as a window is told: its exit code, how long it ran, and its command line.
+[[nodiscard]] proto::FinishedCommand finishedCommandOf(vtbackend::CommandBlockSummary const& block);
 
 /// What a command block's record says changed: it started, finished, or a newer prompt superseded it.
 struct CommandBlockChangedSignal
@@ -337,6 +343,12 @@ class SessionStreamEvents
 
     /// @p session rang the bell (BEL).
     virtual void sessionBell(vtworkspace::SessionId /*session*/) {}
+
+    /// What the host's attention ledger states of a pane changed: it raised something, or a window saw it.
+    /// Fires on the loop thread, once per change.
+    /// @param session The pane's session.
+    /// @param attention What the ledger states of it now.
+    virtual void paneAttentionChanged(uint64_t /*session*/, PaneAttention const& /*attention*/) {}
 
     /// @p session raised @p signal: a command block finished or changed, its title or working directory
     /// changed. Fires on the loop thread, after the parser thread raised it; the session may have printed
@@ -1160,6 +1172,9 @@ struct SessionHostConfig
     /// attach does not take it (@see SessionHost::shownForAttach). The default is proto::ReconnectGrace: the
     /// longest wait between two reconnect attempts of a client plus the time one may take to attach.
     std::chrono::milliseconds reconnectGrace = proto::ReconnectGrace;
+    /// The least time between two output marks of a pane in the attention ledger: a pane printing without
+    /// pause raises once, not once per screen update. The host's loop clock times it.
+    core::platform::SteadyDuration activityMarkInterval = FlushPolicy {}.activityMarkInterval;
 };
 
 /// One session of a quiesced host.
@@ -1451,12 +1466,46 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param client The attached client; one never counted (@see noteClientAttached) is ignored.
     void noteSelected(SessionStreamEvents const& client);
 
-    /// Records that the window on @p client reported its focus. Gaining focus stamps the window with the
-    /// next value of the host's counter, which the routing decisions order windows by; the raise role is
+    /// Records that the window on @p client reported its focus. Gaining focus -- a Focused report after none
+    /// or after an Unfocused one; a restated Focused is no move -- stamps the window with the next value of
+    /// the host's counter, which the routing decisions order windows by; the raise role is
     /// then settled again.
     /// @param client The attached client; one never counted (@see noteClientAttached) is ignored.
     /// @param focus The window's focus now.
     void noteFocus(SessionStreamEvents const& client, proto::WindowFocus focus);
+
+    /// Records which panes the window on @p client shows and whether it has focus, as a connection sharing
+    /// Capability::DaemonAttention reports it: a pane a focused window shows is watched (@see isWatched),
+    /// and one that becomes watched is cleared in the attention ledger at once. The report replaces the
+    /// connection's previous one, and is dropped when the connection detaches. Unlike noteFocus() it stamps
+    /// nothing: the raise role is left to noteFocus().
+    /// @param client The reporting connection.
+    /// @param focus The window's focus now.
+    /// @param shownSessions The sessions of the panes the window shows.
+    void noteShown(ConnectionId const& client,
+                   proto::WindowFocus focus,
+                   std::span<uint64_t const> shownSessions);
+
+    /// @param session A pane's session.
+    /// @return Whether some connection's last report (@see noteShown) is Focused and lists @p session: what
+    ///         the pane raises then marks nothing, as the user is looking at it.
+    [[nodiscard]] bool isWatched(uint64_t session) const;
+
+    /// Acknowledges what a window saw of @p session, as its MarkSeen says, and tells every stream observer
+    /// what the ledger states of it then (@see SessionStreamEvents::paneAttentionChanged).
+    /// @param session The pane's session; one this host does not hold changes nothing.
+    /// @param seen The serials and status generation the window saw.
+    /// @return Changed when the ledger's state of the pane changed.
+    AttentionChange markPaneSeen(uint64_t session, SeenSerials seen);
+
+    /// @return What the attention ledger states of every pane, by ascending session.
+    [[nodiscard]] std::vector<std::pair<uint64_t, PaneAttention>> paneAttention() const
+    {
+        return _attention.entries();
+    }
+
+    /// @return The last serial the attention ledger handed out; 0 before any.
+    [[nodiscard]] uint64_t attentionLastSerial() const noexcept { return _attention.lastSerial(); }
 
     /// @param session A hosted session.
     /// @return The connection a clipboard write of @p session goes to: the one focused last among those
@@ -2587,8 +2636,55 @@ class SessionHost final: public vtworkspace::ModelEvents
     void settleRaiseRole();
     /// The value the last focus report was stamped with. @see noteFocus
     uint64_t _focusCounter = 0;
+    /// What each pane raised for the user's attention, and what a window saw of it. Loop thread.
+    AttentionLedger _attention;
+    /// One connection's last report of the panes its window shows. @see noteShown
+    struct ShownReport
+    {
+        ConnectionId client;                                      ///< The reporting connection.
+        proto::WindowFocus focus = proto::WindowFocus::Unfocused; ///< Its window's focus.
+        std::vector<uint64_t> sessions;                           ///< The sessions its window shows.
+    };
+    /// The last report of each connection that made one. Loop thread.
+    std::vector<ShownReport> _shownReports;
+    /// How each pane's output was last marked in the attention ledger, by session. Loop thread. @see
+    /// noteOutputAttention
+    std::unordered_map<uint64_t, ActivityMark> _outputMarks;
+    core::platform::SteadyDuration _activityMarkInterval; ///< @see SessionHostConfig::activityMarkInterval
+    /// The trailing mark of the output the pace held back, armed for the earliest pane due. Loop thread.
+    std::optional<core::net::DeadlineTimer> _trailingOutputMark;
+    /// When _trailingOutputMark is due, while it is armed.
+    std::optional<core::platform::SteadyTimePoint> _trailingOutputMarkDue;
+    /// Marks @p session's output in the attention ledger: only output to the main display, at most once per
+    /// activity mark interval, and nothing while the pane is watched. Output the interval holds back is
+    /// marked as it ends (armTrailingOutputMark), so the last of a burst is never lost to a clear between.
+    void noteOutputAttention(vtworkspace::SessionId session);
+    /// Arms the trailing output mark for the earliest pane whose held output is due, unless it is armed as
+    /// early already.
+    void armTrailingOutputMark();
+    /// What the trailing output mark does: marks the held output of every pane that is due -- of a watched
+    /// one it is seen, and dropped -- and re-arms for the rest.
+    /// @param host The SessionHost.
+    static void markTrailingOutput(void* host);
+    /// Notes a bell of @p session in the attention ledger, unless the pane is watched.
+    void noteBellAttention(vtworkspace::SessionId session);
+    /// Notes a finished command of @p session in the attention ledger, unless the pane is watched.
+    void noteFinishedAttention(vtworkspace::SessionId session, vtbackend::CommandBlockSummary const& block);
+    /// A program-status change of @p session: seen at once while the pane is watched.
+    void noteStatusAttention(vtworkspace::SessionId session);
+    /// Clears everything @p session raised, its program status up to now included, as a window that shows it
+    /// sees it.
+    void clearAttention(uint64_t session);
+    /// @param session A hosted pane's session.
+    /// @return The newest generation among its program-status records; 0 for none.
+    [[nodiscard]] uint64_t statusGenerationOf(vtworkspace::SessionId session);
+    /// Tells every stream observer what the ledger states of @p session, when @p change says it changed.
+    void tellAttention(uint64_t session, AttentionChange change);
     /// The stamp of each attached client's last `Focused` report; absent for one never focused.
     std::unordered_map<SessionStreamEvents const*, uint64_t> _focusSerials;
+    /// The attached clients whose last report said they are focused: a report that restates
+    /// it stamps nothing.
+    std::unordered_set<SessionStreamEvents const*> _focusedClients;
     /// Stamps @p workspace as left now; 0, a connection that selected none, is ignored. @see leftAt
     void noteLeft(uint64_t workspace);
     /// The workspace each attached client selected when the host last heard of it. @see noteSelected

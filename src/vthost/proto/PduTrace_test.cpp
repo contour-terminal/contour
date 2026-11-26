@@ -411,6 +411,33 @@ TEST_CASE("the trace shows a workspace's colour, set and cleared", "[vthost][pro
     CHECK(summarize(DecodedPdu { SetWorkspaceColor { .workspace = 3 } }) == "workspace=3 color=none");
 }
 
+TEST_CASE("the trace shows a pane's attention and what a window saw, never a command line",
+          "[vthost][proto][trace][daemon-attention]")
+{
+    CHECK(toString(PduType::PaneAttentionState) == "PaneAttentionState");
+    CHECK(toString(PduType::MarkSeen) == "MarkSeen");
+    CHECK(summarize(DecodedPdu { PaneAttentionState { .session = 4 } })
+          == "session=4 activity=none bell=silent serials=0/0/0 status-seen=0");
+    CHECK(summarize(DecodedPdu {
+              PaneAttentionState { .session = 4,
+                                   .activity = OutputActivity::Output,
+                                   .activitySerial = 1,
+                                   .bell = PaneBell::Rang,
+                                   .bellSerial = 2,
+                                   .finished = FinishedCommand { .exitCode = 1, .commandLine = "secret" },
+                                   .finishedSerial = 3,
+                                   .finishedAtUnixMs = 1'790'000'000'000,
+                                   .seenStatusGeneration = 5 } })
+          == "session=4 activity=output bell=rang finished=exit:1 at=1790000000000 serials=1/2/3 "
+             "status-seen=5");
+    CHECK(summarize(DecodedPdu { MarkSeen {
+              .session = 4,
+              .seen = SeenSerials { .activity = 1, .bell = 2, .finished = 3, .statusGeneration = 5 } } })
+          == "session=4 seen=1/2/3 status-seen=5");
+    CHECK(summarize(DecodedPdu { ReportFocus { .focus = WindowFocus::Focused, .shownSessions = { 4, 9 } } })
+          == "focus=focused shown=2");
+}
+
 TEST_CASE("a ControlRequest's trace names the method but not the params", "[vthost][proto][control]")
 {
     auto const line =

@@ -76,6 +76,11 @@ namespace
         EnumName { .value = OutputActivity::Output, .name = "output" },
     };
 
+    constexpr auto BellNames = std::array {
+        EnumName { .value = PaneBell::Silent, .name = "silent" },
+        EnumName { .value = PaneBell::Rang, .name = "rang" },
+    };
+
     /// @return @p finished as ` finished=exit:0,ms:120`, with only the numbers it states -- never the command
     ///         line, which is payload.
     [[nodiscard]] std::string formatFinished(std::optional<FinishedCommand> const& finished)
@@ -665,7 +670,12 @@ namespace
         TraceRow { PduType::ReportFocus,
                    "ReportFocus",
                    +[](DecodedPdu const& pdu) {
-                       return std::format("focus={}", nameIn(FocusNames, std::get<ReportFocus>(pdu).focus));
+                       auto const& value = std::get<ReportFocus>(pdu);
+                       return std::format("focus={}{}",
+                                          nameIn(FocusNames, value.focus),
+                                          value.shownSessions.empty()
+                                              ? std::string {}
+                                              : std::format(" shown={}", value.shownSessions.size()));
                    } },
         TraceRow { PduType::NotifyRole,
                    "NotifyRole",
@@ -731,6 +741,35 @@ namespace
                        auto const& value = std::get<SetWorkspaceColor>(pdu);
                        return std::format(
                            "workspace={} {}", value.workspace, formatWorkspaceColor(value.color));
+                   } },
+        TraceRow { PduType::PaneAttentionState,
+                   "PaneAttentionState",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<PaneAttentionState>(pdu);
+                       // The serials run activity/bell/finished, as MarkSeen hands them back.
+                       return std::format(
+                           "session={} activity={} bell={}{}{} serials={}/{}/{} status-seen={}",
+                           value.session,
+                           nameIn(ActivityNames, value.activity),
+                           nameIn(BellNames, value.bell),
+                           formatFinished(value.finished),
+                           value.finishedAtUnixMs ? std::format(" at={}", *value.finishedAtUnixMs)
+                                                  : std::string {},
+                           value.activitySerial,
+                           value.bellSerial,
+                           value.finishedSerial,
+                           value.seenStatusGeneration);
+                   } },
+        TraceRow { PduType::MarkSeen,
+                   "MarkSeen",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MarkSeen>(pdu);
+                       return std::format("session={} seen={}/{}/{} status-seen={}",
+                                          value.session,
+                                          value.seen.activity,
+                                          value.seen.bell,
+                                          value.seen.finished,
+                                          value.seen.statusGeneration);
                    } },
     };
 

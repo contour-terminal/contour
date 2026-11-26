@@ -2880,6 +2880,143 @@ TEST_CASE("SetWorkspaceColor is a PDU of tag 62 that round-trips a colour and it
     }
 }
 
+TEST_CASE("PaneAttentionState is a PDU of tag 63 that round-trips with and without a finished command",
+          "[vthost][pdu][daemon-attention]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::PaneAttentionState) == 63);
+    auto const quiet = PaneAttentionState { .session = 4, .finishedSerial = 2, .seenStatusGeneration = 1 };
+    CHECK(roundTrip(DecodedPdu { quiet }) == DecodedPdu { quiet });
+    auto const raised = PaneAttentionState {
+        .session = 4,
+        .activity = OutputActivity::Output,
+        .activitySerial = 300,
+        .bell = PaneBell::Rang,
+        .bellSerial = 301,
+        .finished = FinishedCommand { .exitCode = -1, .durationMs = 1500, .commandLine = "make" },
+        .finishedSerial = 302,
+        .finishedAtUnixMs = 1'790'000'000'000,
+        .seenStatusGeneration = 7,
+    };
+    CHECK(roundTrip(DecodedPdu { raised }) == DecodedPdu { raised });
+    // A time before the epoch is zig-zagged like any other svarint.
+    auto const early = PaneAttentionState { .session = 4, .finishedAtUnixMs = -5 };
+    CHECK(roundTrip(DecodedPdu { early }) == DecodedPdu { early });
+}
+
+TEST_CASE("PaneAttentionState's body: the serials, then a presence mask for the finish and its time",
+          "[vthost][pdu][daemon-attention]")
+{
+    auto body = Writer {};
+    body.varint(4);  // session
+    body.u8(1);      // activity: output
+    body.varint(10); // activity serial
+    body.u8(1);      // bell: rang
+    body.varint(11); // bell serial
+    body.varint(12); // finished serial
+    body.varint(3);  // seen status generation
+    body.u8(0b11);   // finished, finished at
+    body.u8(0b01);   // the finish states its exit code
+    body.svarint(2); // exit code
+    body.string("ls");
+    body.svarint(-7); // finished at
+    auto const expected = PaneAttentionState {
+        .session = 4,
+        .activity = OutputActivity::Output,
+        .activitySerial = 10,
+        .bell = PaneBell::Rang,
+        .bellSerial = 11,
+        .finished = FinishedCommand { .exitCode = 2, .commandLine = "ls" },
+        .finishedSerial = 12,
+        .finishedAtUnixMs = -7,
+        .seenStatusGeneration = 3,
+    };
+    CHECK(decodeAs<PaneAttentionState>(frameOf(PduType::PaneAttentionState, body.view())) == expected);
+    CHECK(std::ranges::equal(bodyOf(DecodedPdu { expected }), body.view()));
+    SECTION("appended bytes are ignored")
+    {
+        body.u8(9);
+        CHECK(decodeAs<PaneAttentionState>(frameOf(PduType::PaneAttentionState, body.view())) == expected);
+    }
+}
+
+TEST_CASE("a truncated PaneAttentionState is malformed", "[vthost][pdu][daemon-attention]")
+{
+    auto const whole = bodyOf(DecodedPdu { PaneAttentionState {
+        .session = 4,
+        .finished = FinishedCommand { .exitCode = 0, .commandLine = "make" },
+        .finishedSerial = 2,
+        .finishedAtUnixMs = 1'790'000'000'000,
+    } });
+    // Every cut short of the whole body leaves a field it announced unread: a decode error, never a state.
+    for (auto const length: std::views::iota(std::size_t { 0 }, whole.size()))
+    {
+        INFO("length " << length);
+        auto const cut = std::span { whole }.first(length);
+        CHECK_FALSE(decodePdu(frameOf(PduType::PaneAttentionState, cut)).has_value());
+    }
+}
+
+TEST_CASE("MarkSeen is a PDU of tag 64 that round-trips the serials a window saw",
+          "[vthost][pdu][daemon-attention]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::MarkSeen) == 64);
+    auto const seen =
+        MarkSeen { .session = 9,
+                   .seen = SeenSerials { .activity = 1, .bell = 200, .finished = 3, .statusGeneration = 4 } };
+    CHECK(roundTrip(DecodedPdu { seen }) == DecodedPdu { seen });
+    auto body = Writer {};
+    for (auto const value: { 9, 1, 200, 3, 4 })
+        body.varint(static_cast<uint64_t>(value));
+    CHECK(decodeAs<MarkSeen>(frameOf(PduType::MarkSeen, body.view())) == seen);
+    SECTION("a body cut short is malformed")
+    {
+        auto cut = Writer {};
+        for (auto const value: { 9, 1, 200, 3 })
+            cut.varint(static_cast<uint64_t>(value));
+        CHECK_FALSE(decodePdu(frameOf(PduType::MarkSeen, cut.view())).has_value());
+    }
+}
+
+TEST_CASE("a ReportFocus without shown sessions decodes as before", "[vthost][pdu][daemon-attention]")
+{
+    // The body an older client sends: the focus alone.
+    auto older = Writer {};
+    older.u8(std::to_underlying(WindowFocus::Focused));
+    auto const decoded = decodeAs<ReportFocus>(frameOf(PduType::ReportFocus, older.view()));
+    CHECK(decoded.focus == WindowFocus::Focused);
+    CHECK(decoded.shownSessions.empty());
+
+    SECTION("the shown sessions follow the focus as a count and session ids")
+    {
+        auto const report = ReportFocus { .focus = WindowFocus::Focused, .shownSessions = { 4, 300 } };
+        CHECK(roundTrip(DecodedPdu { report }) == DecodedPdu { report });
+        auto body = Writer {};
+        body.u8(std::to_underlying(WindowFocus::Focused));
+        body.varint(2);
+        body.varint(4);
+        body.varint(300);
+        CHECK(std::ranges::equal(bodyOf(DecodedPdu { report }), body.view()));
+        // An older daemon reads the focus alone: the sessions are bytes it leaves unread.
+        CHECK(decodeAs<ReportFocus>(frameOf(PduType::ReportFocus, body.view())) == report);
+    }
+    SECTION("none shown is a count of 0, which reads as before")
+    {
+        auto const report = ReportFocus { .focus = WindowFocus::Unfocused };
+        auto body = Writer {};
+        body.u8(std::to_underlying(WindowFocus::Unfocused));
+        body.varint(0);
+        CHECK(std::ranges::equal(bodyOf(DecodedPdu { report }), body.view()));
+    }
+    SECTION("a count announcing more sessions than follow is malformed")
+    {
+        auto body = Writer {};
+        body.u8(std::to_underlying(WindowFocus::Focused));
+        body.varint(3);
+        body.varint(4);
+        CHECK_FALSE(decodePdu(frameOf(PduType::ReportFocus, body.view())).has_value());
+    }
+}
+
 TEST_CASE("a SwitchRequest from a daemon that states no deadline reads as stating none",
           "[vthost][pdu][workspace-follow]")
 {

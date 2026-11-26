@@ -170,6 +170,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `LaunchFirstTab` | 31 | `launch-first-tab` | `OpenFirstTab` (tag 61, client->server, body: the workspace id the client saw empty): a launch that named a workspace holding no tab (`contour --workspace N`) asks the daemon, once its layout shows the workspace empty, to open the first tab there (only if that workspace still exists, is still selected by the connection and still holds none), in the directory the hello stated; without it (an older daemon) the launch waits for a tab, as it did, and the hello is the same `Select` either way |
 | `Names` | 32 | `names` | The peer speaks the control API's `name` spelling: `name` keys, `object.rename`, `object.renamed`, `toName`. Without it the other end speaks the old one to it (`label` keys, `object.setLabel`, `workspace.rename`, `workspace.labelChanged`, `toLabel`) through vtcontrol's legacy spelling table (`LegacySpelling.hpp`); removed before 0.9.0 |
 | `WorkspaceColor` | 33 | `workspace-color` | `SetWorkspaceColor` (tag 62, client->server, body: the workspace id, a has-colour byte and a `u32` `0xRRGGBB`, 0 when cleared) sets or clears a workspace's colour in the daemon's model, and `WorkspaceMeta`'s colour field (the fourth presence bit, after `position`) states it: in full and as a delta on each change. Without it (an older daemon) a client sends nothing and keeps the workspace uncoloured; an older client is stated no colour, so its `WorkspaceMeta` bytes are what they were |
+| `DaemonAttention` | 34 | `daemon-attention` | The daemon owns the panes' attention (`AttentionLedger`): `PaneAttentionState` (tag 63, server->client) states a pane's flags in full -- output, bell, a finished command and its time (`finishedAtUnixMs`, an svarint) -- each with the ledger serial that raised it last, and the highest status generation a window saw; `MarkSeen` (tag 64, client->server, body: the session and the activity, bell, finished and status-generation serials seen) clears the flags those serials cover. `ReportFocus` gains the sessions of the panes the window shows, after the focus: a count, always written (0 when none), and the session ids, which a client states only to a daemon sharing the capability and an older daemon leaves unread. Without it a client keeps attention to itself, as before |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -439,7 +440,8 @@ publishes the control event `object.renamed`, for workspaces, tabs and panes ali
 <a id="workspace-follow-and-switch"></a>
 **Workspace selection and switch.** `SelectWorkspace` (client->server, gated on `Capability::DaemonFollow`) names
 the one daemon workspace the connection displays in full; `0` asks the daemon to create a workspace and select
-it. `ReportFocus` (client->server, same gate) states whether the window has the user's focus, and `NotifyRole`
+it. `ReportFocus` (client->server, same gate) states whether the window has the user's focus (and, with
+`Capability::DaemonAttention`, which panes it shows), and `NotifyRole`
 (server->client) tells it whether it is the raise holder (see above). `PaneSummary` (server->client) carries
 what changed about a pane of an unselected workspace -- and, for every pane, its working directory as shown,
 never home-abbreviated, with a locality byte (appended after the notifications, so an older client leaves it

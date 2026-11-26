@@ -603,3 +603,49 @@ TEST_CASE("a workspace's colour cut short in a handover image is refused", "[han
         CHECK(decodeHandover(imageWithWorkspaceColorField(field)).error() == HandoverError::Truncated);
     }
 }
+
+TEST_CASE("the attention ledger round-trips through the handover image", "[handover][daemon-attention]")
+{
+    using vthost::proto::FinishedCommand;
+    using vthost::proto::OutputActivity;
+    using vthost::proto::PaneBell;
+    auto image = sampleImage();
+    // Before the epoch too: a wall clock set back is still an instant the image keeps.
+    auto const finishedAt =
+        std::chrono::system_clock::time_point { std::chrono::milliseconds { 1'790'000'000'123 } };
+    image.attention = HandoverAttention {
+        .lastSerial = 41,
+        .panes = {
+            HandoverPaneAttention { .session = 3, .attention = PaneAttention {} },
+            HandoverPaneAttention {
+                .session = 5,
+                .attention = PaneAttention { .activity = OutputActivity::Output,
+                                             .activitySerial = 38,
+                                             .bell = PaneBell::Rang,
+                                             .bellSerial = 40,
+                                             .finished = FinishedCommand { .exitCode = -2,
+                                                                           .durationMs = 1500,
+                                                                           .commandLine = "make all" },
+                                             .finishedSerial = 41,
+                                             .finishedAt = finishedAt,
+                                             .seenStatusGeneration = 9 } },
+            HandoverPaneAttention {
+                .session = 8,
+                .attention = PaneAttention { .finished = FinishedCommand {},
+                                             .finishedSerial = 12,
+                                             .finishedAt = std::chrono::system_clock::time_point {
+                                                 std::chrono::seconds { -5 } } } },
+        },
+    };
+
+    auto const decoded = decodeHandover(encodeHandover(image));
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->attention == image.attention);
+
+    // A host that raised nothing hands over an empty ledger.
+    auto older = sampleImage();
+    REQUIRE(older.attention == HandoverAttention {});
+    auto const decodedOlder = decodeHandover(encodeHandover(older));
+    REQUIRE(decodedOlder.has_value());
+    CHECK(decodedOlder->attention == HandoverAttention {});
+}

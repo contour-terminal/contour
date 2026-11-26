@@ -514,6 +514,10 @@ void NativeSession::scheduleFlush(core::platform::SteadyTimePoint deadline)
 void NativeSession::sessionClosed(SessionId session)
 {
     forgetSession(session);
+    // Kept by forgetSession: the ledger states every pane, mirrored or not, so a state queued while the
+    // window mirrored the pane is news still once it does not. Only a pane that is gone has nothing left to
+    // state.
+    _pendingAttention.erase(session.value);
 }
 
 void NativeSession::forgetSession(SessionId session)
@@ -522,7 +526,8 @@ void NativeSession::forgetSession(SessionId session)
     _pendingSessions.erase(session.value);
     // The snapshot bookkeeping forgets it too. The streamer would survive without this (buildPush
     // answers NoSuchSession and it moves on), but every per-session set this connection keeps must
-    // be dropped in ONE place, or the next one added is dropped in none.
+    // be dropped in ONE place, or the next one added is dropped in none. The one exception is the pending
+    // attention state, which outlives unmirroring and is dropped as the session closes (@see sessionClosed).
     std::erase(_snapshotQueue, session.value);
     _recordsAwaitingRoom.erase(session.value);
     _programStatusPending.erase(session.value);
@@ -559,6 +564,14 @@ void NativeSession::sessionBell(SessionId session)
         queueSummary(session, [](proto::PaneSummary& summary) { summary.bell = proto::PaneBell::Rang; });
     else
         emitSessionEvent(proto::SessionBell { .session = session.value });
+}
+
+void NativeSession::paneAttentionChanged(uint64_t session, PaneAttention const& attention)
+{
+    if (_phase != ConnectionPhase::Viewing || _closed || !sharesDaemonAttention())
+        return;
+    _pendingAttention.insert_or_assign(session, attention);
+    scheduleFlush(flushDeadline(_services.flush, FlushReason::Coalesce, _loop.clock().now()));
 }
 
 void NativeSession::sessionNotify(SessionId session,
@@ -642,16 +655,7 @@ void NativeSession::sessionSignal(SessionId session, SessionSignal const& signal
         queueSummary(session, [title](proto::PaneSummary& summary) { summary.title = title->title; });
     else if (auto const* finished = std::get_if<CommandBlockFinishedSignal>(&signal))
         queueSummary(session, [finished](proto::PaneSummary& summary) {
-            auto const& block = finished->summary;
-            summary.finished = proto::FinishedCommand {
-                .exitCode = block.exitCode,
-                .durationMs = block.duration
-                                  ? std::optional { static_cast<uint64_t>(
-                                        std::chrono::duration_cast<std::chrono::milliseconds>(*block.duration)
-                                            .count()) }
-                                  : std::nullopt,
-                .commandLine = block.commandLine.display(),
-            };
+            summary.finished = finishedCommandOf(finished->summary);
         });
 }
 
@@ -667,6 +671,11 @@ void NativeSession::raiseRoleChanged(proto::RaiseRole role)
     // summaries, at most one per pane, which the role must not overtake whatever the room.
     flushSummaries();
     send(0, proto::DecodedPdu { proto::NotifyRole { .role = role } });
+}
+
+bool NativeSession::sharesDaemonAttention() const noexcept
+{
+    return _negotiated && _negotiated->shared.contains(proto::Capability::DaemonAttention);
 }
 
 bool NativeSession::summarizesPanes() const noexcept
@@ -868,16 +877,11 @@ void NativeSession::noteActivity(SessionId session)
         return;
     auto& mark = _activityMarks[session.value];
     // A program that only rewrote its status line changed nothing the user would see in the pane.
-    if (auto const* terminal = _host.terminal(session))
-    {
-        auto const pageOutput = terminal->mainDisplayOutputCount();
-        if (std::exchange(mark.mainDisplayOutput, pageOutput) == pageOutput)
-            return;
-    }
-    auto const now = _loop.clock().now();
-    if (mark.markedAt && now - *mark.markedAt < _services.flush.activityMarkInterval)
+    if (auto const* terminal = _host.terminal(session);
+        terminal != nullptr && mark.look(terminal->mainDisplayOutputCount()) == OutputReach::StatusLineOnly)
         return;
-    mark.markedAt = now;
+    if (mark.mark(_loop.clock().now(), _services.flush.activityMarkInterval) == MarkPace::TooSoon)
+        return;
     queueSummary(session,
                  [](proto::PaneSummary& summary) { summary.activity = proto::OutputActivity::Output; });
 }
@@ -901,6 +905,15 @@ void NativeSession::flushSummaries()
         if (raised.cwd || proto::carriesRaise(raised))
             send(0, proto::DecodedPdu { std::move(raised) });
     }
+    // Every pane's, the mirrored ones' too: no screen stream says what the ledger states.
+    for (auto const& [session, attention]: std::exchange(_pendingAttention, {}))
+        send(0, proto::DecodedPdu { attentionStateOf(session, attention) });
+}
+
+void NativeSession::announceAttention()
+{
+    for (auto const& [session, attention]: _host.paneAttention())
+        paneAttentionChanged(session, attention);
 }
 
 void NativeSession::announcePanes()
@@ -1315,7 +1328,8 @@ core::async::Task<void> NativeSession::flushAt(SpawnedFlowClaim claim,
     // Something was held back and nothing else will re-arm the flush: a session whose output
     // has stopped raises no further screen update, so without this its last increment would wait
     // for one that never comes.
-    if (!_pendingSessions.empty() || !_programStatusPending.empty() || !_pendingSummaries.empty())
+    if (!_pendingSessions.empty() || !_programStatusPending.empty() || !_pendingSummaries.empty()
+        || !_pendingAttention.empty())
         scheduleFlush(_loop.clock().now() + _services.flush.coalesceDelay);
 }
 
@@ -2615,7 +2629,22 @@ NativeSession::TabVerb NativeSession::serveWorkspaceVerb(proto::DecodedFrame con
         if (!_negotiated->shared.contains(proto::Capability::DaemonFollow))
             refuse(frame);
         else
-            _host.noteFocus(*this, std::get<proto::ReportFocus>(frame.pdu).focus);
+        {
+            auto const& report = std::get<proto::ReportFocus>(frame.pdu);
+            _host.noteFocus(*this, report.focus);
+            // Only a peer sharing the capability states the panes it shows; another's report ends before the
+            // list, which would read as showing none.
+            if (sharesDaemonAttention())
+                _host.noteShown(_id, report.focus, report.shownSessions);
+        }
+        return TabVerb::Served;
+    }
+    if (auto const* seen = std::get_if<proto::MarkSeen>(&frame.pdu))
+    {
+        if (!sharesDaemonAttention())
+            refuse(frame);
+        else
+            std::ignore = _host.markPaneSeen(seen->session, seen->seen);
         return TabVerb::Served;
     }
     if (std::holds_alternative<proto::Goodbye>(frame.pdu))
@@ -3284,6 +3313,7 @@ void NativeSession::attachClient(uint64_t serial,
     // trees before the per-session content streams into them.
     pushLayout();
     announcePanes();
+    announceAttention();
 
     // A live upgrade that could not bring a session's screen back says so to the first client that mirrors
     // the session: what it sees is a fresh screen, the program behind it untouched.

@@ -189,6 +189,15 @@ TEST_CASE("capability 33 is workspace-color", "[vthost][negotiation][workspace-c
     CHECK(color->name == "workspace-color");
 }
 
+TEST_CASE("capability 34 is daemon-attention", "[vthost][negotiation][daemon-attention]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::DaemonAttention) == 34);
+    auto const attention =
+        std::ranges::find(CapabilityTable, Capability::DaemonAttention, &CapabilityRow::capability);
+    REQUIRE(attention != CapabilityTable.end());
+    CHECK(attention->name == "daemon-attention");
+}
+
 TEST_CASE("the workspace switch capability keeps its ident and name",
           "[vthost][negotiation][workspace-follow]")
 {

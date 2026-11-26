@@ -139,6 +139,11 @@ enum class Capability : uint8_t
     /// in WorkspaceMeta's colour field, in full and as a delta on each change. Without it a client does not
     /// send the PDU, and the daemon states no colour to it, so an older client's metadata is what it was.
     WorkspaceColor = 33,
+    /// The daemon owns the panes' attention: it states each pane's flags and their serials
+    /// (PaneAttentionState), a client acknowledges what it showed (MarkSeen) and names the panes it shows in
+    /// ReportFocus. Without it a client keeps attention to itself, as before, and the daemon sends no such
+    /// PDU.
+    DaemonAttention = 34,
 };
 
 /// One row of the table naming a Capability.
@@ -181,6 +186,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::LaunchFirstTab, .name = "launch-first-tab" },
     CapabilityRow { .capability = Capability::Names, .name = "names" },
     CapabilityRow { .capability = Capability::WorkspaceColor, .name = "workspace-color" },
+    CapabilityRow { .capability = Capability::DaemonAttention, .name = "daemon-attention" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

@@ -145,6 +145,7 @@ struct HandshakePolicy
                                                                    proto::Capability::SoftFonts,
                                                                    proto::Capability::WorkspaceSwitch,
                                                                    proto::Capability::DaemonFollow,
+                                                                   proto::Capability::DaemonAttention,
                                                                    proto::Capability::WorkspaceMeta,
                                                                    proto::Capability::ClientGoodbye,
                                                                    proto::Capability::LaunchFirstTab,
@@ -294,6 +295,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     void sessionResized(vtworkspace::SessionId session) override;
 
     void sessionBell(vtworkspace::SessionId session) override;
+    /// Queues the pane's attention state for the next flush, for a connection sharing
+    /// Capability::DaemonAttention: one state per pane per flush, the latest.
+    void paneAttentionChanged(uint64_t session, PaneAttention const& attention) override;
     void sessionNotify(vtworkspace::SessionId session,
                        std::string const& title,
                        std::string const& body,
@@ -1015,6 +1019,10 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Capability::DaemonFollow).
     [[nodiscard]] bool summarizesPanes() const noexcept;
 
+    /// Whether this connection is told the daemon's attention ledger and may mark panes seen (its client
+    /// shares Capability::DaemonAttention).
+    [[nodiscard]] bool sharesDaemonAttention() const noexcept;
+
     /// Whether this connection is told each workspace's name, control id and git state (its client shares
     /// Capability::WorkspaceMeta).
     [[nodiscard]] bool sharesWorkspaceMeta() const noexcept;
@@ -1079,8 +1087,12 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// Notes that an unmirrored @p session printed, at most once per FlushPolicy::activityMarkInterval.
     void noteActivity(vtworkspace::SessionId session);
 
-    /// Sends the pending summaries, and forgets them.
+    /// Sends the pending summaries and attention states, and forgets them.
     void flushSummaries();
+
+    /// Queues the attention state of every pane the host's ledger holds for the next flush, for a connection
+    /// sharing Capability::DaemonAttention: what a window starts each pane's marks from as it attaches.
+    void announceAttention();
 
     /// Queues every pane's working directory as shown, and each unmirrored pane's title and any program
     /// status it holds, for the next flush: what a window starts a pane's row from, as it attaches or selects
@@ -1411,16 +1423,11 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// What changed in each pane since the last flush, merged into one summary per pane: everything of an
     /// unmirrored one, the directory alone of a mirrored one (@see flushSummaries).
     std::map<uint64_t, proto::PaneSummary> _pendingSummaries;
-    /// What this connection knows of an unmirrored pane's output, to decide whether an update is news.
-    struct ActivityMark
-    {
-        /// When its output was last marked, which paces the next mark; none before the first.
-        std::optional<core::platform::SteadyTimePoint> markedAt;
-        /// Its terminal's mainDisplayOutputCount() at the last update: one that leaves it there wrote to
-        /// the host-writable status line alone.
-        uint64_t mainDisplayOutput = 0;
-    };
+    /// What this connection knows of each unmirrored pane's output, to decide whether an update is news.
     std::unordered_map<uint64_t, ActivityMark> _activityMarks;
+    /// The attention state of each pane that changed since the last flush, the latest only. @see
+    /// paneAttentionChanged
+    std::map<uint64_t, PaneAttention> _pendingAttention;
     /// The workspaces whose WorkspaceMeta this connection was sent in full, each with the position the
     /// connection was last told for it; a delta names only these. @see announceWorkspaceMeta
     std::unordered_map<uint64_t, uint32_t> _announcedMeta;

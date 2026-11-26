@@ -15,6 +15,8 @@
 /// window on every key. The credit stays unspent, so the update that shows the cursor again flushes at once,
 /// with the whole redraw; a program that keeps it hidden is answered within the grace.
 ///
+/// Beside it, ActivityMark paces how often a pane's output is marked as activity.
+///
 /// The decision is pure — no clock, no socket — so every rule is table-testable.
 
 #include <core/platform/Clock.hpp>
@@ -22,6 +24,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 namespace vthost
 {
@@ -119,5 +122,75 @@ struct FlushInputs
     }
     return now;
 }
+
+/// Whether a pane's output reached its main display since the last look.
+enum class OutputReach : uint8_t
+{
+    StatusLineOnly = 0, ///< Only the host-writable status line was written: nothing the user would see.
+    MainDisplay,        ///< The main display was written to.
+};
+
+/// Whether a pane's output may be marked now.
+enum class MarkPace : uint8_t
+{
+    TooSoon = 0, ///< One was marked less than the interval before.
+    Marked,      ///< It is marked as of now.
+};
+
+/// Whether a pane holds output the pace kept from being marked.
+enum class HeldOutput : uint8_t
+{
+    None = 0, ///< Every output was marked, or seen since.
+    Pending,  ///< Output came too soon after the last mark: a trailing mark owes it.
+};
+
+/// How a pane's output was last marked: what tells news from a status-line rewrite, and what paces the next
+/// mark. Kept per pane by the ledger's host and by each connection that summarizes panes it does not mirror.
+struct ActivityMark
+{
+    /// When its output was last marked, which paces the next mark; none before the first.
+    std::optional<core::platform::SteadyTimePoint> markedAt = std::nullopt;
+    /// Its terminal's mainDisplayOutputCount() at the last look.
+    uint64_t mainDisplayOutput = 0;
+    /// Whether output came since the last mark that the pace held back.
+    HeldOutput held = HeldOutput::None;
+
+    /// Takes the main display's output count now.
+    /// @param count The terminal's mainDisplayOutputCount() now.
+    /// @return MainDisplay when it moved since the last look; StatusLineOnly when it did not.
+    [[nodiscard]] constexpr OutputReach look(uint64_t count) noexcept
+    {
+        return std::exchange(mainDisplayOutput, count) == count ? OutputReach::StatusLineOnly
+                                                                : OutputReach::MainDisplay;
+    }
+
+    /// Marks the output at @p now, unless the last mark is less than @p interval old: then the output is
+    /// held, for a trailing mark to make once the interval is up (trailingDue()).
+    /// @param now The current time.
+    /// @param interval The least time between two marks.
+    /// @return Marked, or TooSoon (and the output is held).
+    [[nodiscard]] constexpr MarkPace mark(core::platform::SteadyTimePoint now,
+                                          core::platform::SteadyDuration interval) noexcept
+    {
+        if (markedAt && now - *markedAt < interval)
+        {
+            held = HeldOutput::Pending;
+            return MarkPace::TooSoon;
+        }
+        markedAt = now;
+        held = HeldOutput::None;
+        return MarkPace::Marked;
+    }
+
+    /// @param interval The least time between two marks.
+    /// @return When the held output is due its trailing mark, or std::nullopt when none is held.
+    [[nodiscard]] constexpr std::optional<core::platform::SteadyTimePoint> trailingDue(
+        core::platform::SteadyDuration interval) const noexcept
+    {
+        if (held == HeldOutput::None || !markedAt)
+            return std::nullopt;
+        return *markedAt + interval;
+    }
+};
 
 } // namespace vthost

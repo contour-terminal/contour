@@ -49,6 +49,18 @@ using vtworkspace::Tab;
 using vtworkspace::TabId;
 using vtworkspace::WorkspaceId;
 
+proto::FinishedCommand finishedCommandOf(vtbackend::CommandBlockSummary const& block)
+{
+    return proto::FinishedCommand {
+        .exitCode = block.exitCode,
+        .durationMs = block.duration.transform([](auto duration) {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+        }),
+        .commandLine = block.commandLine.display(),
+    };
+}
+
 // ---------------------------------------------------------------------------
 // HostGitLookups
 
@@ -574,6 +586,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
     _announcedStatusPatience(config.announcedStatusPatience),
+    _activityMarkInterval(config.activityMarkInterval),
     _extensionControl(vtcontrol::nullControlApi()),
     _objects(std::move(config.uuids)),
     _tabNameMirror(_objects.onNameChanged(
@@ -852,7 +865,14 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
             _loop.post([this, id] { armAnimationTick(id); });
         },
         /*onBell=*/
-        [this, id] { postStreamEvent(id, &SessionStreamEvents::sessionBell); },
+        [this, id] {
+            postFromPump([this, id] {
+                if (!_sessions.contains(id.value))
+                    return;
+                noteBellAttention(id);
+                fanOutStream(&SessionStreamEvents::sessionBell, id);
+            });
+        },
         /*onNotify=*/
         [this, id](std::string title, std::string body, std::optional<vtbackend::DisplayOccasion> occasion) {
             postStreamEvent(
@@ -878,6 +898,10 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
                     tellDirectoryIfMoved(id);
                     return;
                 }
+                if (std::holds_alternative<ProgramStatusChangedSignal>(signal))
+                    noteStatusAttention(id);
+                else if (auto const* finished = std::get_if<CommandBlockFinishedSignal>(&signal))
+                    noteFinishedAttention(id, finished->summary);
                 for (auto* observer: _streamSubscribers)
                     observer->sessionSignal(id, signal);
                 // A finished command (it may have switched branch or committed) is when the workspace showing
@@ -910,6 +934,7 @@ void SessionHost::installSession(std::unique_ptr<HostedSession> session)
     }
     auto const id = session->id();
     _sessions.emplace(id.value, std::move(session));
+    _attention.track(id.value);
     tellStructure(&StructureEvents::sessionCreated, id);
     // Its directory is the process's until its shell reports one.
     armForegroundPoll();
@@ -1214,6 +1239,7 @@ void SessionHost::onSessionScreenUpdated(SessionId session)
         hosted->second->requestStatusLineRepaint();
     typeInitialInputAtPrompt(session);
     clearInterruptionOnNextCommand(session);
+    noteOutputAttention(session);
     for (auto* observer: _streamSubscribers)
         observer->sessionScreenUpdated(session);
 }
@@ -1471,10 +1497,15 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
 
 void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKind kind)
 {
+    // A window that is gone watches nothing.
+    std::erase_if(_shownReports, [gone = client->connectionId()](ShownReport const& report) {
+        return report.client == gone;
+    });
     auto const counted = std::erase(_attachedClients, client) != 0;
     if (!counted)
         return;
     _focusSerials.erase(client);
+    _focusedClients.erase(client);
     _selectionSeen.erase(client);
     noteLeft(client->selectedWorkspace());
     // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
@@ -1534,9 +1565,174 @@ void SessionHost::noteFocus(SessionStreamEvents const& client, proto::WindowFocu
 {
     if (!std::ranges::contains(_attachedClients, &client))
         return;
-    if (focus == proto::WindowFocus::Focused)
+    // Only gaining focus stamps the window. A window restates its focus whenever the panes it shows change
+    // (noteShown), and such a report, still on its way over the window's own connection while the user
+    // focuses another one, would otherwise arrive after that one's and take the role back.
+    if (focus == proto::WindowFocus::Focused && _focusedClients.insert(&client).second)
         _focusSerials[&client] = ++_focusCounter;
+    else if (focus == proto::WindowFocus::Unfocused)
+        _focusedClients.erase(&client);
     settleRaiseRole();
+}
+
+void SessionHost::noteShown(ConnectionId const& client,
+                            proto::WindowFocus focus,
+                            std::span<uint64_t const> shownSessions)
+{
+    // Which panes become watched is read before the report replaces the connection's last one.
+    auto entering = std::vector<uint64_t> {};
+    if (focus == proto::WindowFocus::Focused)
+        for (auto const session: shownSessions)
+            if (!isWatched(session))
+                entering.push_back(session);
+    auto const report = ShownReport { .client = client,
+                                      .focus = focus,
+                                      .sessions = { shownSessions.begin(), shownSessions.end() } };
+    if (auto const held = std::ranges::find(_shownReports, client, &ShownReport::client);
+        held != _shownReports.end())
+        *held = report;
+    else
+        _shownReports.push_back(report);
+    // The user looks at it now: what it raised is seen, and no window has to say so.
+    for (auto const session: entering)
+        clearAttention(session);
+}
+
+bool SessionHost::isWatched(uint64_t session) const
+{
+    return std::ranges::any_of(_shownReports, [session](ShownReport const& report) {
+        return report.focus == proto::WindowFocus::Focused && std::ranges::contains(report.sessions, session);
+    });
+}
+
+AttentionChange SessionHost::markPaneSeen(uint64_t session, SeenSerials seen)
+{
+    // Only a pane this host holds has an entry to clear; a session id from a window is not trusted to
+    // name one.
+    if (!_sessions.contains(session))
+        return AttentionChange::Unchanged;
+    auto const change = _attention.markSeen(session, seen);
+    tellAttention(session, change);
+    return change;
+}
+
+void SessionHost::noteOutputAttention(SessionId session)
+{
+    auto* const backing = terminal(session);
+    if (backing == nullptr)
+        return;
+    auto& mark = _outputMarks[session.value];
+    // A program that only rewrote its status line changed nothing the user would see in the pane. Counted
+    // while watched too, so that output the user saw is not marked once the pane is left.
+    if (mark.look(backing->mainDisplayOutputCount()) == OutputReach::StatusLineOnly)
+        return;
+    if (isWatched(session.value))
+        return;
+    if (mark.mark(_loop.clock().now(), _activityMarkInterval) == MarkPace::TooSoon)
+    {
+        // Owed a trailing mark only once the last one was cleared: output still flagged is news already.
+        if (auto const* const attention = _attention.of(session.value);
+            attention != nullptr && attention->activity == proto::OutputActivity::Output)
+            mark.held = HeldOutput::None;
+        else
+            armTrailingOutputMark();
+        return;
+    }
+    tellAttention(session.value, _attention.noteOutput(session.value));
+}
+
+void SessionHost::armTrailingOutputMark()
+{
+    auto earliest = std::optional<core::platform::SteadyTimePoint> {};
+    for (auto const& mark: _outputMarks | std::views::values)
+        if (auto const due = mark.trailingDue(_activityMarkInterval); due && (!earliest || *due < *earliest))
+            earliest = due;
+    if (!earliest
+        || (_trailingOutputMark && !_trailingOutputMark->settled() && _trailingOutputMarkDue <= earliest))
+        return;
+    _trailingOutputMarkDue = earliest;
+    _trailingOutputMark.emplace(_loop, *earliest, &markTrailingOutput, this);
+}
+
+void SessionHost::markTrailingOutput(void* host)
+{
+    auto& self = *static_cast<SessionHost*>(host);
+    // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
+    self._trailingOutputMark.reset();
+    self._trailingOutputMarkDue.reset();
+    auto const now = self._loop.clock().now();
+    auto due = std::vector<uint64_t> {};
+    for (auto const& [session, mark]: self._outputMarks)
+        if (auto const at = mark.trailingDue(self._activityMarkInterval); at && *at <= now)
+            due.push_back(session);
+    for (auto const session: due)
+    {
+        auto& mark = self._outputMarks[session];
+        if (self.isWatched(session))
+        {
+            mark.held = HeldOutput::None; // the user is looking at it
+            continue;
+        }
+        if (mark.mark(now, self._activityMarkInterval) == MarkPace::Marked)
+            self.tellAttention(session, self._attention.noteOutput(session));
+    }
+    self.armTrailingOutputMark();
+}
+
+void SessionHost::noteBellAttention(SessionId session)
+{
+    if (!isWatched(session.value))
+        tellAttention(session.value, _attention.noteBell(session.value));
+}
+
+void SessionHost::noteFinishedAttention(SessionId session, vtbackend::CommandBlockSummary const& block)
+{
+    if (!isWatched(session.value))
+        tellAttention(session.value,
+                      _attention.noteFinished(session.value, finishedCommandOf(block), _clocks.wall.now()));
+}
+
+void SessionHost::noteStatusAttention(SessionId session)
+{
+    // A Done or an Error the user watches appear is seen as it appears.
+    if (isWatched(session.value))
+        tellAttention(session.value,
+                      _attention.markSeen(session.value,
+                                          SeenSerials { .statusGeneration = statusGenerationOf(session) }));
+}
+
+void SessionHost::clearAttention(uint64_t session)
+{
+    if (!_sessions.contains(session))
+        return;
+    auto const last = _attention.lastSerial();
+    tellAttention(
+        session,
+        _attention.markSeen(session,
+                            SeenSerials { .activity = last,
+                                          .bell = last,
+                                          .finished = last,
+                                          .statusGeneration = statusGenerationOf(SessionId { session }) }));
+}
+
+uint64_t SessionHost::statusGenerationOf(SessionId session)
+{
+    auto* const backing = terminal(session);
+    if (backing == nullptr)
+        return 0;
+    auto const guard = std::lock_guard { std::as_const(*backing) };
+    auto newest = uint64_t { 0 };
+    for (auto const& record: backing->programStatus().records())
+        newest = std::max(newest, record.generation);
+    return newest;
+}
+
+void SessionHost::tellAttention(uint64_t session, AttentionChange change)
+{
+    if (change == AttentionChange::Unchanged)
+        return;
+    if (auto const* attention = _attention.of(session))
+        fanOutStream(&SessionStreamEvents::paneAttentionChanged, session, *attention);
 }
 
 std::optional<ConnectionId> SessionHost::clipboardTargetOf(vtworkspace::SessionId session) const
@@ -2171,6 +2367,8 @@ void SessionHost::eraseSession(uint64_t session)
     // Before the terminal it ticks: no frame timer outlives its session.
     _animationTicks.erase(session);
     _endWaits.erase(session);
+    _attention.forget(session);
+    _outputMarks.erase(session);
     _sessions.erase(session);
     tellStructure(&StructureEvents::sessionClosed, SessionId { session });
 }

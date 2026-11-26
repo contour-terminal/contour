@@ -962,3 +962,42 @@ TEST_CASE("a pseudoconsole that cannot be adopted is closed, and its program's h
     CloseHandle(unnamed.native());
 }
 #endif
+
+#ifndef _WIN32
+namespace
+{
+/// @return What @p live's ledger states of @p session; a quiet entry when it holds none.
+[[nodiscard]] PaneAttention attentionOf(LiveHost const& live, vtworkspace::SessionId session)
+{
+    for (auto const& [id, attention]: live.host.paneAttention())
+        if (id == session.value)
+            return attention;
+    return {};
+}
+} // namespace
+
+TEST_CASE("a restored host continues the ledger's serials", "[vthost][handover][threading][daemon-attention]")
+{
+    auto old = oneSession();
+    auto const id = old->host.sessionIds().front();
+    old->host.hostedSession(id)->terminal().writeToScreen("\a");
+    REQUIRE(old->eventually([&] { return attentionOf(*old, id).bell == proto::PaneBell::Rang; }));
+    // What a window saw crosses too.
+    REQUIRE(old->host.markPaneSeen(id.value, SeenSerials { .statusGeneration = 7 })
+            == AttentionChange::Changed);
+    auto const before = old->host.paneAttention();
+    auto const last = old->host.attentionLastSerial();
+    REQUIRE(last > 0);
+
+    auto image = handOver(std::move(old));
+    CHECK(image.attention.lastSerial == last);
+    auto const live = takeOver(std::move(image));
+    CHECK(live->host.attentionLastSerial() == last);
+    CHECK(live->host.paneAttention() == before);
+
+    // The next raise takes a serial no window holds yet.
+    live->host.hostedSession(id)->terminal().writeToScreen("\a");
+    REQUIRE(live->eventually([&] { return attentionOf(*live, id).bellSerial > last; }));
+    CHECK(attentionOf(*live, id).seenStatusGeneration == 7);
+}
+#endif

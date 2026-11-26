@@ -10737,3 +10737,462 @@ TEST_CASE("SelectWorkspace 0 with a session starts the first pane in that sessio
 
     CHECK(*spawned == std::vector { statedDirectory() });
 }
+
+// {{{ daemon attention
+namespace
+{
+
+/// A SummaryFixture whose windows share Capability::DaemonAttention.
+struct AttentionFixture
+{
+    SummaryFixture f {};
+
+    /// Attaches a window selecting @p workspace that shares the daemon's attention ledger.
+    FlushClient& attachSelecting(uint64_t workspace)
+    {
+        auto hello = SummaryFixture::helloSelecting(workspace);
+        hello.capabilities.idents.push_back(std::to_underlying(proto::Capability::DaemonAttention));
+        return f.flush.attach(workspace == f.first ? f.inFirst : f.inSecond, std::move(hello));
+    }
+
+    /// @return The hosted terminal of @p session.
+    [[nodiscard]] vtbackend::Terminal& terminal(vtworkspace::SessionId session)
+    {
+        return *f.flush.h.host.terminal(session);
+    }
+
+    /// @return The newest generation among @p session's program-status records.
+    [[nodiscard]] uint64_t statusGeneration(vtworkspace::SessionId session)
+    {
+        auto newest = uint64_t { 0 };
+        for (auto const& record: terminal(session).programStatus().records())
+            newest = std::max(newest, record.generation);
+        return newest;
+    }
+
+    /// @return What the host's ledger states of @p session.
+    [[nodiscard]] vthost::PaneAttention ledgerOf(vtworkspace::SessionId session) const
+    {
+        for (auto const& [id, attention]: f.flush.h.host.paneAttention())
+            if (id == session.value)
+                return attention;
+        FAIL("the ledger holds no entry for the session");
+        return {};
+    }
+
+    /// @return The PaneAttentionState PDUs @p client received for @p session after its first @p skip frames.
+    [[nodiscard]] static std::vector<proto::PaneAttentionState> statesOf(FlushClient const& client,
+                                                                         vtworkspace::SessionId session,
+                                                                         std::size_t skip = 0)
+    {
+        auto found = std::vector<proto::PaneAttentionState> {};
+        for (auto const& frame: client.received | std::views::drop(skip))
+            if (auto const* state = std::get_if<proto::PaneAttentionState>(&frame.pdu);
+                state != nullptr && state->session == session.value)
+                found.push_back(*state);
+        return found;
+    }
+
+    /// Reports from @p client that its window has @p focus and shows @p sessions.
+    static void reportShown(FlushClient& client,
+                            proto::WindowFocus focus,
+                            std::vector<vtworkspace::SessionId> const& sessions)
+    {
+        auto report = proto::ReportFocus { .focus = focus };
+        for (auto const session: sessions)
+            report.shownSessions.push_back(session.value);
+        NativeSessionFlushTester::serveWorkspaceVerb(*client.session, std::move(report));
+    }
+
+    /// Marks @p session seen from @p client up to @p seen.
+    static void markSeen(FlushClient& client, vtworkspace::SessionId session, vthost::SeenSerials seen)
+    {
+        NativeSessionFlushTester::serveWorkspaceVerb(
+            *client.session, proto::MarkSeen { .session = session.value, .seen = seen });
+    }
+};
+
+/// A Done record of program status, as OSC 7501 reports it.
+constexpr auto DoneStatus = std::string_view { "\033]7501;state=done:id=build:app=make\033\\" };
+
+} // namespace
+
+TEST_CASE("a bell is stated to both clients with one serial", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.first);
+    auto& two = a.attachSelecting(a.f.first);
+    a.f.settle();
+    auto const skipOne = one.received.size();
+    auto const skipTwo = two.received.size();
+
+    a.terminal(a.f.inSecond).writeToScreen("\a");
+    a.f.settle();
+
+    auto const toOne = AttentionFixture::statesOf(one, a.f.inSecond, skipOne);
+    auto const toTwo = AttentionFixture::statesOf(two, a.f.inSecond, skipTwo);
+    REQUIRE(toOne.size() == 1);
+    REQUIRE(toTwo.size() == 1);
+    CHECK(toOne.front().bell == proto::PaneBell::Rang);
+    CHECK(toOne.front().bellSerial > 0);
+    CHECK(toOne.front().bellSerial == a.ledgerOf(a.f.inSecond).bellSerial);
+    CHECK(toOne.front() == toTwo.front());
+}
+
+TEST_CASE("one client's MarkSeen clears it for the other", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.first);
+    auto& two = a.attachSelecting(a.f.first);
+    a.terminal(a.f.inSecond).writeToScreen("\a");
+    a.f.settle();
+    auto const rang = AttentionFixture::statesOf(two, a.f.inSecond);
+    REQUIRE_FALSE(rang.empty());
+    REQUIRE(rang.back().bell == proto::PaneBell::Rang);
+    auto const skip = two.received.size();
+
+    AttentionFixture::markSeen(one, a.f.inSecond, vthost::SeenSerials { .bell = rang.back().bellSerial });
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(two, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().bell == proto::PaneBell::Silent);
+    CHECK(a.ledgerOf(a.f.inSecond).bell == proto::PaneBell::Silent);
+}
+
+TEST_CASE("a seen Done status is seen for the other client", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.first);
+    auto& two = a.attachSelecting(a.f.first);
+    a.terminal(a.f.inSecond).writeToScreen(DoneStatus);
+    a.f.settle();
+    auto const generation = a.statusGeneration(a.f.inSecond);
+    REQUIRE(generation > 0);
+    auto const skip = two.received.size();
+
+    // The pane raised nothing else: the status seen is all the window acknowledges.
+    AttentionFixture::markSeen(one, a.f.inSecond, vthost::SeenSerials { .statusGeneration = generation });
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(two, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().seenStatusGeneration == generation);
+}
+
+TEST_CASE("a client attaching later is told the unseen finished command and its time",
+          "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    a.terminal(a.f.inSecond).writeToScreen(commandCycle("make all", 3));
+    a.f.settle();
+    auto const held = a.ledgerOf(a.f.inSecond);
+    REQUIRE(held.finished.has_value());
+    REQUIRE(held.finishedAt.has_value());
+
+    auto& client = a.attachSelecting(a.f.first);
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(client, a.f.inSecond);
+    REQUIRE(told.size() == 1);
+    REQUIRE(told.front().finished.has_value());
+    CHECK(told.front().finished->exitCode == std::optional<int32_t> { 3 });
+    CHECK(told.front().finished->commandLine == "make all");
+    CHECK(told.front().finishedSerial == held.finishedSerial);
+    CHECK(told.front().finishedAtUnixMs
+          == std::optional<int64_t> {
+              std::chrono::duration_cast<std::chrono::milliseconds>(held.finishedAt->time_since_epoch())
+                  .count() });
+    // Every pane is stated as the window attaches, a quiet one too.
+    CHECK(AttentionFixture::statesOf(client, a.f.inFirst).size() == 1);
+}
+
+TEST_CASE("the pane a client mirrors is stated too", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& client = a.attachSelecting(a.f.first);
+    a.f.settle();
+    auto const skip = client.received.size();
+
+    a.terminal(a.f.inFirst).writeToScreen("\a");
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(client, a.f.inFirst, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().bell == proto::PaneBell::Rang);
+}
+
+TEST_CASE("a pane's queued attention state survives the client selecting another workspace",
+          "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& client = a.attachSelecting(a.f.first);
+    auto& other = a.attachSelecting(a.f.first);
+    a.terminal(a.f.inFirst).writeToScreen("\a");
+    a.f.settle();
+    auto const rang = AttentionFixture::statesOf(client, a.f.inFirst);
+    REQUIRE_FALSE(rang.empty());
+    REQUIRE(rang.back().bell == proto::PaneBell::Rang);
+    auto const skip = client.received.size();
+
+    // The other window sees the bell, which no screen output carries: the state waits for the coalesced
+    // flush, and the window leaves the pane's workspace before it goes out.
+    AttentionFixture::markSeen(other, a.f.inFirst, vthost::SeenSerials { .bell = rang.back().bellSerial });
+    turnIdle(a.f.flush.h.loop);
+    REQUIRE(AttentionFixture::statesOf(client, a.f.inFirst, skip).empty());
+    NativeSessionFlushTester::serveWorkspaceVerb(*client.session,
+                                                 proto::SelectWorkspace { .workspace = a.f.second });
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(client, a.f.inFirst, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().bell == proto::PaneBell::Silent);
+}
+
+TEST_CASE("output, a bell and a finished command in a watched pane mark nothing",
+          "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.second);
+    auto& two = a.attachSelecting(a.f.first);
+    AttentionFixture::reportShown(one, proto::WindowFocus::Focused, { a.f.inSecond });
+    a.f.settle();
+    REQUIRE(a.f.flush.h.host.isWatched(a.f.inSecond.value));
+    auto const skip = two.received.size();
+
+    a.terminal(a.f.inSecond).writeToScreen("output\r\n");
+    a.terminal(a.f.inSecond).writeToScreen("\a");
+    a.terminal(a.f.inSecond).writeToScreen(commandCycle("make all", 0));
+    a.f.settle();
+
+    CHECK(AttentionFixture::statesOf(two, a.f.inSecond, skip).empty());
+    CHECK(a.ledgerOf(a.f.inSecond).activity == proto::OutputActivity::None);
+    CHECK(a.ledgerOf(a.f.inSecond).bell == proto::PaneBell::Silent);
+    CHECK_FALSE(a.ledgerOf(a.f.inSecond).finished.has_value());
+}
+
+TEST_CASE("an unfocused window's shown pane is not watched", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.second);
+    AttentionFixture::reportShown(one, proto::WindowFocus::Unfocused, { a.f.inSecond });
+    a.f.settle();
+    CHECK_FALSE(a.f.flush.h.host.isWatched(a.f.inSecond.value));
+    auto const skip = one.received.size();
+
+    a.terminal(a.f.inSecond).writeToScreen("\a");
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(one, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().bell == proto::PaneBell::Rang);
+}
+
+TEST_CASE("a disconnected window's report stops watching", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.second);
+    auto& two = a.attachSelecting(a.f.first);
+    AttentionFixture::reportShown(one, proto::WindowFocus::Focused, { a.f.inSecond });
+    a.f.settle();
+    REQUIRE(a.f.flush.h.host.isWatched(a.f.inSecond.value));
+
+    REQUIRE(NativeSessionFlushTester::letGo(*one.session, a.f.flush.h.loop, a.f.flush.clock));
+    one.session.reset();
+    a.f.settle();
+    CHECK_FALSE(a.f.flush.h.host.isWatched(a.f.inSecond.value));
+    auto const skip = two.received.size();
+
+    a.terminal(a.f.inSecond).writeToScreen("\a");
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(two, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().bell == proto::PaneBell::Rang);
+}
+
+TEST_CASE("a pane becoming watched is cleared", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.second);
+    auto& two = a.attachSelecting(a.f.first);
+    a.terminal(a.f.inSecond).writeToScreen("output\r\n");
+    a.terminal(a.f.inSecond).writeToScreen("\a");
+    a.terminal(a.f.inSecond).writeToScreen(commandCycle("make all", 1));
+    a.terminal(a.f.inSecond).writeToScreen(DoneStatus);
+    a.f.settle();
+    auto const raised = a.ledgerOf(a.f.inSecond);
+    REQUIRE(raised.activity == proto::OutputActivity::Output);
+    REQUIRE(raised.bell == proto::PaneBell::Rang);
+    REQUIRE(raised.finished.has_value());
+    auto const generation = a.statusGeneration(a.f.inSecond);
+    REQUIRE(generation > raised.seenStatusGeneration);
+    auto const skip = two.received.size();
+
+    AttentionFixture::reportShown(one, proto::WindowFocus::Focused, { a.f.inSecond });
+    a.f.settle();
+
+    auto const told = AttentionFixture::statesOf(two, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().activity == proto::OutputActivity::None);
+    CHECK(told.front().bell == proto::PaneBell::Silent);
+    CHECK_FALSE(told.front().finished.has_value());
+    CHECK_FALSE(told.front().finishedAtUnixMs.has_value());
+    CHECK(told.front().seenStatusGeneration == generation);
+}
+
+TEST_CASE("a Done status in a watched pane is seen by a second client", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& one = a.attachSelecting(a.f.second);
+    auto& two = a.attachSelecting(a.f.first);
+    AttentionFixture::reportShown(one, proto::WindowFocus::Focused, { a.f.inSecond });
+    a.f.settle();
+    auto const skip = two.received.size();
+
+    a.terminal(a.f.inSecond).writeToScreen(DoneStatus);
+    a.f.settle();
+
+    auto const generation = a.statusGeneration(a.f.inSecond);
+    REQUIRE(generation > 0);
+    auto const told = AttentionFixture::statesOf(two, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().seenStatusGeneration == generation);
+}
+
+TEST_CASE("output held back by the mark interval after a clear is marked as the interval ends",
+          "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& client = a.attachSelecting(a.f.first);
+    a.f.settle();
+    a.terminal(a.f.inSecond).writeToScreen("first\r\n");
+    a.f.settle();
+    auto const marked = a.ledgerOf(a.f.inSecond);
+    REQUIRE(marked.activity == proto::OutputActivity::Output);
+
+    // The window sees it, and the pane prints again inside the interval: the pace holds that output back.
+    AttentionFixture::markSeen(
+        client, a.f.inSecond, vthost::SeenSerials { .activity = marked.activitySerial });
+    a.f.settle();
+    REQUIRE(a.ledgerOf(a.f.inSecond).activity == proto::OutputActivity::None);
+    a.terminal(a.f.inSecond).writeToScreen("second\r\n");
+    a.f.settle();
+    REQUIRE(a.ledgerOf(a.f.inSecond).activity == proto::OutputActivity::None);
+    auto const skip = client.received.size();
+
+    // As the interval ends, the last output is marked after all, and the window told.
+    a.f.flush.clock.advance(vthost::FlushPolicy {}.activityMarkInterval);
+    a.f.settle();
+    CHECK(a.ledgerOf(a.f.inSecond).activity == proto::OutputActivity::Output);
+    auto const told = AttentionFixture::statesOf(client, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().activity == proto::OutputActivity::Output);
+}
+
+TEST_CASE("an output flood sends at most one state per flush", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& client = a.attachSelecting(a.f.first);
+    a.f.settle();
+    auto const skip = client.received.size();
+    constexpr auto Flushes = 3;
+
+    for ([[maybe_unused]] auto const flush: std::views::iota(0, Flushes))
+    {
+        // Each round raises again (a bell takes a new serial every time), all of it inside one coalescing
+        // window.
+        for ([[maybe_unused]] auto const line: std::views::iota(0, 100))
+        {
+            a.terminal(a.f.inSecond).writeToScreen("flood\r\n\a");
+            turnIdle(a.f.flush.h.loop, 1);
+        }
+        a.f.settle();
+    }
+
+    auto const told = AttentionFixture::statesOf(client, a.f.inSecond, skip);
+    CHECK(told.size() == static_cast<std::size_t>(Flushes));
+    REQUIRE_FALSE(told.empty());
+    CHECK(told.back() == vthost::attentionStateOf(a.f.inSecond.value, a.ledgerOf(a.f.inSecond)));
+}
+
+TEST_CASE("1000 bells coalesce to one state per flush", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& client = a.attachSelecting(a.f.first);
+    a.f.settle();
+    auto const skip = client.received.size();
+    auto const before = a.f.flush.h.host.attentionLastSerial();
+
+    for ([[maybe_unused]] auto const bell: std::views::iota(0, 1000))
+        a.terminal(a.f.inSecond).writeToScreen("\a");
+    a.f.settle();
+
+    // Every bell took a serial of the real ledger; one state carries the latest.
+    CHECK(a.f.flush.h.host.attentionLastSerial() > before);
+    auto const told = AttentionFixture::statesOf(client, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().bellSerial == a.f.flush.h.host.attentionLastSerial());
+}
+
+TEST_CASE("status-line-only frames mark nothing", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& client = a.attachSelecting(a.f.first);
+    auto& terminal = a.terminal(a.f.inSecond);
+    terminal.writeToScreen("\033[2$~"); // DECSSDT host-writable
+    a.f.settle();
+    a.f.flush.clock.advance(1s); // past the pacing of whatever that first update marked
+    auto const last = a.f.flush.h.host.attentionLastSerial();
+    AttentionFixture::markSeen(client, a.f.inSecond, vthost::SeenSerials { .activity = last });
+    a.f.settle();
+    REQUIRE(a.ledgerOf(a.f.inSecond).activity == proto::OutputActivity::None);
+    auto const skip = client.received.size();
+
+    terminal.writeToScreen("\033[1$}12:00\r\033[0$}"); // DECSASD status line, a clock, back to the page
+    a.f.settle();
+    CHECK(AttentionFixture::statesOf(client, a.f.inSecond, skip).empty());
+
+    terminal.writeToScreen("done\r\n");
+    a.f.settle();
+    auto const told = AttentionFixture::statesOf(client, a.f.inSecond, skip);
+    REQUIRE(told.size() == 1);
+    CHECK(told.front().activity == proto::OutputActivity::Output);
+}
+
+TEST_CASE("a peer without daemon-attention is served exactly as before", "[vthost][native][daemon-attention]")
+{
+    auto a = AttentionFixture {};
+    auto& client = a.f.attachSelecting(a.f.second); // no DaemonAttention
+    auto& sharing = a.attachSelecting(a.f.first);
+    a.f.settle();
+    auto const skip = client.received.size();
+
+    // Its report states no panes it could watch, and its MarkSeen is not served.
+    AttentionFixture::reportShown(client, proto::WindowFocus::Focused, { a.f.inSecond });
+    CHECK_FALSE(a.f.flush.h.host.isWatched(a.f.inSecond.value));
+    a.terminal(a.f.inFirst).writeToScreen("\a");
+    a.f.settle();
+    auto const rang = AttentionFixture::statesOf(sharing, a.f.inFirst);
+    REQUIRE_FALSE(rang.empty());
+    AttentionFixture::markSeen(client, a.f.inFirst, vthost::SeenSerials { .bell = rang.back().bellSerial });
+    a.f.settle();
+    CHECK(a.ledgerOf(a.f.inFirst).bell == proto::PaneBell::Rang);
+    CHECK(std::ranges::count_if(
+              client.received | std::views::drop(skip),
+              [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); })
+          == 1);
+
+    // It is told what it was told before: the bell in its summary, the output as a summary's mark, and no
+    // attention state.
+    a.terminal(a.f.inFirst).writeToScreen("x\r\n\a");
+    client.session->sessionScreenUpdated(a.f.inFirst);
+    a.f.settle();
+    auto const summaries = SummaryFixture::summariesOf(client, a.f.inFirst, skip);
+    CHECK(std::ranges::count(summaries, proto::PaneBell::Rang, &proto::PaneSummary::bell) == 2);
+    CHECK(std::ranges::count(summaries, proto::OutputActivity::Output, &proto::PaneSummary::activity) == 1);
+    CHECK(std::ranges::none_of(client.received, [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::PaneAttentionState>(frame.pdu);
+    }));
+}
+// }}}

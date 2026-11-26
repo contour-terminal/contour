@@ -227,7 +227,8 @@ namespace vthost::testing
         { proto::PduType::SelectWorkspace,
           proto::DecodedPdu { proto::SelectWorkspace { .workspace = 2, .directoryFromSession = 7 } } },
         { proto::PduType::ReportFocus,
-          proto::DecodedPdu { proto::ReportFocus { .focus = proto::WindowFocus::Focused } } },
+          proto::DecodedPdu {
+              proto::ReportFocus { .focus = proto::WindowFocus::Focused, .shownSessions = { 5, 7 } } } },
         { proto::PduType::NotifyRole,
           proto::DecodedPdu { proto::NotifyRole { .role = proto::RaiseRole::Raise } } },
         { proto::PduType::PaneSummary,
@@ -266,6 +267,23 @@ namespace vthost::testing
         { proto::PduType::SetWorkspaceColor,
           proto::DecodedPdu { proto::SetWorkspaceColor {
               .workspace = 3, .color = proto::WireWorkspaceColor { .rgb = 0xC2548F } } } },
+        { proto::PduType::PaneAttentionState,
+          proto::DecodedPdu { proto::PaneAttentionState {
+              .session = 5,
+              .activity = proto::OutputActivity::Output,
+              .activitySerial = 1,
+              .bell = proto::PaneBell::Rang,
+              .bellSerial = 2,
+              .finished =
+                  proto::FinishedCommand { .exitCode = 0, .durationMs = 120, .commandLine = "secret-cmd" },
+              .finishedSerial = 3,
+              .finishedAtUnixMs = 1'790'000'000'000,
+              .seenStatusGeneration = 4 } } },
+        { proto::PduType::MarkSeen,
+          proto::DecodedPdu { proto::MarkSeen {
+              .session = 5,
+              .seen =
+                  proto::SeenSerials { .activity = 1, .bell = 2, .finished = 3, .statusGeneration = 4 } } } },
     };
 }
 

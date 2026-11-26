@@ -182,6 +182,18 @@ HandoverSession sessionStructureOf(SessionHost const& host, vtworkspace::Session
     return session;
 }
 
+namespace
+{
+    /// @return @p host's attention ledger, as a handover image carries it.
+    [[nodiscard]] HandoverAttention attentionOf(SessionHost const& host)
+    {
+        auto attention = HandoverAttention { .lastSerial = host.attentionLastSerial(), .panes = {} };
+        for (auto const& [session, pane]: host.paneAttention())
+            attention.panes.push_back(HandoverPaneAttention { .session = session, .attention = pane });
+        return attention;
+    }
+} // namespace
+
 HandoverImage hostStructureOf(SessionHost const& host)
 {
     auto image = HandoverImage {
@@ -198,6 +210,7 @@ HandoverImage hostStructureOf(SessionHost const& host)
         .defaultColorPreference = host.defaultColorPreference(),
         .upgradeGeneration = 0,
         .cellPixelSize = host.learnedCellPixelSize(),
+        .attention = attentionOf(host),
     };
     for (auto const id: host.sessionIds())
         image.sessions.push_back(sessionStructureOf(host, id));

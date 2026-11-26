@@ -20,10 +20,12 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <vtcontrol/ObjectRef.hpp>
 #include <vtcontrol/Uuid.hpp>
+#include <vthost/AttentionLedger.hpp>
 #include <vthost/CarriedDelivery.hpp>
 #include <vthost/CommandInterruption.hpp>
 #include <vthost/ObjectRegistry.hpp>
@@ -153,6 +155,47 @@ struct HandoverSession
     }
 };
 
+/// One pane's entry of the attention ledger, as it crosses the exec.
+struct HandoverPaneAttention
+{
+    uint64_t session = 0;    ///< The pane's session.
+    PaneAttention attention; ///< What the ledger states of it.
+
+    /// Lists the fields for the handover codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.session);
+        visitor(2, self.attention);
+    }
+
+    bool operator==(HandoverPaneAttention const&) const = default;
+};
+
+/// The daemon's attention ledger, as it crosses the exec: what each pane raised and what a window saw of it,
+/// and the serial counter, so that the new image never hands out a serial a window already holds.
+struct HandoverAttention
+{
+    uint64_t lastSerial = 0;                  ///< The last serial the ledger handed out.
+    std::vector<HandoverPaneAttention> panes; ///< Every pane's entry, by ascending session.
+
+    /// Lists the fields for the handover codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.lastSerial);
+        visitor(2, self.panes);
+    }
+
+    bool operator==(HandoverAttention const&) const = default;
+};
+
+/// Whether a visitFields() pass over a @p Self encodes: the handover codec writes an image from a const one
+/// and reads into a mutable one, so the constness of `self` is what tells a field that may be left out of the
+/// written image from one that is always read.
+/// @tparam Self The type of `self` in visitFields() (decltype(self)).
+template <typename Self>
+inline constexpr bool isEncodingPass = std::is_const_v<std::remove_reference_t<Self>>;
+static_assert(isEncodingPass<int const&> && !isEncodingPass<int&>);
+
 /// Everything the old image hands the new one.
 struct HandoverImage
 {
@@ -180,6 +223,9 @@ struct HandoverImage
     /// until a client reports.
     /// Unchecked: the host that adopts the image bounds it first.
     std::optional<vtpty::ImageSize> cellPixelSize {};
+    /// The attention ledger (SessionHost::paneAttention()); empty for an image from before the field, whose
+    /// panes then start with nothing raised.
+    HandoverAttention attention {};
 
     /// Lists the fields for the handover codec. Field 12 carried the Windows lease handle apart from the
     /// descriptor in format 1, and field 14 the release records of the follow model; both retired, never to
@@ -199,6 +245,10 @@ struct HandoverImage
         visitor(11, self.upgradeGeneration);
         visitor(13, self.cellPixelSize);
         visitor(15, self.defaultWorkspace);
+        // Read always, written only when the ledger holds something: the image of a host that holds none is
+        // written byte for byte as a release before the field wrote it (testing::RecordedHandoverNames).
+        if (!isEncodingPass<decltype(self)> || self.attention != HandoverAttention {})
+            visitor(16, self.attention);
     }
 };
 
