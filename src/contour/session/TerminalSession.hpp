@@ -1327,6 +1327,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The directory, or an empty string when none can be determined.
     [[nodiscard]] std::string displayWorkingDirectory() const;
 
+    /// The directory the session's process started in, as a fallback when its shell reported none; raw.
+    /// @return The directory, or an empty string where it cannot be asked (Windows, a non-process device).
+    [[nodiscard]] std::string startedDirectory() const;
+
     /// The view this session renders through (@ref DisplaySurface), or nullptr while it has none —
     /// a background tab that was never shown, or a headless test.
     [[nodiscard]] DisplaySurface* display() noexcept { return _display; }

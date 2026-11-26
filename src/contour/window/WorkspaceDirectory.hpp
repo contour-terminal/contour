@@ -34,9 +34,11 @@ namespace contour::window
 /// One pane of a tab, with what is known of it.
 struct DirectoryPane
 {
-    PaneKey key;                                        ///< The pane's session.
-    std::string title;                                  ///< The pane's title, empty when unknown.
-    std::string cwd;                                    ///< The pane's working directory, empty when unknown.
+    PaneKey key;       ///< The pane's session.
+    std::string title; ///< The pane's title, empty when unknown.
+    /// The pane's working directory as shown (home-abbreviated, made safe to show): display text, never a
+    /// path to act on. Empty when unknown.
+    std::string cwd;
     std::vector<vtbackend::ProgramStatusRecord> status; ///< The program-status records the pane reports.
     vthost::proto::OutputActivity activity = vthost::proto::OutputActivity::None; ///< Output since seen.
     vthost::proto::PaneBell bell = vthost::proto::PaneBell::Silent;               ///< A bell since seen.
@@ -223,7 +225,7 @@ std::optional<ListedTab> tabHoldingPane(WorkspaceDirectory const&& directory, Pa
 struct PaneStatus
 {
     std::string title;
-    std::string cwd;
+    std::string cwd; ///< As shown: display text, never a path to act on (@see DirectoryPane::cwd).
     std::vector<vtbackend::ProgramStatusRecord> status;
     vthost::proto::OutputActivity activity = vthost::proto::OutputActivity::None;
     vthost::proto::PaneBell bell = vthost::proto::PaneBell::Silent;

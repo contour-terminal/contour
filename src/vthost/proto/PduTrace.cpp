@@ -126,6 +126,12 @@ namespace
         return found != table.end() ? found->name : "?";
     }
 
+    /// A PaneSummary's directory by its locality alone: the path is payload.
+    [[nodiscard]] std::string formatDirectory(std::optional<WireDirectory> const& directory)
+    {
+        return directory ? std::format(" cwd=locality:{}", directory->locality) : std::string {};
+    }
+
     /// @return @p color as `color=#rrggbb`, or `color=none` for a cleared one: a colour is no user's words.
     [[nodiscard]] std::string formatWorkspaceColor(WireWorkspaceColor const& color)
     {
@@ -675,7 +681,7 @@ namespace
                                           value.session,
                                           nameIn(ActivityNames, value.activity),
                                           formatPresence("title", value.title),
-                                          formatPresence("cwd", value.cwd),
+                                          formatDirectory(value.cwd),
                                           formatFinished(value.finished),
                                           value.bell == PaneBell::Rang ? " bell=rang" : "",
                                           value.notifications.empty()

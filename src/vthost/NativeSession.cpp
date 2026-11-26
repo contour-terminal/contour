@@ -74,6 +74,13 @@ using vtworkspace::SessionId;
 
 namespace
 {
+    /// @return @p shown as a PaneSummary carries it: the real path, and whether it is on this machine.
+    [[nodiscard]] proto::WireDirectory toWireDirectory(ShownDirectory shown)
+    {
+        return proto::WireDirectory { .path = std::move(shown.path),
+                                      .locality = std::to_underlying(shown.locality) };
+    }
+
     /// Validates a client-proposed grid at the protocol boundary.
     ///
     /// The bound is `proto::MaxGridExtent`, shared with the decoder that bounds the grid the server
@@ -624,7 +631,7 @@ void NativeSession::sessionSignal(SessionId session, SessionSignal const& signal
     if (std::holds_alternative<WorkingDirectoryChangedSignal>(signal))
     {
         queueSummary(session, [this, session](proto::PaneSummary& summary) {
-            summary.cwd = _host.shownWorkingDirectoryOf(session);
+            summary.cwd = _host.shownWorkingDirectoryOf(session).transform(toWireDirectory);
         });
         return;
     }
@@ -908,7 +915,7 @@ void NativeSession::announcePanes()
             _pendingSummaries.try_emplace(session.value, proto::PaneSummary { .session = session.value })
                 .first->second;
         // Every pane's directory, as shown: a mirrored pane's stream does not say it.
-        summary.cwd = _host.shownWorkingDirectoryOf(session);
+        summary.cwd = _host.shownWorkingDirectoryOf(session).transform(toWireDirectory);
         if (mirrorsSession(session))
             continue;
         if (auto const* terminal = _host.terminal(session))

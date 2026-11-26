@@ -3246,12 +3246,13 @@ std::string TerminalSession::shownWorkingDirectory(std::string_view home) const
 {
     // Purely presentational, which is why it happens here and not at the source: a caller that wants a
     // path to act on wants the real one.
+    // Resolved once: a report landing between two reads must not pass a foreign path through as local.
     auto const resolved = resolveWorkingDirectory(vtbackend::CwdPurpose::Display);
-    if (!resolved) // Nothing reported: the directory the session started in, which is on this machine.
-        return vtbackend::abbreviateHomePath(displayWorkingDirectory(), home);
-
-    return vtbackend::sanitizeCommandLine(vtbackend::homeAbbreviatedPath(*resolved, home),
-                                          vtbackend::SanitizePurpose::Display);
+    auto const path = resolved
+                          ? vtbackend::homeAbbreviatedPath(*resolved, home)
+                          // Nothing reported: the directory the session started in, which is on this machine.
+                          : vtbackend::abbreviateHomePath(startedDirectory(), home);
+    return vtbackend::sanitizeCommandLine(path, vtbackend::SanitizePurpose::Display);
 }
 
 void TerminalSession::setPaneProgramStatus(window::TabBadgeKind kind, QString text)
@@ -7855,6 +7856,17 @@ std::string TerminalSession::workingDirectory() const
     return "."s;
 }
 
+std::string TerminalSession::startedDirectory() const
+{
+    // Unlike workingDirectory() this is NOT filtered for local existence -- a path worth SHOWING need not be
+    // one a child could be spawned in.
+#ifndef _WIN32
+    if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
+        return ptyProcess->workingDirectory();
+#endif
+    return {};
+}
+
 std::string TerminalSession::displayWorkingDirectory() const
 {
     auto const directory = [this]() -> std::string {
@@ -7867,13 +7879,7 @@ std::string TerminalSession::displayWorkingDirectory() const
             return resolved->path;
 
         // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
-        // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need
-        // not be one a child could be spawned in.
-#ifndef _WIN32
-        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
-            return ptyProcess->workingDirectory();
-#endif
-        return {};
+        return startedDirectory();
     }();
 
     // Shown, so made safe to show: a directory name may hold a line feed or a bidi override, and OSC 7
