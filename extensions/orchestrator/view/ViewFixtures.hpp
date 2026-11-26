@@ -64,8 +64,9 @@ struct World
     std::optional<std::string> configJson = std::nullopt; ///< The whole configuration; absent: the default
                                                           ///< one with @ref repos.
     std::string repos = std::string { OneRepository };    ///< The `repos` array.
-    std::string work = {}; ///< The `work` object of the default configuration; empty: none.
-    std::string keys = {}; ///< The `keys` object of the default configuration; empty: none.
+    std::string work = {};       ///< The `work` object of the default configuration; empty: none.
+    std::string keys = {};       ///< The `keys` object of the default configuration; empty: none.
+    std::string automation = {}; ///< The `automation` object of the default configuration; empty: none.
     std::vector<std::string> repoPaths = { std::string { ContourPath } }; ///< Each repository, resolved.
     ListAnswer prs = { "github/prs-open.json" };                          ///< What `gh-prs` prints.
     ListAnswer issues = { "github/issues-open.json" };                    ///< What `gh-issues` prints.

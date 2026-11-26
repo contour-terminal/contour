@@ -326,3 +326,24 @@ TEST_CASE("q closes the timeline opened from a typed filter, which keeps its tex
     CHECK(fixture.dashboard.interaction().overlay == Overlay::None);
     CHECK(fixture.dashboard.interaction().filter == "ab");
 }
+
+TEST_CASE("palette: automation is switched from the palette while rules are configured",
+          "[orchestrator][view][automation]")
+{
+    auto const isToggle = [](PaletteEntry const& entry) {
+        return entry.command == KeyCommand::ToggleAutomation;
+    };
+    auto const without = bootEngine(World {});
+    auto const unruled = paletteEntries(nullptr, &without);
+    auto const off = std::ranges::find_if(unruled, isToggle);
+    REQUIRE(off != unruled.end());
+    CHECK(off->reason == "no automation rules are configured");
+
+    auto const with = bootEngine(
+        World { .automation = R"({ "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] })" });
+    auto const ruled = paletteEntries(nullptr, &with);
+    auto const on = std::ranges::find_if(ruled, isToggle);
+    REQUIRE(on != ruled.end());
+    CHECK(on->reason.empty());
+    CHECK(on->label == "switch automation on or off");
+}

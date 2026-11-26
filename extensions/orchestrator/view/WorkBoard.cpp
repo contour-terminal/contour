@@ -200,12 +200,18 @@ namespace
         return nowWallMs > item.updatedWallMs ? nowWallMs - item.updatedWallMs : 0;
     }
 
-    /// @return The Agent cell: `⬢ <worker>` while a run works on the item; else, at Detail::Full, the age
-    ///         of its last update, or `·` when that is unknown; else nothing.
-    [[nodiscard]] Cell agentCell(WorkItem const& item, uint64_t nowWallMs, Detail detail)
+    /// @return The Agent cell: `⬢ <worker>` while a run works on the item; `⚙ queued` while automation waits
+    ///         for a free slot to start on it; else, at Detail::Full, the age of its last update, or `·` when
+    ///         that is unknown; else nothing.
+    [[nodiscard]] Cell agentCell(Engine const& engine,
+                                 WorkItem const& item,
+                                 uint64_t nowWallMs,
+                                 Detail detail)
     {
         if (!item.agentRun.empty())
             return Cell { .text = std::format("⬢ {}", item.agentWorker), .role = Role::Working };
+        if (engine.isQueuedForAutomation(workItemKey(item)))
+            return Cell { .text = "⚙ queued", .role = Role::Dim };
         if (detail != Detail::Full)
             return {};
         if (auto const age = shownAgeOf(item, nowWallMs))
@@ -241,8 +247,7 @@ namespace
             widest.mr = std::max(widest.mr, columnsOf(workMrLabel(engine, item)));
             widest.ticket = std::max(widest.ticket, columnsOf(item.ticketKey));
             widest.jira = std::max(widest.jira, columnsOf(jiraCell(item).text));
-            if (!item.agentRun.empty())
-                workers = std::max(workers, columnsOf(agentCell(item, 0, Detail::NoAge).text));
+            workers = std::max(workers, columnsOf(agentCell(engine, item, 0, Detail::NoAge).text));
         }
         auto columns = Columns {};
         // A wide list spaces its columns out by two cells.
@@ -334,6 +339,8 @@ namespace
     {
         if (state.focus == WorkFocus::SortChip)
             return { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
+        if (state.focus == WorkFocus::AutomationChip)
+            return { toggledAutomation(engine) };
         stepRepoChip(state, engine, step);
         return {};
     }
@@ -465,6 +472,7 @@ namespace
                     case WorkFocus::RepoChip: stepRepoChip(work, context.engine, 1); return {};
                     case WorkFocus::SortChip:
                         return { ToggleFoldAction { .group = std::string { SortByUpdateKey } } };
+                    case WorkFocus::AutomationChip: return { toggledAutomation(context.engine) };
                     case WorkFocus::List:
                     case WorkFocus::Filter: break;
                 }
@@ -522,6 +530,12 @@ namespace
             .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 return stepChip(interaction.work, context.engine, 1);
             } },
+        WorkHandlerRow { .command = KeyCommand::ToggleAutomation,
+                         .handler = [](Interaction&, WorkContext const& context) -> std::vector<UiAction> {
+                             if (!context.engine.hasAutomationRules())
+                                 return {};
+                             return { toggledAutomation(context.engine) };
+                         } },
         WorkHandlerRow { .command = KeyCommand::OpenLink, .handler = openSelected },
         WorkHandlerRow { .command = KeyCommand::RowMenu, .handler = openMenu },
         // Every group shown open but the selected line's folds.
@@ -536,9 +550,12 @@ namespace
         // tab moves the keys along the list and the filter bar's chips; the filter types while it has them.
         WorkHandlerRow {
             .command = KeyCommand::Tab,
-            .handler = [](Interaction& interaction, WorkContext const&) -> std::vector<UiAction> {
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 auto& work = interaction.work;
-                constexpr auto Count = std::to_underlying(WorkFocus::SortChip) + 1;
+                // The automation chip is shown, and so takes the keys, only while rules are configured.
+                auto const last =
+                    context.engine.hasAutomationRules() ? WorkFocus::AutomationChip : WorkFocus::SortChip;
+                auto const Count = std::to_underlying(last) + 1;
                 work.focus = static_cast<WorkFocus>((std::to_underlying(work.focus) + 1) % Count);
                 work.filtering = work.focus == WorkFocus::Filter ? Filtering::Typing : Filtering::Off;
                 return {};
@@ -898,7 +915,16 @@ namespace
         auto const repoText = std::format("‹ {} ›", repo);
         auto const sortText = std::format(
             "sort: {}", sortOf(frame.engine) == WorkSort::LastUpdate ? "last update"sv : "importance"sv);
-        auto x = frame.inside.width() - 1 - columnsOf(sortText);
+        auto x = frame.inside.width() - 1;
+        if (frame.engine.hasAutomationRules())
+        {
+            auto const automationText =
+                frame.engine.automation() == AutomationSwitch::On ? "auto ▶ on"sv : "auto ⏸ paused"sv;
+            x -= columnsOf(automationText);
+            chip(x, automationText, WorkFocus::AutomationChip);
+            x -= 2;
+        }
+        x -= columnsOf(sortText);
         chip(x, sortText, WorkFocus::SortChip);
         x -= columnsOf(repoText) + 2;
         chip(x, repoText, WorkFocus::RepoChip);
@@ -965,7 +991,7 @@ namespace
             list, y, x, columns.review, lookText(review, columns.review), pick(review.role), columns.gap);
         auto const jira = jiraCell(item);
         x = putCell(list, y, x, columns.jira, jira.text, pick(jira.role), columns.gap);
-        auto const agent = agentCell(item, nowWallMs, columns.detail);
+        auto const agent = agentCell(engine, item, nowWallMs, columns.detail);
         static_cast<void>(putCell(list, y, x, columns.agent, agent.text, pick(agent.role), columns.gap));
     }
 

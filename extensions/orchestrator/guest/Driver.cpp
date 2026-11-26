@@ -211,6 +211,16 @@ namespace
         return SetFold { .group = fold.group, .choice = fold.choice, .monoMs = monoMs };
     }
 
+    [[nodiscard]] Input inputOf(view::SetAutomationAction const& set, uint64_t monoMs)
+    {
+        return SetAutomation { .to = set.to, .monoMs = monoMs };
+    }
+
+    [[nodiscard]] Input inputOf(view::RunOnItemsAction const& run, uint64_t monoMs)
+    {
+        return RunOnItems { .items = run.items, .task = run.task, .monoMs = monoMs };
+    }
+
     /// @return A listed tab's size, as the dashboard takes it.
     [[nodiscard]] core::tui::Size sizeOf(TabInfo const& tab) noexcept
     {

@@ -617,6 +617,12 @@ namespace
                      } },
         // The palette installs the plugins the agents lack into the user's own Claude Code: its entry names
         // them, and dispatch() refuses while none is missing or they are being installed.
+        HandlerRow { .command = KeyCommand::ToggleAutomation,
+                     .handler = [](Interaction&, KeyContext const& context) -> std::optional<UiAction> {
+                         if (context.engine == nullptr)
+                             return std::nullopt;
+                         return UiAction { toggledAutomation(*context.engine) };
+                     } },
         HandlerRow { .command = KeyCommand::InstallPlugins,
                      .handler = [](Interaction&, KeyContext const&) -> std::optional<UiAction> {
                          return UiAction { InstallPluginsAction {} };
@@ -1039,6 +1045,12 @@ std::string_view chipRepository(WorkState const& state, std::span<std::string co
     return state.repoChip > 0 && state.repoChip <= repos.size()
                ? std::string_view { repos[state.repoChip - 1] }
                : std::string_view {};
+}
+
+SetAutomationAction toggledAutomation(Engine const& engine) noexcept
+{
+    return SetAutomationAction { .to = engine.automation() == AutomationSwitch::On ? AutomationSwitch::Paused
+                                                                                   : AutomationSwitch::On };
 }
 
 } // namespace orchestrator::view

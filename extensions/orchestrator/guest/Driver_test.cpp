@@ -2125,3 +2125,20 @@ TEST_CASE("an automatic start is stepped as a dispatch with a fresh session, wit
     CHECK(dispatched.front().wallMs == served.host.clock.wallMs);
     CHECK(served.host.startsOf("git-fetch") == 1);
 }
+
+TEST_CASE("the automation switch and a group start are stepped as the engine's inputs",
+          "[guest][driver][automation]")
+{
+    auto served = Served {};
+    served.load();
+    served.invoke("open");
+    served.driver->apply("tab-1", view::SetAutomationAction { .to = AutomationSwitch::On });
+    served.driver->apply("tab-1", view::RunOnItemsAction { .items = { "contour/!2375" }, .task = "fix_ci" });
+    auto const switched = served.observer.inputsOf<SetAutomation>();
+    REQUIRE(switched.size() == 1);
+    CHECK(switched.front().to == AutomationSwitch::On);
+    auto const started = served.observer.inputsOf<RunOnItems>();
+    REQUIRE(started.size() == 1);
+    CHECK(started.front().items == std::vector<std::string> { "contour/!2375" });
+    CHECK(started.front().task == "fix_ci");
+}

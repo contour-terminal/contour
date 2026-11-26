@@ -627,3 +627,39 @@ TEST_CASE("a 2 KiB unbroken word wraps to the same lines as cluster by cluster",
     // A word that is not ASCII alone is still broken between clusters.
     CHECK(wrap("日本語日本語", 4, 4) == std::vector<std::string> { "日本", "語日", "本語" });
 }
+
+TEST_CASE("a run a rule began is marked, and its details say which rule", "[orchestrator][view][automation]")
+{
+    auto byRule = storedRun(Running {}, RunningId, ChangeRequestRef { 2375 });
+    byRule.origin = RunOrigin::Rule;
+    byRule.originRule = "pipeline_failed/fix_ci";
+    auto byGroup = storedRun(Running {}, DoneId, ChangeRequestRef { 2379 });
+    byGroup.origin = RunOrigin::Bulk;
+    auto const engine = bootEngine({ .stored = { byRule, byGroup } });
+    auto const rows = buildRows(engine, StartMonoMs);
+
+    auto const* const rule = rowOfRun(rows, RunningId);
+    REQUIRE(rule != nullptr);
+    CHECK(rule->text.starts_with("⚙ "));
+    auto const startedAt = detailIndexOf(rule->details, "started by");
+    REQUIRE(startedAt < rule->details.size());
+    CHECK(rule->details[startedAt].value == "rule pipeline_failed → fix CI");
+
+    auto const* const group = rowOfRun(rows, DoneId);
+    REQUIRE(group != nullptr);
+    CHECK(group->text.starts_with("⚙ "));
+    auto const groupAt = detailIndexOf(group->details, "started by");
+    REQUIRE(groupAt < group->details.size());
+    CHECK(group->details[groupAt].value == "a group start");
+}
+
+TEST_CASE("a run the user began has no mark and no started-by line", "[orchestrator][view][automation]")
+{
+    auto const engine =
+        bootEngine({ .stored = { storedRun(Running {}, RunningId, ChangeRequestRef { 2375 }) } });
+    auto const rows = buildRows(engine, StartMonoMs);
+    auto const* const row = rowOfRun(rows, RunningId);
+    REQUIRE(row != nullptr);
+    CHECK_FALSE(row->text.starts_with("⚙"));
+    CHECK(detailIndexOf(row->details, "started by") == row->details.size());
+}

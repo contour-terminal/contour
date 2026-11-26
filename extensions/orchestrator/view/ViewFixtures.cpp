@@ -52,10 +52,12 @@ namespace
     {{ "id": "fix_ci", "key": "f", "label": "fix CI", "applies_to": "pr", "model": "sonnet",
        "prompt": "/contour-workflows:fix-ci {{url}}" }},
     {{ "id": "issue", "key": "w", "label": "work on issue", "applies_to": "issue", "model": "opus",
-       "prompt": "/contour-workflows:work-issue {{url}}" }} ]{}{} }})",
+       "prompt": "/contour-workflows:work-issue {{url}}" }} ]{}{}{} }})",
                            world.repos,
                            world.work.empty() ? std::string {} : std::format(R"(, "work": {})", world.work),
-                           world.keys.empty() ? std::string {} : std::format(R"(, "keys": {})", world.keys));
+                           world.keys.empty() ? std::string {} : std::format(R"(, "keys": {})", world.keys),
+                           world.automation.empty() ? std::string {}
+                                                    : std::format(R"(, "automation": {})", world.automation));
     }
 
     [[nodiscard]] ProcessOutcome ok(std::string text)

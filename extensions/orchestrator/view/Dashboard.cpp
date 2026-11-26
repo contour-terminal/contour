@@ -1389,6 +1389,11 @@ namespace
                 work.filtering = Filtering::Off;
                 state.run(KeyCommand::Sort, actions);
                 return;
+            case WorkFocus::AutomationChip:
+                work.focus = chip;
+                work.filtering = Filtering::Off;
+                state.run(KeyCommand::ToggleAutomation, actions);
+                return;
             case WorkFocus::List: break;
         }
     }

@@ -571,3 +571,36 @@ TEST_CASE("Work view: the filter's esc keeps it and a second esc clears it; / ty
     CHECK(work.filter.empty());
     CHECK(work.filtering == Filtering::Off);
 }
+
+TEST_CASE("Work view: the automation chip shows the switch, and only with rules",
+          "[orchestrator][view][work][automation]")
+{
+    auto without = DashboardFixture { workWorld(), Wide };
+    CHECK(without.dashboard.input("w").empty());
+    CHECK_FALSE(without.screen().contains("auto "));
+
+    auto world = workWorld();
+    world.automation = R"({ "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] })";
+    auto fixture = DashboardFixture { world, Wide };
+    CHECK(fixture.dashboard.input("w").empty());
+    CHECK(fixture.screen().contains("auto ⏸ paused"));
+
+    // tab moves the keys along the filter bar's chips to the automation chip; ⏎ switches it.
+    CHECK(fixture.dashboard.input("\t\t\t\t").empty());
+    CHECK(fixture.dashboard.interaction().work.focus == WorkFocus::AutomationChip);
+    auto const actions = fixture.dashboard.input("\r");
+    REQUIRE(actions.size() == 1);
+    CHECK(actions.front() == UiAction { SetAutomationAction { .to = AutomationSwitch::On } });
+}
+
+TEST_CASE("Work view: an item waiting for a free slot shows it is queued",
+          "[orchestrator][view][work][automation]")
+{
+    auto world = workWorld();
+    world.automation = R"({ "enabled": true, "max_agents": 1,
+                            "rules": [ { "when": "pipeline_failed", "task": "fix_ci" },
+                                       { "when": "conflicts", "task": "fix_ci" } ] })";
+    auto fixture = DashboardFixture { world, Wide };
+    CHECK(fixture.dashboard.input("w").empty());
+    CHECK(fixture.screen().contains("⚙ queued"));
+}

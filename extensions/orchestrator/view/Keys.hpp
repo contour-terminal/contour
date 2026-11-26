@@ -134,6 +134,21 @@ struct ReadTranscriptAction
     [[nodiscard]] bool operator==(ReadTranscriptAction const&) const = default;
 };
 
+/// Switch automation on or off.
+struct SetAutomationAction
+{
+    AutomationSwitch to = AutomationSwitch::Paused; ///< What it is to be.
+    [[nodiscard]] bool operator==(SetAutomationAction const&) const = default;
+};
+
+/// Start one task on several Work-view items, as free slots allow ("run a task on this group").
+struct RunOnItemsAction
+{
+    std::vector<std::string> items = {}; ///< The items, by workItemKey(), in the order shown.
+    std::string task = {};               ///< The task for all of them; empty: each item's suggested one.
+    [[nodiscard]] bool operator==(RunOnItemsAction const&) const = default;
+};
+
 /// What the dashboard asks for: the guest steps each as the engine input of the same name (DispatchAction as
 /// Dispatch, ShowBoardAction and HideBoardAction as ShowBoard and HideBoard for the dashboard's tab,
 /// ReadTranscriptAction as ReadTranscript), but for RevealAgentAction, SendMessageAction, QuickReplyAction
@@ -152,10 +167,16 @@ using UiAction = std::variant<RefreshNowAction,
                               HideBoardAction,
                               ReadTranscriptAction,
                               ToggleFoldAction,
-                              SetFoldAction>;
+                              SetFoldAction,
+                              SetAutomationAction,
+                              RunOnItemsAction>;
 
 // }}}
 // {{{ the key table
+
+/// @param engine The engine.
+/// @return What switching automation asks: the other state than the engine's.
+[[nodiscard]] SetAutomationAction toggledAutomation(Engine const& engine) noexcept;
 
 /// What a key, the palette or `⏎` does on the dashboard.
 enum class KeyCommand : uint8_t
@@ -197,15 +218,16 @@ enum class KeyCommand : uint8_t
     FoldOthers,     ///< The Work view: fold every group shown open but the selected line's.
     HalfPageUp,     ///< Move a list's selection, or scroll the Focus's tab, up by half a page.
     HalfPageDown,   ///< Move a list's selection, or scroll the Focus's tab, down by half a page.
-    Reply1,         ///< Answer the selected agent that asks with the quick reply on `1`.
-    Reply2,         ///< … on `2`.
-    Reply3,         ///< … on `3`.
-    Reply4,         ///< … on `4`.
-    Reply5,         ///< … on `5`.
-    Reply6,         ///< … on `6`.
-    Reply7,         ///< … on `7`.
-    Reply8,         ///< … on `8`.
-    Reply9,         ///< … on `9`.
+    ToggleAutomation, ///< Switch automation on or off; the palette's and the automation chip's.
+    Reply1,           ///< Answer the selected agent that asks with the quick reply on `1`.
+    Reply2,           ///< … on `2`.
+    Reply3,           ///< … on `3`.
+    Reply4,           ///< … on `4`.
+    Reply5,           ///< … on `5`.
+    Reply6,           ///< … on `6`.
+    Reply7,           ///< … on `7`.
+    Reply8,           ///< … on `8`.
+    Reply9,           ///< … on `9`.
 };
 
 /// @param command A command.
@@ -284,10 +306,11 @@ enum class View : uint8_t
 /// Where the Work view's keys go.
 enum class WorkFocus : uint8_t
 {
-    List = 0, ///< The list: the keys move the selection.
-    Filter,   ///< The filter: printable keys type into it.
-    RepoChip, ///< The repository chip: ⏎ steps it.
-    SortChip, ///< The sort chip: ⏎ switches the sort.
+    List = 0,       ///< The list: the keys move the selection.
+    Filter,         ///< The filter: printable keys type into it.
+    RepoChip,       ///< The repository chip: ⏎ steps it.
+    SortChip,       ///< The sort chip: ⏎ switches the sort.
+    AutomationChip, ///< The automation chip, shown while rules are configured: ⏎ switches automation.
 };
 
 /// What is shown over the dashboard, besides the start dialog, the `n` box and the palette.

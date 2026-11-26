@@ -376,6 +376,30 @@ namespace
     }
 
     // }}}
+    /// @return A run row's first line: its item and task, after `⚙` for a run a rule or a group start began.
+    [[nodiscard]] std::string runText(Lists const& lists, Run const& run)
+    {
+        return std::format("{}{} · {}",
+                           run.origin == RunOrigin::User ? ""sv : "⚙ "sv,
+                           itemName(run),
+                           taskLabel(lists.config, run));
+    }
+
+    /// @return Who began a run that the user did not: `rule <when> → <task>`, or `a group start`.
+    [[nodiscard]] std::string startedByText(Lists const& lists, Run const& run)
+    {
+        switch (run.origin)
+        {
+            case RunOrigin::Rule: {
+                auto const when = std::string_view { run.originRule }.substr(0, run.originRule.find('/'));
+                return std::format("rule {} → {}", when, taskLabel(lists.config, run));
+            }
+            case RunOrigin::Bulk: return "a group start";
+            case RunOrigin::User: break;
+        }
+        return {};
+    }
+
     /// The details every run row shows.
     [[nodiscard]] std::vector<DetailLine> runDetails(Lists const& lists, Run const& run)
     {
@@ -388,6 +412,9 @@ namespace
             details.push_back(DetailLine {
                 .label = "worker",
                 .value = clean(run.worker.empty() ? std::string { ImplicitWorkerId } : run.worker) });
+        if (run.origin != RunOrigin::User)
+            details.push_back(
+                DetailLine { .label = "started by", .value = clean(startedByText(lists, run)) });
         details.push_back(DetailLine { .label = "state", .value = clean(runStateText(run)) });
         // What the agent spent and did comes before where it worked: it is what a finished run is opened for.
         std::ranges::move(statsDetails(run), std::back_inserter(details));
@@ -532,7 +559,7 @@ namespace
                      .mark = std::string { look.mark },
                      .markRole = look.role,
                      .prefix = prefixOf(lists, run.repo),
-                     .text = clean(std::format("{} · {}", itemName(run), taskLabel(lists.config, run))),
+                     .text = clean(runText(lists, run)),
                      .status = clean(status),
                      .statusRole = statusRole,
                      .context = std::move(context),
@@ -608,7 +635,7 @@ namespace
                      .mark = std::string { look.mark },
                      .markRole = look.role,
                      .prefix = prefixOf(lists, run.repo),
-                     .text = clean(std::format("{} · {}", itemName(run), taskLabel(lists.config, run))),
+                     .text = clean(runText(lists, run)),
                      .status = std::string { look.word },
                      .statusRole = look.role,
                      .context = clean(context),

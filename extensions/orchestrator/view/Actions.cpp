@@ -51,6 +51,13 @@ namespace
         return {};
     }
 
+    /// Why automation is not switched now.
+    [[nodiscard]] std::string_view whyNoAutomation(Engine const* engine)
+    {
+        return engine == nullptr || !engine->hasAutomationRules() ? "no automation rules are configured"sv
+                                                                  : ""sv;
+    }
+
     /// Why a digit no quick reply is on does not answer.
     constexpr auto NoReply = "no quick reply is on this key; quick_replies sets them"sv;
 
@@ -91,6 +98,10 @@ namespace
                      .label = "install the missing plugins"sv,
                      .scope = CommandScope::Global,
                      .unavailable = whyNoInstall },
+        CommandRow { .command = KeyCommand::ToggleAutomation,
+                     .label = "switch automation on or off"sv,
+                     .scope = CommandScope::Global,
+                     .unavailable = whyNoAutomation },
         CommandRow { .command = KeyCommand::Timeline,
                      .label = "show the last 24 hours"sv,
                      .scope = CommandScope::Global },
