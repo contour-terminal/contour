@@ -11,6 +11,11 @@
 // Every address and length a guest provides is checked against its linear memory before a byte is
 // read or written, so a guest cannot make the host touch memory outside its own: a lift that would is
 // ExtensionError::Trapped, as the Canonical ABI traps.
+//
+// Lifting reads guest memory only through IGuestMemory::read(), which copies: each value is decoded from a
+// copy taken once, never from the guest's memory itself. A guest's memory may be written while the host
+// lifts (by another process that maps it, or by another thread of the guest's), and a value decoded from
+// the memory itself could have one length when it is checked and another when it is used.
 #pragma once
 
 #include <core/Flags.hpp>
@@ -58,12 +63,21 @@ class IGuestMemory
     IGuestMemory& operator=(IGuestMemory&&) = delete;
     virtual ~IGuestMemory() = default;
 
-    /// Views guest memory. The view is invalidated by the next allocate(), which may grow the memory.
-    /// @param address Where the view starts.
+    /// Copies guest memory, once: lifting reads through nothing else. The copy is the host's, so whatever
+    /// the guest's memory holds afterwards, the bytes decoded are the bytes checked.
+    /// @param address Where the copy starts.
+    /// @param into Where it goes; its size is how many bytes are copied.
+    /// @return Nothing once copied; `Trapped` if any byte lies outside the memory.
+    [[nodiscard]] virtual Result<void> read(Address address, std::span<std::byte> into) = 0;
+
+    /// Guest memory to write: for lowering, and for proving a range inside the memory. Lifting never reads
+    /// through it (read() is for that). The span is invalidated by the next allocate(), which may grow the
+    /// memory.
+    /// @param address Where the span starts.
     /// @param size How many bytes it spans.
     /// @return The bytes at [@p address, @p address + @p size); `Trapped` if any lies outside the
     ///         memory.
-    [[nodiscard]] virtual Result<std::span<std::byte>> view(Address address, uint32_t size) = 0;
+    [[nodiscard]] virtual Result<std::span<std::byte>> writable(Address address, uint32_t size) = 0;
 
     /// Allocates guest memory through the guest's `cabi_realloc`.
     /// @param size How many bytes.
@@ -150,24 +164,29 @@ namespace detail
         using Type = Member;
     };
 
-    /// Reads @p memory's bytes at @p address as a little-endian unsigned integer.
+    /// Decodes @p bytes as a little-endian unsigned integer.
     template <typename U>
-    [[nodiscard]] Result<U> loadInteger(IGuestMemory& memory, Address address)
+    [[nodiscard]] constexpr U decodeInteger(std::span<std::byte const, sizeof(U)> bytes) noexcept
     {
-        auto const bytes = memory.view(address, sizeof(U));
-        if (!bytes)
-            return std::unexpected(bytes.error());
         auto value = U { 0 };
         for (auto const index: std::views::iota(std::size_t { 0 }, sizeof(U)))
-            value |= static_cast<U>(std::to_integer<U>((*bytes)[index]) << (8 * index));
+            value |= static_cast<U>(std::to_integer<U>(bytes[index]) << (8 * index));
         return value;
+    }
+
+    /// Reads @p memory's bytes at @p address, copied once, as a little-endian unsigned integer.
+    template <typename U>
+    [[nodiscard]] Result<U> readInteger(IGuestMemory& memory, Address address)
+    {
+        auto bytes = std::array<std::byte, sizeof(U)> {};
+        return memory.read(address, bytes).transform([&] { return decodeInteger<U>(bytes); });
     }
 
     /// Writes @p value at @p address of @p memory as a little-endian unsigned integer.
     template <typename U>
     [[nodiscard]] Result<void> storeInteger(IGuestMemory& memory, Address address, U value)
     {
-        auto const bytes = memory.view(address, sizeof(U));
+        auto const bytes = memory.writable(address, sizeof(U));
         if (!bytes)
             return std::unexpected(bytes.error());
         for (auto const index: std::views::iota(std::size_t { 0 }, sizeof(U)))
@@ -191,7 +210,7 @@ namespace detail
     {
         if (!fitsAddressSpace(address, size))
             return std::unexpected(ExtensionError::Trapped);
-        return memory.view(address, size).transform([](std::span<std::byte>) {});
+        return memory.writable(address, size).transform([](std::span<std::byte>) {});
     }
 
     /// Lowers a (pointer, length) pair: the shape strings and lists share.
@@ -212,16 +231,16 @@ namespace detail
         uint32_t length;
     };
 
-    /// Lifts a (pointer, length) pair from memory.
+    /// Lifts a (pointer, length) pair from memory, both from one copy.
     [[nodiscard]] inline Result<PointerAndLength> loadPointerAndLength(IGuestMemory& memory, Address address)
     {
-        if (auto const inRange = checkRange(memory, address, 8); !inRange)
-            return std::unexpected(inRange.error());
-        auto const pointer = loadInteger<uint32_t>(memory, address);
-        if (!pointer)
-            return std::unexpected(pointer.error());
-        return loadInteger<uint32_t>(memory, address + 4).transform([&](uint32_t length) {
-            return PointerAndLength { .pointer = *pointer, .length = length };
+        if (!fitsAddressSpace(address, 8))
+            return std::unexpected(ExtensionError::Trapped);
+        auto bytes = std::array<std::byte, 8> {};
+        return memory.read(address, bytes).transform([&] {
+            auto const pair = std::span<std::byte const, 8> { bytes };
+            return PointerAndLength { .pointer = decodeInteger<uint32_t>(pair.first<4>()),
+                                      .length = decodeInteger<uint32_t>(pair.last<4>()) };
         });
     }
 
@@ -247,34 +266,44 @@ namespace detail
         auto const address = memory.allocate(size, alignment);
         if (!address || size == 0)
             return address;
-        return memory.view(*address, size).transform([&](std::span<std::byte> target) {
+        return memory.writable(*address, size).transform([&](std::span<std::byte> target) {
             std::ranges::copy(bytes, target.begin());
             return *address;
         });
     }
 
-    /// Views the bytes a (pointer, length) pair of @p elementSize-byte elements spans.
-    [[nodiscard]] inline Result<std::span<std::byte>> viewElements(IGuestMemory& memory,
-                                                                   PointerAndLength list,
-                                                                   uint32_t elementSize)
+    /// Proves the bytes a (pointer, length) pair of @p elementSize-byte elements spans inside @p memory,
+    /// reading none of them.
+    [[nodiscard]] inline Result<void> checkElements(IGuestMemory& memory,
+                                                    PointerAndLength list,
+                                                    uint32_t elementSize)
     {
         auto const bytes = uint64_t { list.length } * elementSize;
         if (!fitsAddressSpace(list.pointer, bytes))
             return std::unexpected(ExtensionError::Trapped);
         if (bytes == 0)
-            return std::span<std::byte> {};
-        return memory.view(list.pointer, static_cast<uint32_t>(bytes));
+            return {};
+        return checkRange(memory, list.pointer, static_cast<uint32_t>(bytes));
     }
 
-    /// Copies a viewed run of guest bytes into a container of byte-sized values.
+    /// Copies the bytes a (pointer, length) pair of @p elementSize-byte elements spans, once, into a
+    /// container of byte-sized values. What the container takes on the host is the caller's to have charged
+    /// (IGuestMemory::chargeLift()) or bounded before.
     template <typename Container>
-    [[nodiscard]] Container copyBytes(std::span<std::byte const> bytes)
+        requires(sizeof(typename Container::value_type) == 1)
+    [[nodiscard]] Result<Container> readBytes(IGuestMemory& memory,
+                                              PointerAndLength list,
+                                              uint32_t elementSize)
     {
-        auto container = Container(bytes.size(), typename Container::value_type {});
-        std::ranges::transform(bytes, container.begin(), [](std::byte byte) {
-            return static_cast<Container::value_type>(byte);
+        auto const bytes = uint64_t { list.length } * elementSize;
+        if (!fitsAddressSpace(list.pointer, bytes))
+            return std::unexpected(ExtensionError::Trapped);
+        auto container = Container(static_cast<std::size_t>(bytes), typename Container::value_type {});
+        if (bytes == 0)
+            return container;
+        return memory.read(list.pointer, std::as_writable_bytes(std::span { container })).transform([&] {
+            return std::move(container);
         });
-        return container;
     }
 } // namespace detail
 
@@ -296,7 +325,7 @@ struct Codec<I>
 
     [[nodiscard]] static Result<I> load(IGuestMemory& memory, Address address)
     {
-        return detail::loadInteger<Unsigned>(memory, address).transform([](Unsigned value) {
+        return detail::readInteger<Unsigned>(memory, address).transform([](Unsigned value) {
             return static_cast<I>(value);
         });
     }
@@ -332,7 +361,7 @@ struct Codec<bool>
 
     [[nodiscard]] static Result<bool> load(IGuestMemory& memory, Address address)
     {
-        return detail::loadInteger<uint8_t>(memory, address).transform([](uint8_t byte) {
+        return detail::readInteger<uint8_t>(memory, address).transform([](uint8_t byte) {
             return byte != 0;
         });
     }
@@ -377,7 +406,7 @@ struct Codec<E>
 
     [[nodiscard]] static Result<E> load(IGuestMemory& memory, Address address)
     {
-        return detail::loadInteger<Discriminant>(memory, address).and_then([](Discriminant index) {
+        return detail::readInteger<Discriminant>(memory, address).and_then([](Discriminant index) {
             return fromIndex(index);
         });
     }
@@ -421,7 +450,7 @@ struct Codec<core::Flags<E>>
 
     [[nodiscard]] static Result<core::Flags<E>> load(IGuestMemory& memory, Address address)
     {
-        return detail::loadInteger<Bits>(memory, address).transform([](Bits bits) { return fromBits(bits); });
+        return detail::readInteger<Bits>(memory, address).transform([](Bits bits) { return fromBits(bits); });
     }
 
     [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& /*memory*/,
@@ -545,9 +574,8 @@ struct Codec<std::string>
     [[nodiscard]] static Result<std::string> liftContents(IGuestMemory& memory, detail::PointerAndLength list)
     {
         return memory.chargeLift(list.length)
-            .and_then([&] { return detail::viewElements(memory, list, 1); })
-            .and_then([](std::span<std::byte> bytes) -> Result<std::string> {
-                auto text = detail::copyBytes<std::string>(bytes);
+            .and_then([&] { return detail::readBytes<std::string>(memory, list, 1); })
+            .and_then([](std::string text) -> Result<std::string> {
                 if (!isValidUtf8(text))
                     return std::unexpected(ExtensionError::Trapped);
                 return text;
@@ -631,14 +659,14 @@ struct Codec<std::vector<T>>
     [[nodiscard]] static Result<std::vector<T>> liftContents(IGuestMemory& memory,
                                                              detail::PointerAndLength list)
     {
-        // Proves the whole list in bounds before reading any of it, and bounds the reservation below.
-        auto const bytes = detail::viewElements(memory, list, Codec<T>::Size);
-        if (!bytes)
-            return std::unexpected(bytes.error());
+        // Proves the whole list in bounds before reading any of it, and bounds the reservation below. The
+        // length is the one lifted with the pointer, once: every element read below lies in the range proven.
+        if (auto const inRange = detail::checkElements(memory, list, Codec<T>::Size); !inRange)
+            return std::unexpected(inRange.error());
         if (auto charged = memory.chargeLift(uint64_t { list.length } * sizeof(T)); !charged)
             return std::unexpected(charged.error());
         if constexpr (IsByteList)
-            return detail::copyBytes<std::vector<uint8_t>>(*bytes);
+            return detail::readBytes<std::vector<uint8_t>>(memory, list, 1);
         else
         {
             auto elements = std::vector<T> {};
@@ -879,7 +907,7 @@ struct Codec<std::variant<Ts...>>
     {
         if (auto const inRange = detail::checkRange(memory, address, Size); !inRange)
             return std::unexpected(inRange.error());
-        return detail::loadInteger<Discriminant>(memory, address).and_then([&](Discriminant index) {
+        return detail::readInteger<Discriminant>(memory, address).and_then([&](Discriminant index) {
             return liftIndexed(index, [&]<typename Case>(std::type_identity<Case>) {
                 return Codec<Case>::load(memory, address + PayloadOffset);
             });

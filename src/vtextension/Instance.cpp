@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -16,6 +17,7 @@
 
 #include <vtextension/CanonicalAbi.hpp>
 #include <vtextension/ControlImports.hpp>
+#include <vtextension/GuestMemoryReads.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/StatuslineWorld.hpp>
 
@@ -77,9 +79,9 @@ namespace detail
     }
 } // namespace detail
 
-/// The guest's linear memory as the codec reaches it: every view is bounds-checked by the runtime,
-/// allocations go through the guest's `cabi_realloc` and are checked as well, and what lifting may
-/// spend on the host is bounded per host call.
+/// The guest's linear memory as the codec reaches it: every access is bounds-checked by the runtime, what
+/// lifting reads is copied out once, allocations go through the guest's `cabi_realloc` and are checked as
+/// well, and what lifting may spend on the host is bounded per host call.
 class Instance::GuestMemory final: public abi::IGuestMemory
 {
   public:
@@ -88,12 +90,14 @@ class Instance::GuestMemory final: public abi::IGuestMemory
     /// Gives the next lift the full budget of one host call.
     void resetLiftBudget() noexcept { _liftBudget = _instance._limits.maxHostCallBytes; }
 
-    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
+    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
     {
-        auto const bytes = _instance._instance->memory(address, size);
-        if (!bytes)
-            return std::unexpected(ExtensionError::Trapped);
-        return *bytes;
+        return detail::readOnce(*this, address, into);
+    }
+
+    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
+    {
+        return detail::guestRange(_instance._instance->memory(address, size));
     }
 
     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
@@ -105,7 +109,7 @@ class Instance::GuestMemory final: public abi::IGuestMemory
         auto const address = argv[0];
         if (alignment == 0 || address % alignment != 0)
             return std::unexpected(ExtensionError::Trapped);
-        return view(address, size).transform([&](std::span<std::byte>) { return address; });
+        return writable(address, size).transform([&](std::span<std::byte>) { return address; });
     }
 
     [[nodiscard]] abi::Result<void> chargeLift(uint64_t bytes) override
@@ -236,14 +240,16 @@ Instance::Instance(PrivateTag /*unused*/,
                    std::shared_ptr<CompiledExtension const> compiled,
                    IHostServices& services,
                    core::platform::IClock& clock,
-                   ExtensionLimits limits):
+                   ExtensionLimits limits,
+                   HostAdmission admission):
     _compiled { std::move(compiled) },
     _engine { _compiled->engine().shared_from_this() },
     _services { services },
     _clock { clock },
     _limits { limits },
     _declaredControl { declaredControlOf(*_compiled) },
-    _memory { std::make_unique<GuestMemory>(*this) }
+    _memory { std::make_unique<GuestMemory>(*this) },
+    _admission { admission }
 {
 }
 
@@ -259,9 +265,26 @@ std::expected<std::unique_ptr<Instance>, ExtensionError> Instance::create(Engine
     // The memory and stack caps are the engine's runtime's: an instance cannot be held to others.
     Require(limits.memoryBytes == engine.limits().memoryBytes
             && limits.stackBytes == engine.limits().stackBytes);
-    auto instance =
-        std::make_unique<Instance>(PrivateTag {}, compiled.shared_from_this(), services, clock, limits);
-    return instance->instantiate().transform([&] { return std::move(instance); });
+    // Refused before anything is instantiated: a host that keeps dying is not started again.
+    auto const admission = compiled.admitHost();
+    if (!admission)
+        return std::unexpected(admission.error());
+    auto instance = std::make_unique<Instance>(
+        PrivateTag {}, compiled.shared_from_this(), services, clock, limits, *admission);
+    if (auto instantiated = instance->instantiate(); !instantiated)
+    {
+        instance->reportHostFault(instantiated.error());
+        return std::unexpected(instantiated.error());
+    }
+    return instance;
+}
+
+void Instance::reportHostFault(ExtensionError error) noexcept
+{
+    if (error != ExtensionError::HostUnavailable)
+        return;
+    if (auto const admission = std::exchange(_admission, std::nullopt))
+        _compiled->recordHostFault(*admission);
 }
 
 std::expected<void, ExtensionError> Instance::instantiate()
@@ -338,7 +361,10 @@ auto Instance::guarded(std::chrono::milliseconds timeout, Body const& body) -> d
         _fault = ExtensionError::DeadlineExceeded;
 
     if (_fault)
+    {
+        reportHostFault(*_fault);
         return std::unexpected(*_fault);
+    }
     return result;
 }
 
@@ -360,6 +386,9 @@ std::expected<void, ExtensionError> Instance::callPostReturn(OptionalFunction fu
 
 ExtensionError Instance::guestFailure(wasm::CallFailure failure) const noexcept
 {
+    // A host that died ranks first: a host call failing meanwhile is its consequence, not the cause.
+    if (failure == wasm::CallFailure::HostCrashed)
+        return ExtensionError::HostUnavailable;
     if (_hostCallError)
         return *_hostCallError;
     if (isDeadlineExpired())
@@ -369,8 +398,14 @@ ExtensionError Instance::guestFailure(wasm::CallFailure failure) const noexcept
     // interface, so a later failure in the same guarded body is `Trapped`, where WAMR driven directly
     // once said `OutOfMemory` -- a documented deviation, in the label only. Refusal inside a host call's
     // allocation does reach here as `OutOfMemory`: the host call records it as its error, which ranks first.
-    if (failure == wasm::CallFailure::MemoryGrowthRefused)
-        return ExtensionError::OutOfMemory;
+    switch (failure)
+    {
+        case wasm::CallFailure::MemoryGrowthRefused: return ExtensionError::OutOfMemory;
+        case wasm::CallFailure::HostCrashed: return ExtensionError::HostUnavailable;
+        case wasm::CallFailure::Trap:
+        case wasm::CallFailure::Interrupted:
+        case wasm::CallFailure::HostFailure: return ExtensionError::Trapped;
+    }
     return ExtensionError::Trapped;
 }
 

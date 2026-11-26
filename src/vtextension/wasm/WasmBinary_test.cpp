@@ -9,14 +9,24 @@
 #include <expected>
 #include <initializer_list>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/InstantiationHooks.hpp>
 #include <vtextension/wasm/WasmBinary.hpp>
+#include <vtextension/wasm/testing/BackendContract.hpp>
 
 using vtextension::wasm::binary::BinaryError;
+using vtextension::wasm::binary::DeclaredCounts;
+using vtextension::wasm::binary::declaredCounts;
+using vtextension::wasm::binary::largestInitialElements;
+using vtextension::wasm::binary::largestInitialMemoryPages;
 using vtextension::wasm::binary::Reader;
 using vtextension::wasm::binary::sections;
+using vtextension::wasm::binary::TableDeclaration;
+using vtextension::wasm::binary::tableDeclarations;
 
 namespace
 {
@@ -120,4 +130,198 @@ TEST_CASE("WasmBinary.sections", "[vtextension]")
             module.push_back(static_cast<std::byte>(value));
         CHECK(sections(module) == std::unexpected(BinaryError::Truncated));
     }
+}
+
+TEST_CASE("WasmBinary.largestInitialMemoryPages", "[vtextension]")
+{
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections; ///< What follows the module header.
+        std::expected<uint32_t, BinaryError> pages;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no memory", .sections = {}, .pages = 0 },
+        { .description = "one memory", .sections = raw({ 0x05, 0x03, 0x01, 0x00, 0x02 }), .pages = 2 },
+        { .description = "the largest of two, one with a maximum",
+          .sections = raw({ 0x05, 0x06, 0x02, 0x01, 0x03, 0x04, 0x00, 0x01 }),
+          .pages = 3 },
+        { .description = "a shared one, with its maximum",
+          .sections = raw({ 0x05, 0x04, 0x01, 0x03, 0x05, 0x06 }),
+          .pages = 5 },
+        { .description = "a multi-byte initial size",
+          .sections = raw({ 0x05, 0x04, 0x01, 0x00, 0x80, 0x02 }),
+          .pages = 256 },
+        { .description = "other sections are not read",
+          .sections = raw({ 0x01, 0x02, 0x05, 0x05, 0x05, 0x03, 0x01, 0x00, 0x07 }),
+          .pages = 7 },
+        { .description = "a 64-bit memory",
+          .sections = raw({ 0x05, 0x03, 0x01, 0x04, 0x01 }),
+          .pages = std::unexpected(BinaryError::Malformed) },
+        { .description = "a memory cut short",
+          .sections = raw({ 0x05, 0x03, 0x02, 0x00, 0x01 }),
+          .pages = std::unexpected(BinaryError::Truncated) },
+        { .description = "a maximum cut short",
+          .sections = raw({ 0x05, 0x03, 0x01, 0x01, 0x01 }),
+          .pages = std::unexpected(BinaryError::Truncated) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, pages]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(largestInitialMemoryPages(module) == pages);
+    }
+    CHECK(largestInitialMemoryPages({}) == std::unexpected(BinaryError::NotAModule));
+}
+
+TEST_CASE("WasmBinary.tableDeclarations", "[vtextension]")
+{
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections; ///< What follows the module header.
+        std::expected<std::vector<TableDeclaration>, BinaryError> tables;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no table", .sections = {}, .tables = std::vector<TableDeclaration> {} },
+        { .description = "a funcref table without a maximum",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x00, 0x02 }),
+          .tables =
+              std::vector { TableDeclaration { .elementType = 0x70, .initialElements = 2, .maximum = {} } } },
+        { .description = "an externref table with a multi-byte maximum",
+          .sections = raw({ 0x04, 0x06, 0x01, 0x6f, 0x01, 0x01, 0x80, 0x08 }),
+          .tables = std::vector { TableDeclaration {
+              .elementType = 0x6f, .initialElements = 1, .maximum = 1024 } } },
+        { .description = "two tables, in order",
+          .sections = raw({ 0x04, 0x07, 0x02, 0x70, 0x00, 0x03, 0x70, 0x00, 0x05 }),
+          .tables =
+              std::vector { TableDeclaration { .elementType = 0x70, .initialElements = 3, .maximum = {} },
+                            TableDeclaration { .elementType = 0x70, .initialElements = 5, .maximum = {} } } },
+        { .description = "a typed reference table",
+          .sections = raw({ 0x04, 0x05, 0x01, 0x64, 0x70, 0x00, 0x01 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "a table with an initializer expression",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x40, 0x00, 0x70 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "a shared table",
+          .sections = raw({ 0x04, 0x05, 0x01, 0x70, 0x03, 0x01, 0x01 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "a maximum cut short",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x01, 0x01 }),
+          .tables = std::unexpected(BinaryError::Truncated) },
+        { .description = "bytes after the last table",
+          .sections = raw({ 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+        { .description = "more tables than are read, refused by the count alone",
+          .sections = raw({ 0x04, 0x05, 0x03, 0xff, 0xff, 0xff, 0xff }),
+          .tables = std::unexpected(BinaryError::TooMany) },
+        { .description = "a second table section",
+          .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x00, 0x01, 0x04, 0x04, 0x01, 0x70, 0x00, 0x01 }),
+          .tables = std::unexpected(BinaryError::Malformed) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, tables]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(tableDeclarations(module, 2) == tables);
+    }
+}
+
+TEST_CASE("WasmBinary.largestInitialElements", "[vtextension]")
+{
+    auto const tables = std::vector {
+        TableDeclaration { .elementType = 0x70, .initialElements = 3, .maximum = {} },
+        TableDeclaration { .elementType = 0x70, .initialElements = 7, .maximum = 9 },
+    };
+    CHECK(largestInitialElements(tables) == 7);
+    CHECK(largestInitialElements({}) == 0);
+}
+
+TEST_CASE("WasmBinary.declaredCounts", "[vtextension]")
+{
+    auto const described =
+        vtextension::testing::toModule(vtextension::wasm::testing::contract::DescribedModule);
+    CHECK(declaredCounts(described) == DeclaredCounts { .imports = 2, .exports = 2 });
+    CHECK(declaredCounts(raw({ 0x00 })) == std::unexpected(BinaryError::NotAModule));
+
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections;
+        std::expected<DeclaredCounts, BinaryError> counts;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no sections",
+          .sections = {},
+          .counts = DeclaredCounts { .imports = 0, .exports = 0 } },
+        { .description = "the counts alone, read without their entries",
+          .sections = raw({ 0x02, 0x02, 0xe5, 0x0e, 0x07, 0x01, 0x03 }),
+          .counts = DeclaredCounts { .imports = 1893, .exports = 3 } },
+        { .description = "a count running past its section",
+          .sections = raw({ 0x07, 0x01, 0x80 }),
+          .counts = std::unexpected(BinaryError::Truncated) },
+        { .description = "a second import section",
+          .sections = raw({ 0x02, 0x01, 0x00, 0x02, 0x01, 0x00 }),
+          .counts = std::unexpected(BinaryError::Malformed) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, counts]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(declaredCounts(module) == counts);
+    }
+}
+
+TEST_CASE("WasmBinary.exportNames", "[vtextension]")
+{
+    using vtextension::wasm::binary::exportNames;
+    using Names = std::vector<std::string>;
+    CHECK(exportNames(raw({ 0x00 })) == std::unexpected(BinaryError::NotAModule));
+
+    struct Case
+    {
+        std::string_view description;
+        std::vector<std::byte> sections;
+        std::expected<Names, BinaryError> names;
+    };
+    auto const cases = std::vector<Case> {
+        { .description = "no export section", .sections = {}, .names = Names {} },
+        { .description = "two exports, a NUL kept as a byte of its name",
+          .sections = raw({ 0x07, 0x0a, 0x02, 0x01, 'a', 0x00, 0x00, 0x02, 'b', 0x00, 0x02, 0x00 }),
+          .names = Names { "a", std::string { "b\0", 2 } } },
+        { .description = "an entry running past its section",
+          .sections = raw({ 0x07, 0x03, 0x01, 0x05, 'a' }),
+          .names = std::unexpected(BinaryError::Truncated) },
+        { .description = "a second export section",
+          .sections = raw({ 0x07, 0x01, 0x00, 0x07, 0x01, 0x00 }),
+          .names = std::unexpected(BinaryError::Malformed) },
+        { .description = "a byte after the last entry",
+          .sections = raw({ 0x07, 0x06, 0x01, 0x01, 'a', 0x00, 0x00, 0xFF }),
+          .names = std::unexpected(BinaryError::Malformed) },
+    };
+    auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+    for (auto const& [description, body, names]: cases)
+    {
+        INFO(description);
+        auto module = header;
+        module.insert(module.end(), body.begin(), body.end());
+        CHECK(exportNames(module) == names);
+    }
+}
+
+TEST_CASE("InstantiationHooks.isRefusedExportName", "[vtextension]")
+{
+    using vtextension::wasm::isRefusedExportName;
+    CHECK(isRefusedExportName("__post_instantiate"));
+    CHECK(isRefusedExportName("__wasm_call_ctors"));
+    CHECK(isRefusedExportName("~initialize"));
+    CHECK(isRefusedExportName(std::string_view { "_initialize\0", 12 }));
+    CHECK_FALSE(isRefusedExportName("_initialize"));
+    CHECK_FALSE(isRefusedExportName("render"));
 }

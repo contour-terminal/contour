@@ -11,6 +11,7 @@
 // labelled may vary between backends (see MemoryGrowthReporting), never whether it is stopped.
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -75,6 +76,24 @@ enum class CallFailure : uint8_t
     MemoryGrowthRefused, ///< The guest trapped after its memory refused to grow past the cap; only
                          ///< from a backend declaring MemoryGrowthReporting::Reported.
     HostFailure,         ///< A host function the guest called failed (IHostContext::callHost).
+    HostCrashed,         ///< The host running the instance died; every later call fails so.
+};
+
+/// Why a view of an instance's memory could not be had.
+enum class MemoryFailure : uint8_t
+{
+    OutOfBounds, ///< A byte of the range lies outside the memory, or the instance has none.
+    HostCrashed, ///< The host running the instance died before it could serve the range.
+};
+
+/// Which host a module runs in. Modules with equal keys share one; an empty key gets a host of its own.
+/// In-process backends ignore it.
+struct ModuleIdentity
+{
+    std::string key; ///< What names the host; empty for a host of the module's own.
+
+    /// @return Whether both name the same host.
+    bool operator==(ModuleIdentity const&) const = default;
 };
 
 /// A function's core signature.
@@ -82,6 +101,16 @@ struct FunctionSignature
 {
     std::vector<ValueType> parameters; ///< The parameter types, in order.
     std::vector<ValueType> results;    ///< The result types, in order.
+
+    /// @return Whether every parameter and every result is an i32: the only exports an instance offers
+    ///         (IWasmInstance::function).
+    [[nodiscard]] bool isAllI32() const noexcept
+    {
+        auto const isI32 = [](ValueType type) {
+            return type == ValueType::I32;
+        };
+        return std::ranges::all_of(parameters, isI32) && std::ranges::all_of(results, isI32);
+    }
 
     /// @return Whether both signatures name the same types in the same order.
     bool operator==(FunctionSignature const&) const = default;
@@ -96,6 +125,9 @@ struct ImportDescription
     FunctionSignature signature;            ///< The function's signature; empty unless kind is Function.
     /// Whether the runtime provides it; decided at load time and final.
     Linkage linkage = Linkage::Unsatisfied;
+
+    /// @return Whether both describe the same import, alike in every field.
+    bool operator==(ImportDescription const&) const = default;
 };
 
 /// One export a module declares.
@@ -105,20 +137,43 @@ struct ExportDescription
     ExternKind kind = ExternKind::Function; ///< What is exported.
     FunctionSignature signature;            ///< The function's signature; empty unless kind is Function.
     uint32_t initialPages = 0; ///< The memory's initial size in 64 KiB pages; 0 unless kind is Memory.
+
+    /// @return Whether both describe the same export, alike in every field.
+    bool operator==(ExportDescription const&) const = default;
 };
+
+/// The most elements RuntimeLimits::tableElements may allow one table, and its default. It is WAMR's own
+/// cap on a table declared without a maximum, which that backend cannot raise; createRuntime() refuses a
+/// higher cap with `RuntimeUnavailable` on every backend, so that all of them accept the same limits.
+inline constexpr auto MaxTableElements = uint32_t { 1024 };
+
+/// The most tables one module may define. Every toolchain the host targets emits one, the indirect
+/// function table; a module defining more is not loaded (`InvalidComponent`), by every backend before its
+/// engine reads the module, so that all refuse it at the same step. Narrower than reference-types allows
+/// (EngineFeatures.hpp), deliberately. Without this cap the
+/// per-table one would bound nothing: each further table costs a guest three bytes of module.
+inline constexpr auto MaxTables = uint32_t { 1 };
 
 /// The limits a runtime holds every instance it creates to.
 struct RuntimeLimits
 {
     std::size_t memoryBytes = 0; ///< The cap on an instance's linear memory; growth past it is refused.
     std::size_t stackBytes = 0;  ///< The cap on an instance's stack; recursion past it traps.
+    /// The cap on the elements of each table of an instance, which lives outside linear memory and so
+    /// outside memoryBytes. A table whose initial size exceeds it is not instantiated (`OutOfMemory`), and
+    /// `table.grow` past it returns -1, as `memory.grow` does past memoryBytes. At most MaxTableElements.
+    uint32_t tableElements = MaxTableElements;
 };
+
+/// The most i32 parameters a host function can take, on every backend. The Canonical ABI passes at most 16
+/// flat parameters (more go through memory), and a func with a result that does not flatten to one value
+/// takes the result's address after them: 17.
+inline constexpr auto MaxHostParameters = uint32_t { 17 };
 
 /// One host import. Every world host function takes only i32s and returns nothing.
 ///
-/// A host function may take no parameter at all. A backend may cap how many it can take (the WAMR
-/// backend's cap is `wamr::MaxHostParameters`, five); createRuntime() refuses a table holding one above
-/// the cap with `RuntimeUnavailable`.
+/// A host function may take no parameter at all, and at most MaxHostParameters; createRuntime() refuses a
+/// table holding one above that with `RuntimeUnavailable`.
 struct HostFunction
 {
     std::string_view module;     ///< The import module name it is provided under.
@@ -179,9 +234,12 @@ class IWasmInstance
     /// Releases the instance; the module (and with it the runtime) may go with it.
     virtual ~IWasmInstance() = default;
 
-    /// Looks a function export up, once, for later calls.
+    /// Looks a function export up, once, for later calls. Only an export whose parameters and results are
+    /// all i32 (FunctionSignature::isAllI32) is offered, as call() passes nothing but u32 cells: every
+    /// export the host calls is one, and any other is not offered by any backend.
     /// @param name The export's name.
-    /// @return Its handle; nothing if the instance exports no function of that name.
+    /// @return Its handle; nothing if the instance exports no function of that name with an all-i32
+    ///         signature.
     [[nodiscard]] virtual std::optional<ExportFunction> function(std::string_view name) const = 0;
 
     /// Calls a function export on the calling thread, which must be prepared.
@@ -195,8 +253,10 @@ class IWasmInstance
     /// instance, which may grow (and so move) the memory.
     /// @param address The guest address the view starts at.
     /// @param size The view's size in bytes; 0 yields an empty span.
-    /// @return The view; nothing if any byte of it lies outside the memory.
-    [[nodiscard]] virtual std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) = 0;
+    /// @return The view; `OutOfBounds` if any byte of it lies outside the memory, `HostCrashed` if the host
+    ///         running the instance died (only from a backend whose instances run in another process).
+    [[nodiscard]] virtual std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
+                                                                                    uint32_t size) = 0;
 
     /// Stops the call running in the instance, if any, for good: callable from any thread, and final.
     /// Every later call() fails as CallFailure::Interrupted without entering the guest, including when
@@ -227,7 +287,9 @@ class IWasmModule
 
     /// Instantiates the module under the runtime's limits, with WASI preview 1 as the backend provides
     /// it: no arguments, no environment, no preopened directory, and standard streams whose writes
-    /// reach nobody. May run on another prepared thread than the one that loaded the module.
+    /// reach nobody. May run on another prepared thread than the one that loaded the module, and on several
+    /// prepared threads at once: concurrent instantiations of one module neither fail nor disturb one another
+    /// (the panes sharing one compiled extension instantiate it on their own workers).
     ///
     /// A WASI reactor (a module that imports WASI and exports `_initialize`, as every Rust guest built
     /// with Rust 1.100 or newer does) is not initialized here: the backend never runs its `_initialize`,
@@ -258,11 +320,12 @@ class IWasmRuntime
     virtual ~IWasmRuntime() = default;
 
     /// Loads a module. Runs none of its code.
+    /// @param identity Which host the module runs in; a backend running every module in-process ignores it.
     /// @param bytes The module's bytes; the module keeps them.
     /// @return The module, which keeps the runtime alive; `InvalidComponent` if the bytes are not a
-    ///         valid core module.
+    ///         valid core module, `HostUnavailable` if the host it is to run in cannot be reached.
     [[nodiscard]] virtual std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
-        std::vector<std::byte> bytes) = 0;
+        ModuleIdentity identity, std::vector<std::byte> bytes) = 0;
 };
 
 /// A thread's preparation to call into instances, held for as long as the guard lives.
@@ -288,9 +351,9 @@ class IThreadGuard
 /// about whether a thread is prepared or which generation is current.
 ///
 /// **Threading.** Calls into one instance never overlap, but may come from any prepared thread; a module
-/// may be loaded on one prepared thread and instantiated on another; different instances of one
-/// runtime may run on different threads at once. A runtime with single-entry execution contexts meets
-/// this internally.
+/// may be loaded on one prepared thread and instantiated on another, or on several at once; different
+/// instances of one runtime may run on different threads at once. A runtime with single-entry execution
+/// contexts meets this internally.
 ///
 /// **Synchronous execution.** An export call runs on the calling thread, and every host function it
 /// calls runs synchronously on that same thread before the call returns.
@@ -323,7 +386,9 @@ class IWasmBackend
     IWasmBackend(IWasmBackend&&) = delete;
     IWasmBackend& operator=(IWasmBackend const&) = delete;
     IWasmBackend& operator=(IWasmBackend&&) = delete;
-    /// Must outlive every runtime created from it.
+    /// Must outlive every runtime created from it. The one exception is the remote backend
+    /// (makeRemoteBackend()), which tolerates being dropped first: it lets its hosts go, and whatever still
+    /// uses one of its runtimes fails `HostUnavailable`.
     virtual ~IWasmBackend() = default;
 
     /// Creates a runtime. The engine is brought up with the first runtime alive and torn down with
@@ -332,8 +397,9 @@ class IWasmBackend
     /// @param hostFunctions The host functions modules may import; IHostContext::callHost() receives an
     ///                      index into this table. The runtime copies what it needs. Runtimes alive at
     ///                      once must agree on every host function they share (see the class notes).
-    /// @return The runtime; `RuntimeUnavailable` if the engine could not be brought up, or the backend
-    ///         cannot provide one of @p hostFunctions.
+    /// @return The runtime; `RuntimeUnavailable` if the engine could not be brought up, the backend
+    ///         cannot provide one of @p hostFunctions, or @p limits allow a table more than
+    ///         MaxTableElements.
     [[nodiscard]] virtual std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
         RuntimeLimits limits, std::span<HostFunction const> hostFunctions) = 0;
 

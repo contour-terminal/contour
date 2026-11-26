@@ -11,7 +11,9 @@
 
 #include <vtextension/ControlImports.hpp>
 #include <vtextension/HostBindings.hpp>
+#include <vtextension/wasm/InstantiationHooks.hpp>
 #include <vtextension/wasm/WasiAllowList.hpp>
+#include <vtextension/wasm/WasmBinary.hpp>
 
 namespace vtextension
 {
@@ -114,21 +116,38 @@ namespace
 CompiledExtension::CompiledExtension(PrivateTag /*unused*/,
                                      std::shared_ptr<Engine> engine,
                                      std::optional<Manifest> manifest,
-                                     std::shared_ptr<wasm::IWasmModule> module):
-    _engine { std::move(engine) }, _manifest { std::move(manifest) }, _module { std::move(module) }
+                                     std::shared_ptr<wasm::IWasmModule> module,
+                                     std::shared_ptr<HostBreaker> breaker):
+    _engine { std::move(engine) },
+    _manifest { std::move(manifest) },
+    _module { std::move(module) },
+    _breaker { std::move(breaker) }
 {
 }
 
 std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtension::load(
-    Engine& engine, std::vector<std::byte> bytes)
+    Engine& engine,
+    wasm::ModuleIdentity identity,
+    std::vector<std::byte> bytes,
+    std::shared_ptr<HostBreaker> breaker)
 {
     // The manifest is read before the runtime sees the bytes, which its loader may rewrite in place.
     auto manifest = parseManifest(bytes);
     auto const startsItself = hasStartFunction(bytes);
 
-    auto module = engine.runtime().load(std::move(bytes));
-    if (!module)
+    // Exports an engine would run while instantiating, or read otherwise than the host does, are refused
+    // here, before any engine sees them: every engine refuses the same modules, and at once. Bytes whose
+    // exports cannot be read are no module any engine would load.
+    auto const exportNames = wasm::binary::exportNames(bytes);
+    if (!exportNames || std::ranges::any_of(*exportNames, wasm::isRefusedExportName))
         return std::unexpected(ExtensionError::InvalidComponent);
+
+    auto module = engine.runtime().load(std::move(identity), std::move(bytes));
+    // A host that cannot be reached says nothing about the module; any other refusal is the module's.
+    if (!module)
+        return std::unexpected(module.error() == ExtensionError::HostUnavailable
+                                   ? ExtensionError::HostUnavailable
+                                   : ExtensionError::InvalidComponent);
 
     // A module that is one, but whose manifest does not parse, is refused before anything else. One
     // without a manifest declares no commands.
@@ -144,7 +163,8 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtens
                                                engine.shared_from_this(),
                                                manifest ? std::optional { std::move(*manifest) }
                                                         : std::nullopt,
-                                               std::move(*module));
+                                               std::move(*module),
+                                               std::move(breaker));
 }
 
 } // namespace vtextension

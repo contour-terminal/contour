@@ -1,0 +1,420 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// The vocabulary Contour and its extension host process speak: one struct per PDU, and the enums they carry.
+///
+/// Every request and every reply is a PDU of its own kind. A PDU travels one way on one channel: the control
+/// channel carries what creates and releases runtimes, modules and instances, and a lane carries one thread's
+/// calls, host calls and memory accesses. The codec (Codec.hpp) refuses a PDU arriving the other way or on
+/// the other channel, as it refuses one larger than its kind may be (PduTable.hpp).
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <variant>
+#include <vector>
+
+#include <vtextension/ExtensionError.hpp>
+#include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
+
+namespace vtextension::wasm::remote::proto
+{
+
+/// The protocol version both ends must speak; the helper states it in its Hello.
+inline constexpr uint32_t ProtocolVersion = 5;
+
+/// The size of a guest's memory page: what guest memory grows by, and what its object is rounded up to.
+inline constexpr uint64_t WasmPageBytes = uint64_t { 64 } * 1024;
+
+/// The largest object memoryObjectBytes() sizes: the most whole guest pages a 64-bit size holds.
+inline constexpr uint64_t MaxMemoryObjectBytes = (UINT64_MAX / WasmPageBytes) * WasmPageBytes;
+
+/// The size of the shared object that holds an instance's memory under a cap of @p capBytes: the cap rounded
+/// up to a whole guest page, and at least one page, so that an instance without memory still has an object.
+/// A cap past MaxMemoryObjectBytes sizes it at that, rather than wrap to 0, which names no object.
+/// @param capBytes The most bytes the instance's memory may grow to.
+/// @return The object's size in bytes: a whole number of guest pages, never 0.
+[[nodiscard]] constexpr uint64_t memoryObjectBytes(uint64_t capBytes) noexcept
+{
+    auto const cap = capBytes < MaxMemoryObjectBytes ? capBytes : MaxMemoryObjectBytes;
+    auto const pages = (cap / WasmPageBytes) + (cap % WasmPageBytes != 0 ? 1 : 0);
+    return (pages == 0 ? 1 : pages) * WasmPageBytes;
+}
+
+/// The most values a Call carries as arguments, or a CallResult as results.
+inline constexpr std::size_t MaxCallValues = 64;
+
+/// The most arguments a CallHost carries: the most parameters a host function takes, on every engine.
+inline constexpr std::size_t MaxHostParameters = wasm::MaxHostParameters;
+
+// The most elements each list a PDU carries may hold, checked against its count before any element is read:
+// what a list costs once decoded is far more than its encoding, which is all the byte caps bound. The module
+// limits are those Wasmtime's parser applies, so that no module it loads is described past them.
+
+/// The most imports a Loaded describes.
+inline constexpr std::size_t MaxImports = 100'000;
+
+/// The most exports a Loaded describes, and the most callable exports an Instantiated names.
+inline constexpr std::size_t MaxExports = 100'000;
+
+/// The most parameters, and separately the most results, a described function signature has.
+inline constexpr std::size_t MaxSignatureValues = 1'000;
+
+/// The most host functions a CreateRuntime provides.
+inline constexpr std::size_t MaxHostFunctions = 1'024;
+
+/// The most guest calls one lane runs at once: its outermost call, and those the parent makes back in while
+/// host calls wait. A Call past it is a protocol violation.
+inline constexpr std::size_t MaxCallDepth = 8;
+
+/// The largest stack a runtime may give each instance's calls (RuntimeLimits::stackBytes); a CreateRuntime
+/// asking for more is refused (`RuntimeUnavailable`), by the parent before it is sent. Each guest call on a
+/// lane sets its own limit from where the lane's stack stands, so the lane's thread must hold MaxCallDepth of
+/// them.
+inline constexpr std::size_t MaxRuntimeStackBytes = std::size_t { 1024 } * 1024;
+
+static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
+              "a host runs the stack the parent gives");
+
+/// How the helper shares an instance's linear memory with the parent.
+enum class MemoryMode : uint8_t
+{
+    Copy,   ///< Memory is read and written through MemoryRead, MemoryData and MemoryWrite PDUs.
+    Shared, ///< Memory lives in an object both processes map.
+};
+
+/// How far the helper confined itself before it said Hello.
+enum class LockdownState : uint8_t
+{
+    Failed,      ///< It tried and failed; the parent refuses it.
+    Unsandboxed, ///< It runs without a sandbox on this platform.
+    LockedDown,  ///< It runs inside its sandbox.
+};
+
+/// A step of the helper's confinement: its hardening, its sandbox and its resource caps, on every system.
+/// Each system takes some of them; a Hello stating `Failed` names the first that failed. Phrased for users by
+/// lockdownSteps() (LockdownSteps.hpp), on both ends.
+enum class LockdownStep : uint8_t
+{
+    None,             ///< No step: what a Hello names when nothing failed.
+    CoreDumps,        ///< No core dump (POSIX: RLIMIT_CORE 0, soft and hard).
+    Dumpable,         ///< Not dumpable (Linux: PR_SET_DUMPABLE 0).
+    Tracing,          ///< Not traceable (FreeBSD: PROC_TRACE_CTL_DISABLE).
+    FaultReports,     ///< No fault report with its dialog (Windows: WerSetFlags).
+    NoNewPrivileges,  ///< No privilege gained through exec (Linux: no_new_privs; FreeBSD: PROC_NO_NEW_PRIVS).
+    FileSystem,       ///< No file system access (Linux: Landlock).
+    SystemCalls,      ///< Only the system calls it needs (Linux: seccomp).
+    ThreadSync,       ///< The system call filter on every thread (Linux: seccomp TSYNC).
+    ResourceCaps,     ///< Its resources capped (POSIX: setrlimit).
+    Capabilities,     ///< Capability mode (FreeBSD: cap_enter).
+    DescriptorRights, ///< Each descriptor limited to what it is used for (FreeBSD: cap_rights_limit).
+    Profile,          ///< A sandbox profile (macOS: Seatbelt).
+    Container,        ///< A container of its own (Windows: AppContainer).
+    Mitigations,      ///< The process mitigations it runs under (Windows).
+    Job,              ///< A job that ends it with Contour and limits what it starts (Windows).
+    Priming,          ///< Each thread that runs guests prepared before the rest is taken (every system).
+    WriteXorExecute,  ///< No memory both writable and executable (FreeBSD: PROC_WXMAP_CTL).
+};
+
+/// The last step: what lockdownSteps() ends at, checked there, and so what bounds every table and mask over
+/// the steps at compile time.
+inline constexpr auto LastLockdownStep = LockdownStep::WriteXorExecute;
+
+/// Which way a PDU travels.
+enum class Direction : uint8_t
+{
+    ToHelper, ///< From Contour to the extension host process.
+    ToParent, ///< From the extension host process to Contour.
+};
+
+/// Which channel a PDU travels on.
+enum class ChannelKind : uint8_t
+{
+    Control, ///< The one channel that creates and releases runtimes, modules and instances.
+    Lane,    ///< One of the channels a calling thread runs its calls on.
+};
+
+/// What a Release PDU releases.
+enum class ReleaseTarget : uint8_t
+{
+    Instance,
+    Module,
+    Runtime,
+};
+
+/// The kind of a PDU: its tag on the wire, and its row in the PduTable. Zero names none.
+enum class PduKind : uint8_t
+{
+    Hello = 1,
+    CreateRuntime,
+    RuntimeCreated,
+    Load,
+    Loaded,
+    Instantiate,
+    Instantiated,
+    Release,
+    Call,
+    CallHost,
+    HostResult,
+    CallResult,
+    MemoryRead,
+    MemoryData,
+    MemoryWrite,
+    Grow,
+    Grown,
+};
+
+/// Whether a MemoryRead found its range inside the instance's memory.
+enum class MemoryStatus : uint8_t
+{
+    OutOfBounds, ///< The range runs past the memory's end; nothing was read.
+    Ok,          ///< The bytes follow.
+};
+
+/// Whether the parent let an instance's memory grow.
+enum class GrowStatus : uint8_t
+{
+    Refused, ///< It did not: the guest's growth fails.
+    Granted, ///< It did: the memory spans the new size.
+};
+
+/// The size limits a stream applies to the PDUs it receives, beside the fixed ones in the PduTable.
+struct PduLimits
+{
+    uint64_t maxModuleBytes = uint64_t { 16 } * 1024 * 1024; ///< The largest module a Load may carry.
+    uint64_t maxMemoryBytes = uint64_t { 32 } * 1024 * 1024; ///< The largest instance memory.
+};
+
+static_assert(PduLimits {}.maxModuleBytes == ExtensionLimits {}.maxModuleBytes,
+              "a stream accepts the largest module the host loads");
+static_assert(PduLimits {}.maxMemoryBytes == ExtensionLimits {}.memoryBytes,
+              "a stream accepts the largest memory an instance may have");
+
+/// One host function a runtime provides, as CreateRuntime names it.
+struct WireHostFunction
+{
+    std::string module;          ///< The import module name it is provided under.
+    std::string name;            ///< The import field name it is provided under.
+    uint32_t parameterCount = 0; ///< How many i32 parameters it takes.
+
+    bool operator==(WireHostFunction const&) const = default;
+};
+
+/// The helper's first PDU on the control channel: what it speaks and how it runs.
+struct Hello
+{
+    uint32_t version = 0;                           ///< The protocol version it speaks.
+    MemoryMode memoryMode = MemoryMode::Copy;       ///< How it shares instance memory.
+    LockdownState lockdown = LockdownState::Failed; ///< How far it confined itself.
+    /// The first step of its confinement that failed, when `lockdown` is `Failed`; `None` otherwise.
+    LockdownStep failedStep = LockdownStep::None;
+    /// What was said of that step, as its row in lockdownSteps() reads it: an errno or an HRESULT's bit
+    /// pattern for a system's step, an ExtensionError for `Priming`; 0 when none failed.
+    uint32_t failureCode = 0;
+    /// A step this system lacks, which the host went without while it is confined all the same (Linux without
+    /// Landlock: `FileSystem`); `None` when it lacks none.
+    LockdownStep unavailableStep = LockdownStep::None;
+
+    bool operator==(Hello const&) const = default;
+};
+
+/// Creates a runtime in the helper.
+struct CreateRuntime
+{
+    uint32_t runtimeId = 0;   ///< The parent-chosen id the runtime is known by.
+    uint64_t memoryBytes = 0; ///< RuntimeLimits::memoryBytes.
+    uint64_t stackBytes = 0;  ///< RuntimeLimits::stackBytes.
+    /// RuntimeLimits::tableElements; the helper refuses more than MaxTableElements.
+    uint64_t tableElements = MaxTableElements;
+    std::vector<WireHostFunction>
+        functions; ///< Its host functions, indexed by CallHost; at most MaxHostFunctions.
+
+    bool operator==(CreateRuntime const&) const = default;
+};
+
+/// Answers CreateRuntime.
+struct RuntimeCreated
+{
+    uint32_t runtimeId = 0;              ///< The runtime it answers for.
+    std::optional<ExtensionError> error; ///< Why it was not created; nothing if it was.
+
+    bool operator==(RuntimeCreated const&) const = default;
+};
+
+/// Loads a module into a runtime.
+struct Load
+{
+    uint32_t runtimeId = 0;       ///< The runtime it is loaded into.
+    uint32_t moduleId = 0;        ///< The parent-chosen id the module is known by.
+    std::vector<std::byte> bytes; ///< The module's bytes.
+
+    bool operator==(Load const&) const = default;
+};
+
+/// Answers Load.
+struct Loaded
+{
+    uint32_t moduleId = 0;                  ///< The module it answers for.
+    std::optional<ExtensionError> error;    ///< Why it was not loaded; nothing if it was.
+    std::vector<ImportDescription> imports; ///< What the module imports, in order; at most MaxImports.
+    std::vector<ExportDescription> exports; ///< What the module exports, in order; at most MaxExports.
+
+    bool operator==(Loaded const&) const = default;
+};
+
+/// The shared object an instance's memory lives in, handed to the helper with the Instantiate that needs it.
+struct MemoryGrant
+{
+    /// Where the object reaches the helper. On Windows the value of the section handle the parent duplicated
+    /// into the helper; on POSIX 0, the descriptor travelling with the frame itself.
+    uint64_t handle = 0;
+    /// The object's size: memoryObjectBytes() of the runtime's memory cap. 0 for a helper that copies memory,
+    /// to which no object is handed.
+    uint64_t objectBytes = 0;
+    /// How many of its bytes the memory spans at first: its initial pages.
+    uint64_t initialBytes = 0;
+
+    bool operator==(MemoryGrant const&) const = default;
+};
+
+/// Instantiates a module.
+struct Instantiate
+{
+    uint32_t moduleId = 0;   ///< The module to instantiate.
+    uint32_t instanceId = 0; ///< The parent-chosen id the instance is known by.
+    /// The interrupt page's slot the parent raises to interrupt the instance: below InterruptSlotCount, and
+    /// held by no other live instance.
+    uint32_t interruptSlot = 0;
+    MemoryGrant memory {}; ///< The object its memory lives in; none (objectBytes 0) for a helper that copies.
+
+    bool operator==(Instantiate const&) const = default;
+};
+
+/// Answers Instantiate.
+struct Instantiated
+{
+    uint32_t instanceId = 0;               ///< The instance it answers for.
+    std::optional<ExtensionError> error;   ///< Why it was not instantiated; nothing if it was.
+    std::vector<uint32_t> callableExports; ///< The export ordinals a Call may name; at most MaxExports.
+
+    bool operator==(Instantiated const&) const = default;
+};
+
+/// Releases a runtime, module or instance the parent no longer holds.
+struct Release
+{
+    ReleaseTarget target = ReleaseTarget::Instance; ///< What kind of object is released.
+    uint32_t id = 0;                                ///< Its id.
+
+    bool operator==(Release const&) const = default;
+};
+
+/// Calls an export of an instance.
+struct Call
+{
+    uint32_t instanceId = 0;    ///< The instance called.
+    uint32_t exportOrdinal = 0; ///< Which of its exports, by ordinal.
+    std::vector<uint32_t> argv; ///< The i32 arguments; at most MaxCallValues.
+
+    bool operator==(Call const&) const = default;
+};
+
+/// The guest called a host function while a Call ran; the parent runs it and answers HostResult.
+struct CallHost
+{
+    uint32_t functionIndex = 0;      ///< Which of the runtime's host functions, by index.
+    std::vector<uint32_t> arguments; ///< Its i32 arguments; at most MaxHostParameters.
+
+    bool operator==(CallHost const&) const = default;
+};
+
+/// Answers CallHost.
+struct HostResult
+{
+    std::optional<ExtensionError> error; ///< Why the host function failed; nothing if it did not.
+
+    bool operator==(HostResult const&) const = default;
+};
+
+/// Answers Call.
+struct CallResult
+{
+    std::optional<CallFailure> failure; ///< Why the call failed; nothing if it returned.
+    std::vector<uint32_t> argv;         ///< The i32 results; at most MaxCallValues.
+
+    bool operator==(CallResult const&) const = default;
+};
+
+/// Reads a range of an instance's memory, while a Call runs or between calls.
+struct MemoryRead
+{
+    uint32_t instanceId = 0; ///< Whose memory.
+    uint32_t address = 0;    ///< Where the range starts.
+    uint32_t size = 0;       ///< How many bytes it spans.
+
+    bool operator==(MemoryRead const&) const = default;
+};
+
+/// Answers MemoryRead.
+struct MemoryData
+{
+    MemoryStatus status = MemoryStatus::OutOfBounds; ///< Whether the range was inside the memory.
+    std::vector<std::byte> bytes;                    ///< The bytes read; empty unless Ok.
+
+    bool operator==(MemoryData const&) const = default;
+};
+
+/// Writes a range of an instance's memory. Unanswered: a write out of bounds fails the call it belongs to.
+struct MemoryWrite
+{
+    uint32_t instanceId = 0;      ///< Whose memory.
+    uint32_t address = 0;         ///< Where the range starts.
+    std::vector<std::byte> bytes; ///< What is written there.
+
+    bool operator==(MemoryWrite const&) const = default;
+};
+
+/// The guest grew an instance's memory; the parent checks the new size and answers Grown. Sent on the lane of
+/// the call that grew it, or on the control channel while the instance is being instantiated.
+struct Grow
+{
+    uint32_t instanceId = 0; ///< Whose memory.
+    uint64_t bytes = 0;      ///< The size it grows to: a whole number of guest pages.
+
+    bool operator==(Grow const&) const = default;
+};
+
+/// Answers Grow, on the channel the Grow arrived on.
+struct Grown
+{
+    GrowStatus status = GrowStatus::Refused; ///< Whether the memory may span the new size.
+
+    bool operator==(Grown const&) const = default;
+};
+
+/// Any PDU. Its alternatives are in PduKind order: alternative `i` is the PDU of kind `i + 1`.
+using Pdu = std::variant<Hello,
+                         CreateRuntime,
+                         RuntimeCreated,
+                         Load,
+                         Loaded,
+                         Instantiate,
+                         Instantiated,
+                         Release,
+                         Call,
+                         CallHost,
+                         HostResult,
+                         CallResult,
+                         MemoryRead,
+                         MemoryData,
+                         MemoryWrite,
+                         Grow,
+                         Grown>;
+
+static_assert(std::variant_size_v<Pdu> == static_cast<std::size_t>(PduKind::Grown),
+              "one Pdu alternative per PduKind");
+
+} // namespace vtextension::wasm::remote::proto

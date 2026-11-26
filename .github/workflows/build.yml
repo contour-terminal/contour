@@ -421,6 +421,11 @@ jobs:
           exit 1
         fi
         test "$(dpkg-deb -f "$deb" Package)" = contour-daemon
+        # The extension host, where contour looks for it: without it no extension runs.
+        if ! dpkg-deb -c "$deb" | grep -Eq '\./usr/libexec/contour/contour-extension-host$'; then
+          echo "::error::contour-daemon does not contain usr/libexec/contour/contour-extension-host"
+          exit 1
+        fi
     # A clean machine is what a user has, and the runner is not one: it carries Qt, the whole build
     # toolchain and more. So the package is installed into a bare ubuntu image. `apt-get install ./file`
     # resolves its Depends from the archive, which is the point: nothing Qt may come with it. The script
@@ -918,7 +923,9 @@ jobs:
   # }}}
   # {{{ FreeBSD
   freebsd:
-    if: github.event_name != 'pull_request'
+    # Pull requests skip this hour-long VM job unless they carry the `ci-freebsd` label, which a change to
+    # FreeBSD-only code (a sandbox, a platform layer) asks for so that it runs before the merge queue does.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci-freebsd')
     concurrency:
       group: ${{ github.ref }}-freebsd
       cancel-in-progress: false
@@ -1100,13 +1107,106 @@ jobs:
             configure
           }
       - name: "Build"
+        id: build
         run: cmake --build --preset macos-ci
+      - name: "Start of the sandbox log"
+        # Where "Sandbox deny log" below starts reading: denials before the tests are not theirs.
+        run: echo "SANDBOX_LOG_START=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
       - name: "Tests"
         # The suite had 30 minutes and the three checks after it none of their own; one bound for all.
         timeout-minutes: 45
         uses: ./.github/actions/macos-tests
         with:
           preset: macos-ci
+      - name: "Extension host: compiling, signed as it ships, in its sandbox"
+        # The plain configuration runs extensions in process, so its suite starts the extension host only on
+        # the interpreting engine, which needs no entitlement. Here the tree is reconfigured to run them out
+        # of process on the compiling engine, named so that a missing Wasmtime fails the configure rather
+        # than leaving vtextension_helper_test undefined, and the extension host is signed as the bundle
+        # signs it: hardened runtime, with its one entitlement. Its suite then holds every helper to a
+        # lockdown (the build has macOS's sandbox). The extension host on the interpreting engine, built
+        # beside it, is signed as a bundle on that engine signs it: hardened runtime, no entitlement at all,
+        # and its suite must pass so. Run even when the suite above failed: each result is what the next
+        # fix needs.
+        #
+        # The case below applies to the compiling helper alone, the only one that carries the entitlement.
+        # Signed again without the entitlement, the helper must be killed as it runs its first compiled
+        # code, and for that reason alone. The hardened runtime lets it make that code executable and kills
+        # it at its first instruction, so the kill is the refusal; the kernel says which page it refused.
+        # Proof is: the one case named ran and failed (a renamed case matching nothing is caught), and
+        # the kernel refused a page of anonymous memory -- `in file "<nil>"`, the compiled code -- and no page
+        # of a file, which is what a stale signature would have it refuse. Each signing goes to a fresh copy
+        # moved over the helper: codesign rewriting in place a binary that already ran leaves the kernel's
+        # cached signature stale, and the next run killed for that.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 45
+        env:
+          CONTOUR_TEST_TRACE: "1"
+        run: |
+          set -o pipefail
+          cmake --preset macos-ci -DCONTOUR_EXTENSION_HOST=out-of-process -DCONTOUR_WASM_RUNTIME=wasmtime
+          cmake --build --preset macos-ci --target vtextension_helper_test vtextension_wamr_helper_test
+          helper=out/macos-ci/src/contour-extension-host/contour-extension-host
+          interpreting=out/macos-ci/src/contour-extension-host/contour-extension-host-wamr
+          suite=out/macos-ci/src/vtextension/wasm/remote/vtextension_helper_test
+          loads=Process.loadsAndCallsThroughARealHelper
+          fail() { echo "::error::$1"; exit 1; }
+          signAs() {
+              local binary=$1
+              shift
+              cp "$binary" "$binary.signing"
+              codesign --force --sign - --options=runtime "$@" "$binary.signing"
+              mv -f "$binary.signing" "$binary"
+              codesign -d --entitlements - "$binary"
+          }
+          sign() { signAs "$helper" "$@"; }
+
+          signAs "$interpreting"
+          out/macos-ci/src/vtextension/wasm/remote/vtextension_wamr_helper_test "~[.measure]"
+
+          sign --entitlements support/macOS/contour-extension-host.entitlements
+          "$suite" "~[.measure]"
+
+          sign
+          "$suite" --list-tests "$loads" | tee "$RUNNER_TEMP/listed.txt"
+          grep -q '^1 matching test case' "$RUNNER_TEMP/listed.txt" || fail "$loads does not name exactly one case"
+          since=$(date '+%Y-%m-%d %H:%M:%S')
+          status=0
+          "$suite" "$loads" > "$RUNNER_TEMP/unentitled.txt" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/unentitled.txt"
+          [ "$status" -ne 0 ] || fail "the extension host loaded and ran a module without its entitlement"
+          ! grep -q 'No test cases matched' "$RUNNER_TEMP/unentitled.txt" || fail "$loads matched no case"
+          grep -Eq '^test cases: +1 \|( +0 passed \|)? +1 failed' "$RUNNER_TEMP/unentitled.txt" \
+              || fail "not exactly one case ran and failed"
+          # logd may not have written the kill's lines yet when the helper is reaped: asked again a few times,
+          # a failed ask included (`|| true`, or bash -e would end the step at the first).
+          for attempt in 1 2 3 4 5; do
+              sudo log show --start "$since" --style compact \
+                  --predicate 'eventMessage CONTAINS "rejecting invalid page" AND eventMessage CONTAINS "contour-extensio"' \
+                  > "$RUNNER_TEMP/refused.txt" || true
+              grep -q 'in file "<nil>"' "$RUNNER_TEMP/refused.txt" && break
+              sleep 2
+          done
+          cat "$RUNNER_TEMP/refused.txt"
+          grep -q 'in file "<nil>"' "$RUNNER_TEMP/refused.txt" \
+              || fail "the kernel refused no compiled code of the extension host: its failure was not the entitlement"
+          # One grep on the saved lines, no pipe: exit 1 (no line other than "<nil>") is the only pass, so
+          # neither a SIGPIPE nor a grep error can read as one.
+          grep -F 'rejecting invalid page' "$RUNNER_TEMP/refused.txt" > "$RUNNER_TEMP/rejected.txt" || true
+          status=0
+          grep -vF 'in file "<nil>"' "$RUNNER_TEMP/rejected.txt" || status=$?
+          [ "$status" -eq 1 ] || fail "the kernel refused a page of a file: a stale signature, not the entitlement"
+      - name: "Sandbox deny log"
+        # What the extension host's sandbox profile refused since the tests started, as the kernel logged it:
+        # the operations (and sysctl names) a failing step above needed and the profile does not allow. Only
+        # the extension host's and the probe's, by the names the kernel gives them: their first 16
+        # characters (contour-extensio, which the hostile and WAMR helpers share, and extension_host_p), or
+        # their full names, which both contain.
+        if: failure()
+        run: |
+          sudo log show --start "${SANDBOX_LOG_START:?the tests never started}" --style compact \
+              --predicate 'sender == "Sandbox" AND (eventMessage CONTAINS "contour-extensio" OR eventMessage CONTAINS "extension_host_p")' \
+              || true
   macos_package:
     name: "macOS (package)"
     if: github.event_name != 'pull_request'
@@ -1883,9 +1983,10 @@ jobs:
   # {{{ Ubuntu 24.04 CC matrix
   ubuntu_2404_cc_matrix:
     # Each leg queues behind its own previous run on the same ref. Three of the four legs run on master
-    # alone and take over an hour; without this, the legs of consecutive pushes ran side by side and
-    # pull requests waited for a runner. The pull-request leg (Clang on x86) queues too: a newer push's
-    # leg replaces one still pending, so the newest commit always saves the cache.
+    # alone (the two arm legs also on a pull request labelled `ci-arm`) and take over an hour; without
+    # this, the legs of consecutive pushes ran side by side and pull requests waited for a runner. The
+    # pull-request leg (Clang on x86) queues too: a newer push's leg replaces one still pending, so the
+    # newest commit always saves the cache.
     concurrency:
       group: ${{ github.ref }}-ubuntu_2404_cc_matrix-${{ strategy.job-index }}
       cancel-in-progress: false
@@ -1901,7 +2002,10 @@ jobs:
         # requests, which have no consumers but keep the steps exercised.
         # The arm Clang leg is OFF too: it runs on master only, so nothing proves it builds clean with
         # -Werror before merge, whereas the x86 Clang leg is proven by every pull request.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]') }}
+        # Pull requests skip the two arm legs unless they carry the `ci-arm` label, which a change to
+        # aarch64-only code (the extension host's sandbox, a platform layer) asks for so that it runs
+        # before the merge queue does.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'ci-arm') && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]' || '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":true}]') || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"Release","qt_version":6,"werror":"OFF","artifacts":false}]') }}
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
     env:
@@ -2492,6 +2596,9 @@ jobs:
           OS_VERSION=${OS_OVERRIDE/./_}
           mv -v "./out/gcc-release/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
                 "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          # The extension host, where contour looks for it: without it no extension runs.
+          dpkg-deb -c "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb" \
+            | grep -E '\./usr/libexec/contour/contour-extension-host$'
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v4
         with:
@@ -2509,6 +2616,8 @@ jobs:
           for extension in agent-status clock git plasma sysload; do
             test -f "/usr/share/contour/extensions/$extension.wasm"
           done
+          # The extension host, where contour looks for it.
+          test -x /usr/libexec/contour/contour-extension-host
   # }}}
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:

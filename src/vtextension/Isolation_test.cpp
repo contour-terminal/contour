@@ -9,6 +9,7 @@
 #include <vtbackend/testing/MockTerm.hpp>
 
 #include <core/async/testing/ManualExecutor.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -260,6 +261,8 @@ TEST_CASE("Isolation.noEngineWhenUnused", "[vtextension][isolation]")
     auto scheduler = CountingScheduler { pool };
     auto builds = core::async::testing::ManualExecutor {};
     auto owner = std::make_shared<QueuedOwner>();
+    auto clock = core::platform::ManualClock {};
+    auto registry = vtextension::ExtensionRegistry { clock, {} };
     {
         auto extensions = SessionExtensions { SessionExtensionCallbacks {}, owner };
         auto mock = vtbackend::MockTerm { PaneSize, extensions.terminalServices() };
@@ -268,6 +271,7 @@ TEST_CASE("Isolation.noEngineWhenUnused", "[vtextension][isolation]")
                            SessionExtensionServices {
                                .engines = counting,
                                .retirement = counting,
+                               .registry = registry,
                                .scheduler = scheduler,
                                .builds = builds,
                                .grants = harness.grants,

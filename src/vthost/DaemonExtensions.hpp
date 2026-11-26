@@ -74,6 +74,7 @@ class DaemonExtensions final: public IExtensionHosting
     void answer(std::string_view hostId, std::string_view digest, GrantState answer) override;
     [[nodiscard]] GrantState lookup(std::string_view hostId, std::string_view digest) const override;
     void releaseRetired() noexcept override;
+    void configurationReloaded() noexcept override;
     void stop() noexcept override;
 
     /// @return How many worker threads run; none until the first extension is started.

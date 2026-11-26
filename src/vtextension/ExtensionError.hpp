@@ -31,6 +31,7 @@ enum class ExtensionError : uint8_t
     CommandFailed,      ///< A command could not be started, or was stopped before it finished.
     ModuleUnavailable,  ///< The host found no module to load: not installed, or not readable.
     ModuleTooLarge,     ///< The module file is larger than ExtensionLimits::maxModuleBytes.
+    HostUnavailable,    ///< The process hosting the extension could not be reached, or died.
 };
 
 /// One row of the error-description table.
@@ -64,9 +65,11 @@ inline constexpr auto ExtensionErrorTexts = std::array {
     ExtensionErrorText { .error = ExtensionError::CommandFailed, .text = "command could not be run" },
     ExtensionErrorText { .error = ExtensionError::ModuleUnavailable, .text = "extension module not found" },
     ExtensionErrorText { .error = ExtensionError::ModuleTooLarge, .text = "extension module too large" },
+    ExtensionErrorText { .error = ExtensionError::HostUnavailable,
+                         .text = "its host process is unavailable" },
 };
 
-static_assert(ExtensionErrorTexts.size() == std::to_underlying(ExtensionError::ModuleTooLarge) + 1u,
+static_assert(ExtensionErrorTexts.size() == std::to_underlying(ExtensionError::HostUnavailable) + 1u,
               "every ExtensionError has a row");
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ExtensionErrorTexts.size()),
                                   [](std::size_t index) {

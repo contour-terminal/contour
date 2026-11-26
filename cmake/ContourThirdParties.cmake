@@ -189,37 +189,70 @@ endif()
 # software instead. Waking blocked WASI calls is off as well: it installs a process-wide SIGUSR1
 # handler, and guests cannot block (poll_oneoff is refused). An installed WAMR does not say how it was
 # built, so a system package is accepted only once cmake/WamrTerminateProbe.cpp has shown that
-# terminating works and that initializing the runtime leaves SIGSEGV and SIGUSR1 alone; otherwise WAMR
-# is built from source.
+# terminating works, that initializing the runtime leaves SIGSEGV and SIGUSR1 alone, that it has no JIT
+# (the extension host's system call filter lets an interpreter make no memory executable), and that it
+# accepts exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows; otherwise
+# WAMR is built from source.
 #
 # First-party code links contour::wamr, whichever WAMR it resolves to.
+
+# Why cmake/WamrTerminateProbe.cpp rejects a WAMR, by its exit code: <code>|<reason>. @FEATURE@ is the
+# feature the probe names on standard output.
+set(_WAMR_PROBE_REASONS
+    "2|its runtime does not initialize"
+    "3|it does not load the probe's module"
+    "4|it does not instantiate the probe's module"
+    "5|it does not set up a call into the probe's module"
+    "6|wasm_runtime_terminate() did not stop a call (built without WAMR_BUILD_THREAD_MGR?)"
+    "7|wasm_runtime_terminate() did not stop a call (built without WAMR_BUILD_THREAD_MGR?)"
+    "8|it installs a SIGSEGV handler (built with hardware bounds checks)"
+    "9|it installs a SIGUSR1 handler (built with wakeup of blocking operations)"
+    "10|it loads a module using @FEATURE@, which extensions may not use"
+    "11|it refuses a module using @FEATURE@, which extensions may use"
+    "12|it compiles guest code to native code (built with a JIT; the extension host interprets)"
+)
 
 # ContourThirdParties_WamrTerminates(<target> <result-variable>)
 #
 # Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
-# when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
-# SIGSEGV or SIGUSR1 handler, FALSE otherwise (including when the probe cannot run, as when cross-compiling).
+# when another thread calls wasm_runtime_terminate(), its runtime initialization installs no SIGSEGV or
+# SIGUSR1 handler, it has no JIT running mode, and it loads exactly the WebAssembly features extensions
+# may use; FALSE otherwise (including when the probe cannot run, as when cross-compiling).
 # Sets <result-variable>_REASON to why a WAMR was rejected.
 function(ContourThirdParties_WamrTerminates target resultVar)
     set(${resultVar} FALSE PARENT_SCOPE)
-    set(${resultVar}_REASON "wasm_runtime_terminate() did not stop a call (built without WAMR_BUILD_THREAD_MGR?)" PARENT_SCOPE)
     if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+        set(${resultVar}_REASON "it cannot be probed when cross-compiling without an emulator" PARENT_SCOPE)
         return()
     endif()
     find_package(Threads QUIET)
     try_run(_wamr_probe_run _wamr_probe_compile
         SOURCES "${PROJECT_SOURCE_DIR}/cmake/WamrTerminateProbe.cpp"
+        CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/src"
         LINK_LIBRARIES ${target} Threads::Threads
         CXX_STANDARD 20
         NO_CACHE
+        RUN_OUTPUT_VARIABLE _wamr_probe_feature
     )
-    if(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "0")
-        set(${resultVar} TRUE PARENT_SCOPE)
-    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "8")
-        set(${resultVar}_REASON "it installs a SIGSEGV handler (built with hardware bounds checks)" PARENT_SCOPE)
-    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "9")
-        set(${resultVar}_REASON "it installs a SIGUSR1 handler (built with wakeup of blocking operations)" PARENT_SCOPE)
+    if(NOT _wamr_probe_compile)
+        set(${resultVar}_REASON "the probe does not compile and link against it" PARENT_SCOPE)
+        return()
     endif()
+    if("${_wamr_probe_run}" STREQUAL "0")
+        set(${resultVar} TRUE PARENT_SCOPE)
+        set(${resultVar}_REASON "" PARENT_SCOPE)
+        return()
+    endif()
+    set(_reason "the probe ended unexpectedly (${_wamr_probe_run})")
+    foreach(_row IN LISTS _WAMR_PROBE_REASONS)
+        string(REPLACE "|" ";" _fields "${_row}")
+        list(GET _fields 0 _code)
+        if("${_wamr_probe_run}" STREQUAL "${_code}")
+            list(GET _fields 1 _reason)
+            string(REPLACE "@FEATURE@" "${_wamr_probe_feature}" _reason "${_reason}")
+        endif()
+    endforeach()
+    set(${resultVar}_REASON "${_reason}" PARENT_SCOPE)
 endfunction()
 
 if(CONTOUR_EXTENSIONS)
@@ -228,9 +261,24 @@ if(CONTOUR_EXTENSIONS)
 
     set(_wamr_target "")
     set(_wamr_rejected "")
+    # On Apple silicon a WAMR without Contour's MAP_JIT patch (cmake/patches/) maps every instance's memory
+    # MAP_JIT, for code made at run time, which the hardened runtime refuses the interpreting extension host,
+    # which holds no allow-jit entitlement: every instantiation would fail. An installed or embedded WAMR
+    # cannot be told apart from a patched one, so every Apple build refuses it -- an Intel one too, as the
+    # same package may be built for both -- and uses only the fetched, patched WAMR.
+    set(_wamr_unpatched_refusal "")
+    if(APPLE)
+        string(CONCAT _wamr_unpatched_refusal
+            "on macOS only a WAMR with Contour's MAP_JIT patch can instantiate under the hardened runtime on "
+            "Apple silicon, and an installed or embedded one cannot be told to have it")
+    endif()
     if(TARGET iwasm::vmlib)
+        if(_wamr_unpatched_refusal)
+            message(FATAL_ERROR "The embedded WAMR (iwasm::vmlib) cannot be used: ${_wamr_unpatched_refusal}. "
+                "Let Contour fetch its own (CONTOUR_USE_CPM=ON), or configure with -DCONTOUR_EXTENSIONS=OFF.")
+        endif()
         set(_wamr_target iwasm::vmlib)
-        set(THIRDPARTY_BUILTIN_wamr "embedded")
+        set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's patches")
     elseif(NOT CONTOUR_BUILD_STATIC)
         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
         set(_wamr_candidate "")
@@ -245,30 +293,80 @@ if(CONTOUR_EXTENSIONS)
                 endif()
             endif()
         endif()
-        if(_wamr_candidate)
+        if(_wamr_candidate AND _wamr_unpatched_refusal)
+            set(_wamr_rejected "${_wamr_unpatched_refusal}")
+            message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
+        elseif(_wamr_candidate)
             ContourThirdParties_WamrTerminates(${_wamr_candidate} _wamr_terminates)
             if(_wamr_terminates)
                 set(_wamr_target ${_wamr_candidate})
-                set(THIRDPARTY_BUILTIN_wamr "system package (wasm_runtime_terminate verified)")
+                set(THIRDPARTY_BUILTIN_wamr
+                    "system package, without Contour's patches (its interrupt verified)")
             else()
-                set(_wamr_rejected "; system WAMR rejected: ${_wamr_terminates_REASON}")
-                message(STATUS "System WAMR rejected (${_wamr_terminates_REASON}); building WAMR from source instead.")
+                set(_wamr_rejected "${_wamr_terminates_REASON}")
+                message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
             endif()
         endif()
     endif()
 
     if(NOT _wamr_target)
         if(NOT CONTOUR_USE_CPM)
-            message(FATAL_ERROR "Could not find a WAMR >= ${WAMR_MINIMAL_VERSION} built with WAMR_BUILD_THREAD_MGR=1 "
-                "and without hardware bounds checks. "
-                "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+            # On macOS no installed WAMR is taken (above): only the fetched one will do.
+            if(_wamr_unpatched_refusal)
+                set(_wamr_remedy "Set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+            else()
+                set(_wamr_remedy "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+            endif()
+            if(_wamr_rejected)
+                set(_wamr_found "The installed WAMR was rejected: ${_wamr_rejected}.")
+            else()
+                set(_wamr_found "None is installed.")
+            endif()
+            message(FATAL_ERROR "Could not find a usable WAMR >= ${WAMR_MINIMAL_VERSION}: one built with "
+                "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
+                "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
+                "${_wamr_found} "
+                "${_wamr_remedy}")
         endif()
         message(STATUS "Using CPM to fetch WAMR")
+        # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
+        # while setting or clearing any instance's exception walks every cluster under that lock: a data
+        # race between one extension's call or trap and another's unload. The first patch unlinks under the
+        # lock. An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory,
+        # as the cluster and the environment are freed only after the walk's list lock is released.
+        #
+        # On Apple silicon WAMR maps all of its memory MAP_JIT, an instance's linear memory included, which
+        # the hardened runtime refuses an executable without the allow-jit entitlement -- and the
+        # interpreting extension host has none, as it runs no code it made. The second patch asks for
+        # MAP_JIT only where the memory is to be executable, which an interpreter never maps.
+        set(_wamr_patches
+            "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch"
+            "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-map-jit-only-for-executable-memory.patch")
+        # git applies each (cmake/ApplyPatchOnce.cmake), one command after another; CPM, which clones WAMR,
+        # needs git already.
+        find_package(Git REQUIRED)
+        set(_wamr_patch_command "")
+        set(_wamr_patch_hashes "")
+        foreach(_wamr_patch IN LISTS _wamr_patches)
+            if(_wamr_patch_command)
+                list(APPEND _wamr_patch_command COMMAND)
+            endif()
+            list(APPEND _wamr_patch_command "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
+                 -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake")
+            file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
+            string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
+            string(APPEND _wamr_patch_hashes "-${_wamr_patch_hash}")
+        endforeach()
         CPMAddPackage(
             NAME wamr
             VERSION ${WAMR_MINIMAL_VERSION}
             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
+            # The patches above, each applied once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a
+            # patched tree succeeds; their own hashes key the source cache, so that a changed or added patch
+            # is never served an old tree.
+            PATCH_COMMAND ${_wamr_patch_command}
+            CUSTOM_CACHE_KEY "25bd7eb63e82${_wamr_patch_hashes}"
             OPTIONS
                 "WAMR_BUILD_INTERP 1"
                 "WAMR_BUILD_FAST_INTERP 1"
@@ -281,6 +379,20 @@ if(CONTOUR_EXTENSIONS)
                 "WAMR_BUILD_LIB_PTHREAD 0"
                 "WAMR_BUILD_LIB_WASI_THREADS 0"
                 "WAMR_BUILD_MULTI_MODULE 0"
+                # The WebAssembly features, as src/vtextension/wasm/EngineFeatures.hpp has them, so that WAMR
+                # accepts exactly the modules every other engine does; the backend contract checks it.
+                # Extended constant expressions are on because Wasmtime cannot refuse them.
+                "WAMR_BUILD_BULK_MEMORY 1"
+                "WAMR_BUILD_REF_TYPES 1"
+                "WAMR_BUILD_EXTENDED_CONST_EXPR 1"
+                "WAMR_BUILD_SIMD 0"
+                "WAMR_BUILD_SHARED_MEMORY 0"
+                "WAMR_BUILD_TAIL_CALL 0"
+                "WAMR_BUILD_MULTI_MEMORY 0"
+                "WAMR_BUILD_MEMORY64 0"
+                "WAMR_BUILD_GC 0"
+                "WAMR_BUILD_STRINGREF 0"
+                "WAMR_BUILD_EXCE_HANDLING 0"
                 "WAMR_DISABLE_HW_BOUND_CHECK 1"
                 "WAMR_DISABLE_STACK_HW_BOUND_CHECK 1"
                 "WAMR_DISABLE_WAKEUP_BLOCKING_OP 1"
@@ -326,11 +438,233 @@ if(CONTOUR_EXTENSIONS)
             target_compile_options(vmlib PRIVATE $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>)
         endif()
         set(_wamr_target vmlib)
-        set(THIRDPARTY_BUILTIN_wamr "CPM (WAMR-${WAMR_MINIMAL_VERSION}, static, fast interpreter)${_wamr_rejected}")
+        set(THIRDPARTY_BUILTIN_wamr
+            "CPM (${WAMR_MINIMAL_VERSION}, static, fast interpreter, with Contour's patches)")
+        if(_wamr_rejected)
+            string(APPEND THIRDPARTY_BUILTIN_wamr "; system WAMR rejected: ${_wamr_rejected}")
+        endif()
     endif()
     target_link_libraries(contour_wamr INTERFACE ${_wamr_target})
 else()
     set(THIRDPARTY_BUILTIN_wamr "(extensions disabled)")
+endif()
+
+# Wasmtime compiles the status-line extensions to native code inside the extension host, the only
+# process that links it, statically. The pin is an LTS release (every 12th major, supported for 24
+# months) and moves from LTS to LTS; security advisories in between are taken as patch releases. With
+# CPM, the prebuilt c-api archive for this platform is fetched, pinned by its SHA-256; a platform without
+# a row below, or CONTOUR_USE_CPM=OFF, looks for an installed wasmtime of the same major instead. Without
+# either, the extension host runs WAMR and CONTOUR_HAVE_WASMTIME stays OFF.
+#
+# Bumping: take the newest patch release of the LTS major, download each archive below and replace its
+# SHA-256 (GitHub shows the same digest on the release page).
+#
+# First-party code links contour::wasmtime, and only where CONTOUR_HAVE_WASMTIME is ON.
+set(WASMTIME_VERSION "48.0.10")
+
+# The Wasmtime build features whose switches the backend drives. The pinned archives have them all; an
+# installed Wasmtime is taken only if its wasmtime/conf.h defines each WASMTIME_FEATURE_<name>. The list is
+# the one source of both that probe and the backend's backstop (src/vtextension/wasm/wasmtime/
+# CMakeLists.txt generates it from ContourThirdParties_WasmtimeFeatureChecks), which stops the build
+# should headers without them be used all the same.
+set(_WASMTIME_REQUIRED_FEATURES COMPILER GC THREADS PARALLEL_COMPILATION COMPONENT_MODEL COMPONENT_MODEL_ASYNC)
+
+# The Wasmtime build features the backend's tests need beyond those: they assemble modules from WebAssembly
+# text. Production code needs none of them, so an installed Wasmtime without them is still used, and only
+# vtextension_wasmtime_test is left out (src/vtextension/wasm/wasmtime/CMakeLists.txt).
+set(_WASMTIME_TEST_FEATURES WAT)
+
+# ContourThirdParties_WasmtimeFeatureChecks(<result-variable> <feature>...)
+#
+# Sets <result-variable> to C++ source that includes <wasmtime.h> and stops the compile with an #error
+# for each <feature> whose WASMTIME_FEATURE_<feature> wasmtime/conf.h does not define.
+function(ContourThirdParties_WasmtimeFeatureChecks resultVar)
+    set(_text "#include <wasmtime.h>\n")
+    foreach(_feature IN LISTS ARGN)
+        string(APPEND _text
+            "#ifndef WASMTIME_FEATURE_${_feature}\n"
+            "    #error \"The extension host needs a Wasmtime built with its default features: "
+            "wasmtime/conf.h lacks WASMTIME_FEATURE_${_feature}.\"\n"
+            "#endif\n")
+    endforeach()
+    set(${resultVar} "${_text}" PARENT_SCOPE)
+endfunction()
+
+# ContourThirdParties_WasmtimeMissingFeatures(<target> <result-variable> <feature>...)
+#
+# Sets <result-variable> to the list of <feature>s the Wasmtime behind <target> was built without: those
+# whose WASMTIME_FEATURE_<feature> its wasmtime/conf.h does not define. Compiles against its headers only,
+# links nothing.
+function(ContourThirdParties_WasmtimeMissingFeatures target resultVar)
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+    set(_missing "")
+    foreach(_feature IN LISTS ARGN)
+        ContourThirdParties_WasmtimeFeatureChecks(_check ${_feature})
+        try_compile(_wasmtime_has_feature
+            SOURCE_FROM_CONTENT wasmtime_feature.cpp "${_check}int probe() { return 0; }\n"
+            LINK_LIBRARIES ${target}
+            NO_CACHE
+        )
+        if(NOT _wasmtime_has_feature)
+            list(APPEND _missing ${_feature})
+        endif()
+    endforeach()
+    set(${resultVar} "${_missing}" PARENT_SCOPE)
+endfunction()
+
+# ContourThirdParties_WasmtimeUnusableReason(<target> <version> <result-variable>)
+#
+# Sets <result-variable> to why the Wasmtime <version> behind <target> cannot be used: its headers do not
+# compile, or it was built without features of _WASMTIME_REQUIRED_FEATURES (named). Empty if it can be.
+# Compiles against its headers only, links nothing.
+function(ContourThirdParties_WasmtimeUnusableReason target version resultVar)
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+    # The headers alone first: a feature probe failing to compile them would blame a missing feature.
+    try_compile(_wasmtime_compiles
+        SOURCE_FROM_CONTENT wasmtime_headers.cpp "#include <wasmtime.h>\nint probe() { return 0; }\n"
+        LINK_LIBRARIES ${target}
+        NO_CACHE
+    )
+    if(NOT _wasmtime_compiles)
+        set(${resultVar} "the headers of the installed Wasmtime ${version} cannot be compiled" PARENT_SCOPE)
+        return()
+    endif()
+    ContourThirdParties_WasmtimeMissingFeatures(${target} _missing ${_WASMTIME_REQUIRED_FEATURES})
+    if(_missing)
+        list(JOIN _missing ", " _missing_text)
+        set(${resultVar}
+            "the installed Wasmtime ${version} was built without features it needs: ${_missing_text}"
+            PARENT_SCOPE)
+    else()
+        set(${resultVar} "" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# <CMAKE_SYSTEM_NAME>|<processor>|<archive name after "wasmtime-v<version>-">|<SHA-256 of the archive>
+# The processor is CMAKE_SYSTEM_PROCESSOR lowercased, with amd64 read as x86_64 and arm64 as aarch64.
+# Windows rows are for the MSVC ABI; MinGW has no row.
+set(_WASMTIME_ARCHIVES
+    "Linux|x86_64|x86_64-linux-c-api.tar.xz|5fc9a0b8c825ae7e2730f41f6260ec38556236f28bcd34fbb9b76e15c9f56e27"
+    "Linux|aarch64|aarch64-linux-c-api.tar.xz|7be1929dd01708212668696cf55b224b4c82bd562bc231596122563e2eb32a3d"
+    "Darwin|x86_64|x86_64-macos-c-api.tar.xz|3bd16df4a8beedb510e8b92a9a3063da8b4187a6ebbc4f363b25397d436ef232"
+    "Darwin|aarch64|aarch64-macos-c-api.tar.xz|868e59b586157b2497d5cd3004a588dde85c8542b4ff2366acc069a7da5d6927"
+    "Windows|x86_64|x86_64-windows-c-api.zip|2c5cd1a231c0b6aee80ecc700d68946bca4afaa09b728f6f8c43db64207ae682"
+)
+
+if(CONTOUR_EXTENSIONS)
+    string(REGEX MATCH "^[0-9]+" _wasmtime_major "${WASMTIME_VERSION}")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _wasmtime_processor)
+    if(_wasmtime_processor STREQUAL "amd64")
+        set(_wasmtime_processor "x86_64")
+    elseif(_wasmtime_processor STREQUAL "arm64")
+        set(_wasmtime_processor "aarch64")
+    endif()
+    set(_wasmtime_system "${CMAKE_SYSTEM_NAME}")
+    if(WIN32 AND NOT MSVC)
+        set(_wasmtime_system "${CMAKE_SYSTEM_NAME}-MinGW")
+    endif()
+
+    set(_wasmtime_archive "")
+    set(_wasmtime_sha256 "")
+    foreach(_wasmtime_row IN LISTS _WASMTIME_ARCHIVES)
+        string(REPLACE "|" ";" _wasmtime_fields "${_wasmtime_row}")
+        list(GET _wasmtime_fields 0 _wasmtime_row_system)
+        list(GET _wasmtime_fields 1 _wasmtime_row_processor)
+        if(_wasmtime_row_system STREQUAL _wasmtime_system AND _wasmtime_row_processor STREQUAL _wasmtime_processor)
+            list(GET _wasmtime_fields 2 _wasmtime_archive)
+            list(GET _wasmtime_fields 3 _wasmtime_sha256)
+        endif()
+    endforeach()
+
+    # contour::wasmtime is created only once a Wasmtime is resolved, so that a target linking it without
+    # CONTOUR_HAVE_WASMTIME fails to configure rather than linking nothing.
+    set(_wasmtime_reason "")
+    set(CONTOUR_WASMTIME_MISSING_TEST_FEATURES "")
+
+    # An installed Wasmtime is looked for first wherever the pinned archive is not simply fetched: without
+    # CPM or an archive for this platform, and wherever CPM is told to prefer local packages
+    # (CPM_USE_LOCAL_PACKAGES) or to use nothing else (CPM_LOCAL_PACKAGES_ONLY). It is probed here, which
+    # CPM's own lookup would not do, and a rejected one is never used.
+    if(NOT CONTOUR_USE_CPM OR NOT _wasmtime_archive OR CPM_USE_LOCAL_PACKAGES OR CPM_LOCAL_PACKAGES_ONLY)
+        find_package(wasmtime ${_wasmtime_major} QUIET)
+        if(TARGET wasmtime::wasmtime)
+            ContourThirdParties_WasmtimeUnusableReason(wasmtime::wasmtime "${wasmtime_VERSION}" _wasmtime_reason)
+        elseif(NOT CONTOUR_USE_CPM)
+            set(_wasmtime_reason "CONTOUR_USE_CPM is OFF and no Wasmtime ${_wasmtime_major} is installed")
+        elseif(CPM_LOCAL_PACKAGES_ONLY)
+            set(_wasmtime_reason "CPM_LOCAL_PACKAGES_ONLY is ON and no Wasmtime ${_wasmtime_major} is installed")
+        elseif(NOT _wasmtime_archive)
+            string(CONCAT _wasmtime_reason
+                "no pinned Wasmtime archive for ${_wasmtime_system} ${_wasmtime_processor}, "
+                "and no Wasmtime ${_wasmtime_major} is installed")
+        endif()
+        if(TARGET wasmtime::wasmtime AND NOT _wasmtime_reason)
+            add_library(contour_wasmtime INTERFACE)
+            add_library(contour::wasmtime ALIAS contour_wasmtime)
+            target_link_libraries(contour_wasmtime INTERFACE wasmtime::wasmtime)
+            ContourThirdParties_WasmtimeMissingFeatures(wasmtime::wasmtime CONTOUR_WASMTIME_MISSING_TEST_FEATURES
+                ${_WASMTIME_TEST_FEATURES})
+            set(CONTOUR_HAVE_WASMTIME ON)
+            set(_wasmtime_resolved "Wasmtime ${wasmtime_VERSION}")
+            set(THIRDPARTY_BUILTIN_wasmtime "system package (Wasmtime ${wasmtime_VERSION})")
+        endif()
+    endif()
+
+    # Otherwise the pinned archive is fetched, unless CPM may use local packages only. An installed Wasmtime
+    # that was rejected above is not CPM's to find again: its local lookup is off for this one package.
+    if(NOT CONTOUR_HAVE_WASMTIME AND CONTOUR_USE_CPM AND _wasmtime_archive AND NOT CPM_LOCAL_PACKAGES_ONLY)
+        if(_wasmtime_reason)
+            message(STATUS "Installed Wasmtime rejected (${_wasmtime_reason}); fetching the pinned archive instead.")
+        endif()
+        set(_wasmtime_reason "")
+        message(STATUS "Using CPM to fetch Wasmtime ${WASMTIME_VERSION} (${_wasmtime_archive})")
+        set(_wasmtime_use_local_packages "${CPM_USE_LOCAL_PACKAGES}")
+        set(CPM_USE_LOCAL_PACKAGES OFF)
+        CPMAddPackage(
+            NAME wasmtime
+            VERSION ${WASMTIME_VERSION}
+            URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASMTIME_VERSION}/wasmtime-v${WASMTIME_VERSION}-${_wasmtime_archive}"
+            URL_HASH SHA256=${_wasmtime_sha256}
+            DOWNLOAD_ONLY YES
+        )
+        set(CPM_USE_LOCAL_PACKAGES "${_wasmtime_use_local_packages}")
+        if(wasmtime_SOURCE_DIR)
+            add_library(contour_wasmtime INTERFACE)
+            add_library(contour::wasmtime ALIAS contour_wasmtime)
+            target_include_directories(contour_wasmtime SYSTEM INTERFACE "${wasmtime_SOURCE_DIR}/include")
+            if(WIN32)
+                target_link_libraries(contour_wasmtime INTERFACE
+                    "${wasmtime_SOURCE_DIR}/lib/wasmtime.lib"
+                    ws2_32 advapi32 userenv ntdll shell32 ole32 bcrypt)
+                # wasm.h and wasi.h mark the API __declspec(dllimport) on Windows unless told otherwise, which
+                # is right only for wasmtime.dll; this one is linked statically.
+                target_compile_definitions(contour_wasmtime INTERFACE LIBWASM_STATIC WASI_API_EXTERN=)
+            else()
+                target_link_libraries(contour_wasmtime INTERFACE "${wasmtime_SOURCE_DIR}/lib/libwasmtime.a")
+                if(LINUX)
+                    target_link_libraries(contour_wasmtime INTERFACE pthread dl m)
+                endif()
+            endif()
+            set(CONTOUR_HAVE_WASMTIME ON)
+            set(_wasmtime_resolved "Wasmtime ${WASMTIME_VERSION}")
+            set(THIRDPARTY_BUILTIN_wasmtime "CPM (Wasmtime ${WASMTIME_VERSION}, prebuilt, static)")
+        else()
+            # CPM resolved the package without the archive all the same (one of that name was added before),
+            # so there is no archive to take the headers and library from.
+            set(_wasmtime_reason "CPM resolved Wasmtime ${WASMTIME_VERSION} without fetching its archive")
+        endif()
+    endif()
+
+    # Whether the extension host runs it is CONTOUR_WASM_RUNTIME's to say (../CMakeLists.txt).
+    if(CONTOUR_HAVE_WASMTIME)
+        set(CONTOUR_WASMTIME_STRING "${_wasmtime_resolved}")
+    else()
+        set(THIRDPARTY_BUILTIN_wasmtime "(not found: ${_wasmtime_reason})")
+        set(CONTOUR_WASMTIME_STRING "not available (${_wasmtime_reason})")
+    endif()
+    message(STATUS "Wasmtime: ${CONTOUR_WASMTIME_STRING}")
+else()
+    set(THIRDPARTY_BUILTIN_wasmtime "(extensions disabled)")
 endif()
 
 # glaze, the JSON (de)serializer behind vtcontrol: structs in, structs out, schemas from the same structs.
@@ -535,6 +869,7 @@ macro(ContourThirdPartiesSummary2)
     message(STATUS "boxed-cpp           ${THIRDPARTY_BUILTIN_boxed-cpp}")
     message(STATUS "core-cpp            ${THIRDPARTY_BUILTIN_core-cpp}")
     message(STATUS "WAMR                ${THIRDPARTY_BUILTIN_wamr}")
+    message(STATUS "Wasmtime            ${THIRDPARTY_BUILTIN_wasmtime}")
     message(STATUS "Tracy               ${THIRDPARTY_BUILTIN_Tracy}")
     message(STATUS "------------------------------------------------------------------------------")
 endmacro()

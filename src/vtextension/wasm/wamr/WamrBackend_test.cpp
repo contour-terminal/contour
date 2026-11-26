@@ -4,11 +4,14 @@
 // process-wide runtime its backends share, driven through WAMR's C API directly.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <ranges>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -19,6 +22,7 @@
 #include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/TestModules.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
+#include <vtextension/wasm/testing/RenderMeasurement.hpp>
 #include <vtextension/wasm/wamr/WamrBackend.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
@@ -51,6 +55,18 @@ constexpr auto IdleModule = std::to_array<std::uint8_t>({
     0x03, 0x02, 0x01, 0x00,                                     // func 0: type 0
     0x07, 0x08, 0x01, 0x04, 'i',  'd',  'l',  'e',  0x00, 0x00, // export "idle" = 0
     0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,                         // 0: (empty)
+});
+
+/// Exports a function that returns and one that traps:
+/// (module (func (export "idle")) (func (export "trap") unreachable)).
+constexpr auto TrapModule = std::to_array<std::uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,             // magic, version
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                         // type 0: () -> ()
+    0x03, 0x03, 0x02, 0x00, 0x00,                               // func 0, 1: type 0
+    0x07, 0x0f, 0x02, 0x04, 'i',  'd',  'l',  'e',  0x00, 0x00, // export "idle" = 0
+    0x04, 't',  'r',  'a',  'p',  0x00, 0x01,                   // export "trap" = 1
+    0x0a, 0x08, 0x02, 0x02, 0x00, 0x0b,                         // 0: (empty)
+    0x03, 0x00, 0x00, 0x0b,                                     // 1: unreachable
 });
 
 /// Calls a host function taking no parameter at all:
@@ -117,7 +133,8 @@ TEST_CASE("Wamr.memoryGrowthLabelsEachInstance")
     // also what shows that a guest whose memory refused to grow fails the Instance as OutOfMemory.
     namespace contract = vtextension::wasm::testing::contract;
     auto const capped = RuntimeLimits { .memoryBytes = std::size_t { 2 } * contract::PageBytes,
-                                        .stackBytes = contract::Limits.stackBytes };
+                                        .stackBytes = contract::Limits.stackBytes,
+                                        .tableElements = contract::Limits.tableElements };
     auto const backend = makeWamrBackend();
     auto const runtime = contract::createRuntime(*backend, capped);
     auto const guard = contract::enterThread(*backend);
@@ -205,12 +222,126 @@ TEST_CASE("Wamr.hostFunctionArities")
 
     SECTION("too many")
     {
-        auto const hostFunctions =
-            std::array { HostFunction { .module = "arity",
-                                        .name = "wide",
-                                        .parameterCount = vtextension::wasm::wamr::MaxHostParameters + 1 } };
+        auto const hostFunctions = std::array { HostFunction {
+            .module = "arity", .name = "wide", .parameterCount = vtextension::wasm::MaxHostParameters + 1 } };
         auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
         REQUIRE_FALSE(runtime.has_value());
         CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
     }
+}
+
+TEST_CASE("Wamr.registrationsRaceLoads", "[threading]")
+{
+    // WAMR keeps every runtime's host functions on one process-wide list, which creating and dropping a
+    // runtime changes and loading a module walks. Runtimes with registrations of their own come and go on
+    // several threads while each loads and instantiates a module importing its own: no load may walk a node
+    // another thread frees (ThreadSanitizer and AddressSanitizer see it if one does), and every load links
+    // the import to the function its own runtime registered. (Catch2's assertions are not thread-safe: the
+    // workers count, the test thread checks.) Calls racing unloads are Wamr.callsAndTrapsRaceUnloads'.
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::wasm::HostFunction;
+    constexpr auto Workers = std::size_t { 4 };
+    static constexpr auto Rounds = 50;
+    // Where ZeroArityModule spells its import module, "arity": after the header (8 bytes), the type section
+    // (6) and the import section's id, size, count and name length (4).
+    constexpr auto ImportModuleNameOffset = 18;
+
+    auto const backend = makeWamrBackend();
+    // Keeps WAMR up throughout, so that the workers race each other's registrations, not its bring-up.
+    auto const anchor = contract::createRuntime(*backend);
+
+    auto served = std::array<int, Workers> {};
+    {
+        auto workers = std::vector<std::jthread> {};
+        for (auto const worker: std::views::iota(std::size_t { 0 }, Workers))
+            workers.emplace_back([&backend, &served, worker] {
+                // Each worker's module imports "arit<worker>" "nop", which only its own runtimes provide.
+                auto bytes = ZeroArityModule;
+                auto const name = std::array { 'a', 'r', 'i', 't', static_cast<char>('0' + worker) };
+                std::ranges::transform(name, bytes.begin() + ImportModuleNameOffset, [](char letter) {
+                    return static_cast<std::uint8_t>(letter);
+                });
+                auto const hostFunctions =
+                    std::array { HostFunction { .module = std::string_view { name.data(), name.size() },
+                                                .name = "nop",
+                                                .parameterCount = 0 } };
+                for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+                {
+                    auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
+                    if (!runtime)
+                        return;
+                    auto const guard = backend->enterThread();
+                    if (!guard)
+                        return;
+                    auto const module = (*runtime)->load(vtextension::wasm::ModuleIdentity {},
+                                                         vtextension::testing::toModule(bytes));
+                    if (!module)
+                        return;
+                    auto const imports = (*module)->imports();
+                    if (imports.size() != 1
+                        || imports.front().linkage != vtextension::wasm::Linkage::Satisfied)
+                        return;
+                    auto context = contract::RecordingHostContext {};
+                    if (!(*module)->instantiate(context))
+                        return;
+                    ++served.at(worker);
+                }
+            });
+    }
+
+    for (auto const count: served)
+        CHECK(count == Rounds);
+}
+
+TEST_CASE("Wamr.callsAndTrapsRaceUnloads", "[threading]")
+{
+    // Setting or clearing an instance's exception -- every call clears it, every trap sets it -- walks WAMR's
+    // list of every instance's thread cluster, which destroying an instance's execution environment unlinks
+    // from. Instances are called, trap and are dropped on several threads at once: no walk may read a link
+    // another thread writes unlocked (ThreadSanitizer sees it if one does; WAMR is patched for it,
+    // cmake/patches/). Every call returns and every trap is reported. (Catch2's assertions are not
+    // thread-safe: the workers count, the test thread checks.)
+    namespace contract = vtextension::wasm::testing::contract;
+    constexpr auto Workers = std::size_t { 4 };
+    static constexpr auto Rounds = 100;
+
+    auto const backend = makeWamrBackend();
+    auto const runtime = contract::createRuntime(*backend);
+
+    auto served = std::array<int, Workers> {};
+    {
+        auto workers = std::vector<std::jthread> {};
+        for (auto const worker: std::views::iota(std::size_t { 0 }, Workers))
+            workers.emplace_back([&backend, &runtime, &served, worker] {
+                auto const guard = backend->enterThread();
+                if (!guard)
+                    return;
+                for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+                {
+                    auto const module = runtime->load(vtextension::wasm::ModuleIdentity {},
+                                                      vtextension::testing::toModule(TrapModule));
+                    if (!module)
+                        return;
+                    auto context = contract::RecordingHostContext {};
+                    auto const instance = (*module)->instantiate(context);
+                    if (!instance)
+                        return;
+                    auto const idle = (*instance)->function("idle");
+                    auto const trap = (*instance)->function("trap");
+                    if (!idle || !trap || !(*instance)->call(*idle, {}) || (*instance)->call(*trap, {}))
+                        return;
+                    ++served.at(worker);
+                }
+            });
+    }
+
+    for (auto const count: served)
+        CHECK(count == Rounds);
+}
+
+TEST_CASE("Wamr.measureRender", "[.measure]")
+{
+    // Reported, not asserted; vtextension_wasmtime_test's twin measures Wasmtime the same way.
+    auto const backend = makeWamrBackend();
+    vtextension::wasm::testing::measureBundledRender(*backend, "WAMR");
 }

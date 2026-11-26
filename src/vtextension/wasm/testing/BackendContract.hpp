@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <expected>
 #include <future>
+#include <latch>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -37,8 +39,12 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/testing/StandardStreamsCapture.hpp>
 #include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/EngineFeatures.hpp>
 #include <vtextension/wasm/WasiAllowList.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/testing/FeatureModules.hpp>
+#include <vtextension/wasm/testing/ProcessModules.hpp>
+#include <vtextension/wasm/wasi/Preview1Shim.hpp>
 
 namespace vtextension::wasm::testing::contract
 {
@@ -53,9 +59,11 @@ inline constexpr auto HostFunctions = std::array {
     HostFunction { .module = HostModule, .name = "pair", .parameterCount = 2 },
 };
 
-/// The limits every contract runtime is created with.
-inline constexpr auto Limits =
-    RuntimeLimits { .memoryBytes = std::size_t { 4 } * 1024 * 1024, .stackBytes = std::size_t { 64 } * 1024 };
+/// The limits every contract runtime is created with. The table cap is below MaxTableElements, so that a
+/// backend is seen to honour the cap it is given rather than one of its own.
+inline constexpr auto Limits = RuntimeLimits { .memoryBytes = std::size_t { 4 } * 1024 * 1024,
+                                               .stackBytes = std::size_t { 64 } * 1024,
+                                               .tableElements = 64 };
 
 // Every backend must provide each WASI function the extension host allows: wasm::AllowedWasiFunctions,
 // under wasm::WasiModule (WasiAllowList.hpp), the very list the world check applies.
@@ -93,6 +101,20 @@ inline constexpr auto WrongSignatureModule = std::to_array<uint8_t>({
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x00,
     0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74, 0x65, 0x73,
     0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00, 0x00,
+});
+
+/// Imports an allowed WASI function with another signature than preview 1 gives it: `fd_seek` with an i32
+/// offset where preview 1 has an i64. It exports a memory, as WAMR requires of any module importing WASI.
+///
+///     (module
+///       (import "wasi_snapshot_preview1" "fd_seek" (func (param i32 i32 i32 i32) (result i32)))
+///       (memory (export "memory") 1))
+inline constexpr auto WrongSignatureWasiModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x01, 0x60, 0x04, 0x7f, 0x7f,
+    0x7f, 0x7f, 0x01, 0x7f, 0x02, 0x22, 0x01, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e,
+    0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
+    0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x00, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01,
+    0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
 });
 
 /// Imports every allowed WASI preview 1 function, with its preview 1 signature.
@@ -156,6 +178,128 @@ inline constexpr auto AllowedWasiModule = std::to_array<uint8_t>({
     0x00,
 });
 
+// clang-format off
+/// Imports every allowed WASI preview 1 function, and exports one function per import, named after it,
+/// that calls it with arguments in bounds and returns its errno (`proc_exit` returns nothing). The
+/// pointers point at address 64; `fd_write` writes one empty buffer to standard output, `fd_close` closes
+/// a descriptor that is not open (closing a standard stream could reach the host's), and the prestat
+/// functions ask about descriptor 3, the first a preopened directory would have.
+///
+///     (module
+///       (import "wasi_snapshot_preview1" "args_get" (func $args_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "environ_get" (func $environ_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "environ_sizes_get" (func $environ_sizes_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "clock_time_get" (func $clock_time_get (param i32 i64 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "clock_res_get" (func $clock_res_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (param i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_fdstat_get" (func $fd_fdstat_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_prestat_get" (func $fd_prestat_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_prestat_dir_name" (func $fd_prestat_dir_name (param i32 i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "fd_seek" (func $fd_seek (param i32 i64 i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "random_get" (func $random_get (param i32 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+///       (import "wasi_snapshot_preview1" "sched_yield" (func $sched_yield (result i32)))
+///       (memory (export "memory") 1)
+///       (func (export "args_get") (result i32) (call $args_get (i32.const 64) (i32.const 128)))
+///       (func (export "args_sizes_get") (result i32) (call $args_sizes_get (i32.const 64) (i32.const 68)))
+///       (func (export "environ_get") (result i32) (call $environ_get (i32.const 64) (i32.const 128)))
+///       (func (export "environ_sizes_get") (result i32) (call $environ_sizes_get (i32.const 64) (i32.const 68)))
+///       (func (export "clock_time_get") (result i32) (call $clock_time_get (i32.const 0) (i64.const 1) (i32.const 64)))
+///       (func (export "clock_res_get") (result i32) (call $clock_res_get (i32.const 0) (i32.const 64)))
+///       (func (export "fd_write") (result i32)
+///         (i32.store (i32.const 64) (i32.const 96))
+///         (i32.store (i32.const 68) (i32.const 0))
+///         (call $fd_write (i32.const 1) (i32.const 64) (i32.const 1) (i32.const 80)))
+///       (func (export "fd_close") (result i32) (call $fd_close (i32.const 9)))
+///       (func (export "fd_fdstat_get") (result i32) (call $fd_fdstat_get (i32.const 1) (i32.const 64)))
+///       (func (export "fd_prestat_get") (result i32) (call $fd_prestat_get (i32.const 3) (i32.const 64)))
+///       (func (export "fd_prestat_dir_name") (result i32) (call $fd_prestat_dir_name (i32.const 3) (i32.const 64) (i32.const 8)))
+///       (func (export "fd_seek") (result i32) (call $fd_seek (i32.const 1) (i64.const 0) (i32.const 0) (i32.const 64)))
+///       (func (export "random_get") (result i32) (call $random_get (i32.const 64) (i32.const 16)))
+///       (func (export "proc_exit") (call $proc_exit (i32.const 0)))
+///       (func (export "sched_yield") (result i32) (call $sched_yield)))
+inline constexpr auto EveryWasiFunctionModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x35, 0x09, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
+    0x60, 0x03, 0x7f, 0x7e, 0x7f, 0x01, 0x7f, 0x60, 0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x01,
+    0x7f, 0x01, 0x7f, 0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x04, 0x7f, 0x7e, 0x7f, 0x7f, 0x01,
+    0x7f, 0x60, 0x01, 0x7f, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x00, 0x00, 0x02, 0xb7, 0x04, 0x0f, 0x16,
+    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
+    0x76, 0x69, 0x65, 0x77, 0x31, 0x08, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16,
+    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
+    0x76, 0x69, 0x65, 0x77, 0x31, 0x0e, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f,
+    0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68,
+    0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0b, 0x65, 0x6e, 0x76, 0x69, 0x72,
+    0x6f, 0x6e, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61,
+    0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x11, 0x65, 0x6e,
+    0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00,
+    0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72,
+    0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0e, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65,
+    0x5f, 0x67, 0x65, 0x74, 0x00, 0x01, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73,
+    0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0d, 0x63, 0x6c, 0x6f, 0x63,
+    0x6b, 0x5f, 0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f,
+    0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
+    0x08, 0x66, 0x64, 0x5f, 0x77, 0x72, 0x69, 0x74, 0x65, 0x00, 0x02, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f,
+    0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
+    0x08, 0x66, 0x64, 0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x00, 0x03, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f,
+    0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
+    0x0d, 0x66, 0x64, 0x5f, 0x66, 0x64, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16,
+    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
+    0x76, 0x69, 0x65, 0x77, 0x31, 0x0e, 0x66, 0x64, 0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f,
+    0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68,
+    0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x13, 0x66, 0x64, 0x5f, 0x70, 0x72,
+    0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x64, 0x69, 0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x00, 0x04, 0x16,
+    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
+    0x76, 0x69, 0x65, 0x77, 0x31, 0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x00, 0x05, 0x16, 0x77,
+    0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76,
+    0x69, 0x65, 0x77, 0x31, 0x0a, 0x72, 0x61, 0x6e, 0x64, 0x6f, 0x6d, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00,
+    0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72,
+    0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x00,
+    0x06, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70,
+    0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x5f, 0x79, 0x69, 0x65,
+    0x6c, 0x64, 0x00, 0x07, 0x03, 0x10, 0x0f, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
+    0x07, 0x07, 0x07, 0x08, 0x07, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0xe7, 0x01, 0x10, 0x06, 0x6d, 0x65,
+    0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x08, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x0f,
+    0x0e, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x10,
+    0x0b, 0x65, 0x6e, 0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x11, 0x11, 0x65, 0x6e,
+    0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x12,
+    0x0e, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x13,
+    0x0d, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x14, 0x08,
+    0x66, 0x64, 0x5f, 0x77, 0x72, 0x69, 0x74, 0x65, 0x00, 0x15, 0x08, 0x66, 0x64, 0x5f, 0x63, 0x6c, 0x6f,
+    0x73, 0x65, 0x00, 0x16, 0x0d, 0x66, 0x64, 0x5f, 0x66, 0x64, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65,
+    0x74, 0x00, 0x17, 0x0e, 0x66, 0x64, 0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65,
+    0x74, 0x00, 0x18, 0x13, 0x66, 0x64, 0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x64, 0x69,
+    0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x00, 0x19, 0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x00,
+    0x1a, 0x0a, 0x72, 0x61, 0x6e, 0x64, 0x6f, 0x6d, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x1b, 0x09, 0x70, 0x72,
+    0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x00, 0x1c, 0x0b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x5f, 0x79,
+    0x69, 0x65, 0x6c, 0x64, 0x00, 0x1d, 0x0a, 0xae, 0x01, 0x0f, 0x0a, 0x00, 0x41, 0xc0, 0x00, 0x41, 0x80,
+    0x01, 0x10, 0x00, 0x0b, 0x0a, 0x00, 0x41, 0xc0, 0x00, 0x41, 0xc4, 0x00, 0x10, 0x01, 0x0b, 0x0a, 0x00,
+    0x41, 0xc0, 0x00, 0x41, 0x80, 0x01, 0x10, 0x02, 0x0b, 0x0a, 0x00, 0x41, 0xc0, 0x00, 0x41, 0xc4, 0x00,
+    0x10, 0x03, 0x0b, 0x0b, 0x00, 0x41, 0x00, 0x42, 0x01, 0x41, 0xc0, 0x00, 0x10, 0x04, 0x0b, 0x09, 0x00,
+    0x41, 0x00, 0x41, 0xc0, 0x00, 0x10, 0x05, 0x0b, 0x1f, 0x00, 0x41, 0xc0, 0x00, 0x41, 0xe0, 0x00, 0x36,
+    0x02, 0x00, 0x41, 0xc4, 0x00, 0x41, 0x00, 0x36, 0x02, 0x00, 0x41, 0x01, 0x41, 0xc0, 0x00, 0x41, 0x01,
+    0x41, 0xd0, 0x00, 0x10, 0x06, 0x0b, 0x06, 0x00, 0x41, 0x09, 0x10, 0x07, 0x0b, 0x09, 0x00, 0x41, 0x01,
+    0x41, 0xc0, 0x00, 0x10, 0x08, 0x0b, 0x09, 0x00, 0x41, 0x03, 0x41, 0xc0, 0x00, 0x10, 0x09, 0x0b, 0x0b,
+    0x00, 0x41, 0x03, 0x41, 0xc0, 0x00, 0x41, 0x08, 0x10, 0x0a, 0x0b, 0x0d, 0x00, 0x41, 0x01, 0x42, 0x00,
+    0x41, 0x00, 0x41, 0xc0, 0x00, 0x10, 0x0b, 0x0b, 0x09, 0x00, 0x41, 0xc0, 0x00, 0x41, 0x10, 0x10, 0x0c,
+    0x0b, 0x06, 0x00, 0x41, 0x00, 0x10, 0x0d, 0x0b, 0x04, 0x00, 0x10, 0x0e, 0x0b, 0x00, 0xd7, 0x01, 0x04,
+    0x6e, 0x61, 0x6d, 0x65, 0x01, 0xcf, 0x01, 0x0f, 0x00, 0x08, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x67, 0x65,
+    0x74, 0x01, 0x0e, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74,
+    0x02, 0x0b, 0x65, 0x6e, 0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x67, 0x65, 0x74, 0x03, 0x11, 0x65, 0x6e,
+    0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x04, 0x0e,
+    0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x67, 0x65, 0x74, 0x05, 0x0d, 0x63,
+    0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x06, 0x08, 0x66, 0x64, 0x5f,
+    0x77, 0x72, 0x69, 0x74, 0x65, 0x07, 0x08, 0x66, 0x64, 0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x08, 0x0d,
+    0x66, 0x64, 0x5f, 0x66, 0x64, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65, 0x74, 0x09, 0x0e, 0x66, 0x64,
+    0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65, 0x74, 0x0a, 0x13, 0x66, 0x64, 0x5f,
+    0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x64, 0x69, 0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x0b,
+    0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x0c, 0x0a, 0x72, 0x61, 0x6e, 0x64, 0x6f, 0x6d, 0x5f,
+    0x67, 0x65, 0x74, 0x0d, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x0e, 0x0b, 0x73,
+    0x63, 0x68, 0x65, 0x64, 0x5f, 0x79, 0x69, 0x65, 0x6c, 0x64,
+});
+// clang-format on
+
 /// What the instance cases run: calls `ping`, adds, stores, grows its memory, recurses, spins and
 /// prints. `ping-then-store` calls `ping(42)`, then stores 1 at address 0; `grow` traps if its memory
 /// refuses to grow by 4 pages; `print` writes "hello" (at address 16) to standard output.
@@ -197,6 +341,65 @@ inline constexpr auto InstanceModule = std::to_array<uint8_t>({
     0x01, 0x0b, 0x0b, 0x0b, 0x01, 0x00, 0x41, 0x10, 0x0b, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
 });
 
+/// Defines a memory of one page and exports nothing: no export shows its size.
+///
+///     (module (memory 1))
+inline constexpr auto UnexportedMemoryModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x05,
+    0x03,
+    0x01,
+    0x00,
+    0x01,
+});
+
+/// What the nested-call case runs: `fail` calls `ping(1)`; `absorb` calls `ping(0)`, then returns 7;
+/// `absorb-then-trap` calls `ping(0)`, then traps on its own.
+///
+///     (module
+///       (import "contract:test/host@0" "ping" (func $ping (param i32)))
+///       (func (export "fail") (call $ping (i32.const 1)))
+///       (func (export "absorb") (result i32) (call $ping (i32.const 0)) (i32.const 7))
+///       (func (export "absorb-then-trap") (call $ping (i32.const 0)) unreachable))
+inline constexpr auto NestedCallModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x03, 0x60, 0x01, 0x7f, 0x00, 0x60,
+    0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61,
+    0x63, 0x74, 0x3a, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70,
+    0x69, 0x6e, 0x67, 0x00, 0x00, 0x03, 0x04, 0x03, 0x01, 0x02, 0x01, 0x07, 0x24, 0x03, 0x04, 0x66,
+    0x61, 0x69, 0x6c, 0x00, 0x01, 0x06, 0x61, 0x62, 0x73, 0x6f, 0x72, 0x62, 0x00, 0x02, 0x10, 0x61,
+    0x62, 0x73, 0x6f, 0x72, 0x62, 0x2d, 0x74, 0x68, 0x65, 0x6e, 0x2d, 0x74, 0x72, 0x61, 0x70, 0x00,
+    0x03, 0x0a, 0x19, 0x03, 0x06, 0x00, 0x41, 0x01, 0x10, 0x00, 0x0b, 0x08, 0x00, 0x41, 0x00, 0x10,
+    0x00, 0x41, 0x07, 0x0b, 0x07, 0x00, 0x41, 0x00, 0x10, 0x00, 0x00, 0x0b, 0x00, 0x0e, 0x04, 0x6e,
+    0x61, 0x6d, 0x65, 0x01, 0x07, 0x01, 0x00, 0x04, 0x70, 0x69, 0x6e, 0x67,
+});
+
+/// What the growth case of the nested-call case runs: `fail` calls `ping(1)`; `grow-absorb-then-trap`
+/// grows its memory by 4 pages, ignoring a refusal, then calls `ping(0)`, then traps on its own.
+///
+///     (module
+///       (import "contract:test/host@0" "ping" (func (param i32)))
+///       (memory (export "memory") 1)
+///       (func (export "fail") (call 0 (i32.const 1)))
+///       (func (export "grow-absorb-then-trap")
+///         (drop (memory.grow (i32.const 4))) (call 0 (i32.const 0)) unreachable))
+inline constexpr auto GrowThenNestedCallModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60,
+    0x00, 0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74,
+    0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00,
+    0x00, 0x03, 0x03, 0x02, 0x01, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x29, 0x03, 0x06, 0x6d,
+    0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x66, 0x61, 0x69, 0x6c, 0x00, 0x01, 0x15, 0x67,
+    0x72, 0x6f, 0x77, 0x2d, 0x61, 0x62, 0x73, 0x6f, 0x72, 0x62, 0x2d, 0x74, 0x68, 0x65, 0x6e, 0x2d,
+    0x74, 0x72, 0x61, 0x70, 0x00, 0x02, 0x0a, 0x15, 0x02, 0x06, 0x00, 0x41, 0x01, 0x10, 0x00, 0x0b,
+    0x0c, 0x00, 0x41, 0x04, 0x40, 0x00, 0x1a, 0x41, 0x00, 0x10, 0x00, 0x00, 0x0b,
+});
+
 /// Passes its two parameters on to the two-parameter host function, in order.
 ///
 ///     (module
@@ -210,6 +413,83 @@ inline constexpr auto PairModule = std::to_array<uint8_t>({
     0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x11, 0x02, 0x06,
     0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x70, 0x61, 0x69, 0x72, 0x00, 0x01,
     0x0a, 0x0a, 0x01, 0x08, 0x00, 0x20, 0x00, 0x20, 0x01, 0x10, 0x00, 0x0b,
+});
+
+/// Defines a table of 40 elements without a maximum, more than half of Limits' table cap: an engine that
+/// caps such a table at twice its initial size would let it grow past the cap. `grow` returns what
+/// `table.grow` does: the old size, or -1.
+///
+///     (module
+///       (table 40 funcref)
+///       (func (export "grow") (param i32) (result i32) (table.grow 0 (ref.null func) (local.get 0)))
+///       (func (export "size") (result i32) (table.size 0)))
+inline constexpr auto TableModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0a, 0x02, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x60,
+    0x00, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x00, 0x01, 0x04, 0x04, 0x01, 0x70, 0x00, 0x28, 0x07, 0x0f, 0x02,
+    0x04, 0x67, 0x72, 0x6f, 0x77, 0x00, 0x00, 0x04, 0x73, 0x69, 0x7a, 0x65, 0x00, 0x01, 0x0a, 0x11, 0x02,
+    0x09, 0x00, 0xd0, 0x70, 0x20, 0x00, 0xfc, 0x0f, 0x00, 0x0b, 0x05, 0x00, 0xfc, 0x10, 0x00, 0x0b,
+});
+
+/// Defines a table one element larger than Limits' table cap.
+///
+///     (module (table 65 funcref))
+inline constexpr auto OversizedTableModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x04,
+    0x04,
+    0x01,
+    0x70,
+    0x00,
+    0x41,
+});
+
+/// Defines one table, of two elements and without a maximum, and then a byte the table section's size
+/// covers but no table does.
+///
+///     table section: 04 05 | 01 (one table) | 70 00 02 (funcref, no maximum, 2) | ff
+inline constexpr auto TrailingBytesTableModule = std::to_array<uint8_t>(
+    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff });
+
+/// Defines one table more than MaxTables.
+///
+///     (module (table 1 funcref) (table 1 funcref))
+inline constexpr auto TwoTablesModule = std::to_array<uint8_t>({
+    0x00,
+    0x61,
+    0x73,
+    0x6d,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x04,
+    0x07,
+    0x02,
+    0x70,
+    0x00,
+    0x01,
+    0x70,
+    0x00,
+    0x01,
+});
+
+/// Exports a function over i64s beside one over i32s.
+///
+///     (module
+///       (func (export "wide") (param i64) (result i64) (local.get 0))
+///       (func (export "narrow") (param i32) (result i32) (local.get 0)))
+inline constexpr auto WideExportModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0b, 0x02, 0x60, 0x01, 0x7e, 0x01,
+    0x7e, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x00, 0x01, 0x07, 0x11, 0x02, 0x04,
+    0x77, 0x69, 0x64, 0x65, 0x00, 0x00, 0x06, 0x6e, 0x61, 0x72, 0x72, 0x6f, 0x77, 0x00, 0x01,
+    0x0a, 0x0b, 0x02, 0x04, 0x00, 0x20, 0x00, 0x0b, 0x04, 0x00, 0x20, 0x00, 0x0b,
 });
 
 /// The WebAssembly page size, in bytes.
@@ -251,6 +531,38 @@ class RecordingHostContext final: public IHostContext
   private:
     std::expected<void, ExtensionError> _answer;
     std::vector<HostCall> _calls;
+};
+
+/// A host context for NestedCallModule: `ping(0)` calls the instance's `fail` back and absorbs its
+/// failure, as a host function may when it can do without what it asked the guest for; `ping` with any
+/// other argument fails.
+class AbsorbingHostContext final: public IHostContext
+{
+  public:
+    /// Names the instance `ping(0)` calls back into: the instance is created with this context, so the
+    /// two are wired after both exist.
+    /// @param instance The instance; outlives every call made through this context.
+    void attach(IWasmInstance& instance) noexcept { _instance = &instance; }
+
+    [[nodiscard]] std::expected<void, ExtensionError> callHost(
+        std::size_t /*functionIndex*/, std::span<uint32_t const> arguments) noexcept override
+    {
+        if (arguments.front() != 0)
+            return std::unexpected(ExtensionError::PermissionDenied);
+        if (auto const fail = _instance->function("fail"))
+            _nested = _instance->call(*fail, {});
+        return {};
+    }
+
+    /// @return What the latest call back into the instance returned; nothing before the first.
+    [[nodiscard]] std::optional<std::expected<void, CallFailure>> const& nested() const noexcept
+    {
+        return _nested;
+    }
+
+  private:
+    IWasmInstance* _instance = nullptr;
+    std::optional<std::expected<void, CallFailure>> _nested;
 };
 
 /// Runs @p body on a thread of its own and hands back what it returned. Catch2's assertions are not
@@ -325,7 +637,7 @@ template <typename Body>
 template <std::size_t N>
 [[nodiscard]] std::shared_ptr<IWasmModule> load(IWasmRuntime& runtime, std::array<uint8_t, N> const& bytes)
 {
-    auto module = runtime.load(vtextension::testing::toModule(bytes));
+    auto module = runtime.load(ModuleIdentity {}, vtextension::testing::toModule(bytes));
     REQUIRE(module.has_value());
     return std::move(*module);
 }
@@ -370,9 +682,52 @@ void loadRejectsNonModule()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
-    auto const loaded = runtime->load({ std::byte { 1 }, std::byte { 2 } });
+    auto const loaded = runtime->load(ModuleIdentity {}, { std::byte { 1 }, std::byte { 2 } });
     REQUIRE_FALSE(loaded.has_value());
     CHECK(loaded.error() == ExtensionError::InvalidComponent);
+}
+
+/// Loads each of FeatureModules whose feature is @p state in EngineFeatures, each in a section of its own
+/// named after the feature, and checks that it is accepted if the feature is On, refused if Off.
+template <typename T>
+void checkFeatureModules(FeatureState state)
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    for (auto const& [feature, bytes]: FeatureModules)
+    {
+        auto const& row = featureRow(feature);
+        if (row.state != state)
+            continue;
+        DYNAMIC_SECTION(row.name)
+        {
+            INFO("feature: " << row.name);
+            auto const module = std::as_bytes(bytes);
+            auto const loaded = runtime->load(ModuleIdentity {}, { module.begin(), module.end() });
+            if (state == FeatureState::On)
+                CHECK(loaded.has_value());
+            else
+            {
+                REQUIRE_FALSE(loaded.has_value());
+                CHECK(loaded.error() == ExtensionError::InvalidComponent);
+            }
+        }
+    }
+}
+
+/// A module using a feature extensions may not use is refused.
+template <typename T>
+void refusesDisabledFeatures()
+{
+    checkFeatureModules<T>(FeatureState::Off);
+}
+
+/// A module using a feature extensions may use is accepted.
+template <typename T>
+void acceptsEnabledFeatures()
+{
+    checkFeatureModules<T>(FeatureState::On);
 }
 
 /// A module's imports and exports are described as declared, with what the runtime provides.
@@ -429,6 +784,17 @@ void wrongSignatureImportIsUnsatisfied()
     CHECK(ping.signature
           == FunctionSignature { .parameters = { ValueType::I32, ValueType::I32 }, .results = {} });
     CHECK(ping.linkage == Linkage::Unsatisfied);
+}
+
+/// An allowed WASI function imported with another signature than preview 1 gives it is unsatisfied,
+/// rather than linked and then reading its arguments wrongly.
+template <typename T>
+void wrongSignatureWasiIsUnsatisfied()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const module = load(*runtime, WrongSignatureWasiModule);
+    CHECK(importOf(*module, WasiModule, "fd_seek").linkage == Linkage::Unsatisfied);
 }
 
 /// Every WASI preview 1 function the extension host allows is provided.
@@ -565,7 +931,7 @@ void moduleCrossesThreads()
         auto const guard = backend->enterThread();
         if (!guard)
             return std::unexpected(guard.error());
-        return runtime->load(vtextension::testing::toModule(DescribedModule));
+        return runtime->load(ModuleIdentity {}, vtextension::testing::toModule(DescribedModule));
     });
     REQUIRE(loaded.has_value());
     auto const& module = *loaded;
@@ -641,8 +1007,8 @@ void memoryViewIsBoundsChecked()
     CHECK(std::ranges::equal(*hello, std::string_view { "hello" }, [](std::byte byte, char c) {
         return std::to_integer<char>(byte) == c;
     }));
-    CHECK_FALSE(instance->memory(PageBytes - 1, 2).has_value());
-    CHECK_FALSE(instance->memory(0xFFFFFFF0, 32).has_value());
+    CHECK(instance->memory(PageBytes - 1, 2).error() == MemoryFailure::OutOfBounds);
+    CHECK(instance->memory(0xFFFFFFF0, 32).error() == MemoryFailure::OutOfBounds);
     auto const empty = instance->memory(70000, 0);
     REQUIRE(empty.has_value());
     CHECK(empty->empty());
@@ -706,6 +1072,59 @@ void hostCallbackErrorFails()
     CHECK(wordAt(*instance, 0) == 0);
 }
 
+/// A host function's failure fails the call it was made from, and no other: a host function that called
+/// back into its instance and absorbed that call's failure leaves the outer call to end as the guest
+/// makes it end, returning or trapping on its own.
+template <typename T>
+void nestedHostFailureStaysNested()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, NestedCallModule);
+    auto context = AbsorbingHostContext {};
+    auto const instance = instantiate(*module, context);
+    context.attach(*instance);
+    auto const nestedFailure = std::expected<void, CallFailure> { std::unexpected(CallFailure::HostFailure) };
+
+    auto const trapped = instance->call(functionOf(*instance, "absorb-then-trap"), {});
+    CHECK(context.nested() == nestedFailure);
+    REQUIRE_FALSE(trapped.has_value());
+    CHECK(trapped.error() == CallFailure::Trap);
+
+    auto result = std::array<uint32_t, 1> {};
+    auto const returned = instance->call(functionOf(*instance, "absorb"), result);
+    CHECK(context.nested() == nestedFailure);
+    REQUIRE(returned.has_value());
+    CHECK(result[0] == 7);
+}
+
+/// What a call recorded before a host function called back into its instance is still its own once that
+/// nested call returned: a refused growth, then an absorbed nested failure, then the guest's own trap
+/// fails the call as the refused growth, where the backend reports one.
+template <typename T>
+void nestedCallKeepsTheOuterRecord()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, GrowThenNestedCallModule);
+    auto context = AbsorbingHostContext {};
+    auto const instance = instantiate(*module, context);
+    context.attach(*instance);
+
+    auto const called = instance->call(functionOf(*instance, "grow-absorb-then-trap"), {});
+    CHECK(context.nested() == std::expected<void, CallFailure> { std::unexpected(CallFailure::HostFailure) });
+    REQUIRE_FALSE(called.has_value());
+    auto const expected = backend->capabilities().memoryGrowth == MemoryGrowthReporting::Reported
+                              ? CallFailure::MemoryGrowthRefused
+                              : CallFailure::Trap;
+    CHECK(called.error() == expected);
+}
+
 /// Which of two runtimes alive at once goes first.
 enum class FirstToGo : uint8_t
 {
@@ -759,9 +1178,10 @@ template <typename T>
 void memoryCapRefusesGrowth()
 {
     auto const backend = T::make();
-    auto const runtime = createRuntime(
-        *backend,
-        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes, .stackBytes = Limits.stackBytes });
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
     auto const guard = enterThread(*backend);
     auto const module = load(*runtime, InstanceModule);
     auto context = RecordingHostContext {};
@@ -773,7 +1193,49 @@ void memoryCapRefusesGrowth()
                               ? CallFailure::MemoryGrowthRefused
                               : CallFailure::Trap;
     CHECK(called.error() == expected);
-    CHECK_FALSE(instance->memory(0, 2 * PageBytes).has_value());
+    CHECK(instance->memory(0, 2 * PageBytes).error() == MemoryFailure::OutOfBounds);
+}
+
+/// A memory that grew is seen at its new size: what the guest stores in the page it grew, memory() reads.
+template <typename T>
+void grownMemoryIsVisible()
+{
+    constexpr auto Address = uint32_t { 65540 };
+    constexpr auto Value = uint32_t { 0xC0DE };
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, GrowModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    CHECK(instance->memory(Address, 4).error() == MemoryFailure::OutOfBounds);
+
+    auto grown = std::array<uint32_t, 1> { 1 };
+    REQUIRE(instance->call(functionOf(*instance, "grow"), grown).has_value());
+    CHECK(grown[0] == 1);
+    auto stored = std::array<uint32_t, 2> { Address, Value };
+    REQUIRE(instance->call(functionOf(*instance, "store"), stored).has_value());
+    CHECK(wordAt(*instance, Address) == Value);
+}
+
+/// A call that trapped leaves its instance callable: the next call runs as if none had failed.
+template <typename T>
+void callAfterTrapRuns()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, InstanceModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    REQUIRE_FALSE(instance->call(functionOf(*instance, "grow"), {}).has_value());
+
+    auto argv = std::array<uint32_t, 2> { 2, 3 };
+    REQUIRE(instance->call(functionOf(*instance, "add"), argv).has_value());
+    CHECK(argv[0] == 5);
 }
 
 /// A memory whose initial size exceeds the runtime's cap is not instantiated.
@@ -781,14 +1243,128 @@ template <typename T>
 void memoryCapRefusesInitialSize()
 {
     auto const backend = T::make();
-    auto const runtime = createRuntime(
-        *backend, RuntimeLimits { .memoryBytes = PageBytes / 2, .stackBytes = Limits.stackBytes });
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = PageBytes / 2,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
     auto const guard = enterThread(*backend);
     auto const module = load(*runtime, InstanceModule);
     auto context = RecordingHostContext {};
     auto const instance = module->instantiate(context);
     REQUIRE_FALSE(instance.has_value());
     CHECK(instance.error() == ExtensionError::OutOfMemory);
+}
+
+/// A memory whose initial size exceeds the runtime's cap is not instantiated, though no export shows it.
+template <typename T>
+void memoryCapRefusesUnexportedInitialSize()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend,
+                                       RuntimeLimits { .memoryBytes = PageBytes / 2,
+                                                       .stackBytes = Limits.stackBytes,
+                                                       .tableElements = Limits.tableElements });
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, UnexportedMemoryModule);
+    auto context = RecordingHostContext {};
+    auto const instance = module->instantiate(context);
+    REQUIRE_FALSE(instance.has_value());
+    CHECK(instance.error() == ExtensionError::OutOfMemory);
+}
+
+/// A table grows up to the runtime's cap and no further: `table.grow` past it returns -1, however far
+/// past it asks, and the table keeps its size.
+template <typename T>
+void tableGrowthIsCapped()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, TableModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    auto const grow = functionOf(*instance, "grow");
+    auto const refused = std::numeric_limits<uint32_t>::max();
+
+    auto argv = std::array<uint32_t, 1> { Limits.tableElements - 40 };
+    REQUIRE(instance->call(grow, argv).has_value());
+    CHECK(argv[0] == 40);
+    argv[0] = 1;
+    REQUIRE(instance->call(grow, argv).has_value());
+    CHECK(argv[0] == refused);
+    argv[0] = refused;
+    REQUIRE(instance->call(grow, argv).has_value());
+    CHECK(argv[0] == refused);
+    REQUIRE(instance->call(functionOf(*instance, "size"), argv).has_value());
+    CHECK(argv[0] == Limits.tableElements);
+}
+
+/// A table whose initial size exceeds the runtime's cap is not instantiated.
+template <typename T>
+void tableInitialSizeIsCapped()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, OversizedTableModule);
+    auto context = RecordingHostContext {};
+    auto const instance = module->instantiate(context);
+    REQUIRE_FALSE(instance.has_value());
+    CHECK(instance.error() == ExtensionError::OutOfMemory);
+}
+
+/// A module defining more tables than MaxTables is not loaded.
+template <typename T>
+void tableCountIsCapped()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const module = runtime->load(ModuleIdentity {}, vtextension::testing::toModule(TwoTablesModule));
+    REQUIRE_FALSE(module.has_value());
+    CHECK(module.error() == ExtensionError::InvalidComponent);
+}
+
+/// A table section with bytes after its last table is not loaded, though the tables before them are
+/// well-formed.
+template <typename T>
+void tableSectionWithTrailingBytesIsRefused()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const module =
+        runtime->load(ModuleIdentity {}, vtextension::testing::toModule(TrailingBytesTableModule));
+    REQUIRE_FALSE(module.has_value());
+    CHECK(module.error() == ExtensionError::InvalidComponent);
+}
+
+/// A table cap above MaxTableElements creates no runtime.
+template <typename T>
+void tableCapAboveMaximumIsRefused()
+{
+    auto const backend = T::make();
+    auto limits = Limits;
+    limits.tableElements = MaxTableElements + 1;
+    auto const runtime = backend->createRuntime(limits, HostFunctions);
+    REQUIRE_FALSE(runtime.has_value());
+    CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
+}
+
+/// Only a function export whose parameters and results are all i32 can be looked up; any other is not
+/// offered (IWasmInstance::function).
+template <typename T>
+void onlyI32ExportsAreOffered()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, WideExportModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+
+    CHECK_FALSE(instance->function("wide").has_value());
+    auto argv = std::array<uint32_t, 1> { 42 };
+    REQUIRE(instance->call(functionOf(*instance, "narrow"), argv).has_value());
+    CHECK(argv[0] == 42);
 }
 
 /// Unbounded recursion runs into the stack cap and traps.
@@ -866,8 +1442,9 @@ void instanceCrossesThreads()
 {
     auto const backend = T::make();
     auto const runtime = createRuntime(*backend);
-    auto const loaded = onPreparedThread(
-        *backend, [&] { return runtime->load(vtextension::testing::toModule(DescribedModule)); });
+    auto const loaded = onPreparedThread(*backend, [&] {
+        return runtime->load(ModuleIdentity {}, vtextension::testing::toModule(DescribedModule));
+    });
     REQUIRE(loaded.has_value());
     REQUIRE(loaded->has_value());
     auto const& module = **loaded;
@@ -887,6 +1464,179 @@ void instanceCrossesThreads()
     });
     REQUIRE(sum.has_value());
     CHECK(*sum == std::expected<uint32_t, CallFailure> { 5 });
+}
+
+/// One module is instantiated on two prepared threads at once, as the panes sharing a compiled extension do:
+/// every instance is whole and runs, and neither instantiation disturbs the other. So too for a module whose
+/// import is unsatisfied, which some runtimes try to link anew on each instantiation: each thread meets the
+/// outcome one instantiation alone has.
+template <typename T>
+void instantiatesConcurrently()
+{
+    /// What one thread achieved: how many instantiations went as the reference did, and how many of the
+    /// instances added right (none of a module without `add`).
+    struct Tally
+    {
+        int asReference = 0;
+        int added = 0;
+    };
+    constexpr auto Rounds = 25;
+
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+
+    // Each thread instantiates `module` Rounds times at once with the other, and adds with what it created.
+    auto const onTwoThreads = [&](IWasmModule& module) {
+        auto context = RecordingHostContext {};
+        auto const reference = module.instantiate(context).transform([](auto const&) { return 0; });
+        auto start = std::latch { 2 };
+        auto const instantiateMany = [&] {
+            auto tally = Tally {};
+            auto const threadGuard = backend->enterThread();
+            start.arrive_and_wait();
+            if (!threadGuard)
+                return tally;
+            for (auto const round: std::views::iota(uint32_t { 0 }, uint32_t { Rounds }))
+            {
+                auto ownContext = RecordingHostContext {};
+                auto const instance = module.instantiate(ownContext);
+                if (instance.has_value() != reference.has_value()
+                    || (!instance && instance.error() != reference.error()))
+                    continue;
+                ++tally.asReference;
+                if (!instance)
+                    continue;
+                auto const add = (*instance)->function("add");
+                auto argv = std::array<uint32_t, 2> { round, 3 };
+                if (add && (*instance)->call(*add, argv) && argv[0] == round + 3)
+                    ++tally.added;
+            }
+            return tally;
+        };
+        auto first = std::async(std::launch::async, instantiateMany);
+        auto second = std::async(std::launch::async, instantiateMany);
+        return std::array { first.get(), second.get() };
+    };
+
+    auto const module = load(*runtime, InstanceModule);
+    for (auto const tally: onTwoThreads(*module))
+    {
+        CHECK(tally.asReference == Rounds);
+        CHECK(tally.added == Rounds);
+    }
+    auto const unsatisfied = load(*runtime, UnknownImportModule);
+    for (auto const tally: onTwoThreads(*unsatisfied))
+        CHECK(tally.asReference == Rounds);
+}
+
+/// What each export of EveryWasiFunctionModule, named after the WASI function it calls, ends with: the
+/// errno it returns, or ShimOutcome::Exit for a call that ends as a trap.
+inline constexpr auto EveryWasiFunctionOutcomes =
+    std::to_array<std::pair<std::string_view, wasi::ShimResult>>({
+        { "args_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "args_sizes_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "environ_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "environ_sizes_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "clock_time_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "clock_res_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "fd_write", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "fd_close", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Badf } },
+        { "fd_fdstat_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "fd_prestat_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Badf } },
+        { "fd_prestat_dir_name", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Badf } },
+        { "fd_seek", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "random_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+        { "proc_exit", { .outcome = wasi::ShimOutcome::Exit, .error = wasi::Errno::Success } },
+        { "sched_yield", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+    });
+
+static_assert(std::ranges::equal(EveryWasiFunctionOutcomes | std::views::keys, AllowedWasiFunctions),
+              "EveryWasiFunctionOutcomes covers AllowedWasiFunctions, in its order");
+
+/// Every allowed WASI function can be called, and answers as preview 1 says: each export of
+/// EveryWasiFunctionModule, on an instance of its own, returns its errno or traps (proc_exit).
+template <typename T>
+void everyAllowedWasiFunctionWorks()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, EveryWasiFunctionModule);
+    for (auto const& [function, expected]: EveryWasiFunctionOutcomes)
+    {
+        INFO(function);
+        auto context = RecordingHostContext {};
+        auto const instance = instantiate(*module, context);
+        auto const entry = functionOf(*instance, function);
+        if (expected.outcome == wasi::ShimOutcome::Exit)
+        {
+            auto const called = instance->call(entry, {});
+            REQUIRE_FALSE(called.has_value());
+            CHECK(called.error() == CallFailure::Trap);
+            continue;
+        }
+        auto error = std::array<uint32_t, 1> { 0xFFFF'FFFF };
+        REQUIRE(instance->call(entry, error).has_value());
+        CHECK(error[0] == static_cast<uint32_t>(expected.error));
+    }
+}
+
+/// Asks WASI's clocks: `time(clock)` calls clock_time_get(clock, 1, 64), `resolution(clock)` calls
+/// clock_res_get(clock, 64); each returns the errno.
+///
+///     (module
+///       (import "wasi_snapshot_preview1" "clock_time_get" (func $time (param i32 i64 i32) (result i32)))
+///       (import "wasi_snapshot_preview1" "clock_res_get" (func $res (param i32 i32) (result i32)))
+///       (memory (export "memory") 1)
+///       (func (export "time") (param i32) (result i32)
+///         (call $time (local.get 0) (i64.const 1) (i32.const 64)))
+///       (func (export "resolution") (param i32) (result i32)
+///         (call $res (local.get 0) (i32.const 64))))
+inline constexpr auto ClockModule = std::to_array<uint8_t>(
+    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x13, 0x03, 0x60, 0x03, 0x7f, 0x7e, 0x7f, 0x01,
+      0x7f, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x02, 0x50, 0x02, 0x16, 0x77,
+      0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76,
+      0x69, 0x65, 0x77, 0x31, 0x0e, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x67,
+      0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f,
+      0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0d, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f,
+      0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x01, 0x03, 0x03, 0x02, 0x02, 0x02, 0x05, 0x03, 0x01,
+      0x00, 0x01, 0x07, 0x1e, 0x03, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x74, 0x69,
+      0x6d, 0x65, 0x00, 0x02, 0x0a, 0x72, 0x65, 0x73, 0x6f, 0x6c, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x00, 0x03,
+      0x0a, 0x17, 0x02, 0x0b, 0x00, 0x20, 0x00, 0x42, 0x01, 0x41, 0xc0, 0x00, 0x10, 0x00, 0x0b, 0x09, 0x00,
+      0x20, 0x00, 0x41, 0xc0, 0x00, 0x10, 0x01, 0x0b });
+
+/// What clock_time_get and clock_res_get answer for each clock id of preview 1, and one past them: the
+/// realtime and monotonic clocks are provided; the CPU-time clocks are withheld (`Nosys`), as the time an
+/// instance's process or thread spent running tells of every other guest it runs beside; an unknown id is
+/// `Inval`.
+inline constexpr auto ClockOutcomes = std::to_array<std::pair<uint32_t, wasi::Errno>>({
+    { 0, wasi::Errno::Success },
+    { 1, wasi::Errno::Success },
+    { 2, wasi::Errno::Nosys },
+    { 3, wasi::Errno::Nosys },
+    { 4, wasi::Errno::Inval },
+});
+
+/// Every engine answers the same for every clock id: the CPU-time clocks withheld, whatever its own WASI
+/// would read.
+template <typename T>
+void clocksAnswerAlike()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, ClockModule);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+    for (auto const& [clock, expected]: ClockOutcomes)
+        for (auto const* function: { "time", "resolution" })
+        {
+            INFO(function << "(" << clock << ")");
+            auto argv = std::array<uint32_t, 1> { clock };
+            REQUIRE(instance->call(functionOf(*instance, function), argv).has_value());
+            CHECK(argv[0] == static_cast<uint32_t>(expected));
+        }
 }
 
 #ifndef _WIN32
@@ -971,30 +1721,54 @@ void wasiStdioGoesNowhere()
         ::vtextension::wasm::testing::contract::Name<TestType>();        \
     }
 
+/// One contract case that runs threads of its own, run against the backend of @p Traits.
+#define CONTOUR_WASM_BACKEND_CONTRACT_THREADING_CASE(Traits, Name)                  \
+    TEMPLATE_TEST_CASE("WasmContract." #Name, "[wasm-contract][threading]", Traits) \
+    {                                                                               \
+        ::vtextension::wasm::testing::contract::Name<TestType>();                   \
+    }
+
 /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
-#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                 \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)             \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)             \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder) \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)               \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)               \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                   \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)               \
+#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)                \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)        \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, clocksAnswerAlike)                      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedCallKeepsTheOuterRecord)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, grownMemoryIsVisible)                   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                      \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize)  \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableGrowthIsCapped)                    \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableSectionWithTrailingBytesIsRefused) \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, onlyI32ExportsAreOffered)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)                \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                       \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_THREADING_CASE(Traits, instantiatesConcurrently)     \
     CONTOUR_WASM_BACKEND_CONTRACT_POSIX(Traits)

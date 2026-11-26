@@ -15,7 +15,9 @@
 #include <wasm_export.h>
 
 #include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/wamr/WamrBackend.hpp>
 
 namespace vtextension::wasm::wamr
 {
@@ -31,21 +33,22 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
     };
 
   public:
-    /// Brings the runtime up (or joins it), opens a null device and registers @p hostFunctions.
+    /// Brings the runtime up (or joins it), takes its null device and registers @p hostFunctions.
     /// @param limits The limits every instance of the runtime is held to.
     /// @param hostFunctions The host functions modules may import.
+    /// @param nullDevice Where its null device comes from: opened for it, or shared.
     /// @return The runtime; `RuntimeUnavailable` if WAMR could not initialize, the null device could
     ///         not be opened, or WAMR refused the host functions.
     [[nodiscard]] static std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> create(
-        RuntimeLimits limits, std::span<HostFunction const> hostFunctions);
+        RuntimeLimits limits, std::span<HostFunction const> hostFunctions, NullDevice const& nullDevice);
 
     /// Use create(); public only so that std::make_shared can reach it.
     WamrRuntime(PrivateTag,
                 RuntimeLimits limits,
-                int64_t nullDevice,
+                std::shared_ptr<OpenNullDevice const> nullDevice,
                 std::unique_ptr<HostRegistrations> hostRegistrations) noexcept;
 
-    /// Unregisters the host functions, closes the null device, then releases the hold on the runtime.
+    /// Unregisters the host functions, lets go of the null device, then releases the hold on the runtime.
     ~WamrRuntime() override;
 
     WamrRuntime(WamrRuntime const&) = delete;
@@ -53,18 +56,19 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
     WamrRuntime& operator=(WamrRuntime const&) = delete;
     WamrRuntime& operator=(WamrRuntime&&) = delete;
 
+    /// Loads @p bytes in this process; the identity is ignored, as every module runs here.
     [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
-        std::vector<std::byte> bytes) override;
+        ModuleIdentity identity, std::vector<std::byte> bytes) override;
 
     /// @return The limits every instance of the runtime is held to.
     [[nodiscard]] RuntimeLimits const& limits() const noexcept { return _limits; }
 
     /// @return The raw handle of the null device the guests' WASI standard streams are bound to.
-    [[nodiscard]] int64_t nullDevice() const noexcept { return _nullDevice; }
+    [[nodiscard]] int64_t nullDevice() const noexcept { return _nullDevice->handle(); }
 
   private:
     RuntimeLimits _limits;
-    int64_t _nullDevice;                                   ///< Owned; closed on destruction.
+    std::shared_ptr<OpenNullDevice const> _nullDevice;     ///< Closed with its last holder.
     std::unique_ptr<HostRegistrations> _hostRegistrations; ///< Unregistered before the runtime is released.
 };
 
@@ -80,20 +84,19 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
 /// @param module WAMR's handle on @p owner's module.
 /// @param limits The limits of the runtime @p owner was loaded on.
 /// @param exports @p owner's exports.
+/// @param largestInitialTableElements The largest initial size of the tables @p owner defines, exported or
+///                                    not.
 /// @param context What the instance's host function calls reach.
-/// @return The instance; `OutOfMemory` if a memory's initial size exceeds the cap, `InvalidComponent`
+/// @return The instance; `OutOfMemory` if a memory's or a table's initial size exceeds its cap
+///         (RuntimeLimits::memoryBytes, RuntimeLimits::tableElements), `InvalidComponent`
 ///         if WAMR cannot instantiate the module, `RuntimeUnavailable` on a resource failure.
 [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiateModule(
     std::shared_ptr<IWasmModule const> owner,
     WASMModuleCommon* module,
     RuntimeLimits const& limits,
     std::span<ExportDescription const> exports,
+    uint32_t largestInitialTableElements,
     IHostContext& context);
-
-/// The most i32 parameters a host function can take: a trampoline exists for each count up to it. The
-/// Canonical ABI passes at most 16 flat parameters (more go through memory), and a func with a result
-/// that does not flatten to one value takes the result's address after them: 17.
-inline constexpr auto MaxHostParameters = uint32_t { 17 };
 
 /// The most host functions one runtime can be created with.
 inline constexpr auto MaxHostFunctions = std::size_t { 32 };

@@ -110,6 +110,10 @@ class IExtensionHosting
     /// Releases, on the loop thread, the engines and modules runners retired since.
     virtual void releaseRetired() noexcept = 0;
 
+    /// Tells the extensions the host's configuration was reloaded: an extension whose host process kept dying
+    /// is started again.
+    virtual void configurationReloaded() noexcept = 0;
+
     /// Stops every extension for good, for a host about to go: cancels the commands in flight, then joins
     /// the threads builds and runners run on, keeping alive what they reach. Called by the host once its
     /// sessions -- and so every runner -- are gone, and before it drains its loop of what they posted; after

@@ -27,6 +27,8 @@
 namespace vtextension
 {
 
+class ExtensionRegistry;
+
 /// Hands out the process's Engine: the one that is alive, or a new one if none is.
 class IEngineProvider
 {
@@ -137,9 +139,13 @@ struct PreparedExtensions
 /// @param config The pane's extensions.
 /// @param engine What to load them on: one acquired on an owner's thread; ignored (and may be an error)
 ///        when no extension has module bytes.
+/// @param registry Where each module is shared with the other panes running it, loaded only if none does;
+///        null to load every module afresh, with no breaker for its host.
 /// @return The loaded extensions, each with its module or the reason it has none.
 [[nodiscard]] PreparedExtensions prepareExtensions(
-    ExtensionHostConfig config, std::expected<std::shared_ptr<Engine>, ExtensionError> engine);
+    ExtensionHostConfig config,
+    std::expected<std::shared_ptr<Engine>, ExtensionError> engine,
+    ExtensionRegistry* registry);
 
 /// @param prepared Prepared extensions.
 /// @return What a runner retires, one node per module of @p prepared and one for its engine, linked by

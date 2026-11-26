@@ -131,6 +131,21 @@ TEST_CASE("Line.toUtf8", "[Line]")
     CHECK(trimmed == "Hi");
 }
 
+TEST_CASE("Line.toUtf8TrimmedKeepsMultibyteText", "[Line]")
+{
+    // U+26A0 is E2 9A A0 in UTF-8, and U+00A0 is C2 A0: bytes past 0x7F that std::isspace may not be given as
+    // a char (a debug C runtime asserts) and that a Latin-1 locale calls a space. Only ASCII whitespace goes.
+    auto line = Line(ColumnCount(6), LineFlag::None, GraphicsAttributes {});
+    line.useCellAt(ColumnOffset(1)).write(GraphicsAttributes {}, U'\u00A0', 1);
+    line.useCellAt(ColumnOffset(2)).write(GraphicsAttributes {}, U'x', 1);
+    line.useCellAt(ColumnOffset(3)).write(GraphicsAttributes {}, U'\u26A0', 1);
+    // This check bites only under the MSVC debug runtime or a non-C locale; the static checks pin the helper.
+    CHECK(line.toUtf8Trimmed() == "\u00A0x\u26A0");
+
+    STATIC_CHECK(isAsciiWhitespace('\t'));
+    STATIC_CHECK_FALSE(isAsciiWhitespace(static_cast<char>(0xA0)));
+}
+
 TEST_CASE("Line.toUtf8ColumnAligned", "[Line]")
 {
     auto constexpr DisplayWidth = ColumnCount(5);

@@ -14,6 +14,7 @@
 
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
+#include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/LaneReport.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
 #include <vtextension/testing/TestModules.hpp>
@@ -106,6 +107,20 @@ TEST_CASE("ExtensionHost.runners", "[vtextension]")
     CHECK(host.snapshot("three") == nullptr);
 }
 
+TEST_CASE("ExtensionHost.loadsUnderTheHostId", "[vtextension]")
+{
+    // The host id names the host process a module runs in: every load passes it on to the runtime.
+    auto backend = vtextension::testing::FakeWasmBackend {};
+    auto config = ExtensionHostConfig {};
+    config.extensions.push_back(minimal("one"));
+    auto const prepared =
+        prepareExtensions(std::move(config), Engine::create(backend, ExtensionLimits {}), nullptr);
+    REQUIRE(prepared.extensions.size() == 1);
+    CHECK(prepared.extensions.front().compiled.has_value());
+    CHECK(backend.loads() == 1);
+    CHECK(backend.lastIdentity() == wasm::ModuleIdentity { "minimal@test" });
+}
+
 TEST_CASE("ExtensionHost.unloadable", "[vtextension]")
 {
     // A module that does not load shows why, in its place; it gets no runner and no lane.
@@ -160,7 +175,7 @@ namespace
     config.extensions.push_back(std::move(large));
 
     auto prepared = PreparedExtensions {};
-    auto loader = std::thread { [&] { prepared = prepareExtensions(std::move(config), engine); } };
+    auto loader = std::thread { [&] { prepared = prepareExtensions(std::move(config), engine, nullptr); } };
     loader.join();
     REQUIRE(prepared.extensions.size() == 2);
     CHECK(prepared.extensions[0].compiled.has_value());
@@ -192,7 +207,7 @@ TEST_CASE("ExtensionHost.preparedElsewhere", "[vtextension]")
 TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
 {
     // Loaded but never started: retired, and released by the owner.
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto engines = CountingEngineProvider { *backend };
     auto engine = engines.acquire();
     REQUIRE(engine.has_value());
@@ -209,7 +224,7 @@ TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
 
 TEST_CASE("EngineProvider.shares", "[vtextension]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto provider = EngineProvider { *backend, ExtensionLimits {} };
     auto first = provider.acquire();
     auto second = provider.acquire();
@@ -230,7 +245,7 @@ TEST_CASE("EngineProvider.shares", "[vtextension]")
 TEST_CASE("EngineProvider.retirement", "[vtextension]")
 {
     // What a runner retires lives in the provider until an owner thread releases it.
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto provider = EngineProvider { *backend, ExtensionLimits {} };
     auto engine = provider.acquire();
     REQUIRE(engine.has_value());

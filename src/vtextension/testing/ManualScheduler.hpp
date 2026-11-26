@@ -18,15 +18,21 @@
 #include <vector>
 
 #include <vtextension/ExtensionScheduler.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension::testing
 {
 
 /// Runs posted jobs when the test says so, and fires timers as the test advances the clock. Every lane
-/// is the test's thread, so this is deterministic and needs no thread guard.
+/// is the test's thread, so this is deterministic; as a worker pool's lane would be, the thread is prepared
+/// to call into instances while a job runs.
 class ManualScheduler final: public IExtensionScheduler
 {
   public:
+    /// @param backend What the jobs' instances run on: the thread is prepared for it while each job runs,
+    ///        when it has a runtime up. Must outlive the scheduler.
+    explicit ManualScheduler(wasm::IWasmBackend& backend): _backend { backend } {}
+
     [[nodiscard]] LaneId assignLane() override
     {
         ++lanesAssigned;
@@ -60,7 +66,7 @@ class ManualScheduler final: public IExtensionScheduler
             REQUIRE(ran++ < MaxJobs);
             auto job = std::move(_jobs.front());
             _jobs.pop_front();
-            job();
+            run(job);
         }
     }
 
@@ -81,7 +87,7 @@ class ManualScheduler final: public IExtensionScheduler
             _clock.setNow(std::max(_clock.now(), next->due));
             auto job = std::move(next->job);
             _timers.erase(next);
-            job();
+            run(job);
             runPending();
         }
         _clock.setNow(end);
@@ -104,6 +110,15 @@ class ManualScheduler final: public IExtensionScheduler
         std::function<void()> job;
     };
 
+    /// Runs @p job with the thread prepared, if the backend can prepare it: a thread it cannot prepare still
+    /// runs the job, and a runner finds out that it cannot instantiate, as on a pool's worker.
+    void run(std::function<void()> const& job)
+    {
+        auto const guard = _backend.enterThread();
+        job();
+    }
+
+    wasm::IWasmBackend& _backend;
     core::platform::ManualClock _clock;
     std::deque<std::function<void()>> _jobs;
     std::vector<Timer> _timers;

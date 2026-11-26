@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// What the extension host process runs modules on: a WebAssembly backend, and how it shares an instance's
+/// memory with Contour.
+
+#include <cstdint>
+#include <expected>
+#include <functional>
+#include <memory>
+#include <vector>
+
+#include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
+#include <vtextension/wasm/host/GuestCode.hpp>
+#include <vtextension/wasm/remote/proto/Pdu.hpp>
+#include <vtextension/wasm/remote/transport/Channel.hpp>
+
+namespace vtextension::wasm::host
+{
+
+/// A backend a host process drives. The helper's own interface: the parent never sees one.
+class IHostedEngine: public IWasmBackend
+{
+  public:
+    /// @return How the engine's instances share their linear memory with the parent: what the host states in
+    ///         its Hello, and so how the parent reaches that memory.
+    [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
+
+    /// @return Under MemoryMode::Shared, how many inaccessible bytes must follow each instance's memory
+    ///         object where the host maps it: the guard the engine's compiled code relies on
+    ///         (MemoryProvision). 0 for an engine that copies memory.
+    [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
+
+    /// @return How the engine runs a module's code: what the host's sandbox lets it do with executable
+    ///         memory once it is locked down.
+    [[nodiscard]] virtual GuestCode guestCode() const noexcept = 0;
+
+    /// @return The devices the engine opened before the host locked itself down and keeps using after it:
+    ///         what the host's sandbox leaves an engine's device (DescriptorRole::EngineDevice). Empty for an
+    ///         engine that keeps none.
+    [[nodiscard]] virtual std::vector<remote::transport::NativeHandle> heldDevices() const = 0;
+
+    /// Prepares the calling thread to run guests, before the host locks itself down: does once what running
+    /// a guest on it would do the first time -- installing the engine's signal handlers, the thread's
+    /// alternate signal stack, its thread environment -- so that nothing a guest does later needs what the
+    /// locked-down host may no longer do. Called on every thread that runs guests, each once; idempotent per
+    /// thread.
+    /// @return Nothing once the thread is prepared; why not otherwise, which ends the host.
+    [[nodiscard]] virtual std::expected<void, ExtensionError> prepareThread() = 0;
+};
+
+/// Creates the engine one host runs on; null if none can be.
+using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
+
+} // namespace vtextension::wasm::host

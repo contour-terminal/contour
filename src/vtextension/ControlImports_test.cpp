@@ -106,9 +106,9 @@ struct GuestCall
     /// @return Whether the result slot is untouched: all zeros, as it was allocated.
     [[nodiscard]] bool resultUntouched()
     {
-        auto const bytes = memory.view(resultAddress, ResultSlotBytes);
-        REQUIRE(bytes.has_value());
-        return std::ranges::all_of(*bytes, [](std::byte byte) { return byte == std::byte { 0 }; });
+        auto bytes = std::vector<std::byte>(ResultSlotBytes);
+        REQUIRE(memory.read(resultAddress, bytes).has_value());
+        return std::ranges::all_of(bytes, [](std::byte byte) { return byte == std::byte { 0 }; });
     }
 
     FakeMemory memory;
@@ -414,11 +414,12 @@ TEST_CASE("a control import the guest calls wrongly traps", "[vtextension][contr
 
 TEST_CASE("a module importing the control interface instantiates", "[vtextension][control]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto const engine = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
-    auto const compiled =
-        CompiledExtension::load(**engine, toModule(vtextension::testing::ControlImportingModule));
+    auto const threadGuard = vtextension::testing::preparedThread(*backend);
+    auto const compiled = CompiledExtension::load(
+        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule), nullptr);
     REQUIRE(compiled.has_value());
     auto services = FakeHostServices {};
     auto clock = core::platform::ManualClock {};
@@ -482,8 +483,10 @@ TEST_CASE("an instance's deadline expiring during a control call faults it, writ
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(
         **engine,
+        wasm::ModuleIdentity {},
         vtextension::testing::withManifest(toModule(vtextension::testing::MinimalModule),
-                                           "name = reader\nversion = 1\ncontrol read\n"));
+                                           "name = reader\nversion = 1\ncontrol read\n"),
+        nullptr);
     REQUIRE(compiled.has_value());
     auto services = FakeHostServices {};
     services.controlAnswer =

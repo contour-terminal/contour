@@ -1,7 +1,7 @@
 # vtextension: hosts WebAssembly status-line extensions on a runtime-neutral interface (wasm/WasmRuntime.hpp).
 # Qt-free, so that both the GUI (src/contour) and the daemon (src/vthost) can link it. It links no WebAssembly
-# runtime: the backend selected by CONTOUR_WASM_RUNTIME is its own target (wasm/<runtime>/), and a program
-# links it through vtextension_runtime, defined at the bottom.
+# runtime: each backend is its own target (wasm/<runtime>/, and wasm/remote/ for extension host processes),
+# and a program links the one CONTOUR_EXTENSION_HOST selects through vtextension_runtime, defined at the bottom.
 
 set(vtextension_SOURCES
     BundledExtensions.cpp
@@ -16,7 +16,9 @@ set(vtextension_SOURCES
     ExtensionConsent.cpp
     ExtensionGrantStore.cpp
     ExtensionHost.cpp
+    ExtensionRegistry.cpp
     ExtensionWorkerPool.cpp
+    HostBreaker.cpp
     HostState.cpp
     Instance.cpp
     Manifest.cpp
@@ -24,6 +26,8 @@ set(vtextension_SOURCES
     SessionExtensions.cpp
     StatusLineAdapter.cpp
     Surface.cpp
+    wasm/wasi/Preview1Shim.cpp
+    wasm/wasi/SystemEnvironment.cpp
 )
 
 set(vtextension_HEADERS
@@ -45,9 +49,12 @@ set(vtextension_HEADERS
     ExtensionGrantStore.hpp
     ExtensionHost.hpp
     ExtensionLimits.hpp
+    ExtensionRegistry.hpp
     ExtensionScheduler.hpp
     ExtensionWorkerPool.hpp
+    GuestMemoryReads.hpp
     HostBindings.hpp
+    HostBreaker.hpp
     HostState.hpp
     IHostServices.hpp
     Instance.hpp
@@ -59,10 +66,16 @@ set(vtextension_HEADERS
     StatuslineWorld.hpp
     Surface.hpp
     Utf8.hpp
+    wasm/BackendConfig.hpp
     wasm/DefaultBackend.hpp
+    wasm/EngineFeatures.hpp
+    wasm/InstantiationHooks.hpp
     wasm/WasiAllowList.hpp
     wasm/WasmBinary.hpp
     wasm/WasmRuntime.hpp
+    wasm/wasi/Preview1Shim.hpp
+    wasm/wasi/Preview1Signatures.hpp
+    wasm/wasi/SystemEnvironment.hpp
 )
 
 add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
@@ -77,6 +90,10 @@ target_link_libraries(vtextension PUBLIC vtbackend vtcontrol vtpty core::async c
 # Private, as in vtcontrol: ControlCodec.hpp reflects the control vocabulary through glaze, and it is included
 # from vtextension's .cpp files only. vtextension_public_headers_test below pins that no public header leaks it.
 target_link_libraries(vtextension PRIVATE glaze::glaze)
+if(WIN32)
+    # BCryptGenRandom: the random source of the WASI shim's system environment (wasm/wasi/SystemEnvironment.cpp).
+    target_link_libraries(vtextension PRIVATE bcrypt)
+endif()
 
 option(VTEXTENSION_TESTING "Enables building of unittests for vtextension [default: ON]" ${CONTOUR_TESTING})
 if(VTEXTENSION_TESTING)
@@ -96,8 +113,10 @@ if(VTEXTENSION_TESTING)
         EventQueue_test.cpp
         ExtensionComposition_test.cpp
         ExtensionConsent_test.cpp
+        ExtensionError_test.cpp
         ExtensionGrantStore_test.cpp
         ExtensionHost_test.cpp
+        ExtensionRegistry_test.cpp
         ExtensionWorkerPool_test.cpp
         HostState_test.cpp
         Instance_test.cpp
@@ -109,6 +128,11 @@ if(VTEXTENSION_TESTING)
         Surface_test.cpp
         Wit_test.cpp
         wasm/WasmBinary_test.cpp
+        wasm/remote/CopyPathMemory_test.cpp
+        wasm/remote/proto/Codec_test.cpp
+        wasm/remote/transport/Channel_test.cpp
+        wasm/remote/transport/PduStream_test.cpp
+        wasm/wasi/Preview1Shim_test.cpp
         testing/FakeGuestMemory.hpp
         testing/FakeWasmBackend.hpp
         testing/Harness.hpp
@@ -119,7 +143,9 @@ if(VTEXTENSION_TESTING)
         testing/StandardStreamsCapture.hpp
         testing/TestModules.hpp
         wasm/testing/BackendContract.hpp
+        wasm/testing/FeatureModules.hpp
         wasm/testing/PreparedGeneration.hpp
+        wasm/testing/RenderMeasurement.hpp
     )
     # The WIT package is the normative spec of the extension ABI; the tests read it from the source tree.
     target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/statusline")
@@ -149,8 +175,9 @@ if(VTEXTENSION_TESTING)
     else()
         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
     endif()
-    # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
-    target_link_libraries(vtextension_test PRIVATE vtextension_runtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    # The tests run real guests in this process, on WAMR's backend, named rather than the program's selection:
+    # they start no extension host process. Its own tests are added by its directory.
+    target_link_libraries(vtextension_test PRIVATE vtextension_wamr vtextension_remote vtextension_remote_wire glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
 
     # Compiles the headers other modules include (the GUI, vthost) without glaze on the include path: a public
     # header that pulled in ControlCodec.hpp, or anything else naming glaze, fails to build here, as it would in
@@ -166,9 +193,53 @@ if(VTEXTENSION_TESTING)
     endif()
 endif()
 
-# The backend this build selected (CONTOUR_WASM_RUNTIME, validated in the top-level CMakeLists.txt), and the one
-# name everything that composes a program links: the GUI, contour_cli (`contour daemon`), bench-headless and the
-# test executables. vtextension and vthost do not. Its target defines vtextension::wasm::makeDefaultBackend().
-add_subdirectory(wasm/${CONTOUR_WASM_RUNTIME})
+# The engines' backends: WAMR's always, as the tests run guests in this process on it; Wasmtime's wherever one
+# was found (../../cmake/ContourThirdParties.cmake).
+add_subdirectory(wasm/wamr)
+if(CONTOUR_HAVE_WASMTIME)
+    add_subdirectory(wasm/wasmtime)
+endif()
+
+# Whether the extension host locks itself down with the Linux sandbox (wasm/host/Sandbox_linux.cpp): Linux, on the
+# architectures whose system calls its filter numbers (host/linux/SystemCallRows.cpp). Keyed on those alone, as
+# FreeBSD's and macOS's are on their systems, and not on _CONTOUR_SANDBOXED_PLATFORMS (../../CMakeLists.txt): taking
+# a row out of that table changes where extensions run by default, and must never compile a sandbox out. Read by
+# both directories below.
+set(VTEXTENSION_LINUX_SANDBOX OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|aarch64|arm64)$")
+    set(VTEXTENSION_LINUX_SANDBOX ON)
+endif()
+# Whether it locks itself down with FreeBSD's (wasm/host/Sandbox_freebsd.cpp): on FreeBSD, on every architecture,
+# as Capsicum names no system call by number. Built, tested and run by the extension host there although FreeBSD is
+# not yet a row of _CONTOUR_SANDBOXED_PLATFORMS: that row is what makes extensions run out of process by default,
+# and it is added once FreeBSD's CI has run the sandbox's tests green.
+set(VTEXTENSION_FREEBSD_SANDBOX OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    set(VTEXTENSION_FREEBSD_SANDBOX ON)
+    # That sandbox runs no Wasmtime: a row of _CONTOUR_SANDBOXES_WITHOUT_WASMTIME (../../CMakeLists.txt).
+endif()
+# Whether it locks itself down with macOS's (wasm/host/Sandbox_macos.cpp): a Seatbelt profile, on every
+# architecture. Built, tested and run by the extension host there, as FreeBSD's is, although macOS is not yet a row
+# of _CONTOUR_SANDBOXED_PLATFORMS either: that row is added once macOS's CI has run the sandbox's tests green.
+set(VTEXTENSION_MACOS_SANDBOX OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(VTEXTENSION_MACOS_SANDBOX ON)
+endif()
+
+# The protocol and channels between Contour and its extension host process, and the host's server; no engine,
+# always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.
+add_subdirectory(wasm/remote)
+add_subdirectory(wasm/host)
+
+# The backend a program runs its extensions on, and the one name every program that composes one links: the
+# GUI and `contour daemon` (../contour/CMakeLists.txt) and bench-headless. vtextension, vthost and the test
+# executables do not; a test names the backend it runs on. Its target defines
+# vtextension::wasm::makeDefaultBackend(): out of process, the remote backend over extension host processes
+# (vtextension_out_of_process, wasm/remote/), which links no engine; in process, the engine
+# CONTOUR_WASM_RUNTIME names.
 add_library(vtextension_runtime INTERFACE)
-target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})
+if(CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
+    target_link_libraries(vtextension_runtime INTERFACE vtextension_out_of_process)
+else()
+    target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})
+endif()

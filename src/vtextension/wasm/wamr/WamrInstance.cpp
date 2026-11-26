@@ -24,6 +24,7 @@
 #include <wasm_export.h>
 
 #include <vtextension/wasm/wamr/HiddenExports.hpp>
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
@@ -57,6 +58,13 @@ namespace
         Requested,
     };
 
+    /// How a call nested in a host function call ended.
+    enum class NestedCallOutcome : uint8_t
+    {
+        Returned, ///< It returned.
+        Failed,   ///< It failed, and left its exception on the instance.
+    };
+
     /// @return WAMR's cap on the pages of an instance's memory under @p limits; 0 if not even one page
     ///         fits (which WAMR cannot express: to it, 0 means no cap).
     [[nodiscard]] uint32_t capPagesOf(RuntimeLimits const& limits) noexcept
@@ -88,6 +96,7 @@ namespace
             WASMModuleCommon* module,
             RuntimeLimits const& limits,
             std::span<ExportDescription const> exports,
+            uint32_t largestInitialTableElements,
             IHostContext& context);
 
         /// Use create(); public only so that std::make_unique can reach it.
@@ -127,35 +136,49 @@ namespace
             auto const& entry = _functions[function.index];
             Require(argv.size() >= std::max(entry.parameterCount, entry.resultCount));
 
-            // The interrupt is sticky: once requested, no call enters the guest again. A request landing
+            // A host function may call back into the instance (to allocate in guest memory): what the
+            // outermost call records is kept until it returns. WAMR keeps a failed call's exception on the
+            // instance, where it would fail every later call: the outermost call starts without it.
+            if (_callDepth == 0)
+            {
+                _fault = std::nullopt;
+                wasm_runtime_clear_exception(_instance.get());
+            }
+
+            // The interrupt is sticky: once requested, no call enters the guest again. Checked after the
+            // exception is cleared, so that a request landing in between is seen here, and one landing
             // after this check finds WAMR's exception set, which stops the call before it gets far.
             if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
                 return std::unexpected(CallFailure::Interrupted);
 
-            // A host function may call back into the instance (to allocate in guest memory): what the
-            // outermost call records is kept until it returns.
-            if (_callDepth == 0)
-                _fault = std::nullopt;
+            // A nested call records its own failure from scratch; what the call it is nested in recorded so
+            // far is that call's, and comes back once the nested call returns.
+            auto const outerFault = _callDepth > 0 ? std::exchange(_fault, std::nullopt) : std::nullopt;
             ++_callDepth;
             auto const returned =
                 wasm_runtime_call_wasm(_execEnv.get(), entry.function, entry.parameterCount, argv.data());
             --_callDepth;
-            if (returned)
-                return {};
-            return std::unexpected(failure());
+            auto const failed = returned ? std::nullopt : std::optional { failure() };
+            if (_callDepth > 0)
+                endNestedCall(failed.has_value() ? NestedCallOutcome::Failed : NestedCallOutcome::Returned,
+                              outerFault);
+            if (failed)
+                return std::unexpected(*failed);
+            return {};
         }
 
-        [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+        [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
+                                                                                uint32_t size) override
         {
             if (size == 0)
                 return std::span<std::byte> {};
             auto* const memory = wasm_runtime_get_default_memory(_instance.get());
             if (!memory)
-                return std::nullopt;
+                return std::unexpected(MemoryFailure::OutOfBounds);
             auto const bytes =
                 wasm_memory_get_cur_page_count(memory) * wasm_memory_get_bytes_per_page(memory);
             if (uint64_t { address } + size > bytes)
-                return std::nullopt;
+                return std::unexpected(MemoryFailure::OutOfBounds);
             auto const whole =
                 std::span<std::byte> { static_cast<std::byte*>(wasm_memory_get_base_address(memory)),
                                        static_cast<std::size_t>(bytes) };
@@ -191,6 +214,23 @@ namespace
                 _fault = fault;
         }
 
+        /// Leaves the call a nested call returns into as it was: the nested call reports what it recorded
+        /// through its own result, and the host function that made it decides what becomes of it. WAMR
+        /// keeps a failure's exception on the instance, where it would stop the outer call as soon as the
+        /// host function returns: it is cleared, unless it is an interrupt's, which stays final.
+        /// @param outcome How the nested call ended.
+        /// @param outerFault What the call it is nested in had recorded when the nested call began.
+        void endNestedCall(NestedCallOutcome outcome, std::optional<CallFailure> outerFault) noexcept
+        {
+            _fault = outerFault;
+            if (outcome == NestedCallOutcome::Returned)
+                return;
+            wasm_runtime_clear_exception(_instance.get());
+            // An interrupt that landed before the exception was cleared is set again.
+            if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
+                wasm_runtime_terminate(_instance.get());
+        }
+
         /// @return Why the call that just failed did.
         [[nodiscard]] CallFailure failure() const noexcept
         {
@@ -214,13 +254,15 @@ namespace
         WASMModuleCommon* module,
         RuntimeLimits const& limits,
         std::span<ExportDescription const> exports,
+        uint32_t largestInitialTableElements,
         IHostContext& context)
     {
         auto const capPages = capPagesOf(limits);
         auto const exceedsCap = [&](ExportDescription const& entry) {
             return entry.kind == ExternKind::Memory && entry.initialPages > capPages;
         };
-        if (std::ranges::any_of(exports, exceedsCap))
+        // A table is checked before WAMR allocates it, exported or not.
+        if (std::ranges::any_of(exports, exceedsCap) || largestInitialTableElements > limits.tableElements)
             return std::unexpected(ExtensionError::OutOfMemory);
 
         auto* rawArgs = static_cast<InstantiationArgs2*>(nullptr);
@@ -235,8 +277,11 @@ namespace
         wasm_runtime_instantiation_args_set_max_memory_pages(args.get(), capPages);
 
         auto errorBuffer = std::array<char, 128> {};
-        auto instance = detail::InstanceHandle { wasm_runtime_instantiate_ex2(
-            module, args.get(), errorBuffer.data(), static_cast<uint32_t>(errorBuffer.size())) };
+        auto instance = detail::InstanceHandle { [&] {
+            auto const reading = detail::readingWamrGlobals();
+            return wasm_runtime_instantiate_ex2(
+                module, args.get(), errorBuffer.data(), static_cast<uint32_t>(errorBuffer.size()));
+        }() };
         if (!instance)
             return std::unexpected(ExtensionError::InvalidComponent);
 
@@ -252,7 +297,8 @@ namespace
 
         auto functions = std::vector<FunctionEntry> {};
         for (auto const& entry: exports | std::views::filter([](ExportDescription const& candidate) {
-                                    return candidate.kind == ExternKind::Function;
+                                    return candidate.kind == ExternKind::Function
+                                           && candidate.signature.isAllI32();
                                 }))
         {
             // The exports are described by the names the module gave them; WAMR knows a hidden one by its
@@ -283,9 +329,11 @@ std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiateModule(
     WASMModuleCommon* module,
     RuntimeLimits const& limits,
     std::span<ExportDescription const> exports,
+    uint32_t largestInitialTableElements,
     IHostContext& context)
 {
-    return WamrInstance::create(std::move(owner), module, limits, exports, context);
+    return WamrInstance::create(
+        std::move(owner), module, limits, exports, largestInitialTableElements, context);
 }
 
 namespace

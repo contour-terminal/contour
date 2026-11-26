@@ -1,0 +1,186 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <vtextension/wasm/remote/HostRefusals.hpp>
+
+#include <core/log/LogStore.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <format>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include <vtextension/ExtensionError.hpp>
+#include <vtextension/wasm/remote/WarningLog.hpp>
+#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+
+namespace vtextension::wasm::remote
+{
+
+namespace
+{
+    /// The line for a host that could not be started, around what the launcher says of why.
+    constexpr auto LaunchLine =
+        std::string_view { "The extension host cannot be started: {}. Extensions do not run." };
+
+    /// A reason a host was refused at the handshake, and the line logged for it.
+    struct HandshakeRefusalRow
+    {
+        HostRefusal refusal;   ///< The reason.
+        std::string_view text; ///< The line logged.
+    };
+
+    /// The reasons a host that started was refused for. Those it never started for are the launcher's.
+    constexpr auto HandshakeRefusals = std::array {
+        HandshakeRefusalRow { .refusal = HostRefusal::ProtocolVersion,
+                              .text =
+                                  "The extension host speaks another protocol version than Contour, and was "
+                                  "refused: it is not the one installed with this Contour. Extensions do not "
+                                  "run." },
+        HandshakeRefusalRow { .refusal = HostRefusal::LockdownFailed,
+                              .text =
+                                  "The extension host could not confine itself, and was refused. Extensions "
+                                  "do not run." },
+        HandshakeRefusalRow { .refusal = HostRefusal::Unsandboxed,
+                              .text =
+                                  "The extension host runs without a sandbox on this system, which Contour "
+                                  "requires, and was refused. Extensions do not run." },
+    };
+    static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
+    static_assert(std::to_underlying(proto::LastLockdownStep) < 32,
+                  "a bit per step in HostRefusalLog's word of unavailable steps");
+
+    /// A confinement failure a host started again may not meet, and the reason it is refused for instead of
+    /// the lasting `LockdownFailed`.
+    struct TransientLockdownFailure
+    {
+        proto::LockdownStep step; ///< The step.
+        uint32_t code;            ///< Its code, as the step's row reads it.
+        HostRefusal refusal;      ///< The reason, one that is `Transient`.
+    };
+
+    /// The failures that do not last: preparing a thread while the system was out of memory.
+    constexpr auto TransientLockdownFailures = std::array {
+        TransientLockdownFailure { .step = proto::LockdownStep::Priming,
+                                   .code = std::to_underlying(ExtensionError::OutOfMemory),
+                                   .refusal = HostRefusal::OutOfResources },
+    };
+    static_assert(std::ranges::all_of(TransientLockdownFailures,
+                                      [](TransientLockdownFailure const& row) {
+                                          return refusalPersistence(row.refusal)
+                                                 == RefusalPersistence::Transient;
+                                      }),
+                  "a transient lockdown failure is refused for a transient reason");
+
+    /// The line for a host that could not confine itself, around the step it named.
+    constexpr auto LockdownStepLine = std::string_view {
+        "The extension host could not confine itself, and was refused: {}. Extensions do not run."
+    };
+
+    /// The line for hosts that run confined without a step their system lacks, around that step.
+    constexpr auto UnavailableStepLine = std::string_view {
+        "The extension host runs confined, but this system lacks part of its sandbox: {}. Extensions run."
+    };
+
+    /// The line for a host that could not be started for a reason the launcher's table does not name.
+    constexpr auto UnnamedLaunchLine =
+        std::string_view { "The extension host cannot be started. Extensions do not run." };
+
+    /// @return Whether every reason the handshake refuses for has its row.
+    [[nodiscard]] consteval bool everyHandshakeRefusalHasARow() noexcept
+    {
+        for (auto const value: std::views::iota(0, std::to_underlying(LastHostRefusal) + 1))
+        {
+            auto const refusal = static_cast<HostRefusal>(value);
+            if (refusalSource(refusal) == RefusalSource::Handshake
+                && std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal)
+                       == HandshakeRefusals.end())
+                return false;
+        }
+        return true;
+    }
+    static_assert(everyHandshakeRefusalHasARow());
+} // namespace
+
+std::string refusalLine(HostRefusal refusal)
+{
+    switch (refusalSource(refusal))
+    {
+        case RefusalSource::Launch:
+            for (auto const& row: process::launchErrors())
+                if (row.refusal == refusal)
+                    return std::format(LaunchLine, row.text);
+            return std::string { UnnamedLaunchLine };
+        case RefusalSource::Handshake:
+            // Every such reason has its row: checked at compile time.
+            return std::string {
+                std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal)->text
+            };
+        case RefusalSource::None: break;
+    }
+    return std::string { UnnamedLaunchLine };
+}
+
+std::string refusalLine(HostRefusal refusal, proto::LockdownFailure failure)
+{
+    if (refusal == HostRefusal::LockdownFailed && failure.step != proto::LockdownStep::None)
+        return std::format(LockdownStepLine, proto::lockdownFailureText(failure));
+    return refusalLine(refusal);
+}
+
+HostRefusal lockdownFailureRefusal(proto::LockdownFailure failure) noexcept
+{
+    for (auto const& row: TransientLockdownFailures)
+        if (row.step == failure.step && row.code == failure.code)
+            return row.refusal;
+    return HostRefusal::LockdownFailed;
+}
+
+std::string unavailableStepLine(proto::LockdownStep step)
+{
+    return std::format(UnavailableStepLine, proto::lockdownStepText(step));
+}
+
+HostRefusalLog::HostRefusalLog(Writer writer): _writer { std::move(writer) }
+{
+}
+
+void HostRefusalLog::refused(HostRefusal refusal)
+{
+    refused(refusal, proto::LockdownFailure { .step = proto::LockdownStep::None, .code = 0 });
+}
+
+void HostRefusalLog::refused(HostRefusal refusal, proto::LockdownFailure failure)
+{
+    auto const bit = uint32_t { 1 } << std::to_underlying(refusal);
+    if ((_logged.fetch_or(bit) & bit) != 0)
+        return;
+    _writer(LineSeverity::Error, refusalLine(refusal, failure));
+}
+
+void HostRefusalLog::unavailable(proto::LockdownStep step)
+{
+    if (step == proto::LockdownStep::None
+        || std::to_underlying(step) > std::to_underlying(proto::LastLockdownStep))
+        return;
+    auto const bit = uint32_t { 1 } << std::to_underlying(step);
+    if ((_unavailable.fetch_or(bit) & bit) != 0)
+        return;
+    _writer(LineSeverity::Warning, unavailableStepLine(step));
+}
+
+HostRefusalLog::Writer logWriter()
+{
+    return [](LineSeverity severity, std::string_view line) {
+        switch (severity)
+        {
+            case LineSeverity::Warning: warningLog()("{}", line); return;
+            case LineSeverity::Error: errorLog()("{}", line); return;
+        }
+    };
+}
+
+} // namespace vtextension::wasm::remote

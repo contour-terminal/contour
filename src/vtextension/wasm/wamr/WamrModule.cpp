@@ -15,7 +15,10 @@
 
 #include <wasm_export.h>
 
+#include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/wamr/HiddenExports.hpp>
+#include <vtextension/wasm/wamr/TableCaps.hpp>
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
@@ -158,12 +161,14 @@ namespace
                    std::vector<std::byte> bytes,
                    detail::ModuleHandle module,
                    std::vector<ImportDescription> imports,
-                   std::vector<ExportDescription> exports) noexcept:
+                   std::vector<ExportDescription> exports,
+                   uint32_t largestInitialTableElements) noexcept:
             _runtime { std::move(runtime) },
             _bytes { std::move(bytes) },
             _module { std::move(module) },
             _imports { std::move(imports) },
-            _exports { std::move(exports) }
+            _exports { std::move(exports) },
+            _largestInitialTableElements { largestInitialTableElements }
         {
         }
 
@@ -180,8 +185,12 @@ namespace
         [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
             IHostContext& context) override
         {
-            return instantiateModule(
-                shared_from_this(), _module.get(), _runtime->limits(), _exports, context);
+            return instantiateModule(shared_from_this(),
+                                     _module.get(),
+                                     _runtime->limits(),
+                                     _exports,
+                                     _largestInitialTableElements,
+                                     context);
         }
 
       private:
@@ -190,6 +199,7 @@ namespace
         detail::ModuleHandle _module;                ///< Unloaded before the bytes it refers into.
         std::vector<ImportDescription> _imports;
         std::vector<ExportDescription> _exports;
+        uint32_t _largestInitialTableElements; ///< What instantiate() checks against the table cap.
     };
 } // namespace
 
@@ -203,8 +213,21 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
     // WAMR could not load either.
     if (!hideExports(bytes))
         return std::unexpected(ExtensionError::InvalidComponent);
+    // The tables are read once, more than MaxTables refused before any is: WAMR would let a table grow
+    // past the runtime's cap, so each is declared a maximum within it instead.
+    auto const tables = binary::tableDeclarations(bytes, MaxTables);
+    if (!tables)
+        return std::unexpected(ExtensionError::InvalidComponent);
+    auto capped = capTableMaxima(std::move(bytes), *tables, runtime->limits().tableElements);
+    // Declaring a maximum grows the module, which may no longer have a size WAMR can take.
+    if (!capped || capped->size() > std::numeric_limits<uint32_t>::max())
+        return std::unexpected(ExtensionError::InvalidComponent);
+    bytes = std::move(*capped);
     auto errorBuffer = std::array<char, 128> {};
     // The vector's buffer stays where it is when the vector moves into the module. WAMR may rewrite it.
+    // Loading links the imports by walking WAMR's list of host functions, which no runtime may change
+    // meanwhile, and writes the interpreter's global handle table: alone.
+    auto const changing = detail::changingWamrGlobals();
     auto module = detail::ModuleHandle { wasm_runtime_load(reinterpret_cast<uint8_t*>(bytes.data()),
                                                            static_cast<uint32_t>(bytes.size()),
                                                            errorBuffer.data(),
@@ -232,8 +255,12 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
 
     auto imports = describeImports(module.get());
     auto exports = describeExports(module.get());
-    return std::make_shared<WamrModule>(
-        std::move(runtime), std::move(bytes), std::move(module), std::move(imports), std::move(exports));
+    return std::make_shared<WamrModule>(std::move(runtime),
+                                        std::move(bytes),
+                                        std::move(module),
+                                        std::move(imports),
+                                        std::move(exports),
+                                        binary::largestInitialElements(*tables));
 }
 
 } // namespace vtextension::wasm::wamr

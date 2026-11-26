@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -38,7 +39,15 @@ class FakeGuestMemory final: public abi::IGuestMemory
         return {};
     }
 
-    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
+    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
+    {
+        if (uint64_t { address } + into.size() > _bytes.size())
+            return std::unexpected(ExtensionError::Trapped);
+        std::ranges::copy(std::span { _bytes }.subspan(address, into.size()), into.begin());
+        return {};
+    }
+
+    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
     {
         if (uint64_t { address } + size > _bytes.size())
             return std::unexpected(ExtensionError::Trapped);

@@ -18,9 +18,11 @@
 
 #include <wasm_export.h>
 
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+#include <vtextension/wasm/wamr/WasiOverrides.hpp>
 
 #ifdef _WIN32
     #include <Windows.h>
@@ -64,6 +66,39 @@ namespace detail
 #endif
     }
 } // namespace detail
+
+NullDeviceOpener systemNullDeviceOpener()
+{
+    return &detail::openNullDevice;
+}
+
+OpenNullDevice::~OpenNullDevice()
+{
+    detail::closeNullDevice(_handle);
+}
+
+NullDevice NullDevice::openPerRuntime(NullDeviceOpener open)
+{
+    return NullDevice { std::move(open), nullptr };
+}
+
+std::expected<NullDevice, ExtensionError> NullDevice::openShared(NullDeviceOpener const& open)
+{
+    auto const handle = open();
+    if (!handle)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    return NullDevice { {}, std::make_shared<OpenNullDevice const>(*handle) };
+}
+
+std::expected<std::shared_ptr<OpenNullDevice const>, ExtensionError> NullDevice::forRuntime() const
+{
+    if (_shared)
+        return _shared;
+    auto const handle = _open();
+    if (!handle)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    return std::make_shared<OpenNullDevice const>(*handle);
+}
 
 /// The host functions of one runtime, as registered with WAMR: one native-symbol array per import
 /// module. WAMR keeps (and sorts) the very arrays, and the names they point to, until they are
@@ -127,7 +162,7 @@ class HostRegistrations
         ~Group()
         {
             if (!symbols.empty())
-                wasm_runtime_unregister_natives(module.c_str(), symbols.data());
+                detail::unregisterNatives(module.c_str(), symbols.data());
         }
 
         /// Registers the group with WAMR.
@@ -141,9 +176,8 @@ class HostRegistrations
                                                .func_ptr = entry.native.function,
                                                .signature = entry.native.signature,
                                                .attachment = entry.native.attachment });
-            if (!wasm_runtime_register_natives_raw(
-                    module.c_str(), table.data(), static_cast<uint32_t>(table.size())))
-                return std::unexpected(ExtensionError::RuntimeUnavailable);
+            if (auto registered = detail::registerNativesRaw(module.c_str(), table); !registered)
+                return registered;
             symbols = std::move(table); // moving a vector keeps its buffer, which WAMR now holds
             return {};
         }
@@ -165,38 +199,40 @@ class HostRegistrations
 };
 
 std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> WamrRuntime::create(
-    RuntimeLimits limits, std::span<HostFunction const> hostFunctions)
+    RuntimeLimits limits, std::span<HostFunction const> hostFunctions, NullDevice const& nullDevice)
 {
+    // WAMR caps a table at MaxTableElements at the least (TableCaps.hpp): a higher cap it would not keep.
+    if (limits.tableElements > MaxTableElements)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    auto device = nullDevice.forRuntime();
+    if (!device)
+        return std::unexpected(device.error());
     if (auto acquired = acquireRuntime(); !acquired)
         return std::unexpected(acquired.error());
 
-    auto const fail = [] {
+    detail::installMemoryGrowthHandler();
+    if (!detail::registerWasiOverrides())
+    {
         releaseRuntime();
         return std::unexpected(ExtensionError::RuntimeUnavailable);
-    };
-
-    detail::installMemoryGrowthHandler();
+    }
     auto hostRegistrations = HostRegistrations::create(hostFunctions);
     if (!hostRegistrations)
-        return fail();
-    auto const nullDevice = detail::openNullDevice();
-    if (!nullDevice)
     {
-        hostRegistrations->reset();
-        return fail();
+        releaseRuntime();
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
     }
 
     try
     {
         return std::make_shared<WamrRuntime>(
-            PrivateTag {}, limits, *nullDevice, std::move(*hostRegistrations));
+            PrivateTag {}, limits, std::move(*device), std::move(*hostRegistrations));
     }
     catch (...)
     {
         // The runtime's constructor did not complete, so what it was to be handed is released here,
         // the registrations while the runtime they are registered with is still up.
         hostRegistrations->reset();
-        detail::closeNullDevice(*nullDevice);
         releaseRuntime();
         throw;
     }
@@ -204,20 +240,23 @@ std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> WamrRuntime::create(
 
 WamrRuntime::WamrRuntime(PrivateTag /*unused*/,
                          RuntimeLimits limits,
-                         int64_t nullDevice,
+                         std::shared_ptr<OpenNullDevice const> nullDevice,
                          std::unique_ptr<HostRegistrations> hostRegistrations) noexcept:
-    _limits { limits }, _nullDevice { nullDevice }, _hostRegistrations { std::move(hostRegistrations) }
+    _limits { limits },
+    _nullDevice { std::move(nullDevice) },
+    _hostRegistrations { std::move(hostRegistrations) }
 {
 }
 
 WamrRuntime::~WamrRuntime()
 {
     _hostRegistrations.reset();
-    detail::closeNullDevice(_nullDevice);
+    _nullDevice.reset();
     releaseRuntime();
 }
 
-std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WamrRuntime::load(std::vector<std::byte> bytes)
+std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WamrRuntime::load(ModuleIdentity /*identity*/,
+                                                                              std::vector<std::byte> bytes)
 {
     return loadModule(shared_from_this(), std::move(bytes));
 }
@@ -240,10 +279,12 @@ namespace
     class WamrBackend final: public IWasmBackend
     {
       public:
+        explicit WamrBackend(WamrConfig config) noexcept: _config { std::move(config) } {}
+
         [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
             RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
         {
-            return WamrRuntime::create(limits, hostFunctions)
+            return WamrRuntime::create(limits, hostFunctions, _config.nullDevice)
                 .transform([](std::shared_ptr<WamrRuntime> runtime) -> std::shared_ptr<IWasmRuntime> {
                     return runtime;
                 });
@@ -270,12 +311,15 @@ namespace
         {
             return BackendCapabilities { .memoryGrowth = MemoryGrowthReporting::Reported };
         }
+
+      private:
+        WamrConfig _config;
     };
 } // namespace
 
-std::unique_ptr<IWasmBackend> makeWamrBackend()
+std::unique_ptr<IWasmBackend> makeWamrBackend(WamrConfig config)
 {
-    return std::make_unique<WamrBackend>();
+    return std::make_unique<WamrBackend>(std::move(config));
 }
 
 } // namespace vtextension::wasm::wamr

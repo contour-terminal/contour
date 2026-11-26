@@ -41,10 +41,11 @@ namespace
         BuildResult& operator=(BuildResult const&) = delete;
         BuildResult& operator=(BuildResult&&) = delete;
 
-        /// Loads @p config's modules on the engine the build holds. On the build thread.
-        void prepare(ExtensionHostConfig config)
+        /// Loads @p config's modules on the engine the build holds, sharing each through @p registry. On the
+        /// build thread.
+        void prepare(ExtensionHostConfig config, ExtensionRegistry& registry)
         {
-            _prepared = prepareExtensions(std::move(config), _engine);
+            _prepared = prepareExtensions(std::move(config), _engine, &registry);
             // The prepared extensions hold the engine now, if there is one.
             _engine = std::unexpected(ExtensionError::RuntimeUnavailable);
         }
@@ -73,7 +74,7 @@ namespace
         auto composed = composeExtensions(declared, services.lookup, cellPixelSize, services.limits);
         for (auto const& diagnostic: composed.diagnostics)
             errorLog()("{}", diagnostic);
-        result->prepare(std::move(composed.host));
+        result->prepare(std::move(composed.host), services.registry);
         owner->post([result = std::move(result), adopt = std::move(adopt)]() { adopt(result->take()); });
     }
 } // namespace
@@ -208,6 +209,7 @@ ExtensionRuntime::ExtensionRuntime(ExtensionRuntimeConfig config, ExtensionRunti
     _grants { services.fileSystem, std::move(config.grantsFile) },
     _engines { services.backend, config.limits },
     _pool { services.backend, config.workerCount },
+    _registry { _pool.clock(), config.limits },
     _builds { std::make_unique<core::async::ThreadPoolExecutor>(1) }
 {
 }
@@ -217,6 +219,7 @@ SessionExtensionServices ExtensionRuntime::sessionServices() noexcept
     Require(_builds != nullptr); // not after stop()
     return { .engines = _engines,
              .retirement = _engines,
+             .registry = _registry,
              .scheduler = _pool,
              .builds = *_builds,
              .grants = _grants,

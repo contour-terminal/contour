@@ -134,19 +134,33 @@ class FakeHostServices final: public IHostServices
     return vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(columns) };
 }
 
+/// Prepares the calling thread to call into @p backend's instances, as a caller must before it creates or
+/// calls one; the thread a backend brought its engine up on is not prepared by that.
+/// @return The guard, to drop on the calling thread once it is done calling in.
+[[nodiscard]] inline std::unique_ptr<wasm::IThreadGuard> preparedThread(wasm::IWasmBackend& backend)
+{
+    auto guard = backend.enterThread();
+    REQUIRE(guard.has_value());
+    return std::move(*guard);
+}
+
 /// A guest module loaded on its own engine, of its own default backend, with one instance of it running
-/// on a FakeHostServices.
+/// on a FakeHostServices. The thread that creates it is prepared to call into the instance while it lives,
+/// and must be the one that drops it.
 class RunningGuest
 {
   public:
     /// Loads @p module and instantiates it under @p limits.
     explicit RunningGuest(std::vector<std::byte> module, ExtensionLimits limits = {}):
-        _backend { wasm::makeDefaultBackend() }, _limits { limits }
+        _backend { wasm::makeDefaultBackend(wasm::BackendConfig {}) }, _limits { limits }
     {
         auto engine = Engine::create(*_backend, limits);
         REQUIRE(engine.has_value());
         _engine = std::move(*engine);
-        auto compiled = CompiledExtension::load(*_engine, std::move(module));
+        // Prepared once the engine's runtime is up: a backend prepares no thread before it has one.
+        _threadGuard = preparedThread(*_backend);
+        auto compiled =
+            CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module), nullptr);
         REQUIRE(compiled.has_value());
         _compiled = std::move(*compiled);
         restart();
@@ -189,6 +203,9 @@ class RunningGuest
     std::unique_ptr<wasm::IWasmBackend> _backend; ///< Outlives the engine created from it.
     ExtensionLimits _limits;
     std::shared_ptr<Engine> _engine;
+    /// Prepares the creating thread; after the engine, whose runtime it is entered for, and before the module
+    /// and instance, so that they are dropped on a prepared thread.
+    std::unique_ptr<wasm::IThreadGuard> _threadGuard;
     std::shared_ptr<CompiledExtension> _compiled;
     std::unique_ptr<Instance> _instance;
 };

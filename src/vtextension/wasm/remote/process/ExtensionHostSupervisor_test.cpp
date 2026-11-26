@@ -1,0 +1,730 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The supervisor over a fake launcher and a manual clock: every timeout is the clock's, and sync() makes each
+// step of a case deterministic.
+#include <core/Clock.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <vtextension/wasm/BackendConfig.hpp>
+#include <vtextension/wasm/remote/HostConnector.hpp>
+#include <vtextension/wasm/remote/LaneWatch.hpp>
+#include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+#include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+
+using vtextension::wasm::HostTimeouts;
+using vtextension::wasm::remote::HostAttachment;
+using vtextension::wasm::remote::HostStep;
+using vtextension::wasm::remote::LaneWatchSet;
+using vtextension::wasm::remote::process::ExitKind;
+using vtextension::wasm::remote::process::ExitStatus;
+using vtextension::wasm::remote::process::ExtensionHostSupervisor;
+using vtextension::wasm::remote::process::KillReason;
+using vtextension::wasm::remote::process::LaunchError;
+using vtextension::wasm::remote::process::LaunchSpec;
+using vtextension::wasm::remote::process::ShutdownReapBudget;
+using vtextension::wasm::remote::process::SupervisedHelper;
+using vtextension::wasm::remote::process::SupervisorConfig;
+using vtextension::wasm::remote::process::testing::FakeProcessLauncher;
+using namespace std::chrono_literals;
+
+namespace
+{
+
+/// @return What a fake launch is asked to start; the fake starts nothing of it.
+[[nodiscard]] LaunchSpec fakeSpec()
+{
+    return LaunchSpec { .executable = "helper",
+                        .inherited = {},
+                        .arguments = [](auto /*handles*/) { return std::vector<std::string> {}; },
+                        .environment = {},
+                        .caps = {} };
+}
+
+/// @return How many kills the supervisor sent for @p reason.
+[[nodiscard]] std::size_t killsFor(ExtensionHostSupervisor const& supervisor, KillReason reason)
+{
+    return supervisor.counters().kills.at(std::to_underlying(reason));
+}
+
+/// A supervisor over a fake launcher, timed by a manual clock.
+struct Rig
+{
+    explicit Rig(std::chrono::milliseconds teardownGrace = 0ms): grace { teardownGrace } {}
+
+    std::chrono::milliseconds grace;
+    std::shared_ptr<FakeProcessLauncher> fake = std::make_shared<FakeProcessLauncher>();
+    core::ManualClock clock {};
+    std::unique_ptr<ExtensionHostSupervisor> supervisor = [this] {
+        auto started = ExtensionHostSupervisor::start(
+            SupervisorConfig { .launcher = fake, .clock = &clock, .teardownGrace = grace });
+        REQUIRE(started.has_value());
+        return std::move(*started);
+    }();
+    std::shared_ptr<std::atomic<int>> deaths = std::make_shared<std::atomic<int>>(0);
+
+    /// @return A helper launched through the mailbox, which must start.
+    [[nodiscard]] SupervisedHelper launch() const
+    {
+        auto helper = supervisor->mailbox()->launch(fakeSpec());
+        REQUIRE(helper.has_value());
+        return std::move(*helper);
+    }
+
+    /// @return An attachment counting its helper's deaths in `deaths`.
+    [[nodiscard]] HostAttachment countingDeaths() const
+    {
+        return HostAttachment { .onDeath = [deaths = deaths] { deaths->fetch_add(1); },
+                                .lanes = nullptr,
+                                .interruptGrace = 50ms };
+    }
+
+    /// @return An attachment counting its helper's deaths in `deaths`, whose backstop watches @p lanes with
+    ///         a grace of @p grace.
+    [[nodiscard]] HostAttachment watchingLanes(std::shared_ptr<LaneWatchSet const> lanes,
+                                               std::chrono::milliseconds grace = 50ms) const
+    {
+        return HostAttachment { .onDeath = [deaths = deaths] { deaths->fetch_add(1); },
+                                .lanes = std::move(lanes),
+                                .interruptGrace = grace };
+    }
+
+    /// Moves the clock on by @p delta, and lets the supervisor see it.
+    void advance(core::SteadyDuration delta)
+    {
+        clock.advance(delta);
+        supervisor->sync();
+    }
+
+    /// Lets the supervisor process everything and wait once: the fake's lastDeadline() then is what it waits
+    /// with when idle.
+    void settle() const
+    {
+        supervisor->sync();
+        supervisor->sync();
+    }
+};
+
+/// One step and its default budget.
+struct StepRow
+{
+    HostStep step;
+    std::chrono::milliseconds budget;
+    char const* name;
+};
+
+} // namespace
+
+TEST_CASE("Supervisor.launchRunsOnItsThread", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto const helper = rig.launch();
+    CHECK(rig.fake->launchThreads() == std::vector { rig.supervisor->threadId() });
+    CHECK(helper.processId() == vtextension::wasm::remote::process::testing::FirstFakeProcessId);
+    rig.supervisor->sync();
+    CHECK(rig.supervisor->counters().launches == 1);
+    CHECK(rig.supervisor->liveProcesses() == 1);
+}
+
+TEST_CASE("Supervisor.stepTimeoutsKill", "[vtextension]")
+{
+    constexpr auto Defaults = HostTimeouts {};
+    auto const rows = std::array {
+        StepRow { .step = HostStep::Handshake, .budget = Defaults.handshake, .name = "handshake" },
+        StepRow { .step = HostStep::Load, .budget = Defaults.load, .name = "load" },
+        StepRow { .step = HostStep::Instantiate, .budget = Defaults.instantiate, .name = "instantiate" },
+    };
+    REQUIRE(rows[0].budget == 2000ms);
+    REQUIRE(rows[1].budget == 10000ms);
+    REQUIRE(rows[2].budget == 1000ms);
+    for (auto const& row: rows)
+    {
+        DYNAMIC_SECTION(row.name)
+        {
+            auto rig = Rig {};
+            auto helper = rig.launch();
+            helper.attach(rig.countingDeaths());
+            auto const watch = helper.watch(row.step, row.budget);
+            rig.advance(row.budget - 1ms);
+            CHECK(rig.fake->kills().empty());
+            CHECK(rig.deaths->load() == 0);
+
+            rig.advance(1ms);
+            CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+            CHECK(rig.deaths->load() == 1);
+            CHECK(killsFor(*rig.supervisor, KillReason::StepTimeout) == 1);
+            // Its own kill: no unclean exit, and its death is told once, however it is then reaped.
+            CHECK(rig.supervisor->counters().reaped == 1);
+            CHECK(rig.supervisor->counters().uncleanExits == 0);
+        }
+    }
+}
+
+TEST_CASE("Supervisor.watchIsTimedFromItsCaller", "[vtextension]")
+{
+    // The budget runs from watch(), not from when the supervisor gets to the command.
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    auto const watch = helper.watch(HostStep::Load, 10ms);
+    rig.clock.advance(10ms);
+    rig.supervisor->sync();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+}
+
+TEST_CASE("Supervisor.disarmedWatchNeverFires", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    {
+        auto const watch = helper.watch(HostStep::Load, 10ms);
+    }
+    // Disarmed before the time passes: the supervisor may otherwise look at the clock in between.
+    rig.supervisor->sync();
+    rig.advance(1h);
+    CHECK(rig.fake->kills().empty());
+    rig.settle();
+    CHECK(rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.armedWatchIsWaitedFor", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    auto const watch = helper.watch(HostStep::Instantiate, 1000ms);
+    rig.settle();
+    CHECK(rig.fake->lastDeadline() == core::SteadyTimePoint {} + 1000ms);
+}
+
+TEST_CASE("Supervisor.exitIsObservedAndReaped", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    helper.attach(rig.countingDeaths());
+    rig.supervisor->sync();
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 3 });
+    rig.supervisor->sync();
+
+    auto const counters = rig.supervisor->counters();
+    CHECK(counters.deathsObserved == 1);
+    CHECK(counters.reaped == 1);
+    CHECK(counters.uncleanExits == 1);
+    CHECK(rig.deaths->load() == 1);
+    CHECK(rig.supervisor->liveProcesses() == 0);
+    // Reaped: a kill now reaches nothing.
+    helper.kill();
+    rig.supervisor->sync();
+    CHECK(rig.fake->kills().empty());
+}
+
+TEST_CASE("Supervisor.unreapableHelperIsStoppedAndForgotten", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    helper.attach(rig.countingDeaths());
+    rig.supervisor->sync();
+    // It cannot be waited for: looked at again on every wait, it would be looked at for ever.
+    rig.fake->failReap(0, LaunchError::Io);
+    rig.supervisor->sync();
+
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+    auto const counters = rig.supervisor->counters();
+    CHECK(counters.reaped == 1);
+    CHECK(counters.uncleanExits == 1);
+    CHECK(rig.deaths->load() == 1);
+    CHECK(rig.supervisor->liveProcesses() == 0);
+}
+
+TEST_CASE("Supervisor.attachAfterDeathFiresAtOnce", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+    rig.supervisor->sync();
+    CHECK(rig.supervisor->counters().reaped == 1);
+    CHECK(rig.supervisor->counters().uncleanExits == 0);
+
+    helper.attach(rig.countingDeaths());
+    rig.supervisor->sync();
+    CHECK(rig.deaths->load() == 1);
+}
+
+TEST_CASE("Supervisor.requestedKillIsNotUnclean", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    helper.attach(rig.countingDeaths());
+    helper.kill();
+    rig.supervisor->sync();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+    // The fake ended it as SIGKILL does.
+    auto const counters = rig.supervisor->counters();
+    CHECK(counters.reaped == 1);
+    CHECK(counters.uncleanExits == 0);
+    CHECK(killsFor(*rig.supervisor, KillReason::Requested) == 1);
+    CHECK(rig.deaths->load() == 1);
+}
+
+TEST_CASE("Supervisor.crashAfterAKillIsStillUnclean", "[vtextension]")
+{
+    // Only the status a kill ends a process with is the supervisor's doing.
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    rig.fake->survivesKill(0);
+    helper.kill();
+    rig.supervisor->sync();
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Signalled, .value = 11 });
+    rig.supervisor->sync();
+    CHECK(rig.supervisor->counters().uncleanExits == 1);
+}
+
+TEST_CASE("Supervisor.zeroGraceKillsAtOnce", "[vtextension]")
+{
+    auto rig = Rig {};
+    {
+        auto const helper = rig.launch();
+    }
+    rig.supervisor->sync();
+    CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 1);
+    CHECK(rig.supervisor->counters().reaped == 1);
+    CHECK(rig.supervisor->counters().uncleanExits == 0);
+    CHECK(rig.supervisor->liveProcesses() == 0);
+}
+
+TEST_CASE("Supervisor.teardownGraceThenKills", "[vtextension]")
+{
+    auto rig = Rig { 2000ms };
+    {
+        auto helper = rig.launch();
+        helper.attach(rig.countingDeaths());
+    }
+    rig.supervisor->sync(); // the grace runs from when the supervisor lets it go
+    rig.advance(1999ms);
+    CHECK(rig.fake->kills().empty());
+    rig.advance(1ms);
+    CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 1);
+    CHECK(rig.supervisor->counters().reaped == 1);
+    // Let go: its attachment was forgotten with it.
+    CHECK(rig.deaths->load() == 0);
+}
+
+TEST_CASE("Supervisor.teardownGraceLetsAHelperExit", "[vtextension]")
+{
+    auto rig = Rig { 2000ms };
+    {
+        auto const helper = rig.launch();
+    }
+    rig.supervisor->sync();
+    rig.advance(1000ms);
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+    // Reaped before the clock moves on: a turn of the loop already under way could otherwise see the exit
+    // only after it saw the grace run out.
+    rig.supervisor->sync();
+    rig.advance(1h);
+    CHECK(rig.fake->kills().empty());
+    CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 0);
+    CHECK(rig.supervisor->counters().reaped == 1);
+    CHECK(rig.supervisor->counters().uncleanExits == 0);
+    CHECK(rig.supervisor->liveProcesses() == 0);
+}
+
+TEST_CASE("Supervisor.letGoIsOneDrop", "[vtextension]")
+{
+    // Let go while still held, then destroyed: one drop, whose grace runs from the first.
+    auto rig = Rig { 2000ms };
+    {
+        auto helper = rig.launch();
+        helper.letGo();
+        rig.supervisor->sync();
+        rig.advance(1000ms);
+        helper.kill();
+        {
+            auto const watch = helper.watch(HostStep::Load, 1ms);
+        }
+    }
+    rig.supervisor->sync();
+    rig.advance(999ms);
+    CHECK(rig.fake->kills().empty());
+    rig.advance(1ms);
+    CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 1);
+    CHECK(killsFor(*rig.supervisor, KillReason::Requested) == 0);
+    CHECK(killsFor(*rig.supervisor, KillReason::StepTimeout) == 0);
+    CHECK(rig.supervisor->counters().reaped == 1);
+}
+
+TEST_CASE("Supervisor.idleNeverWakes", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto const helper = rig.launch();
+    rig.settle();
+    CHECK(rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.stopIsBounded", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto helpers = std::vector<SupervisedHelper> {};
+    for ([[maybe_unused]] auto const index: { 0, 1, 2 })
+        helpers.push_back(rig.launch());
+    rig.fake->survivesKill(2);
+    auto stopping = std::async(std::launch::async, [&] { rig.supervisor.reset(); });
+
+    // The reap budget is the manual clock's: it passes as the test moves the clock on, and wakes the
+    // supervisor to look.
+    auto rounds = 0;
+    while (stopping.wait_for(10ms) != std::future_status::ready && ++rounds < 100)
+    {
+        rig.clock.advance(ShutdownReapBudget);
+        helpers.front().nudge();
+    }
+    if (stopping.wait_for(1s) != std::future_status::ready)
+    {
+        // The future's destructor would wait for the stop forever, and the rig cannot go while the stop runs
+        // on it: the run ends here, rather than hang.
+        FAIL_CHECK("the supervisor did not stop within its budget");
+        std::fputs("Supervisor.stopIsBounded: the supervisor did not stop within its budget\n", stderr);
+        std::abort();
+    }
+    CHECK(rig.fake->kills().size() == 3);
+}
+
+TEST_CASE("Supervisor.mailboxOutlivesTheSupervisor", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto const mailbox = rig.supervisor->mailbox();
+    auto helper = rig.launch();
+    rig.supervisor.reset();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 }); // the supervisor's own, as it stopped
+
+    helper.kill();
+    {
+        auto const watch = helper.watch(HostStep::Load, 1ms);
+    }
+    helper.attach(rig.countingDeaths());
+    helper.nudge();
+    {
+        auto const dropped = std::move(helper);
+    }
+    CHECK(rig.fake->kills().size() == 1);
+    CHECK(rig.deaths->load() == 0);
+    CHECK(mailbox->launch(fakeSpec()).error() == LaunchError::Stopped);
+}
+
+TEST_CASE("Supervisor.failedWaitStopsEveryHelper", "[vtextension]")
+{
+    // The set cannot wait any more: the supervisor says so once, stops every helper and starts no more,
+    // and still processes its commands until it is destroyed.
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    helper.attach(rig.countingDeaths());
+    rig.supervisor->sync();
+    rig.fake->failWaits(LaunchError::Io);
+    // A failed wait is no command, so one sync() need not come after it: a wake the last sync() left
+    // pending can start one more turn, which takes the next sync() before any wait failed. The second
+    // sync() is taken only by the turn after that wait, by then failed.
+    rig.settle();
+    CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
+    CHECK(rig.deaths->load() == 1);
+    CHECK(rig.supervisor->counters().reaped == 1);
+    CHECK(rig.supervisor->counters().uncleanExits == 0);
+    CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Stopped);
+    CHECK(rig.fake->launches().size() == 1);
+}
+
+TEST_CASE("Supervisor.refusedWatchIsPolledAndReaped", "[vtextension]")
+{
+    // A helper the set cannot wait for is killed at once, and looked for until it is gone.
+    auto rig = Rig {};
+    rig.fake->survivesKill(0);
+    rig.fake->failWatches(LaunchError::Unsupported);
+    CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Unsupported);
+    rig.settle();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+    CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
+    CHECK(rig.supervisor->counters().launches == 1);
+    CHECK(rig.supervisor->liveProcesses() == 1);
+    CHECK(rig.fake->lastDeadline() == rig.clock.now() + 100ms);
+
+    // It ends; no wait reports it, the next poll does.
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Signalled, .value = 9 });
+    rig.advance(100ms);
+    CHECK(rig.supervisor->liveProcesses() == 0);
+    CHECK(rig.supervisor->counters().reaped == 1);
+    CHECK(rig.supervisor->counters().uncleanExits == 0);
+    rig.settle();
+    CHECK(rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.launchCarriesAHandleTarget", "[vtextension]")
+{
+    // Made once per launch, on the supervisor's thread, and handed out with the helper.
+    auto rig = Rig {};
+    auto const helper = rig.launch();
+    rig.settle();
+    CHECK(rig.fake->handleTargetThreads() == std::vector { rig.supervisor->threadId() });
+    CHECK(rig.fake->kills().empty());
+
+    // A helper no handle can be granted to does not run: it is killed, and the launch fails.
+    rig.fake->failHandleTargets(LaunchError::Resources);
+    CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Io);
+    rig.settle();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 1 });
+    CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
+    CHECK(rig.supervisor->counters().launches == 2);
+    CHECK(rig.fake->handleTargetThreads().size() == 2);
+}
+
+TEST_CASE("Supervisor.killIsCountedOnce", "[vtextension]")
+{
+    // A helper killed for a timeout is told to die again by its holder (markDead() terminates): one kill.
+    auto rig = Rig {};
+    auto helper = rig.launch();
+    rig.fake->survivesKill(0);
+    auto const watch = helper.watch(HostStep::Load, 10ms);
+    rig.advance(10ms);
+    helper.kill();
+    rig.supervisor->sync();
+    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
+    auto const kills = rig.supervisor->counters().kills;
+    CHECK(kills.at(std::to_underlying(KillReason::StepTimeout)) == 1);
+    CHECK(kills.at(std::to_underlying(KillReason::Requested)) == 0);
+    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Signalled, .value = 9 });
+    rig.supervisor->sync();
+}
+
+namespace
+{
+/// A manual clock that records the threads it is refreshed on: a caching clock is stale until refreshed.
+class RefreshRecordingClock final: public core::IClock
+{
+  public:
+    [[nodiscard]] core::SteadyTimePoint now() const noexcept override { return _clock.now(); }
+
+    void refresh() noexcept override
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _refreshes.push_back(std::this_thread::get_id());
+    }
+
+    /// @return The threads it was refreshed on, in order.
+    [[nodiscard]] std::vector<std::thread::id> refreshes() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _refreshes;
+    }
+
+  private:
+    core::ManualClock _clock;
+    mutable std::mutex _mutex;
+    std::vector<std::thread::id> _refreshes;
+};
+
+/// @return A supervisor over @p fake, timed by @p clock, which must start.
+[[nodiscard]] std::unique_ptr<ExtensionHostSupervisor> startOver(std::shared_ptr<FakeProcessLauncher> fake,
+                                                                 core::IClock& clock)
+{
+    auto started = ExtensionHostSupervisor::start(
+        SupervisorConfig { .launcher = std::move(fake), .clock = &clock, .teardownGrace = 0ms });
+    REQUIRE(started.has_value());
+    return std::move(*started);
+}
+} // namespace
+
+TEST_CASE("Supervisor.watchRefreshesTheClock", "[vtextension]")
+{
+    // An idle supervisor refreshes nothing: a watch's start is the time of the watch, not of the last
+    // wake-up.
+    auto clock = RefreshRecordingClock {};
+    auto const fake = std::make_shared<FakeProcessLauncher>();
+    auto const supervisor = startOver(fake, clock);
+    auto launched = supervisor->mailbox()->launch(fakeSpec());
+    REQUIRE(launched.has_value());
+    auto const watch = launched->watch(HostStep::Load, 10ms);
+    CHECK(std::ranges::contains(clock.refreshes(), std::this_thread::get_id()));
+}
+
+TEST_CASE("Supervisor.failedWaitIdlesOnceNothingIsLeft", "[vtextension]")
+{
+    // With its set broken, the supervisor polls while helpers or timers are left, and only waits for
+    // commands once none is: it then stops refreshing its clock.
+    auto clock = RefreshRecordingClock {};
+    auto const fake = std::make_shared<FakeProcessLauncher>();
+    auto const supervisor = startOver(fake, clock);
+    fake->failWaits(LaunchError::Io);
+    supervisor->sync();
+    supervisor->sync();
+    auto const before = clock.refreshes().size();
+    std::this_thread::sleep_for(350ms); // three polls, were it polling
+    CHECK(clock.refreshes().size() == before);
+}
+
+TEST_CASE("Supervisor.moveHandsTheHelperOn", "[vtextension]")
+{
+    auto rig = Rig {};
+    auto first = rig.launch();
+    auto second = std::move(first);
+    rig.supervisor->sync();
+    CHECK(rig.fake->kills().empty());
+    second = rig.launch(); // lets the first go
+    rig.supervisor->sync();
+    CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 1);
+    CHECK(rig.supervisor->liveProcesses() == 1);
+}
+
+namespace
+{
+/// A helper attached to a lane set, as an incarnation attaches it, with a grace of 50 ms.
+struct GraceRig
+{
+    Rig rig {};
+    std::shared_ptr<LaneWatchSet> lanes = std::make_shared<LaneWatchSet>();
+    SupervisedHelper helper = [this] {
+        auto launched = rig.launch();
+        launched.attach(rig.watchingLanes(lanes));
+        rig.supervisor->sync();
+        return launched;
+    }();
+
+    /// Interrupts instance @p instanceId, as RemoteInstance::interrupt() does: arms its frame and wakes the
+    /// supervisor; then lets the supervisor see it before the test moves the clock on.
+    void interrupt(uint32_t instanceId)
+    {
+        lanes->interrupt(instanceId);
+        helper.nudge();
+        rig.supervisor->sync();
+    }
+
+    /// Changes lane 0 by @p change, and lets the supervisor see it before the clock moves on: the supervisor
+    /// looks at the lanes only when it wakes, which a test's clock does not do by itself.
+    template <typename Change>
+    void onLane(Change const& change)
+    {
+        change(lanes->lane(0));
+        rig.supervisor->sync();
+    }
+
+    [[nodiscard]] std::size_t graceKills() const { return killsFor(*rig.supervisor, KillReason::Grace); }
+};
+} // namespace
+
+TEST_CASE("Supervisor.graceKillsAfterHelperSideTime", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(49ms);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.deaths->load() == 0);
+    grace.rig.advance(1ms);
+    CHECK(grace.graceKills() == 1);
+    CHECK(grace.rig.fake->kills() == std::vector<std::size_t> { 0 });
+    CHECK(grace.rig.deaths->load() == 1);
+    grace.rig.advance(1h);
+    CHECK(grace.rig.deaths->load() == 1);
+}
+
+TEST_CASE("Supervisor.graceIsPausedWhileServingCallHost", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(10ms);
+    grace.onLane([](auto& lane) { lane.beginHostCall(); });
+    grace.rig.advance(5000ms); // the parent's time
+    CHECK(grace.graceKills() == 0);
+    grace.onLane([](auto& lane) { lane.endHostCall(); });
+    grace.rig.advance(39ms);
+    CHECK(grace.graceKills() == 0);
+    grace.rig.advance(1ms);
+    CHECK(grace.graceKills() == 1);
+    CHECK(grace.rig.deaths->load() == 1);
+}
+
+TEST_CASE("Supervisor.graceEndsWithTheCall", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(20ms);
+    grace.onLane([](auto& lane) { lane.leave(); });
+    grace.rig.advance(1000ms);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.fake->kills().empty());
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.graceRestartsForAnotherFrame", "[vtextension]")
+{
+    // The armed frame ended, and another was interrupted: its grace is its own.
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.advance(40ms);
+    grace.onLane([](auto& lane) {
+        lane.leave();
+        lane.enter(7);
+    });
+    grace.interrupt(7);
+    grace.rig.advance(40ms);
+    CHECK(grace.graceKills() == 0);
+    grace.rig.advance(10ms);
+    CHECK(grace.graceKills() == 1);
+}
+
+TEST_CASE("Supervisor.noGraceWithoutAFrame", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.interrupt(7); // nothing of it runs
+    grace.lanes->lane(1).enter(8);
+    grace.interrupt(7); // another instance runs
+    grace.rig.advance(1h);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.fake->kills().empty());
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == std::nullopt);
+}
+
+TEST_CASE("Supervisor.armedLaneTicksAtATenthOfTheGrace", "[vtextension]")
+{
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.settle();
+    // An armed lane is looked at again every tenth of the grace: whether it parks, or its frame ends.
+    CHECK(grace.rig.fake->lastDeadline() == core::SteadyTimePoint {} + 5ms);
+    grace.rig.advance(5ms);
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == core::SteadyTimePoint {} + 10ms);
+}
+
+TEST_CASE("Supervisor.graceIsForgottenWithTheHelper", "[vtextension]")
+{
+    // A helper that ends with an armed lane takes its grace with it: nothing is due any more.
+    auto grace = GraceRig {};
+    grace.lanes->lane(0).enter(7);
+    grace.interrupt(7);
+    grace.rig.fake->exit(0, ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+    grace.rig.supervisor->sync(); // reaped before the clock moves on (teardownGraceLetsAHelperExit)
+    grace.rig.advance(1h);
+    CHECK(grace.graceKills() == 0);
+    CHECK(grace.rig.deaths->load() == 1);
+    grace.rig.settle();
+    CHECK(grace.rig.fake->lastDeadline() == std::nullopt);
+}

@@ -1,8 +1,8 @@
 name: "Windows tests"
 description: >-
   The test suite of a Windows build tree, and the checks that the cases a Catch2 SKIP would hide did run:
-  the AF_UNIX transport, the PowerShell integration, kitty file media, the Win32 chrome and the Restart
-  Manager. Both
+  the AF_UNIX transport, the PowerShell integration, kitty file media, the Win32 chrome, the Restart
+  Manager and the extension host's AppContainer. Both
   Windows jobs of build.yml run it, the plain one on what a pull request builds and the production one on
   what ships. The per-step time limits of a workflow do not exist inside a composite action; the job
   bounds this step as a whole.
@@ -163,6 +163,38 @@ runs:
           Write-Output $output
           if ($output -match 'skipped') {
             Write-Output "::error::$binary $($row.Filter) reported SKIPPED; $($row.What) is not being exercised on Windows"
+            exit 1
+          }
+          if ($status -ne 0) { exit 1 }
+        }
+    - name: "verify the extension host's AppContainer tests actually ran"
+      # Also when the suite failed: its lines are what a failing container case needs read.
+      if: ${{ !cancelled() }}
+      # @see "verify the PowerShell integration tests actually ran": the [appcontainer] cases SKIP only under
+      # wine, which stubs AppContainers, so a skip here is a regression. Run with -s, so that every line the
+      # cases record shows whether they pass or not: the contained probe's result per operation (a user's
+      # file, a loopback connection, a child process) and the helper's Hello, with the step that failed.
+      shell: pwsh
+      env:
+        CMAKE_PRESET: ${{ inputs.preset }}
+      run: |
+        $rows = @(
+          @{ Binary = 'vtextension_process_test.exe'; What = 'the AppContainer profile, its grant and its confinement' }
+          @{ Binary = 'vtextension_wamr_helper_test.exe'; What = 'the extension host locking down in its AppContainer' }
+        )
+        foreach ($row in $rows) {
+          $binary = "out/build/$env:CMAKE_PRESET/bin/$($row.Binary)"
+          # A missing binary must not read as "nothing skipped".
+          if (-not (Test-Path $binary)) {
+            Write-Output "::error::$binary not found; the assertion below would pass vacuously"
+            exit 1
+          }
+          Write-Output "--- $binary [appcontainer]"
+          $output = & $binary '[appcontainer]' -s 2>&1 | Out-String
+          $status = $LASTEXITCODE
+          Write-Output $output
+          if ($output -match 'skipped') {
+            Write-Output "::error::$binary [appcontainer] reported SKIPPED; $($row.What) is not being exercised on Windows"
             exit 1
           }
           if ($status -ne 0) { exit 1 }

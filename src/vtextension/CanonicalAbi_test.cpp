@@ -4,23 +4,33 @@
 // its round trips through a fake linear memory, its refusal of whatever a guest could forge, and its
 // round trips through the echo and spawner guests, which wit-bindgen built from the world.
 #include <catch2/catch_message.hpp>
+#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#include <vtcontrol/Catalog.hpp>
+#include <vtcontrol/Json.hpp>
 #include <vtextension/CanonicalAbi.hpp>
+#include <vtextension/ControlCodec.hpp>
 #include <vtextension/Event.hpp>
 #include <vtextension/IHostServices.hpp>
+#include <vtextension/Instance.hpp>
 #include <vtextension/StatuslineWorld.hpp>
 #include <vtextension/testing/FakeGuestMemory.hpp>
 #include <vtextension/testing/Harness.hpp>
@@ -375,6 +385,217 @@ TEST_CASE("CanonicalAbi.wrappingRecord", "[vtextension]")
           == ExtensionError::Trapped);
     CHECK(errorOf(abi::Codec<StateSnapshot>::load(memory, 0xFFFF'FFF0)) == ExtensionError::Trapped);
     CHECK(errorOf(abi::Codec<Event>::load(memory, 0xFFFF'FFF8)) == ExtensionError::Trapped);
+}
+
+namespace
+{
+
+/// What a FetchCountingMemory does to guest bytes once read() copied them.
+enum class AfterRead : uint8_t
+{
+    Kept,      ///< Nothing.
+    Corrupted, ///< Flips every bit of them, as a guest scribbling its memory meanwhile would.
+};
+
+/// Whether a FetchCountingMemory is being written to or read from.
+enum class FetchPhase : uint8_t
+{
+    Storing, ///< writable() is the memory: a sample is being lowered.
+    Loading, ///< writable() is a decoy: only read() reaches the memory, and counts what it copies.
+};
+
+/// A guest memory that counts how often lifting reads each of its bytes. While loading, writable() -- which
+/// decoders may use to prove a range, but never to read -- hands out a decoy of other bytes, so a decoder
+/// that reads through it lifts something else.
+class FetchCountingMemory final: public abi::IGuestMemory
+{
+  public:
+    static constexpr uint32_t Size = 64 * 1024;
+
+    /// @param afterRead What read() does to the bytes it copied.
+    explicit FetchCountingMemory(AfterRead afterRead = AfterRead::Kept): _afterRead { afterRead } {}
+
+    /// From now on, writable() hands out the decoy and read() counts.
+    void startLoading() noexcept { _phase = FetchPhase::Loading; }
+
+    /// @return How often the most read byte was read.
+    [[nodiscard]] uint32_t mostReads() const { return std::ranges::max(_reads); }
+
+    /// @return How many bytes were read at all.
+    [[nodiscard]] std::size_t bytesRead() const
+    {
+        return static_cast<std::size_t>(
+            std::ranges::count_if(_reads, [](uint32_t reads) { return reads > 0; }));
+    }
+
+    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
+    {
+        if (uint64_t { address } + into.size() > Size)
+            return std::unexpected(ExtensionError::Trapped);
+        auto const source = std::span { _bytes }.subspan(address, into.size());
+        std::ranges::copy(source, into.begin());
+        for (auto& reads: std::span { _reads }.subspan(address, into.size()))
+            ++reads;
+        if (_afterRead == AfterRead::Corrupted)
+            for (auto& byte: source)
+                byte = ~byte;
+        return {};
+    }
+
+    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
+    {
+        if (uint64_t { address } + size > Size)
+            return std::unexpected(ExtensionError::Trapped);
+        auto& bytes = _phase == FetchPhase::Storing ? _bytes : _decoy;
+        return std::span { bytes }.subspan(address, size);
+    }
+
+    [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
+    {
+        auto const address = abi::alignTo(_next, alignment);
+        if (uint64_t { address } + size > Size)
+            return std::unexpected(ExtensionError::OutOfMemory);
+        _next = address + size;
+        return address;
+    }
+
+    [[nodiscard]] abi::Result<void> chargeLift(uint64_t /*bytes*/) override { return {}; }
+
+  private:
+    AfterRead _afterRead;
+    FetchPhase _phase = FetchPhase::Storing;
+    std::vector<std::byte> _bytes = std::vector<std::byte>(Size);
+    std::vector<std::byte> _decoy = std::vector<std::byte>(Size, std::byte { 0xA5 });
+    std::vector<uint32_t> _reads = std::vector<uint32_t>(Size);
+    abi::Address _next = 8; ///< Address 0 stays unused, as a guest's null.
+};
+
+/// The request type of each control method, in the catalog's order.
+using ControlRequests = decltype(std::apply(
+    [](auto const&... row) { return std::tuple<typename std::remove_cvref_t<decltype(row)>::Request...> {}; },
+    vtcontrol::Methods));
+
+/// Every type the host lifts out of a guest: what host functions take, what exports return, and the requests
+/// of the control verbs.
+using LiftedTypes = decltype(std::tuple_cat(
+    std::tuple<std::string, ByteList, ConfigMap, LogLevel, EventKinds, RenderRequest> {},
+    ControlRequests {}));
+
+/// @return A value of @p T that is not its default, where it has one: for a control request, the example
+///         of the first method taking it.
+template <typename T>
+[[nodiscard]] T sampleOf()
+{
+    if constexpr (std::is_same_v<T, std::string>)
+        return "grüße, ☃";
+    else if constexpr (std::is_same_v<T, ByteList>)
+        return ByteList { 0x00, 0x01, 0x7F, 0x80, 0xFF };
+    else if constexpr (std::is_same_v<T, ConfigMap>)
+        return ConfigMap { { "format", "{cwd}" }, { "größe", "" }, { "", "zwölf" } };
+    else if constexpr (std::is_same_v<T, LogLevel>)
+        return LogLevel::Warn;
+    else if constexpr (std::is_same_v<T, EventKinds>)
+        return EventKinds { EventKind::Title, EventKind::Focus, EventKind::Font };
+    else if constexpr (std::is_same_v<T, RenderRequest>)
+        return RenderRequest::Render;
+    else
+    {
+        auto sample = std::optional<T> {};
+        std::apply(
+            [&](auto const&... row) {
+                std::ignore =
+                    ((std::is_same_v<typename std::remove_cvref_t<decltype(row)>::Request, T>
+                      && (sample = vtcontrol::decodeJson<T>(row.requestExample).value()).has_value())
+                     || ...);
+            },
+            vtcontrol::Methods);
+        REQUIRE(sample.has_value());
+        return *std::move(sample);
+    }
+}
+
+/// @return Whether @p a and @p b are the same value: by `==` where @p T has it, else by their JSON.
+template <typename T>
+[[nodiscard]] bool sameValue(T const& a, T const& b)
+{
+    if constexpr (std::equality_comparable<T>)
+        return a == b;
+    else
+        return vtcontrol::encodeJson(a) == vtcontrol::encodeJson(b);
+}
+
+} // namespace
+
+TEMPLATE_LIST_TEST_CASE("GuestReader.fetchesEachByteOnce", "[vtextension]", LiftedTypes)
+{
+    // A lift reads guest memory only through read(), and no byte twice: what it decodes is one copy, whatever
+    // the guest's memory holds meanwhile.
+    auto const sample = sampleOf<TestType>();
+    auto memory = FetchCountingMemory {};
+    auto const address = abi::storeNew(memory, sample);
+    REQUIRE(address.has_value());
+
+    memory.startLoading();
+    auto const loaded = abi::Codec<TestType>::load(memory, *address);
+    REQUIRE(loaded.has_value());
+    CHECK(sameValue(*loaded, sample));
+    CHECK(memory.mostReads() <= 1);
+    // Something was read, unless there is nothing to: a request without fields.
+    CHECK((memory.bytesRead() > 0 || abi::Codec<TestType>::Size == 0));
+}
+
+TEMPLATE_LIST_TEST_CASE("GuestReader.flatLiftsFetchEachByteOnce", "[vtextension]", LiftedTypes)
+{
+    // What a host function or a small control request lifts from its flat parameters: the pointers they
+    // carry are followed through read() alone, and no byte is read twice.
+    auto const sample = sampleOf<TestType>();
+    auto memory = FetchCountingMemory {};
+    auto flat = abi::FlatValues {};
+    REQUIRE(abi::Codec<TestType>::lowerFlat(memory, sample, flat).has_value());
+
+    memory.startLoading();
+    auto reader = abi::FlatReader(flat);
+    auto const lifted = abi::Codec<TestType>::liftFlat(memory, reader);
+    REQUIRE(lifted.has_value());
+    CHECK(sameValue(*lifted, sample));
+    CHECK(memory.mostReads() <= 1);
+}
+
+TEST_CASE("GuestReader.mutationAfterReadChangesNothing", "[vtextension]")
+{
+    // Every byte is flipped once read() copied it: a lift that read any byte again would see the flip.
+    SECTION("a string stays the first copy")
+    {
+        auto const sample = std::string { "the first copy" };
+        auto memory = FetchCountingMemory { AfterRead::Corrupted };
+        auto const address = abi::storeNew(memory, sample);
+        REQUIRE(address.has_value());
+        memory.startLoading();
+        CHECK(abi::Codec<std::string>::load(memory, *address).value() == sample);
+    }
+
+    SECTION("a list keeps its first length")
+    {
+        auto const sample = sampleOf<ConfigMap>();
+        auto memory = FetchCountingMemory { AfterRead::Corrupted };
+        auto const address = abi::storeNew(memory, sample);
+        REQUIRE(address.has_value());
+        memory.startLoading();
+        auto const loaded = abi::Codec<ConfigMap>::load(memory, *address);
+        REQUIRE(loaded.has_value());
+        CHECK(loaded->size() == sample.size());
+        CHECK(*loaded == sample);
+    }
+
+    SECTION("an extension's output stays the first copy")
+    {
+        auto const sample = ByteList { 'o', 'u', 't' };
+        auto memory = FetchCountingMemory { AfterRead::Corrupted };
+        auto const address = abi::storeNew(memory, sample);
+        REQUIRE(address.has_value());
+        memory.startLoading();
+        CHECK(abi::loadByteString(memory, *address, sample.size()).value() == "out");
+    }
 }
 
 #ifdef VTEXTENSION_TEST_MODULE_DIR

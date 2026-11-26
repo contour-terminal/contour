@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include <vtextension/ExtensionRegistry.hpp>
 #include <vtextension/Surface.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
@@ -74,7 +75,8 @@ std::expected<std::shared_ptr<Engine>, ExtensionError> EngineProvider::acquire()
 }
 
 PreparedExtensions prepareExtensions(ExtensionHostConfig config,
-                                     std::expected<std::shared_ptr<Engine>, ExtensionError> engine)
+                                     std::expected<std::shared_ptr<Engine>, ExtensionError> engine,
+                                     ExtensionRegistry* registry)
 {
     auto prepared = PreparedExtensions { .extensions = {},
                                          .engine = engine.value_or(nullptr),
@@ -95,7 +97,14 @@ PreparedExtensions prepareExtensions(ExtensionHostConfig config,
                 threadGuard.emplace((*engine)->backend().enterThread());
             if (!*threadGuard)
                 return std::unexpected(threadGuard->error());
-            return CompiledExtension::load(**engine, std::move(spec.module));
+            if (registry)
+            {
+                // Keyed before the bytes move: the key digests them.
+                auto const key = registryKeyOf(spec, ExtensionWorld::StatusLine);
+                return registry->acquire(**engine, key, std::move(spec.module));
+            }
+            return CompiledExtension::load(
+                **engine, wasm::ModuleIdentity { spec.hostId }, std::move(spec.module), nullptr);
         }();
         spec.module.clear();
         prepared.extensions.push_back(
@@ -138,7 +147,7 @@ ExtensionHost::ExtensionHost(ExtensionHostConfig config, ExtensionHostServices s
                                              : std::expected<std::shared_ptr<Engine>, ExtensionError> {
                                                    std::unexpected(ExtensionError::ModuleUnavailable)
                                                };
-            return prepareExtensions(std::move(config), std::move(engine));
+            return prepareExtensions(std::move(config), std::move(engine), nullptr);
         }(),
         services)
 {

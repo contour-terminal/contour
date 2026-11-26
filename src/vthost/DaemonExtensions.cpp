@@ -169,6 +169,13 @@ void DaemonExtensions::releaseRetired() noexcept
         _runtime->releaseRetired();
 }
 
+void DaemonExtensions::configurationReloaded() noexcept
+{
+    // A runtime not started yet has no breaker to reset.
+    if (_runtime)
+        _runtime->configurationReloaded();
+}
+
 void DaemonExtensions::stop() noexcept
 {
     _stopped = true;

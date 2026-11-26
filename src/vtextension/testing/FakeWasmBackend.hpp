@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -94,14 +95,15 @@ class FakeWasmInstance final: public wasm::IWasmInstance
         return hook->second(argv);
     }
 
-    [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+    [[nodiscard]] std::expected<std::span<std::byte>, wasm::MemoryFailure> memory(uint32_t address,
+                                                                                  uint32_t size) override
     {
         if (_guest.onMemoryAccess)
             _guest.onMemoryAccess();
         if (size == 0)
             return std::span<std::byte> {};
         if (uint64_t { address } + size > linearMemory.size())
-            return std::nullopt;
+            return std::unexpected(wasm::MemoryFailure::OutOfBounds);
         return std::span { linearMemory }.subspan(address, size);
     }
 
@@ -210,12 +212,10 @@ class FakeWasmRuntime final: public wasm::IWasmRuntime, public std::enable_share
     /// Tells the backend that one runtime fewer is alive.
     ~FakeWasmRuntime() override;
 
-    /// Ignores @p bytes: every module is a world guest.
+    /// Tells the backend of @p identity and ignores @p bytes: every module is a world guest.
+    /// @return The module; the backend's FakeWasmBackend::loadFailure if it names one.
     [[nodiscard]] std::expected<std::shared_ptr<wasm::IWasmModule>, ExtensionError> load(
-        std::vector<std::byte> /*bytes*/) override
-    {
-        return std::make_shared<FakeWasmModule>(shared_from_this(), _backend, _hostFunctions);
-    }
+        wasm::ModuleIdentity identity, std::vector<std::byte> /*bytes*/) override;
 
   private:
     FakeWasmBackend& _backend;
@@ -259,14 +259,50 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         return wasm::BackendCapabilities { .memoryGrowth = wasm::MemoryGrowthReporting::Reported };
     }
 
+    /// @return How many modules were loaded, failed loads included.
+    [[nodiscard]] std::size_t loads() const noexcept
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _loads;
+    }
+
+    /// @return The thread each load ran on, failed ones included, in order.
+    [[nodiscard]] std::vector<std::thread::id> loadThreads() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _loadThreads;
+    }
+
+    /// @return The thread each instantiation ran on, in order.
+    [[nodiscard]] std::vector<std::thread::id> instantiateThreads() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _instantiateThreads;
+    }
+
+    /// @return The identity the last module was loaded with; empty before the first.
+    [[nodiscard]] wasm::ModuleIdentity lastIdentity() const
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _lastIdentity;
+    }
+
     /// How every instance created from now on behaves.
     FakeGuest guest;
+
+    /// What every load from now on fails with; nothing for loads that succeed. Read after loadGate returns.
+    std::optional<ExtensionError> loadFailure;
+
+    /// Run by every load once it is counted, before it answers, on the loading thread: a test holds a load in
+    /// flight with it. None for loads that answer at once.
+    std::function<void()> loadGate;
 
     /// The instance created last; null before the first. Valid only while that instance lives.
     FakeWasmInstance* lastInstance = nullptr;
 
   private:
     friend class FakeWasmRuntime;
+    friend class FakeWasmModule;
 
     /// A guard that prepares nothing, as nothing needs preparing; it remembers its generation.
     class Guard final: public wasm::IThreadGuard
@@ -289,6 +325,22 @@ class FakeWasmBackend final: public wasm::IWasmBackend
             _generation.fetch_add(1, std::memory_order_release);
     }
 
+    /// Counts a module loaded with @p identity.
+    void moduleLoaded(wasm::ModuleIdentity identity)
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        ++_loads;
+        _loadThreads.push_back(std::this_thread::get_id());
+        _lastIdentity = std::move(identity);
+    }
+
+    /// Counts an instance created, on the calling thread.
+    void instanceCreated()
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _instantiateThreads.push_back(std::this_thread::get_id());
+    }
+
     /// Counts a runtime destroyed, on whichever thread drops the last reference to it.
     void runtimeDestroyed()
     {
@@ -296,9 +348,13 @@ class FakeWasmBackend final: public wasm::IWasmBackend
         --_runtimesAlive;
     }
 
-    mutable std::mutex _mutex;             ///< Guards the counters below; the generation is read without it.
-    std::size_t _runtimesAlive = 0;        ///< How many runtimes are alive.
-    std::atomic<uint64_t> _generation = 0; ///< How many times the engine was brought up.
+    mutable std::mutex _mutex;          ///< Guards the counters below; the generation is read without it.
+    std::size_t _runtimesAlive = 0;     ///< How many runtimes are alive.
+    std::size_t _loads = 0;             ///< How many modules were loaded.
+    wasm::ModuleIdentity _lastIdentity; ///< The identity the last module was loaded with.
+    std::vector<std::thread::id> _loadThreads;        ///< Where each load ran.
+    std::vector<std::thread::id> _instantiateThreads; ///< Where each instantiation ran.
+    std::atomic<uint64_t> _generation = 0;            ///< How many times the engine was brought up.
 };
 
 inline FakeWasmRuntime::FakeWasmRuntime(FakeWasmBackend& backend,
@@ -311,6 +367,17 @@ inline FakeWasmRuntime::FakeWasmRuntime(FakeWasmBackend& backend,
 inline FakeWasmRuntime::~FakeWasmRuntime()
 {
     _backend.runtimeDestroyed();
+}
+
+inline std::expected<std::shared_ptr<wasm::IWasmModule>, ExtensionError> FakeWasmRuntime::load(
+    wasm::ModuleIdentity identity, std::vector<std::byte> /*bytes*/)
+{
+    _backend.moduleLoaded(std::move(identity));
+    if (_backend.loadGate)
+        _backend.loadGate();
+    if (_backend.loadFailure)
+        return std::unexpected(*_backend.loadFailure);
+    return std::make_shared<FakeWasmModule>(shared_from_this(), _backend, _hostFunctions);
 }
 
 inline FakeWasmModule::FakeWasmModule(std::shared_ptr<wasm::IWasmRuntime> runtime,
@@ -350,6 +417,7 @@ inline std::expected<std::unique_ptr<wasm::IWasmInstance>, ExtensionError> FakeW
             return entry.kind == wasm::ExternKind::Function;
         })
         | std::views::transform(&wasm::ExportDescription::name));
+    _backend.instanceCreated();
     auto instance =
         std::make_unique<FakeWasmInstance>(_backend.guest, std::move(names), shared_from_this(), &context);
     _backend.lastInstance = instance.get();

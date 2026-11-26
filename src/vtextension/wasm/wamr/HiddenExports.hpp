@@ -20,6 +20,8 @@
 #include <span>
 #include <string_view>
 
+#include <vtextension/wasm/InstantiationHooks.hpp>
+
 namespace vtextension::wasm::wamr
 {
 
@@ -57,6 +59,10 @@ static_assert(std::ranges::all_of(HiddenExports,
                                       return row.name.size() == row.alias.size();
                                   }),
               "an alias must be as long as its name, or the rewrite would change section sizes");
+static_assert(
+    std::ranges::all_of(HiddenExports,
+                        [](HiddenExport const& row) { return isRefusedExportName(row.alias); }),
+    "every alias must be refused for every engine (InstantiationHooks.hpp), or a module could export it");
 
 /// Renames each export of @p module named in HiddenExports to its alias, in place, whatever kind of
 /// export it is: the host's world check then judges it by its name. Only export section entries are

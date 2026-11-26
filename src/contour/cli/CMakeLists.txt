@@ -78,9 +78,10 @@ target_link_libraries(contour_cli
     PRIVATE vthost vtcontrol glaze::glaze
 )
 # `contour daemon` runs its profile's status-line extensions, built from contour::config's declarations. As a
-# composition root it also links the WebAssembly runtime backend it creates (makeDefaultBackend()).
+# composition root it creates their backend (makeDefaultBackend()), which the program that links it defines:
+# the contour executable links vtextension_runtime (../CMakeLists.txt), and a test names its own.
 if(CONTOUR_EXTENSIONS)
-    target_link_libraries(contour_cli PRIVATE contour_extensions vtextension_runtime)
+    target_link_libraries(contour_cli PRIVATE contour_extensions)
 endif()
 
 # The binary dir is PUBLIC so that ShellIntegration.cpp's <ShellIntegrationData.hpp> resolves, and

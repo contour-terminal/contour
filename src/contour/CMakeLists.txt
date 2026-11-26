@@ -11,18 +11,8 @@ endif()
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_WAYLAND "Enables Wayland specific code paths." ON)
 
-# Whether this build produces a macOS application bundle, as opposed to a plain executable.
-#
-# A .app exists to be double-clicked, and everything that assembles one -- the
-# @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
-# notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
-# command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
-# which is the whole point of not building the frontend. So it installs like any other Unix CLI
-# tool. Every bundle-only block below is gated on this rather than on APPLE.
-set(CONTOUR_MACOS_APP_BUNDLE OFF)
-if(APPLE AND CONTOUR_FRONTEND_GUI)
-    set(CONTOUR_MACOS_APP_BUNDLE ON)
-endif()
+# CONTOUR_MACOS_APP_BUNDLE, whether this build produces a macOS application bundle, is decided in
+# ../CMakeLists.txt: contour-extension-host is placed into the bundle too.
 
 option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
 
@@ -829,6 +819,15 @@ endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
 contour_production_executable(contour)
+# The backend the GUI's and `contour daemon`'s extensions run on, which their composition roots create
+# (makeDefaultBackend()): the program links it, so that a test linking the same code names its own instead. Out
+# of process, the helper is placed beside the build tree's contour, as it is installed beside the installed one.
+if(CONTOUR_EXTENSIONS)
+    target_link_libraries(contour PRIVATE vtextension_runtime)
+    if(NOT CONTOUR_MACOS_APP_BUNDLE)
+        contour_place_extension_host_beside(contour)
+    endif()
+endif()
 
 # LLVM 22's ThreadSanitizer runtime does not intercept glibc's pthread_clockjoin_np, the only join Qt
 # 6.10's QThread::wait() uses on Linux, so it takes every waited-for QThread to be still running and
@@ -903,6 +902,30 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
         # show the generic executable icon.
         MACOSX_BUNDLE_ICON_FILE "contour.icns"
     )
+    # The extension host travels inside the bundle, in Contents/Helpers, where contour looks for it first
+    # (locateExtensionHost()). The copy is a command whose output is the bundled helper itself, so it reruns
+    # whenever the helper is rebuilt, even when contour is not; contour depends on the copy, never the helper
+    # on the GUI. An OUTPUT may not name a target's directory by generator expression, so the bundle's place
+    # is spelled out: beside this directory's binaries, per configuration in a multi-config generator.
+    if(TARGET contour-extension-host)
+        get_property(_contourIsMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if(_contourIsMultiConfig)
+            set(_contourBundleDir "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/contour.app")
+        else()
+            set(_contourBundleDir "${CMAKE_CURRENT_BINARY_DIR}/contour.app")
+        endif()
+        set(_bundledExtensionHost "${_contourBundleDir}/Contents/Helpers/contour-extension-host")
+        add_custom_command(
+            OUTPUT "${_bundledExtensionHost}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_contourBundleDir}/Contents/Helpers"
+            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>" "${_bundledExtensionHost}"
+            DEPENDS contour-extension-host "$<TARGET_FILE:contour-extension-host>"
+            COMMENT "Bundling contour-extension-host into Contents/Helpers"
+            VERBATIM
+        )
+        add_custom_target(contour_bundled_extension_host DEPENDS "${_bundledExtensionHost}")
+        add_dependencies(contour contour_bundled_extension_host)
+    endif()
 endif()
 # }}}
 
@@ -949,10 +972,6 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 if(CONTOUR_EXTENSIONS)
     target_link_libraries(contour_core PUBLIC contour_extensions)
-endif()
-# ContourGuiApp is a composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()).
-if(CONTOUR_EXTENSIONS AND CONTOUR_FRONTEND_GUI)
-    target_link_libraries(contour_core PRIVATE vtextension_runtime)
 endif()
 
 # The GUI-only layers beneath the frontend. Guarded for the same reason they are only added as
@@ -1289,6 +1308,11 @@ if(CONTOUR_FRONTEND_GUI)
             endif()
         endforeach()
         target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy contour_test_trace)
+        if(CONTOUR_EXTENSIONS)
+            # The extensions ContourGuiApp runs in its tests run in this process, on WAMR's backend: a test
+            # starts no extension host process.
+            target_link_libraries(contour_gui_test PRIVATE vtextension_wamr)
+        endif()
 
         # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
         if(TARGET contour_tsan_thread_join)
@@ -1892,7 +1916,9 @@ if(CONTOUR_TESTING)
         target_sources(contour_test PRIVATE
             config/ExtensionDeclarations_test.cpp
         )
-        target_link_libraries(contour_test PRIVATE contour_extensions)
+        # `contour daemon`'s extensions run in this process, on WAMR's backend: a test starts no extension host
+        # process.
+        target_link_libraries(contour_test PRIVATE contour_extensions vtextension_wamr)
     endif()
     add_test(NAME contour_test COMMAND contour_test)
     # The contour binary, for ShellIntegrationShells.profileLine: the profile line it tests asks that binary
@@ -2406,6 +2432,13 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
         # this, because the kernel's entitlements parser (AMFI) rejects XML comments outright;
         # docs/internals/macos-code-signing.md has the reasoning.
         set(_entitlements "${CMAKE_SOURCE_DIR}/support/macOS/entitlements.plist")
+        # The bundled extension host is signed by the engine it runs on: on a compiling one with the one
+        # entitlement its compiled code needs, on an interpreting one with none (NESTED_ENTITLEMENTS in
+        # scripts/macos-bundle.py).
+        set(_sign_helper_args)
+        if(TARGET contour-extension-host)
+            set(_sign_helper_args --helper-engine "${CONTOUR_WASM_RUNTIME}")
+        endif()
 
         # Deploy, drop the plugins that cannot load, prove the result is self-contained,
         # then sign it -- in that order, and with every step fatal on failure. macdeployqt
@@ -2468,6 +2501,7 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
             COMMAND \"${Python3_EXECUTABLE}\" \"${CONTOUR_MACOS_BUNDLE_SCRIPT}\" sign \"\${_app}\"
                     --identity \"${CODE_SIGN_CERTIFICATE_ID}\"
                     --entitlements \"${_entitlements}\"
+                    ${_sign_helper_args}
             COMMAND_ERROR_IS_FATAL ANY
         )
     ")
@@ -2477,7 +2511,8 @@ else()
     # build too. That one produces a plain command-line binary, so it installs like any other Unix
     # CLI tool: the executable and the data every platform wants, first.
     include(GNUInstallDirs)
-    install(TARGETS contour DESTINATION bin)
+    # CMAKE_INSTALL_BINDIR: where contour finds contour-extension-host is relative to it (../CMakeLists.txt).
+    install(TARGETS contour DESTINATION "${CMAKE_INSTALL_BINDIR}")
     install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "res/fonts/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts" PATTERN "README.md" EXCLUDE)
     if(CONTOUR_NERD_FONT_SYMBOLS_DIR)

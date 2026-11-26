@@ -1,0 +1,702 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include <wasmtime.h>
+
+#include <vtextension/wasm/EngineFeatures.hpp>
+#include <vtextension/wasm/WasiAllowList.hpp>
+#include <vtextension/wasm/wasi/Preview1Shim.hpp>
+#include <vtextension/wasm/wasi/Preview1Signatures.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp>
+// Every feature switch the table drives must exist: a Wasmtime built without one of these could neither
+// be told to refuse what the table forbids nor be trusted to accept what it allows. Generated from the
+// list the configure-time probe checks too (cmake/ContourThirdParties.cmake).
+#include <vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp>
+#include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
+
+namespace vtextension::wasm::wasmtime
+{
+
+namespace
+{
+    /// The serial the next kind takes; 0 names none.
+    auto nextSerial = std::atomic<uint64_t> { 1 };
+
+    /// Which kind and generation the calling thread is prepared for; generation 0 for none.
+    struct ThreadStamp
+    {
+        uint64_t kind = 0;       ///< The serial of the kind whose guard prepared the thread; 0 for none.
+        uint64_t generation = 0; ///< The generation it was prepared for.
+    };
+
+    thread_local auto threadStamp = ThreadStamp {};
+
+    /// Whether a guard is the one that prepared its thread, or nests inside that one.
+    enum class GuardRole : uint8_t
+    {
+        Nested,    ///< The thread was prepared already; ending the guard leaves it so.
+        Outermost, ///< The guard prepared the thread; ending it ends the preparation.
+    };
+
+    /// A thread's preparation: a stamp of the generation it was entered for.
+    class ThreadGuard final: public IThreadGuard
+    {
+      public:
+        ThreadGuard(KindState const& kind, uint64_t generation, GuardRole role) noexcept:
+            _kind { kind.serial() }, _generation { generation }, _role { role }
+        {
+        }
+
+        ThreadGuard(ThreadGuard const&) = delete;
+        ThreadGuard(ThreadGuard&&) = delete;
+        ThreadGuard& operator=(ThreadGuard const&) = delete;
+        ThreadGuard& operator=(ThreadGuard&&) = delete;
+
+        ~ThreadGuard() override
+        {
+            // A guard entered for an earlier generation leaves alone a later guard's stamp.
+            if (_role == GuardRole::Outermost && threadStamp.kind == _kind
+                && threadStamp.generation == _generation)
+                threadStamp = ThreadStamp {};
+        }
+
+        [[nodiscard]] uint64_t generation() const noexcept override { return _generation; }
+
+      private:
+        uint64_t _kind; ///< The serial of the kind it was entered for, which it may outlive.
+        uint64_t _generation;
+        GuardRole _role;
+    };
+
+    /// A Wasmtime switch for one feature. The bool is Wasmtime's C signature.
+    using FeatureSetter = void (*)(wasm_config_t*, bool);
+
+    /// One row of the switch table: a feature and Wasmtime's switch for it.
+    struct FeatureSetterRow
+    {
+        EngineFeature feature {};       ///< The feature.
+        FeatureSetter setter = nullptr; ///< Wasmtime's switch for it.
+    };
+
+    /// Wasmtime's switch for every feature of EngineFeatures that has one (FeatureSwitch::Configurable),
+    /// in the table's order. Every engine is configured by setting each from its row's state.
+    ///
+    /// Not constexpr: where Wasmtime is a DLL (a system Wasmtime on Windows), its functions are
+    /// `__declspec(dllimport)`, and the address of one is not a constant expression. The table is
+    /// initialized before main() all the same, and featureSettersMatchTheTable() checks it at run time.
+    auto const featureSetters = std::to_array<FeatureSetterRow>({
+        { .feature = EngineFeature::BulkMemory, .setter = &wasmtime_config_wasm_bulk_memory_set },
+        { .feature = EngineFeature::MultiValue, .setter = &wasmtime_config_wasm_multi_value_set },
+        { .feature = EngineFeature::ReferenceTypes, .setter = &wasmtime_config_wasm_reference_types_set },
+        { .feature = EngineFeature::Gc, .setter = &wasmtime_config_wasm_gc_set },
+        { .feature = EngineFeature::Exceptions, .setter = &wasmtime_config_wasm_exceptions_set },
+        { .feature = EngineFeature::Threads, .setter = &wasmtime_config_wasm_threads_set },
+        { .feature = EngineFeature::Memory64, .setter = &wasmtime_config_wasm_memory64_set },
+        { .feature = EngineFeature::MultiMemory, .setter = &wasmtime_config_wasm_multi_memory_set },
+        { .feature = EngineFeature::TailCalls, .setter = &wasmtime_config_wasm_tail_call_set },
+        { .feature = EngineFeature::Simd, .setter = &wasmtime_config_wasm_simd_set },
+        { .feature = EngineFeature::RelaxedSimd, .setter = &wasmtime_config_wasm_relaxed_simd_set },
+        { .feature = EngineFeature::ComponentModel, .setter = &wasmtime_config_wasm_component_model_set },
+        { .feature = EngineFeature::FunctionReferences,
+          .setter = &wasmtime_config_wasm_function_references_set },
+        { .feature = EngineFeature::RelaxedSimdDeterministic,
+          .setter = &wasmtime_config_wasm_relaxed_simd_deterministic_set },
+        { .feature = EngineFeature::WideArithmetic, .setter = &wasmtime_config_wasm_wide_arithmetic_set },
+        { .feature = EngineFeature::BranchHinting, .setter = &wasmtime_config_wasm_branch_hinting_set },
+        { .feature = EngineFeature::CustomPageSizes, .setter = &wasmtime_config_wasm_custom_page_sizes_set },
+        { .feature = EngineFeature::StackSwitching, .setter = &wasmtime_config_wasm_stack_switching_set },
+        { .feature = EngineFeature::ComponentModelAsync,
+          .setter = &wasmtime_config_wasm_component_model_async_set },
+        { .feature = EngineFeature::ComponentModelAsyncBuiltins,
+          .setter = &wasmtime_config_wasm_component_model_more_async_builtins_set },
+        { .feature = EngineFeature::ComponentModelAsyncStackful,
+          .setter = &wasmtime_config_wasm_component_model_async_stackful_set },
+        { .feature = EngineFeature::ComponentModelMap,
+          .setter = &wasmtime_config_wasm_component_model_map_set },
+    });
+
+    /// @return Whether featureSetters holds exactly the configurable features of EngineFeatures, each
+    ///         once, in the table's order, each with a switch.
+    [[nodiscard]] bool featureSettersMatchTheTable() noexcept
+    {
+        auto configurable = EngineFeatures | std::views::filter([](FeatureRow const& row) {
+                                return row.featureSwitch == FeatureSwitch::Configurable;
+                            })
+                            | std::views::transform(&FeatureRow::feature);
+        return std::ranges::equal(configurable,
+                                  featureSetters | std::views::transform(&FeatureSetterRow::feature))
+               && std::ranges::none_of(featureSetters,
+                                       [](FeatureSetterRow const& row) { return row.setter == nullptr; });
+    }
+    /// @return The guard that follows each instance's memory of an engine configured by @p config, where the
+    ///         host maps it: SignalsGuardBytes for provided memory trapping through signals, else none.
+    [[nodiscard]] uint64_t memoryGuardBytesOf(WasmtimeConfig const& config) noexcept
+    {
+        return config.memory == MemorySharing::Provided && config.trapMode == TrapMode::Signals
+                   ? SignalsGuardBytes
+                   : 0;
+    }
+
+    /// @return A configuration for one runtime's engine, from EngineFeatures, @p config and @p limits.
+    [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig const& config, RuntimeLimits limits)
+    {
+        // featureSetters drives every switchable row of EngineFeatures: checked here, as the table cannot
+        // be checked at compile time, and every engine is configured through here.
+        Require(featureSettersMatchTheTable());
+        auto* const engineConfig = wasm_config_new();
+        for (auto const& [feature, setter]: featureSetters)
+            setter(engineConfig, featureRow(feature).state == FeatureState::On);
+        wasmtime_config_max_wasm_stack_set(engineConfig, limits.stackBytes);
+        // Epoch interruption is how a call is stopped from another thread: interrupt() moves the engine's
+        // epoch, and nothing else does, so no thread ticks it. WasmtimeInstance.cpp sets every store's
+        // deadline one tick ahead before each entry into guest code, and decides in the store's deadline
+        // callback whether the guest that reached it stops.
+        wasmtime_config_epoch_interruption_set(engineConfig, true);
+        wasmtime_config_signals_based_traps_set(engineConfig, config.trapMode == TrapMode::Signals);
+        wasmtime_config_cranelift_opt_level_set(engineConfig, WASMTIME_OPT_LEVEL_SPEED);
+        // Compilation runs on the loading thread, rather than on threads of Wasmtime's own.
+        wasmtime_config_parallel_compilation_set(engineConfig, false);
+        // Mach ports would install a process-wide exception handler thread on macOS.
+        wasmtime_config_macos_use_mach_ports_set(engineConfig, false);
+#ifndef _WIN32
+        // No native unwinder walks through guest frames: Wasmtime finds traps and backtraces through its own
+        // tables and frame pointers, and every host function is noexcept. Unregistered, the code costs no
+        // libgcc frame registration -- a process-wide lock -- per module, and nothing outside Wasmtime reads
+        // the code memory it maps and unmaps. Windows keeps it: its x64 ABI requires the unwind tables.
+        wasmtime_config_native_unwind_info_set(engineConfig, false);
+#endif
+        if (config.memory == MemorySharing::Provided)
+        {
+            // Every memory lives in the object Contour granted for it, reserved whole, never moved, and
+            // followed by exactly the guard the host maps: nothing Wasmtime would size on its own.
+            wasmtime_config_memory_reservation_set(engineConfig,
+                                                   remote::proto::memoryObjectBytes(limits.memoryBytes));
+            wasmtime_config_memory_guard_size_set(engineConfig, memoryGuardBytesOf(config));
+            wasmtime_config_memory_reservation_for_growth_set(engineConfig, 0);
+            wasmtime_config_memory_may_move_set(engineConfig, false);
+            // Data segments are copied into the object, rather than mapped copy-on-write over it.
+            wasmtime_config_memory_init_cow_set(engineConfig, false);
+            provideMemories(engineConfig);
+        }
+        return engineConfig;
+    }
+
+    /// Runs a host function on behalf of the guest: hands its i32 arguments to the IHostContext of the
+    /// calling instance's store. A failure is stashed in the store's data, which is how the call that
+    /// made it tells it apart from a trap of the guest's own.
+    /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
+    /// @return Null on success; a trap if the host function failed.
+    wasm_trap_t* callHostFunction(void* env,
+                                  wasmtime_caller_t* caller,
+                                  wasmtime_val_t const* args,
+                                  std::size_t argCount,
+                                  wasmtime_val_t* /*results*/,
+                                  std::size_t /*resultCount*/) noexcept
+    {
+        auto const& binding = *static_cast<HostBinding const*>(env);
+        auto* const callerContext = wasmtime_caller_context(caller);
+        auto& data = *static_cast<StoreData*>(wasmtime_context_get_data(callerContext));
+        // The linker gave the function binding.parameterCount i32 parameters, which create() capped.
+        auto arguments = std::array<uint32_t, MaxHostParameters> {};
+        auto const values = std::span { args, argCount };
+        std::ranges::transform(values, arguments.begin(), [](wasmtime_val_t const& value) {
+            return static_cast<uint32_t>(value.of.i32);
+        });
+        // A host function call may be nested in another one's call back into the instance: the outer
+        // call's context is the one in force again once this one returns.
+        auto const outerContext = std::exchange(data.callerContext, callerContext);
+        auto const called = data.context.callHost(binding.index, std::span { arguments }.first(argCount));
+        data.callerContext = outerContext;
+        if (called)
+            return nullptr;
+        data.hostFailure = called.error();
+        static constexpr auto Message = std::string_view { "host function failed" };
+        return wasmtime_trap_new(Message.data(), Message.size());
+    }
+
+    /// @return The memory the calling instance exports as "memory", where WASI preview 1 looks for it;
+    ///         empty if it exports none, so that every pointer a WASI function is passed faults.
+    [[nodiscard]] std::span<std::byte> callerMemory(wasmtime_caller_t* caller) noexcept
+    {
+        static constexpr auto Name = std::string_view { "memory" };
+        auto item = wasmtime_extern_t {};
+        if (!wasmtime_caller_export_get(caller, Name.data(), Name.size(), &item)
+            || item.kind != WASMTIME_EXTERN_MEMORY)
+            return {};
+        auto* const context = wasmtime_caller_context(caller);
+        return { reinterpret_cast<std::byte*>(wasmtime_memory_data(context, &item.of.memory)),
+                 wasmtime_memory_data_size(context, &item.of.memory) };
+    }
+
+    /// Runs an allowed WASI function on behalf of the guest, through the host's own implementation
+    /// (wasi/Preview1Shim.hpp), never Wasmtime's: hands it the guest's arguments, memory and the store's
+    /// environment, and returns its errno. proc_exit ends the call as a trap, which the call reports as
+    /// CallFailure::Trap: nothing is stashed in the store's data.
+    /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
+    /// @return Null when the function returned; a trap when it ended the call.
+    wasm_trap_t* callShimFunction(void* env,
+                                  wasmtime_caller_t* caller,
+                                  wasmtime_val_t const* args,
+                                  std::size_t argCount,
+                                  wasmtime_val_t* results,
+                                  std::size_t resultCount) noexcept
+    {
+        auto const& function = *static_cast<wasi::ShimFunction const*>(env);
+        auto const& data =
+            *static_cast<StoreData const*>(wasmtime_context_get_data(wasmtime_caller_context(caller)));
+        // The linker gave the function its preview 1 signature: at most MaxPreview1Parameters, each an i32
+        // or an i64.
+        auto arguments = std::array<uint64_t, wasi::MaxPreview1Parameters> {};
+        std::ranges::transform(
+            std::span { args, argCount }, arguments.begin(), [](wasmtime_val_t const& value) {
+                return value.kind == WASMTIME_I64 ? static_cast<uint64_t>(value.of.i64)
+                                                  : uint64_t { static_cast<uint32_t>(value.of.i32) };
+            });
+        auto const result = function.call(
+            data.wasiEnvironment, callerMemory(caller), std::span { arguments }.first(argCount));
+        if (result.outcome == wasi::ShimOutcome::Exit)
+        {
+            static constexpr auto Message = std::string_view { "proc_exit" };
+            return wasmtime_trap_new(Message.data(), Message.size());
+        }
+        // Every function that returns has one result, its errno.
+        for (auto& value: std::span { results, resultCount })
+        {
+            value.kind = WASMTIME_I32;
+            value.of.i32 = static_cast<int32_t>(result.error);
+        }
+        return nullptr;
+    }
+
+    /// Defines one function on @p linker.
+    /// @return Nothing on success; `RuntimeUnavailable` if Wasmtime refused the definition.
+    [[nodiscard]] std::expected<void, ExtensionError> defineFunction(wasmtime_linker_t* linker,
+                                                                     std::string_view module,
+                                                                     std::string_view name,
+                                                                     FunctionSignature const& signature,
+                                                                     wasmtime_func_callback_t callback,
+                                                                     void* env)
+    {
+        auto const type = functionType(signature);
+        auto const error = detail::ErrorHandle { wasmtime_linker_define_func(linker,
+                                                                             module.data(),
+                                                                             module.size(),
+                                                                             name.data(),
+                                                                             name.size(),
+                                                                             type.get(),
+                                                                             callback,
+                                                                             env,
+                                                                             nullptr) };
+        if (error)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        return {};
+    }
+
+    /// @return A linker on @p engine providing every host function of @p hostBindings and every allowed
+    ///         WASI function; nothing if one cannot be defined.
+    [[nodiscard]] std::optional<detail::LinkerHandle> makeLinker(wasm_engine_t* engine,
+                                                                 std::span<HostBinding> hostBindings)
+    {
+        auto linker = detail::LinkerHandle { wasmtime_linker_new(engine) };
+        if (!linker)
+            return std::nullopt;
+        for (auto& binding: hostBindings)
+        {
+            auto const signature =
+                FunctionSignature { .parameters = std::vector(binding.parameterCount, ValueType::I32),
+                                    .results = {} };
+            if (!defineFunction(
+                    linker.get(), binding.module, binding.name, signature, &callHostFunction, &binding))
+                return std::nullopt;
+        }
+        // Our own WASI, never Wasmtime's (wasmtime_linker_define_wasi), which would bring threads of its own.
+        for (auto const& function: wasi::shimFunctions())
+        {
+            // Wasmtime hands the callback a mutable env; the shim's table is constant, and never written.
+            if (!defineFunction(linker.get(),
+                                WasiModule,
+                                function.preview1.name,
+                                function.preview1.signature(),
+                                &callShimFunction,
+                                const_cast<wasi::ShimFunction*>(&function)))
+                return std::nullopt;
+        }
+        return linker;
+    }
+
+    /// A module of one function that takes and returns nothing, built in: what a thread is primed with.
+    ///
+    ///     (module (func (export "p")))
+    constexpr auto PrimingModule = std::to_array<uint8_t>({
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+        0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x70, 0x00, 0x00, 0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
+    });
+
+    /// The name PrimingModule exports its function under.
+    constexpr auto PrimingExport = std::string_view { "p" };
+
+    /// The stack the priming engine gives a call: one frame of a function that does nothing.
+    constexpr auto PrimingStackBytes = std::size_t { 64 } * 1024;
+
+    /// How many times PrimingModule was compiled, in this process.
+    auto primingCompilationCount = std::atomic<uint64_t> { 0 };
+
+    /// The serial the next engine facade takes; 0 names none.
+    auto nextEngineSerial = std::atomic<uint64_t> { 1 };
+
+    /// The serial of the engine facade whose prepareThread() primed the calling thread last; 0 for none.
+    thread_local auto threadPrimedFor = uint64_t { 0 };
+
+    /// What a thread is primed with: an engine configured as every runtime's engine of a facade is, as to
+    /// how it traps, and PrimingModule compiled on it.
+    struct Priming
+    {
+        detail::EngineHandle engine;
+        detail::ModuleHandle module;
+    };
+
+    /// What this operating system says when memory or address space ran out, as Wasmtime passes it on: the
+    /// error's text, the number Rust's io::Error appends to it -- each system's own, as the same number means
+    /// something else on the other (12 is ERROR_INVALID_ACCESS on Windows; 8 and 14, ENOEXEC and EFAULT on
+    /// POSIX) -- and Wasmtime's own words.
+#ifdef _WIN32
+    constexpr auto ResourceErrorMarkers = std::to_array<std::string_view>({
+        "Not enough memory resources", // ERROR_NOT_ENOUGH_MEMORY
+        "os error 8)",
+        "Not enough storage", // ERROR_OUTOFMEMORY
+        "os error 14)",
+        "paging file is too small", // ERROR_COMMITMENT_LIMIT
+        "os error 1455)",
+        "out of memory",
+    });
+#else
+    constexpr auto ResourceErrorMarkers = std::to_array<std::string_view>({
+        "Cannot allocate memory", // ENOMEM
+        "os error 12)",
+        "out of memory",
+    });
+#endif
+
+    /// Compiles PrimingModule on an engine configured by @p config as to how it traps.
+    /// @return The engine and the module; `OutOfMemory` if compiling it ran out of memory
+    /// (resourceErrorOf()),
+    ///         `RuntimeUnavailable` if either cannot be made otherwise. A null engine is a refused
+    ///         configuration: Wasmtime aborts where it cannot allocate one.
+    [[nodiscard]] std::expected<Priming, ExtensionError> compilePriming(WasmtimeConfig const& config)
+    {
+        // Its own memory: the module has none, and so needs no provision.
+        auto primingConfig = WasmtimeConfig { .trapMode = config.trapMode,
+                                              .wasiEnvironment = config.wasiEnvironment,
+                                              .memory = MemorySharing::Private };
+        auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(
+            primingConfig,
+            RuntimeLimits { .memoryBytes = 0, .stackBytes = PrimingStackBytes, .tableElements = 0 })) };
+        if (!engine)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        auto* module = static_cast<wasmtime_module_t*>(nullptr);
+        auto const error = detail::ErrorHandle { wasmtime_module_new(
+            engine.get(), PrimingModule.data(), PrimingModule.size(), &module) };
+        if (error || module == nullptr)
+            return std::unexpected(detail::extensionErrorOf(error.get()));
+        primingCompilationCount.fetch_add(1);
+        return Priming { .engine = std::move(engine), .module = detail::ModuleHandle { module } };
+    }
+
+    /// Instantiates @p priming's module and calls its function on the calling thread: what the engine does
+    /// the first time a guest runs on a thread, and once in the process.
+    /// @return Nothing once it returned; `OutOfMemory` if instantiating or calling it ran out of memory
+    ///         (resourceErrorOf()); `RuntimeUnavailable` if anything else failed or it trapped.
+    [[nodiscard]] std::expected<void, ExtensionError> runPriming(Priming const& priming)
+    {
+        auto const store = detail::StoreHandle { wasmtime_store_new(priming.engine.get(), nullptr, nullptr) };
+        if (!store)
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        auto* const context = wasmtime_store_context(store.get());
+        // Epoch interruption is on, as on every engine; nothing moves this engine's epoch past one tick.
+        wasmtime_context_set_epoch_deadline(context, 1);
+        auto instance = wasmtime_instance_t {};
+        auto* rawTrap = static_cast<wasm_trap_t*>(nullptr);
+        auto const error = detail::ErrorHandle { wasmtime_instance_new(
+            context, priming.module.get(), nullptr, 0, &instance, &rawTrap) };
+        auto const trap = detail::TrapHandle { rawTrap };
+        if (error || trap)
+            return std::unexpected(detail::extensionErrorOf(error.get()));
+        auto item = wasmtime_extern_t {};
+        if (!wasmtime_instance_export_get(
+                context, &instance, PrimingExport.data(), PrimingExport.size(), &item))
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        if (item.kind != WASMTIME_EXTERN_FUNC)
+        {
+            wasmtime_extern_delete(&item);
+            return std::unexpected(ExtensionError::RuntimeUnavailable);
+        }
+        auto* rawCallTrap = static_cast<wasm_trap_t*>(nullptr);
+        auto const callError = detail::ErrorHandle { wasmtime_func_call(
+            context, &item.of.func, nullptr, 0, nullptr, 0, &rawCallTrap) };
+        auto const callTrap = detail::TrapHandle { rawCallTrap };
+        if (callError || callTrap)
+            return std::unexpected(detail::extensionErrorOf(callError.get()));
+        return {};
+    }
+
+    /// A Wasmtime engine: a facade over the kind's shared state.
+    class WasmtimeEngine final: public host::IHostedEngine
+    {
+      public:
+        WasmtimeEngine(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
+            _kind { std::move(kind) },
+            _config { std::move(config) },
+            _serial { nextEngineSerial.fetch_add(1) }
+        {
+        }
+
+        [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
+            RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
+        {
+            return WasmtimeRuntime::create(_kind, _config, limits, hostFunctions)
+                .transform([](std::shared_ptr<WasmtimeRuntime> runtime) -> std::shared_ptr<IWasmRuntime> {
+                    return runtime;
+                });
+        }
+
+        [[nodiscard]] std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread() override
+        {
+            return _kind->enterThread();
+        }
+
+        [[nodiscard]] bool isCurrentThreadPrepared() const override
+        {
+            return _kind->isCurrentThreadPrepared();
+        }
+
+        [[nodiscard]] uint64_t runtimeGeneration() const noexcept override { return _kind->generation(); }
+
+        [[nodiscard]] BackendCapabilities capabilities() const noexcept override
+        {
+            return BackendCapabilities { .memoryGrowth = MemoryGrowthReporting::Unreported };
+        }
+
+        [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+        {
+            return _config.memory == MemorySharing::Provided ? remote::proto::MemoryMode::Shared
+                                                             : remote::proto::MemoryMode::Copy;
+        }
+
+        [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override
+        {
+            return memoryGuardBytesOf(_config);
+        }
+
+        /// Cranelift compiles each module to native code, which is made executable once written.
+        [[nodiscard]] host::GuestCode guestCode() const noexcept override
+        {
+            return host::GuestCode::Compiled;
+        }
+
+        /// Its guests' standard streams are the shim's, which opens nothing.
+        [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override { return {}; }
+
+        /// Runs PrimingModule on the calling thread, which installs Wasmtime's signal handlers (once in the
+        /// process, under TrapMode::Signals) and the thread's alternate signal stack, both of which Wasmtime
+        /// does lazily, the first time a guest runs. Compiled once per engine, on the first thread primed.
+        [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+        {
+            if (threadPrimedFor == _serial)
+                return {};
+            return priming()
+                .and_then([](Priming const* priming) { return runPriming(*priming); })
+                .transform([this] { threadPrimedFor = _serial; });
+        }
+
+      private:
+        /// @return This engine's priming, compiled by the first call.
+        [[nodiscard]] std::expected<Priming const*, ExtensionError> priming()
+        {
+            auto const lock = std::scoped_lock { _primingMutex };
+            if (!_priming)
+            {
+                auto compiled = compilePriming(_config);
+                if (!compiled)
+                    return std::unexpected(compiled.error());
+                _priming = std::move(*compiled);
+            }
+            return &*_priming;
+        }
+
+        std::shared_ptr<KindState> _kind;
+        WasmtimeConfig _config;
+        uint64_t _serial;                ///< Which engine primed a thread (threadPrimedFor).
+        std::mutex _primingMutex;        ///< Guards _priming.
+        std::optional<Priming> _priming; ///< What threads are primed with; compiled by the first.
+    };
+} // namespace
+
+KindState::KindState() noexcept: _serial { nextSerial.fetch_add(1) }
+{
+}
+
+void KindState::acquireRuntime() noexcept
+{
+    auto const lock = std::scoped_lock { _mutex };
+    if (_liveRuntimes++ == 0)
+        ++_generation;
+}
+
+void KindState::releaseRuntime() noexcept
+{
+    auto const lock = std::scoped_lock { _mutex };
+    --_liveRuntimes;
+}
+
+std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> KindState::enterThread()
+{
+    auto const lock = std::scoped_lock { _mutex };
+    if (_liveRuntimes == 0)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    auto const current = _generation.load();
+    if (threadStamp.kind == _serial && threadStamp.generation == current)
+        return std::make_unique<ThreadGuard>(*this, current, GuardRole::Nested);
+    threadStamp = ThreadStamp { .kind = _serial, .generation = current };
+    return std::make_unique<ThreadGuard>(*this, current, GuardRole::Outermost);
+}
+
+bool KindState::isCurrentThreadPrepared() const noexcept
+{
+    return threadStamp.kind == _serial && threadStamp.generation != 0
+           && threadStamp.generation == _generation.load();
+}
+
+uint64_t KindState::preparedGeneration() noexcept
+{
+    return threadStamp.generation;
+}
+
+std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> WasmtimeRuntime::create(
+    std::shared_ptr<KindState> kind,
+    WasmtimeConfig config,
+    RuntimeLimits limits,
+    std::span<HostFunction const> hostFunctions)
+{
+    // Wasmtime aborts the process, rather than failing, on an engine with no stack at all. A table cap
+    // above the interface's maximum is one the WAMR backend cannot keep, and so no backend accepts.
+    if (limits.stackBytes == 0 || limits.tableElements > MaxTableElements)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    // wasm_engine_new_with_config takes the configuration over.
+    auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(config, limits)) };
+    if (!engine)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    // The host function trampoline reads the arguments into an array of MaxHostParameters.
+    if (std::ranges::any_of(hostFunctions, [](HostFunction const& function) {
+            return function.parameterCount > MaxHostParameters;
+        }))
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    auto hostBindings = std::vector<HostBinding> {};
+    hostBindings.reserve(hostFunctions.size());
+    for (auto const [index, function]: core::views::enumerate(hostFunctions))
+        hostBindings.push_back(HostBinding { .module = std::string { function.module },
+                                             .name = std::string { function.name },
+                                             .index = static_cast<std::size_t>(index),
+                                             .parameterCount = function.parameterCount });
+    // The linker's callbacks point into hostBindings' buffer, which moving the vector keeps.
+    auto linker = makeLinker(engine.get(), hostBindings);
+    if (!linker)
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    return std::make_shared<WasmtimeRuntime>(std::move(kind),
+                                             limits,
+                                             std::move(config.wasiEnvironment),
+                                             std::move(engine),
+                                             std::move(hostBindings),
+                                             std::move(*linker));
+}
+
+WasmtimeRuntime::WasmtimeRuntime(std::shared_ptr<KindState> kind,
+                                 RuntimeLimits limits,
+                                 wasi::ShimEnvironment wasiEnvironment,
+                                 detail::EngineHandle engine,
+                                 std::vector<HostBinding> hostBindings,
+                                 detail::LinkerHandle linker) noexcept:
+    _kind { std::move(kind) },
+    _limits { limits },
+    _wasiEnvironment { std::move(wasiEnvironment) },
+    _engine { std::move(engine) },
+    _hostBindings { std::move(hostBindings) },
+    _linker { std::move(linker) }
+{
+    _kind->acquireRuntime();
+}
+
+WasmtimeRuntime::~WasmtimeRuntime()
+{
+    // The engine goes before the runtime stops counting alive, so that no bring-up overlaps it.
+    _linker.reset();
+    _engine.reset();
+    _kind->releaseRuntime();
+}
+
+std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WasmtimeRuntime::load(
+    ModuleIdentity /*identity*/, std::vector<std::byte> bytes)
+{
+    return loadModule(shared_from_this(), _engine.get(), bytes);
+}
+
+std::shared_ptr<KindState> makeKindState()
+{
+    return std::make_shared<KindState>();
+}
+
+std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
+                                                        WasmtimeConfig config)
+{
+    return std::make_unique<WasmtimeEngine>(std::move(kind), std::move(config));
+}
+
+ExtensionError detail::extensionErrorOf(wasmtime_error const* error)
+{
+    if (error == nullptr)
+        return ExtensionError::RuntimeUnavailable;
+    auto message = wasm_name_t {};
+    wasmtime_error_message(error, &message);
+    auto const kind = resourceErrorOf(std::string_view { message.data, message.size });
+    wasm_byte_vec_delete(&message);
+    return kind;
+}
+
+ExtensionError resourceErrorOf(std::string_view message) noexcept
+{
+    return std::ranges::any_of(ResourceErrorMarkers,
+                               [message](std::string_view marker) { return message.contains(marker); })
+               ? ExtensionError::OutOfMemory
+               : ExtensionError::RuntimeUnavailable;
+}
+
+} // namespace vtextension::wasm::wasmtime
+
+namespace vtextension::wasm::wasmtime::testing
+{
+
+uint64_t primingCompilations() noexcept
+{
+    return primingCompilationCount.load();
+}
+
+} // namespace vtextension::wasm::wasmtime::testing

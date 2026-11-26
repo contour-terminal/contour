@@ -5,11 +5,14 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <tuple>
 #include <utility>
 
 #include <wasm_export.h>
+
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 
 namespace vtextension::wasm::wamr
 {
@@ -52,6 +55,14 @@ namespace
         return ownership.holders > 0 && currentGeneration.load() == generation && body();
     }
 
+    /// What preparing a thread's environment came to.
+    enum class ThreadEnvInit : uint8_t
+    {
+        RuntimeDown, ///< No runtime of the generation asked for was up.
+        Refused,     ///< WAMR could not make the environment.
+        Ready,       ///< The environment is there.
+    };
+
     /// Whether the calling thread is the one that brought the running runtime up.
     [[nodiscard]] bool isInitializingThread()
     {
@@ -71,13 +82,8 @@ std::expected<void, ExtensionError> acquireRuntime()
     // The system allocator and the interpreter, the build's only running mode. Only the first call
     // initializes; later ones join the running runtime. WAMR reference-counts this pair with
     // wasm_runtime_destroy() under its own lock.
-    if (!wasm_runtime_init())
+    if (auto const changing = detail::changingWamrGlobals(); !wasm_runtime_init())
         return std::unexpected(ExtensionError::RuntimeUnavailable);
-
-    // WAMR logs to stdout, which is not ours to write to. Errors that matter reach the caller through
-    // error buffers and exceptions; the warnings are noise, among them one on every load of a
-    // wit-bindgen cdylib, which is neither a WASI command nor a reactor.
-    wasm_runtime_set_log_level(WASM_LOG_LEVEL_ERROR);
 
     auto& ownership = runtimeOwnership();
     auto const lock = std::scoped_lock { ownership.mutex };
@@ -85,6 +91,12 @@ std::expected<void, ExtensionError> acquireRuntime()
     {
         ownership.initializingThread = std::this_thread::get_id();
         currentGeneration.fetch_add(1);
+        // WAMR logs to stdout, which is not ours to write to. Errors that matter reach the caller through
+        // error buffers and exceptions; the warnings are noise, among them one on every load of a
+        // wit-bindgen cdylib, which is neither a WASI command nor a reactor. Set once per bring-up, under
+        // this lock, which every later holder takes before it runs anything that logs: WAMR reads the level
+        // unlocked.
+        wasm_runtime_set_log_level(WASM_LOG_LEVEL_ERROR);
     }
     return {};
 }
@@ -97,6 +109,7 @@ void releaseRuntime() noexcept
         if (--ownership.holders == 0)
             ownership.initializingThread = {};
     }
+    auto const changing = detail::changingWamrGlobals();
     wasm_runtime_destroy();
 }
 
@@ -120,8 +133,19 @@ std::expected<ThreadEnv, ExtensionError> ThreadEnv::enter()
     }
     // With no runtime up there is nothing to prepare the thread for, and on Windows WAMR would keep the
     // thread's state in a thread-local slot the runtime does not hold: its key is freed, or never was.
-    if (!whileRuntimeUp(generation, [] { return wasm_runtime_init_thread_env(); }))
-        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    auto initialized = ThreadEnvInit::RuntimeDown;
+    std::ignore = whileRuntimeUp(generation, [&initialized] {
+        initialized = wasm_runtime_init_thread_env() ? ThreadEnvInit::Ready : ThreadEnvInit::Refused;
+        return true;
+    });
+    switch (initialized)
+    {
+        case ThreadEnvInit::RuntimeDown: return std::unexpected(ExtensionError::RuntimeUnavailable);
+        // All a thread's environment can fail at is allocating it: its record and the semaphore, mutex and
+        // condition WAMR makes for it on Windows (os_thread_env_init); on POSIX nothing fails.
+        case ThreadEnvInit::Refused: return std::unexpected(ExtensionError::OutOfMemory);
+        case ThreadEnvInit::Ready: break;
+    }
     ++threadEnvDepth;
     threadEnvGeneration = generation;
     return ThreadEnv { Hold::Owned, generation };

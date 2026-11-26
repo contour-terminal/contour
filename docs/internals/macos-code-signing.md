@@ -191,7 +191,8 @@ not guarantee that nested code is sealed before its container — so the outer s
 up covering a signature that was replaced afterwards. `macos-bundle.py sign` walks the
 bundle deepest-first instead: loadable dylibs in `Frameworks/`, `PlugIns/` and
 `Resources/qml/`, then each framework's versioned directory, then helper executables, then
-the main executable, then the bundle. Only the outermost signature carries entitlements.
+the main executable, then the bundle. The outermost signature carries the app's
+entitlements; of the nested code, only what `NESTED_ENTITLEMENTS` names carries its own.
 
 `--deep` *is* right for verification, where it means "check every nested signature too":
 
@@ -212,6 +213,22 @@ AMFIUnserializeXML: syntax error` — so the reasoning lives here:
   Everything Contour bundles is re-signed with the same Team ID, which library validation
   already permits, so this is a candidate for removal; verify a notarized build launches
   and loads its plugins before dropping it.
+
+[`support/macOS/contour-extension-host.entitlements`](https://github.com/contour-terminal/contour/blob/master/support/macOS/contour-extension-host.entitlements)
+is applied to `Contents/Helpers/contour-extension-host` only, and only when the extension host runs on a
+compiling engine (Wasmtime). It is signed with the hardened runtime before the bundle, by the engine the
+build runs it on (`NESTED_ENTITLEMENTS` in `macos-bundle.py`, which the install step passes
+`--helper-engine` from `CONTOUR_WASM_RUNTIME`):
+
+- `com.apple.security.cs.allow-unsigned-executable-memory` — an extension host on a compiling engine
+  compiles extensions to native code and makes it executable, which the hardened runtime otherwise
+  refuses. An extension host on an interpreting engine (WAMR, which a build without Wasmtime ships) makes
+  no memory executable, so it is signed with the hardened runtime and no entitlement at all. Contour itself
+  never gets this: extensions it runs in its own process are interpreted. The helper runs inside its
+  sandbox profile, which allows no file, network, process or Mach service.
+
+`macos-bundle.py --self-test` checks the signing commands against a stand-in bundle; it is a
+`lint` ctest, so it runs on every platform.
 
 ## Inspecting a signature
 

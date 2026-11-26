@@ -34,7 +34,7 @@ TEST_CASE("ExtensionWorkerPool.workerCount", "[vtextension]")
 
 TEST_CASE("ExtensionWorkerPool.lazy", "[vtextension][threading]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto pool = ExtensionWorkerPool(*backend, 2);
     CHECK(pool.runningWorkers() == 0);
     [[maybe_unused]] auto const lane = pool.assignLane();
@@ -44,7 +44,7 @@ TEST_CASE("ExtensionWorkerPool.lazy", "[vtextension][threading]")
 TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
 {
     // A lane is prepared for the runtime an engine keeps up, as a runner's engine does while its jobs run.
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto const engine = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
     auto pool = ExtensionWorkerPool(*backend, 2);
@@ -76,7 +76,7 @@ TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
 
 TEST_CASE("ExtensionWorkerPool.timers", "[vtextension][threading]")
 {
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto pool = ExtensionWorkerPool(*backend, 1);
     auto const lane = pool.assignLane();
     auto mutex = std::mutex {};
@@ -103,7 +103,7 @@ TEST_CASE("ExtensionWorkerPool.scheduleWhileWaiting", "[vtextension][threading]"
     // The worker sleeps towards its earliest timer while another thread schedules more: scheduling may move
     // the timers in memory, and the worker must not be left holding on to where the earliest one was
     // (ASan checks that it is not).
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto pool = ExtensionWorkerPool(*backend, 1);
     auto const lane = pool.assignLane();
     auto timers = std::vector<TimerId> {};
@@ -129,7 +129,7 @@ TEST_CASE("ExtensionWorkerPool.destructionRunsPostedJobs", "[vtextension][thread
     auto ran = std::vector<int> {};
     auto timerRan = false;
     auto blocker = std::promise<void> {};
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     {
         auto pool = ExtensionWorkerPool(*backend, 1);
         auto const lane = pool.assignLane();
@@ -149,7 +149,7 @@ TEST_CASE("ExtensionWorkerPool.reprepareForNewRuntime", "[vtextension][threading
 {
     // A lane prepared for one runtime is prepared again once the last engine went and a new one brought
     // the runtime up anew: on Windows the old preparation would have no state under the new runtime.
-    auto const backend = wasm::makeDefaultBackend();
+    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
     auto pool = ExtensionWorkerPool(*backend, 1);
     auto const lane = pool.assignLane();
 

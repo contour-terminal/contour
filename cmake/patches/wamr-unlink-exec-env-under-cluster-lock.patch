@@ -1,0 +1,25 @@
+diff --git a/core/iwasm/libraries/thread-mgr/thread_manager.c b/core/iwasm/libraries/thread-mgr/thread_manager.c
+index 8f3a6317..d3e2f4a5 100644
+--- a/core/iwasm/libraries/thread-mgr/thread_manager.c
++++ b/core/iwasm/libraries/thread-mgr/thread_manager.c
+@@ -424,11 +424,19 @@ wasm_cluster_del_exec_env_internal(WASMCluster *cluster, WASMExecEnv *exec_env,
+         os_mutex_unlock(&cluster->debug_inst->wait_lock);
+     }
+ #endif
++    /* The caller that may destroy the cluster (wasm_exec_env_destroy) holds
++       no lock, while wasm_clusters_search_exec_env walks this list under
++       cluster->lock from any thread: unlink under it. */
++    if (can_destroy_cluster)
++        os_mutex_lock(&cluster->lock);
+     if (bh_list_remove(&cluster->exec_env_list, exec_env) != 0)
+         ret = false;
++    bool emptied = cluster->exec_env_list.len == 0;
++    if (can_destroy_cluster)
++        os_mutex_unlock(&cluster->lock);
+ 
+     if (can_destroy_cluster) {
+-        if (cluster->exec_env_list.len == 0) {
++        if (emptied) {
+             /* exec_env_list empty, destroy the cluster */
+             wasm_cluster_destroy(cluster);
+         }

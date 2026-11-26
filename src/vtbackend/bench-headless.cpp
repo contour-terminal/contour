@@ -1545,7 +1545,7 @@ class ExtensionRig
                 .config = _config,
                 .placement = index == 0 ? vtextension::Placement::TakeOver : vtextension::Placement::Segment,
                 .runCommand = vtextension::CommandPermission::Deny });
-        return vtextension::prepareExtensions(std::move(config), _engines.acquire());
+        return vtextension::prepareExtensions(std::move(config), _engines.acquire(), nullptr);
     }
 
     /// @param published Where the terminal hears of a published frame.
@@ -1578,7 +1578,8 @@ class ExtensionRig
     NoGrants _grants;
     NoCommands _commands;
     /// What the engines are created from and the lanes prepared with; outlives both.
-    std::unique_ptr<vtextension::wasm::IWasmBackend> _backend = vtextension::wasm::makeDefaultBackend();
+    std::unique_ptr<vtextension::wasm::IWasmBackend> _backend =
+        vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
     vtextension::EngineProvider _engines { *_backend, rigLimits() };
     /// Last: destroyed first, running each runner's last job before what those jobs reach goes.
     vtextension::ExtensionWorkerPool _pool {

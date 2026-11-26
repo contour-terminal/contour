@@ -118,10 +118,20 @@ export LINUXDEPLOY_OUTPUT_VERSION="$VERSION_STRING"
 LIBSTDCXX="$("$CXX" -print-file-name=libstdc++.so.6)"
 LIBGCC="$("$CXX" -print-file-name=libgcc_s.so.1)"
 
+# The extension host, a private executable beside the main one (usr/libexec/contour), gets its RUNPATH to the
+# bundled libraries -- libstdc++ above all -- only when linuxdeploy is told of it. --deploy-deps-only patches it
+# where it lies, which is where contour looks for it; --executable would patch a copy in usr/bin instead.
+EXTENSION_HOST="$APPDIR/usr/libexec/contour/contour-extension-host"
+EXTENSION_HOST_DEPLOY=()
+if [[ -x "$EXTENSION_HOST" ]]; then
+    EXTENSION_HOST_DEPLOY=(--deploy-deps-only "$EXTENSION_HOST")
+fi
+
 (
     cd "$BUILD_DIR"
     linuxdeploy-x86_64.AppImage \
         --appdir "$APPDIR" \
+        "${EXTENSION_HOST_DEPLOY[@]}" \
         --desktop-file "$APPDIR/usr/share/applications/$APP_ID.desktop" \
         --icon-file "$APPDIR/usr/share/icons/hicolor/512x512/apps/$APP_ID.png" \
         --library "$(realpath "$LIBSTDCXX")" \

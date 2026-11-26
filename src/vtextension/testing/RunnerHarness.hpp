@@ -55,7 +55,7 @@ struct LoadedModule
 {
     auto engine = Engine::create(backend, limits);
     REQUIRE(engine.has_value());
-    auto compiled = CompiledExtension::load(**engine, std::move(bytes));
+    auto compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(bytes), nullptr);
     REQUIRE(compiled.has_value());
     return LoadedModule { .engine = std::move(*engine), .compiled = std::move(*compiled) };
 }
@@ -176,6 +176,9 @@ class RunnerHarness
   public:
     RunnerHarness() = default;
 
+    /// @param engines What the harness's engines are created from, in place of the default backend.
+    explicit RunnerHarness(std::unique_ptr<wasm::IWasmBackend> engines): backend { std::move(engines) } {}
+
     /// @return The services, for a Runner or an ExtensionHost built on this harness.
     [[nodiscard]] RunnerServices services() { return services(scheduler); }
 
@@ -220,8 +223,8 @@ class RunnerHarness
     }
 
     /// What the harness's engines are created from. First: it outlives every engine its tests retire here.
-    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend();
-    ManualScheduler scheduler;
+    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+    ManualScheduler scheduler { *backend };
     RetirementCollector retirement;
     InMemoryGrantStore grants;
     RecordingCommandCapture capture;

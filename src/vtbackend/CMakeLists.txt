@@ -568,8 +568,10 @@ if(LIBTERMINAL_TESTING)
         if(CONTOUR_EXTENSIONS)
             # `throughput extensions LIST` runs status-line extensions beside the measured terminal. The tool
             # links them; the vtbackend library does not.
-            # A composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()).
+            # A composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()), and runs its
+            # extensions where installed programs do, out of process where the build says so.
             target_link_libraries(bench-headless vtextension vtextension_runtime)
+            contour_place_extension_host_beside(bench-headless)
         endif()
 
         # A short run of throughput, snapshot, keypress and pty each, so that a crash like the one

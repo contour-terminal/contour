@@ -100,6 +100,7 @@
     #include <vtextension/BundledExtensions.hpp>
     #include <vtextension/ExtensionConsent.hpp>
     #include <vtextension/SessionExtensions.hpp>
+    #include <vtextension/wasm/BackendConfig.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/client/DaemonGrantReplies.hpp>
@@ -723,10 +724,14 @@ vtextension::ExtensionRuntime& ContourGuiApp::extensionRuntime()
     if (!_extensionRuntime)
     {
         if (!_extensionBackend)
-            _extensionBackend = { vtextension::wasm::makeDefaultBackend().release(),
+        {
+            // How the extensions' host processes are started: the one place the GUI configures it.
+            auto backendConfig = vtextension::wasm::BackendConfig {};
+            _extensionBackend = { vtextension::wasm::makeDefaultBackend(std::move(backendConfig)).release(),
                                   [](vtextension::wasm::IWasmBackend* made) {
                                       std::default_delete<vtextension::wasm::IWasmBackend> {}(made);
                                   } };
+        }
         auto const executableDirectory =
             std::filesystem::path { QCoreApplication::applicationDirPath().toStdU16String() };
         auto runtime = std::make_unique<vtextension::ExtensionRuntime>(
@@ -2852,6 +2857,13 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anc
 
 void ContourGuiApp::onConfigurationReloaded()
 {
+#ifdef CONTOUR_EXTENSIONS
+    // Every extension's breaker closes: a pane built or reconfigured from here on may start an extension
+    // whose host kept dying again. A pane whose runner disabled that extension already stays disabled, as a
+    // reload that leaves its declared extensions unchanged does not rebuild it.
+    if (auto* const runtime = startedExtensionRuntime())
+        runtime->configurationReloaded();
+#endif
     refreshChromeStyle();
     // Every link states the reloaded session settings to its daemon, not only the launch's.
     for (auto const& link: _daemonLinks)

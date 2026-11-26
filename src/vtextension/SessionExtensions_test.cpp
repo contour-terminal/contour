@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/async/testing/ManualExecutor.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <filesystem>
@@ -14,9 +16,11 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/SessionExtensions.hpp>
+#include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/QueuedOwner.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
 #include <vtextension/testing/TestModules.hpp>
@@ -33,6 +37,7 @@ using vtextension::ReplaceableStatusLineExtensions;
 using vtextension::SessionExtensionCallbacks;
 using vtextension::SessionExtensions;
 using vtextension::SessionExtensionServices;
+using vtextension::testing::FakeWasmBackend;
 using vtextension::testing::QueuedOwner;
 using vtextension::testing::RunnerHarness;
 
@@ -55,9 +60,18 @@ namespace
 /// in-memory filesystem the test fills.
 struct Fixture
 {
+    Fixture() = default;
+
+    /// @param backend What the engines are created from, in place of the default backend.
+    explicit Fixture(std::unique_ptr<vtextension::wasm::IWasmBackend> backend): harness { std::move(backend) }
+    {
+    }
+
     RunnerHarness harness;
     vtextension::ExtensionLimits limits {}; ///< What the engines are created with, and each extension costs.
     vtextension::EngineProvider engines { *harness.backend, limits };
+    core::platform::ManualClock clock {};
+    vtextension::ExtensionRegistry registry { clock, limits };
     core::async::testing::ManualExecutor builds;
     core::platform::testing::InMemoryFileSystem fileSystem;
     std::shared_ptr<QueuedOwner> owner = std::make_shared<QueuedOwner>();
@@ -67,6 +81,7 @@ struct Fixture
     {
         return { .engines = engines,
                  .retirement = engines,
+                 .registry = registry,
                  .scheduler = harness.scheduler,
                  .builds = builds,
                  .grants = harness.grants,
@@ -122,8 +137,8 @@ struct Fixture
                                                 .placement = placement,
                                                 .runCommand = vtextension::CommandPermission::Deny });
     return std::make_shared<HostedExtensions>(
-        vtextension::prepareExtensions(std::move(config),
-                                       std::unexpected(vtextension::ExtensionError::ModuleUnavailable)),
+        vtextension::prepareExtensions(
+            std::move(config), std::unexpected(vtextension::ExtensionError::ModuleUnavailable), nullptr),
         vtextension::ExtensionHostServices {
             .engines = fixture.engines,
             .runners = fixture.harness.services(fixture.harness.scheduler, fixture.engines) });
@@ -226,6 +241,44 @@ TEST_CASE("SessionExtensions: built off the owner's thread, then swapped in", "[
         }
     }
     fixture.settle();
+}
+
+TEST_CASE("status-line load never runs on the owner thread", "[vtextension][extensions]")
+{
+    // A load or an instantiation may take as long as its host's budget: the owner (the GUI thread) only
+    // asks for the build and takes its result. Here the builds run on one thread and the runners' lanes on
+    // another, the owner being the test's own.
+    auto ownedBackend = std::make_unique<FakeWasmBackend>();
+    auto const& fake = *ownedBackend;
+    auto fixture = Fixture { std::move(ownedBackend) };
+    REQUIRE(fixture.fileSystem.writeFile(modulePath(), minimalModule()).has_value());
+    REQUIRE(fixture.fileSystem.writeFile("/ext/second.wasm", minimalModule()).has_value());
+    auto const owner = std::this_thread::get_id();
+    {
+        auto extensions = SessionExtensions { fixture.callbacks(), fixture.owner };
+        auto declared = declaring("clock", modulePath());
+        declared.extensions.push_back(
+            vtextension::DeclaredExtension { .name = "second",
+                                             .path = "/ext/second.wasm",
+                                             .config = {},
+                                             .runCommand = vtextension::CommandPermission::Deny });
+        extensions.rebuild(std::move(declared), {}, fixture.services());
+        CHECK(fake.loadThreads().empty());
+
+        std::jthread { [&] { fixture.builds.drain(); } }.join();
+        fixture.owner->run();
+        CHECK(fixture.replaced == 1);
+        std::jthread { [&] { fixture.harness.scheduler.runPending(); } }.join();
+
+        auto const onOwner = [owner](std::thread::id thread) {
+            return thread == owner;
+        };
+        CHECK_FALSE(fake.loadThreads().empty());
+        CHECK_FALSE(fake.instantiateThreads().empty());
+        CHECK(std::ranges::none_of(fake.loadThreads(), onOwner));
+        CHECK(std::ranges::none_of(fake.instantiateThreads(), onOwner));
+    }
+    std::jthread { [&] { fixture.settle(); } }.join();
 }
 
 TEST_CASE("SessionExtensions: a module larger than the limit is not read", "[vtextension][extensions]")
