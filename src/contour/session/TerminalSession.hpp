@@ -1524,7 +1524,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
     void extensionFramePublished() override;
+    /// The screen changed for another reason than a batch of output (a vi motion, a mark, a preedit), on
+    /// whichever thread changed it: notes no output, but for a mirror, whose every frame is its host's
+    /// output.
     void screenUpdated() override;
+    /// The parser applied a batch of output, on the parser thread: noted as output for the tab badge when it
+    /// moved the page's count (@ref _notedMainDisplayOutput), then as screenUpdated().
+    void screenWritten() override;
     /// A kitty animation frame advanced: raised by Terminal::tick() on the render thread, with no lock held.
     /// Only asks for a redraw -- a frame is not output, and none of what screenUpdated() does for output
     /// (input echo, activity, scrollbar marks) applies.
@@ -2461,6 +2467,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// What a changed screen does to the display: the part of screenUpdated() and screenReplayed() that
     /// needs one.
     void repaintChangedScreen();
+    /// What any change of the screen asks besides the tab badge: the link pill placed again, the
+    /// interruption offer looked at, the display repainted. The part screenUpdated() and screenWritten()
+    /// share.
+    void followScreenChange();
+    /// @return Where what the parser just read came from: a tmux pane's capture-pane refill is a resync.
+    [[nodiscard]] window::OutputOrigin parsedOutputOrigin() const;
 
     /// Handles every block event gathered since the last call, in the order they were raised: each finish,
     /// then what the changes ask -- the hovered block's tooltip re-read, a `clear_on: next` notice
@@ -3178,9 +3190,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
     /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingOutputOrigins = 0;
-    /// The terminal's mainDisplayOutputCount() when screenUpdated() last looked: a batch that leaves it where
-    /// it was wrote to a status line alone, and raises no unseen-output mark. Parser thread only.
-    uint64_t _notedMainDisplayOutput = 0;
+    /// The terminal's mainDisplayOutputCount() when screenWritten() last looked: a batch that leaves it where
+    /// it was wrote to a status line alone, and raises no unseen-output mark. Exchanged by screenWritten()
+    /// alone, on the parser thread; atomic all the same, as a test may write from a thread of its own.
+    std::atomic<uint64_t> _notedMainDisplayOutput = 0;
     /// The origins of the bells gathered for the queued bell notice, like @ref _pendingOutputOrigins
     /// (@see noteBellForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingBellOrigins = 0;

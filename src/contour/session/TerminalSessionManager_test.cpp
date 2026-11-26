@@ -1054,6 +1054,25 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
         CHECK(badgeAt(*window, 0) == TabBadgeKind::Working);
     }
 
+    SECTION(
+        "only the parser's batch notes output: an update raised meanwhile on the GUI thread marks nothing")
+    {
+        // The parser moved the page's count in a batch whose notice is still to come (synchronized output
+        // holds it here), when an update of another kind -- a status line's refresh on the GUI thread --
+        // reaches the session: it notes nothing; the batch's own notice does.
+        background->terminal().writeToScreen("\033[?2026h");
+        background->terminal().writeToScreen("x");
+        background->screenUpdated();
+        drainPosted();
+        CHECK(manager.attentionOf(background->modelSessionId()).activity
+              == contour::window::TabActivity::None);
+
+        background->terminal().writeToScreen("\033[?2026l");
+        drainPosted();
+        CHECK(manager.attentionOf(background->modelSessionId()).activity
+              == contour::window::TabActivity::UnseenOutput);
+    }
+
     SECTION("a minimised window's active tab is not seen")
     {
         window.osWindow->setWindowStates(Qt::WindowMinimized);
