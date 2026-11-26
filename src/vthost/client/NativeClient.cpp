@@ -616,6 +616,12 @@ RemoteScreen& NativeClient::screenFor(uint64_t session)
     return _screens.try_emplace(session, _historyKeep, _blockLimits).first->second;
 }
 
+void NativeClient::forgetScreens() noexcept
+{
+    _screens.clear();
+    _pendingImages.clear();
+}
+
 void NativeClient::forgetUnlaidScreens()
 {
     std::erase_if(_screens, [this](auto const& entry) {

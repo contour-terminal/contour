@@ -81,8 +81,7 @@ class WindowSwitcher final: public SwitchingService
     /// @param picker Shows the switcher popup for a pick.
     /// @param deadline How long a switch waits for its target to show, and what tells it the time is up.
     /// @param random Draws the creation token of a new workspace an adopted observer is promoted to.
-    /// Borrowed;
-    ///        it must outlive the switcher.
+    ///        Borrowed; it must outlive the switcher.
     WindowSwitcher(session::TerminalSessionManager& sessions,
                    ISwitchHost& host,
                    IObserverPool& pool,

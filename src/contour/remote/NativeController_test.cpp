@@ -295,6 +295,12 @@ struct RefusingFactory final: contour::session::SessionFactory
 
 } // namespace
 
+// The blocking look at what a connection holds is the tests' alone (NativeControllerTestAccess): a production
+// caller on the GUI thread would stall it, one on the reactor thread would deadlock.
+template <typename Controller>
+concept CountsHeldScreens = requires(Controller& controller) { controller.heldScreenCount(); };
+static_assert(!CountsHeldScreens<contour::remote::NativeController>);
+
 TEST_CASE("attach controller signs in by key to a keys-only daemon", "[attach][controller][keyauth]")
 {
     // The path `contour client` and a saved tls host take: a transport that makes the key source, a
@@ -7906,6 +7912,45 @@ TEST_CASE("withdrawing a promotion in flight leaves an observer", "[attach][cont
     CHECK(interactive->dials() == 0);
     CHECK(observer->dials() == 2);
     CHECK(daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 1);
+}
+
+// Final review M2 (case 1): the daemon made a workspace for a withdrawn promotion, and the connection dropped
+// before its answer was read.
+TEST_CASE("a withdrawn promotion to a new workspace whose answer was lost is withdrawn on the reconnect",
+          "[attach][controller][observer][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto const workspaceCount = [&daemon] {
+        return daemon.onDaemon([&daemon] { return daemon.host->model().workspaceCount(); });
+    };
+    REQUIRE(workspaceCount() == 1);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    // The daemon makes the workspace and promotes the connection; its answer is held, and lost with it.
+    daemon.holdEverything();
+    REQUIRE(controller.promote(daemon.promotionOf(0, WindowArea, WindowCell), interactive, [](auto const&) {})
+                .has_value());
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->model().workspaceCount() == 2; }));
+    controller.withdrawPromotion();
+    daemon.dropConnections();
+    daemon.releaseHeld();
+
+    // The reconnect asks it again, by its token -- the daemon selects what it made -- and withdraws the
+    // answer: the workspace nobody shows is closed.
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 2000));
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->model().workspaceCount() == 1; }));
+    CHECK(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->connectedObservers() == 1 && daemon.host->connectedClients() == 0; }));
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(interactive->dials() == 0);
 }
 
 TEST_CASE("withdrawing with no promotion does nothing", "[attach][controller][observer]")

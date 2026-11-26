@@ -265,7 +265,7 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     void jumpTo(SidebarTarget target, JumpMode mode) override
     {
-        jumpThen(std::move(target), mode, HistoryCause::Jump, {});
+        jumpThen(target, mode, HistoryCause::Jump, {});
     }
 
     /// Jumps to @p target as jumpTo() does, for @p cause, then runs @p then once it landed
@@ -3799,9 +3799,9 @@ std::optional<SidebarTarget> WindowController::nextAttentionTarget() const
     if (!current)
     {
         auto const* const active = activeSession();
-        auto const from = _pendingJump        ? std::optional { _pendingJump->pane }
-                          : active != nullptr ? std::optional { _manager.paneKeyOf(active->modelSessionId()) }
-                                              : std::nullopt;
+        auto from = _pendingJump ? std::optional { _pendingJump->pane } : std::nullopt;
+        if (!from && active != nullptr)
+            from = _manager.paneKeyOf(active->modelSessionId());
         if (from)
             current = ownPlaceOfPane(*from);
     }
@@ -3814,8 +3814,8 @@ void WindowController::jumpBack()
     auto const entry = _history.back(_sidebarHost->currentPlace(), placeStillThere());
     if (!entry)
     {
-        _noticeAnnouncer->announce(
-            QString::fromUtf8(NowhereToGoBack.data(), static_cast<qsizetype>(NowhereToGoBack.size())));
+        // Shown as well as said: a press that does nothing visible otherwise looks like a broken key.
+        _notices.post(nowhereToGoBackNotice());
         return;
     }
     auto const own = _sidebarHost->ownDaemon();
@@ -4013,7 +4013,7 @@ void WindowController::navigateToPane(PaneKey target, std::optional<PendingLandi
 {
     // A jump whose workspace is being selected already: a pane of the same one waits for that selection.
     // Asking it again would end the first request, whose failure ends the jump that waits now.
-    auto const selecting = _pendingJump ? std::optional { _pendingJump->workspace } : std::nullopt;
+    auto const selecting = selectingWorkspace();
     // Navigating supersedes what waited for an earlier look.
     cancelPendingNavigation();
     if (_directorySource == nullptr)
@@ -4027,9 +4027,29 @@ void WindowController::navigateToPane(PaneKey target, std::optional<PendingLandi
     // nowhere to go back from.
     _pendingJump = PendingJump { .pane = target, .workspace = holder, .landing = std::move(landing) };
     if (directory.selected == holder)
+    {
+        // The window stays where the newer navigation is: a switch an earlier one asked for is given up.
+        if (selecting && *selecting != holder)
+            std::ignore = selectForPending(holder);
         completePendingJump();
-    else if (selecting != holder && _directorySource->select(holder) == SelectResult::Refused)
+    }
+    else if (selecting != holder && selectForPending(holder) == SelectResult::Refused)
         _pendingJump.reset();
+}
+
+std::optional<uint64_t> WindowController::selectingWorkspace() const noexcept
+{
+    if (_pendingJump)
+        return _pendingJump->workspace;
+    if (_pendingRowAction)
+        return _pendingRowAction->workspace;
+    return std::nullopt;
+}
+
+SelectResult WindowController::selectForPending(uint64_t workspace)
+{
+    _navigationSerial = NavigationSerial { _navigationSerial.value + 1 };
+    return _directorySource->select(workspace);
 }
 
 void WindowController::followIntoNewWorkspace(PaneKey pane, WorkspaceDirectory const& asked)
@@ -4123,6 +4143,12 @@ void WindowController::cancelPendingJump() noexcept
 {
     _pendingJump.reset();
     _pendingRowAction.reset();
+}
+
+void WindowController::cancelPendingJumpOf(NavigationSerial navigation) noexcept
+{
+    if (navigation == _navigationSerial)
+        cancelPendingJump();
 }
 
 void WindowController::markActivePaneSeen()
@@ -4273,16 +4299,26 @@ void WindowController::goToSidebarPane()
 
 SelectResult WindowController::afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run)
 {
+    // The newer navigation wins: a jump or an action of the window's own still waiting for its workspace is
+    // given up.
+    auto const selecting = selectingWorkspace();
+    _pendingJump.reset();
     _pendingRowAction.reset();
     if (_directorySource == nullptr)
         return SelectResult::Refused;
     auto const shown = _directorySource->directory().selected == workspace;
-    if (shown && run() == RowActionOutcome::Done)
-        return SelectResult::Requested;
+    if (shown)
+    {
+        // And the switch it asked for: the window stays where the action runs.
+        if (selecting && *selecting != workspace)
+            std::ignore = selectForPending(workspace);
+        if (run() == RowActionOutcome::Done)
+            return SelectResult::Requested;
+    }
     // A daemon states its selection later, and a pane may land only with its layout: the action waits, and is
     // dropped if the daemon refuses or the workspace is shown without it (cancelPendingJump()).
     _pendingRowAction = PendingRowAction { .workspace = workspace, .run = std::move(run) };
-    if (!shown && _directorySource->select(workspace) == SelectResult::Refused)
+    if (!shown && selectForPending(workspace) == SelectResult::Refused)
     {
         _pendingRowAction.reset();
         return SelectResult::Refused;
@@ -4384,7 +4420,7 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
     // What the row names, in a window of its own: a jump as Shift+Return makes, the window staying as it is.
     constexpr Run OpenRowInNewWindow =
         [](WindowController& window, SidebarRowKey const& key, actions::Action const&) {
-            window._sidebarHost->jumpTo(sidebarTargetOf(key), JumpMode::NewWindow);
+            window._sidebarHost->jumpTo(window._sidebar->targetOf(key), JumpMode::NewWindow);
         };
     // A daemon row's menu runs what its buttons do, as a press of the button does.
     constexpr Run ConnectRowDaemon =
@@ -4424,7 +4460,7 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
             if (window.rowOriginOf(key) == command::RowOrigin::Own)
                 window.runMenuBarAction(what);
             else
-                window._sidebarHost->createAndJump(sidebarTargetOf(key));
+                window._sidebarHost->createAndJump(window._sidebar->targetOf(key));
         };
     /// A menu action that names its row by id, and how it is run on it.
     struct ByIdAction
@@ -4657,6 +4693,10 @@ void WindowController::confirmClose(QVariant const& node)
     // the new run's node of the same ids is not what the user was asked about.
     if (!isOfOwnRunNow(row))
         return;
+    // Closing a tab or a pane shows it first: a navigation of the window's own, which ends a jump to another
+    // daemon under way, as every own row's action does.
+    if (closing->kind != CloseKind::Workspace)
+        _sidebarHost->supersedeJump();
     switch (closing->kind)
     {
         case CloseKind::Workspace: confirmCloseWorkspace(row.workspace); break;

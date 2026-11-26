@@ -413,6 +413,7 @@ if(CONTOUR_FRONTEND_GUI)
         remote/SwitchGuard.hpp
         remote/SwitchHost.hpp
         remote/DaemonPresence.hpp
+        remote/ObserveSupport.hpp
         remote/ObserverPool.hpp
         remote/ElsewhereRaise.hpp
         remote/PresencePlan.hpp

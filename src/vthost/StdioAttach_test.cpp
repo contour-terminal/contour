@@ -290,6 +290,26 @@ TEST_CASE("stdio attach writes the ready preamble and nothing else before the cl
     client.b->closeWrite();    // lets the relay's client→daemon thread finish
 }
 
+// Final review M3: a relay told not to start a daemon says, in its ready line, that it honoured the flag.
+TEST_CASE("stdio attach told not to start a daemon states it in its ready line", "[vthost][stdio]")
+{
+    auto const client = makeMemoryStreamPair();
+    auto const daemon = makeMemoryStreamPair();
+    auto attach = std::async(std::launch::async, [&]() {
+        return vthost::runStdioAttach(
+            client.a,
+            [&]() -> std::expected<std::shared_ptr<IByteStream>, std::string> { return daemon.a; },
+            {},
+            vthost::RelayNoStart::Honoured);
+    });
+
+    CHECK(readText(*client.b, vthost::StdioPreambleReadyNoStart.size()) == vthost::StdioPreambleReadyNoStart);
+
+    daemon.b->closeWrite();
+    CHECK(attach.get() == EXIT_SUCCESS);
+    client.b->closeWrite(); // lets the relay's client→daemon thread finish
+}
+
 TEST_CASE("stdio attach gives up, by name, on a daemon that sends nothing", "[vthost][stdio]")
 {
     auto capture = core::log::ScopedCapture {};

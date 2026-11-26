@@ -126,7 +126,9 @@ struct HostDraft
     std::string identityFile {};  ///< The key file to sign in with; empty for the agent's keys.
     std::string remoteCommand {}; ///< Replaces the remote command (`ssh://`); empty for the default.
     std::string profile {}; ///< The profile the remote sessions are created with; empty for the default.
-    std::string showInSidebar {}; ///< `true` to list the host in the sidebar; `false` or empty for not.
+    /// `true` (or another spelling of it, parseShowInSidebar()) to list the host in the sidebar; `false` or
+    /// empty for not.
+    std::string showInSidebar {};
 
     [[nodiscard]] bool operator==(HostDraft const&) const = default;
 };
@@ -171,8 +173,15 @@ struct HostFieldProblem
     [[nodiscard]] bool operator==(HostFieldProblem const&) const = default;
 };
 
+/// Reads a host's `show_in_sidebar` value as the configuration loader does: as a YAML boolean, in any of the
+/// spellings YAML takes for one (`true`/`false`, `yes`/`no`, `on`/`off`, `y`/`n`, lower, upper or
+/// capitalized).
+/// @param text The value as written.
+/// @return Its truth; none for a value that is no boolean.
+[[nodiscard]] std::optional<bool> parseShowInSidebar(std::string_view text);
+
 /// What keeps @p draft from loading, field by field, in the loader's own words: an address that does not
-/// parse, or a `show_in_sidebar` that is neither `true` nor `false`.
+/// parse, or a `show_in_sidebar` that is no boolean (parseShowInSidebar()).
 /// @param draft The host as written.
 /// @return The problems, in @ref HostField order; empty when the loader would take it.
 [[nodiscard]] std::vector<HostFieldProblem> checkHostDraft(HostDraft const& draft);

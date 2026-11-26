@@ -12,6 +12,7 @@
 #include <string>
 
 #include <vthost/ByteStream.hpp>
+#include <vthost/StdioPreamble.hpp>
 
 namespace vthost
 {
@@ -29,11 +30,14 @@ using DaemonConnector = std::function<std::expected<std::shared_ptr<IByteStream>
 /// @param client This process's stdio (makeProcessStdioStream()).
 /// @param connect Reaches the daemon.
 /// @param relay The relay's configuration: how long the daemon has to answer the client.
+/// @param noStart Honoured for a relay told not to start a daemon (`--no-start`), whose @p connect starts
+///        none: its ready line says so (StdioPreambleReadyNoStart).
 /// @return EXIT_SUCCESS after the daemon side ended; EXIT_FAILURE after writing an error preamble, or
 ///         when the relay failed, or the daemon sent nothing in time (logged as such).
 [[nodiscard]] int runStdioAttach(std::shared_ptr<IByteStream> client,
                                  DaemonConnector const& connect,
-                                 RelayConfig relay = {});
+                                 RelayConfig relay = {},
+                                 RelayNoStart noStart = RelayNoStart::Unstated);
 
 /// The production connector: when no daemon serves @p socketPath, @p starter starts one; then a
 /// blocking connect to its native socket (`nativeSocketPath(socketPath)`).

@@ -136,6 +136,7 @@ TEST_CASE("Config: show_in_sidebar parses and defaults to off", "[config][hosts]
     QTemporaryDir const dir;
     writeSideFile(dir, "hosts/listed.yml", "url: ssh://listed\nshow_in_sidebar: true\n");
     writeSideFile(dir, "hosts/unsure.yml", "url: ssh://unsure\nshow_in_sidebar: maybe\n");
+    writeSideFile(dir, "hosts/spelled.yml", "url: ssh://spelled\nshow_in_sidebar: yes\n");
     auto const config = loadFromYaml(dir, R"(
 hosts:
     plain:
@@ -146,10 +147,11 @@ hosts:
 )"sv);
 
     auto const& hosts = config.hosts.value();
-    REQUIRE(hosts.size() == 4);
+    REQUIRE(hosts.size() == 5);
     CHECK_FALSE(hosts.at("plain").showInSidebar);
     CHECK(hosts.at("shown").showInSidebar);
     CHECK(hosts.at("listed").showInSidebar);
+    CHECK(hosts.at("spelled").showInSidebar);
     // A value that is no boolean leaves the host loaded, and unlisted.
     CHECK_FALSE(hosts.at("unsure").showInSidebar);
 }

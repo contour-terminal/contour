@@ -210,9 +210,12 @@ static_assert(std::to_underlying(command::DaemonRowVerb::Remove) + 1 == DaemonRo
               "every daemon row button has its verb");
 
 /// @param state A daemon's link state.
-/// @return Whether a window could be opened on the daemon now: not while it is not running, too old, or
-///         failed, where the switch could only fail.
-[[nodiscard]] constexpr command::OpenOffer openOfferOf(DaemonLinkState state) noexcept
+/// @param locality Whether the daemon runs on this machine.
+/// @return Whether a window could be opened on the daemon now: not while it is too old or failed, where the
+///         switch could only fail, nor while a local one is not running (its row's Start starts it); a host
+///         that is not running is, as a switch to a host starts its daemon there.
+[[nodiscard]] constexpr command::OpenOffer openOfferOf(DaemonLinkState state,
+                                                       DaemonLocality locality) noexcept
 {
     switch (state)
     {
@@ -222,6 +225,8 @@ static_assert(std::to_underlying(command::DaemonRowVerb::Remove) + 1 == DaemonRo
         case DaemonLinkState::Reconnecting:
         case DaemonLinkState::NeedsInput: return command::OpenOffer::Offered;
         case DaemonLinkState::NotRunning:
+            return locality == DaemonLocality::Remote ? command::OpenOffer::Offered
+                                                      : command::OpenOffer::NotOffered;
         case DaemonLinkState::TooOld:
         case DaemonLinkState::Failed: return command::OpenOffer::NotOffered;
     }
@@ -259,7 +264,7 @@ static_assert(std::to_underlying(command::DaemonRowVerb::Remove) + 1 == DaemonRo
                                                                               command::RowOrigin origin)
 {
     auto const offered = openOfferOf(row.key.daemon) == command::OpenOffer::Offered
-                             ? openOfferOf(row.linkState)
+                             ? openOfferOf(row.linkState, row.locality)
                              : command::OpenOffer::NotOffered;
     auto const reachable = origin == command::RowOrigin::Own || offered == command::OpenOffer::Offered;
     auto state = command::SidebarDaemonMenuState {

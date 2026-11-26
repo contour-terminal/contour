@@ -6099,7 +6099,7 @@ TEST_CASE("the hide toast's Undo is a button on the toast, and taking it ends th
         controller.notices().expireDue();
         QCoreApplication::processEvents();
         CHECK(controller.notices().toastShown());
-        QTest::mouseMove(toast->window(), QPoint { 2, static_cast<int>(toast->window()->height()) - 2 });
+        QTest::mouseMove(toast->window(), QPoint { 2, toast->window()->height() - 2 });
         QCoreApplication::processEvents();
         controller.noticeClock.advance(std::chrono::seconds { 10 });
         controller.notices().expireDue();

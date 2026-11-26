@@ -5,6 +5,8 @@
 
 #include <core/Utf8Path.hpp>
 
+#include <yaml-cpp/yaml.h>
+
 #include <algorithm>
 #include <charconv>
 #include <format>
@@ -193,12 +195,20 @@ std::string_view hostSchemeName(HostScheme scheme) noexcept
     return schemeInfo(scheme).name;
 }
 
+std::optional<bool> parseShowInSidebar(std::string_view text)
+{
+    auto value = false;
+    if (!YAML::convert<bool>::decode(YAML::Node { std::string { text } }, value))
+        return std::nullopt;
+    return value;
+}
+
 std::vector<HostFieldProblem> checkHostDraft(HostDraft const& draft)
 {
     auto problems = std::vector<HostFieldProblem> {};
     if (auto const url = parseHostUrl(draft.url); !url)
         problems.push_back({ .field = HostField::Url, .message = std::string { describe(url.error()) } });
-    if (draft.showInSidebar != "" && draft.showInSidebar != "true" && draft.showInSidebar != "false")
+    if (!draft.showInSidebar.empty() && !parseShowInSidebar(draft.showInSidebar))
         problems.push_back({ .field = HostField::ShowInSidebar, .message = "Expected true or false." });
     return problems;
 }

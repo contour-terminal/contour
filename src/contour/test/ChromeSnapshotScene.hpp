@@ -274,14 +274,29 @@ class ChromeSnapshotScene
         return config::KeyboardPlatformKind::Xkb;
     }
 
+    /// @param font The chrome font.
+    /// @param pointSize Its size instead; empty keeps its own.
+    /// @return @p font at @p pointSize.
+    [[nodiscard]] static QFont sizedTo(QFont font, std::optional<qreal> pointSize)
+    {
+        if (pointSize)
+            font.setPointSizeF(*pointSize);
+        return font;
+    }
+
     /// @param variant The picture to build: its script, chrome row, defaults edition and appearance.
-    explicit ChromeSnapshotScene(SnapshotVariant variant):
+    /// @param chromePointSize The chrome font's size in place of the one this host's defaults give the
+    ///        variant, as another host's would; empty keeps this host's.
+    explicit ChromeSnapshotScene(SnapshotVariant variant,
+                                 std::optional<qreal> chromePointSize = std::nullopt):
         _appearance { variant.appearance },
         _variant { variant },
         _config { .defaultsEdition = variant.edition,
                   .keyboardPlatformKind = keyboardPlatformFor(variantHost(variant)) },
         _look { snapshotLook(variant.edition, variant.appearance) },
-        _chromeFont { window::resolveChromeFont(_config, variant.row, _config.defaultProfileName.value()) },
+        _chromeFont { sizedTo(
+            window::resolveChromeFont(_config, variant.row, _config.defaultProfileName.value()),
+            chromePointSize) },
         _sessions { makeSessions(scriptRow(variant.script), _look) },
         _rootPane { makePaneTree(scriptRow(variant.script).panes, _sessions) },
         _history { PaletteHistoryCapacity },
@@ -2137,13 +2152,22 @@ class ChromeSnapshotScene
             deploy.finished.reset();
         }
 
-        auto billing = directoryWorkspaceOf(1, "billing", { claude, build, notes, deploy });
-        auto split = window::DirectoryTab {};
-        split.id = 14;
-        split.name = "server";
-        split.panes = { idlePaneOf(14, "server", "/src/billing/api"),
-                        idlePaneOf(15, "logs", "/var/log/billing") };
-        billing.tabs.push_back(std::move(split));
+        // Beside starfive's unfolded rows, billing keeps its displayed tab and the working one: all of it
+        // would push the window's own heading out of the sidebar where the Terminal row's cells are the
+        // largest (macOS sets Native2026 a point larger), and what the picture shows would depend on its
+        // host.
+        auto const beside = script.sections == SnapshotSections::OtherDaemonRows;
+        auto billing = beside ? directoryWorkspaceOf(1, "billing", { claude, build })
+                              : directoryWorkspaceOf(1, "billing", { claude, build, notes, deploy });
+        if (!beside)
+        {
+            auto split = window::DirectoryTab {};
+            split.id = 14;
+            split.name = "server";
+            split.panes = { idlePaneOf(14, "server", "/src/billing/api"),
+                            idlePaneOf(15, "logs", "/var/log/billing") };
+            billing.tabs.push_back(std::move(split));
+        }
         billing.git = window::DirectoryGit { .branch = "feat/billing", .ahead = 2 };
         auto infra = directoryWorkspaceOf(3, "infra", { idlePaneOf(30, "terraform", "/src/infra") });
         switch (script.sidebarColor)
@@ -2222,6 +2246,7 @@ class ChromeSnapshotScene
             {
                 case SnapshotSections::NeedsInput: return window::DaemonLinkState::NeedsInput;
                 case SnapshotSections::NotRunning:
+                case SnapshotSections::HostNotRunning:
                 case SnapshotSections::Narrow: return window::DaemonLinkState::NotRunning;
                 case SnapshotSections::Connecting: return window::DaemonLinkState::Connecting;
                 case SnapshotSections::Reconnecting: return window::DaemonLinkState::Reconnecting;
@@ -2235,7 +2260,8 @@ class ChromeSnapshotScene
             }
             return window::DaemonLinkState::Connected;
         }();
-        auto const local = starfiveState == window::DaemonLinkState::NotRunning;
+        auto const local = starfiveState == window::DaemonLinkState::NotRunning
+                           && sections != SnapshotSections::HostNotRunning;
         auto const starfiveRef =
             local ? window::localDaemonRef("starfive") : window::hostDaemonRef("starfive");
         auto starfive = window::DaemonSection {};

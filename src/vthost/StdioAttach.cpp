@@ -32,7 +32,10 @@ namespace
     }
 } // namespace
 
-int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& connect, RelayConfig relay)
+int runStdioAttach(std::shared_ptr<IByteStream> client,
+                   DaemonConnector const& connect,
+                   RelayConfig relay,
+                   RelayNoStart noStart)
 {
     auto daemon = connect();
     if (!daemon)
@@ -41,7 +44,7 @@ int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& c
         client->closeWrite();
         return EXIT_FAILURE;
     }
-    if (!writeLine(*client, StdioPreambleReady))
+    if (!writeLine(*client, stdioPreambleReady(noStart)))
         return EXIT_FAILURE;
     switch (runStdioRelay(std::move(client), *std::move(daemon), relay))
     {

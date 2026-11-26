@@ -26,6 +26,7 @@ using contour::config::hostSchemeOf;
 using contour::config::HostUrlError;
 using contour::config::parseHostDraftYaml;
 using contour::config::parseHostUrl;
+using contour::config::parseShowInSidebar;
 
 namespace
 {
@@ -148,7 +149,7 @@ TEST_CASE("checkHostDraft says what the loader would, under the field it is abou
     }
 }
 
-TEST_CASE("HostDraft: show_in_sidebar round-trips and only true or false is accepted", "[config][hosts]")
+TEST_CASE("HostDraft: show_in_sidebar round-trips and only a boolean is accepted", "[config][hosts]")
 {
     auto const draft = HostDraft { .url = "ssh://h", .showInSidebar = "true" };
     CHECK(parseHostDraftYaml(emitHostYaml(draft)) == draft);
@@ -160,6 +161,17 @@ TEST_CASE("HostDraft: show_in_sidebar round-trips and only true or false is acce
     REQUIRE(problems.size() == 1);
     CHECK(problems.front().field == HostField::ShowInSidebar);
     CHECK_FALSE(problems.front().message.empty());
+
+    // Review (pass 2, N3): every spelling the loader takes for a boolean, Settings takes too.
+    for (auto const* const spelling: { "yes", "No", "ON", "off", "True", "FALSE", "y", "n" })
+    {
+        INFO(spelling);
+        CHECK(checkHostDraft(HostDraft { .url = "ssh://h", .showInSidebar = spelling }).empty());
+    }
+    CHECK(parseShowInSidebar("yes") == std::optional { true });
+    CHECK(parseShowInSidebar("Off") == std::optional { false });
+    CHECK_FALSE(parseShowInSidebar("maybe").has_value());
+    CHECK_FALSE(parseShowInSidebar("tRuE").has_value());
 
     auto entry = HostEntry {};
     entry.url = *parseHostUrl("ssh://h");

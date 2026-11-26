@@ -177,9 +177,11 @@ class WindowSwitching
     {
         std::ignore = window;
         std::ignore = daemon;
-        std::ignore = label;
         std::ignore = mode;
-        done(std::unexpected(std::string { "no workspace can be made there from this window" }));
+        // By value for the overrides, which keep them; this one consumes them all the same.
+        [[maybe_unused]] auto const dropped = std::move(label);
+        auto const tell = std::move(done);
+        tell(std::unexpected(std::string { "no workspace can be made there from this window" }));
     }
 
     /// Told by the manager that @p window closed: a switch of it still under way ends, as cancelled. Nothing

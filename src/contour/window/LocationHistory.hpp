@@ -12,7 +12,6 @@
 #include <functional>
 #include <optional>
 #include <span>
-#include <string_view>
 
 namespace contour::window
 {
@@ -28,14 +27,10 @@ enum class HistoryCause : uint8_t
 /// Production capacity (spec §8).
 inline constexpr std::size_t LocationHistoryCapacity = 16;
 
-/// What JumpBack says when no place is left to go back to.
-inline constexpr auto NowhereToGoBack = std::string_view { "Nowhere to go back to" };
-
 /// @param from Where a window was.
 /// @param to Where it landed.
 /// @return Whether the landing went nowhere: the same daemon, run and workspace, and the same tab -- or no
-/// tab
-///         named, as a workspace re-selected without one stays on the tab it shows.
+///         tab named, as a workspace re-selected without one stays on the tab it shows.
 [[nodiscard]] constexpr bool landsWhereItWas(SidebarTarget const& from, SidebarTarget const& to) noexcept
 {
     return from.daemon == to.daemon && from.instance == to.instance && from.workspace == to.workspace

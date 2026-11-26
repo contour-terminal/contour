@@ -2466,8 +2466,13 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
     };
     // A value that is no boolean is reported, and the host still loads, unlisted.
     if (auto const show = hostNode["show_in_sidebar"]; show)
-        if (!show.IsScalar() || !YAML::convert<bool>::decode(show, host.showInSidebar))
+    {
+        auto const listed = show.IsScalar() ? parseShowInSidebar(show.Scalar()) : std::nullopt;
+        if (listed)
+            host.showInSidebar = *listed;
+        else
             errorLog()("Host '{}': show_in_sidebar must be true or false; the host is not listed.", name);
+    }
     return host;
 }
 

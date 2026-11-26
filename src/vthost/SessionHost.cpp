@@ -1206,22 +1206,23 @@ void SessionHost::returnRestoreAnnouncement(std::vector<RestoredWorkspace> entri
     _restoreAnnouncement.insert(_restoreAnnouncement.begin(), entries.begin(), entries.end());
 }
 
-std::optional<WorkspaceId> SessionHost::workspaceMadeFor(proto::CreationToken const& token) const
+std::optional<SessionHost::MadeForToken> SessionHost::workspaceMadeFor(
+    proto::CreationToken const& token) const
 {
-    auto const made = std::ranges::find(_madeForTokens, token, &decltype(_madeForTokens)::value_type::first);
+    auto const made = std::ranges::find(_madeForTokens, token, &MadeForToken::token);
     if (made == _madeForTokens.end())
         return std::nullopt;
     // One that ended -- closed, or its last tab gone -- is no longer there to select.
-    auto const* workspace = _model.workspace(made->second);
+    auto const* workspace = _model.workspace(made->workspace);
     if (workspace == nullptr || workspace->tabCount() == 0)
         return std::nullopt;
-    return made->second;
+    return *made;
 }
 
-void SessionHost::rememberWorkspaceMadeFor(proto::CreationToken const& token, WorkspaceId workspace)
+void SessionHost::rememberWorkspaceMadeFor(MadeForToken made)
 {
-    std::erase_if(_madeForTokens, [&token](auto const& entry) { return entry.first == token; });
-    _madeForTokens.emplace_back(token, workspace);
+    std::erase_if(_madeForTokens, [&made](MadeForToken const& entry) { return entry.token == made.token; });
+    _madeForTokens.push_back(std::move(made));
     while (_madeForTokens.size() > PromotionTokenMemory)
         _madeForTokens.pop_front();
 }
@@ -1817,7 +1818,11 @@ void SessionHost::tellAttention(uint64_t session, AttentionChange change)
     if (change == AttentionChange::Unchanged)
         return;
     if (auto const* attention = _attention.of(session))
-        fanOutStream(&SessionStreamEvents::paneAttentionChanged, session, *attention);
+    {
+        // A copy: an observer that marks the pane seen as it is told changes the ledger's entry.
+        auto const state = *attention;
+        fanOutStream(&SessionStreamEvents::paneAttentionChanged, session, state);
+    }
 }
 
 std::optional<ConnectionId> SessionHost::clipboardTargetOf(vtworkspace::SessionId session) const

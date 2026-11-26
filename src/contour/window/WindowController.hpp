@@ -77,6 +77,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <boxed-cpp/boxed.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 class QScreen;
@@ -127,6 +128,17 @@ inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSur
 
 /// @return The production NoticeAnnouncerFactory: Qt's accessibility announcements (platform::QtAnnouncer).
 [[nodiscard]] NoticeAnnouncerFactory qtNoticeAnnouncer();
+
+namespace detail::tags
+{
+    struct NavigationSerial
+    {
+    };
+} // namespace detail::tags
+
+/// Numbers a window's requests to its directory source to select a workspace for what waits there (a jump, a
+/// row's action): a refusal of one request ends what that request was made for, and nothing a later one set.
+using NavigationSerial = boxed::boxed<uint64_t, detail::tags::NavigationSerial>;
 
 /// Per-OS-window Qt/QML adapter over one vtworkspace::Workspace.
 ///
@@ -1455,7 +1467,7 @@ class WindowController:
     /// here -- its workspace selected, then its tab with its own active pane -- ending a jump to another
     /// daemon still under way; another daemon's is jumped to, replacing one under way. A jump back that is
     /// refused, fails or is cancelled puts its place back. Records nothing, and ends a run of attention
-    /// jumps. When no place is left, says so (NowhereToGoBack).
+    /// jumps. When no place is left, says so in a brief notice (nowhereToGoBackNotice()).
     void jumpBack();
     /// @return Whether jumpBack() would go somewhere: a recorded place is still there, and is not where the
     ///         window is (the Window menu's Jump Back row).
@@ -1487,6 +1499,14 @@ class WindowController:
     void completePendingJump();
     /// Forgets the jump that waits for a workspace to be shown: it was refused, or is not wanted.
     void cancelPendingJump() noexcept;
+    /// @return The window's latest request to its directory source to select a workspace: what a refusal of
+    ///         that request, answered later, names (cancelPendingJumpOf()).
+    [[nodiscard]] NavigationSerial navigationSerial() const noexcept { return _navigationSerial; }
+    /// Forgets what waits for a workspace to be shown (as cancelPendingJump() does) only if it waits for the
+    /// request @p navigation: a refusal of an earlier request, which a newer navigation replaced, leaves what
+    /// that one set.
+    /// @param navigation The refused request, as navigationSerial() named it as it was made.
+    void cancelPendingJumpOf(NavigationSerial navigation) noexcept;
     /// @return Whether a jump waits for its workspace to be shown.
     [[nodiscard]] bool jumpPending() const noexcept { return _pendingJump.has_value(); }
     /// @return Whether a sidebar action waits for a workspace to be shown, or for its pane to appear in it.
@@ -2188,6 +2208,18 @@ class WindowController:
         std::function<RowActionOutcome()> run; ///< What to do once it is.
     };
     std::optional<PendingRowAction> _pendingRowAction;
+    /// The latest request to the directory source to select a workspace for what waits (@see
+    /// navigationSerial()).
+    NavigationSerial _navigationSerial {};
+    /// Asks the directory source to select @p workspace for what waits now, as a request of its own
+    /// (@see navigationSerial()). The source must be set.
+    /// @param workspace The directory's id of the workspace.
+    /// @return What the source answered.
+    [[nodiscard]] SelectResult selectForPending(uint64_t workspace);
+    /// @return The workspace a request of the window's is selecting for what waits there: a jump's, else a
+    /// row
+    ///         action's; none when nothing waits.
+    [[nodiscard]] std::optional<uint64_t> selectingWorkspace() const noexcept;
     /// The sidebar row an action is being run for, while it runs (goToSidebarPane() reads it).
     std::optional<SidebarRowKey> _sidebarActionRow;
     /// The row the sidebar's menu was last opened over.
@@ -2201,7 +2233,8 @@ class WindowController:
     QPointF _sidebarMenuAnchor; ///< Where that menu was asked for, in window coordinates.
     /// Runs @p run once the directory shows @p workspace: now when it does, else after selecting it. A @p run
     /// that is Waiting (its pane is not there yet) stays pending, as a jump does, until the layout lands;
-    /// showing the workspace without it ends the wait (cancelPendingJump()).
+    /// showing the workspace without it ends the wait (cancelPendingJump()). A newer navigation: a jump or an
+    /// action still waiting for its workspace is given up, and with it a switch elsewhere it asked for.
     /// @param workspace The directory's id of the workspace.
     /// @param run What to do.
     /// @return Requested when it ran or waits; Refused when the window has no source, or its source refused

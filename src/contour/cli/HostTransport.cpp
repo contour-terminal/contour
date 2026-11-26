@@ -58,7 +58,8 @@ namespace
         auto target = vthost::SshTarget { .user = host.url.user,
                                           .host = host.url.host,
                                           .port = host.url.port,
-                                          .remoteCommand = remoteCommandOf(host, remoteStart) };
+                                          .remoteCommand = remoteCommandOf(host, remoteStart),
+                                          .remoteStart = remoteStart };
         auto const prompts = prompting.broker ? SshPrompts::Askpass : SshPrompts::Batch;
         return HostTransport {
             .factory = std::make_shared<vthost::SshTransportFactory>(std::move(target),

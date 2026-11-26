@@ -718,6 +718,10 @@ class NativeClient final
     /// @return All mirrored screens, keyed by session id.
     [[nodiscard]] std::map<uint64_t, RemoteScreen> const& screens() const noexcept { return _screens; }
 
+    /// Drops every mirrored screen, and the image fetches that would fill one: what a connection that mirrors
+    /// no session -- an observer, its window's last pane unbound -- keeps no longer. Reactor thread only.
+    void forgetScreens() noexcept;
+
     /// @return True once the ServerHello agreed on a version this client speaks.
     [[nodiscard]] bool connected() const noexcept { return _negotiated.has_value(); }
 

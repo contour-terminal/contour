@@ -49,6 +49,7 @@ enum class NoticeKind : uint8_t
     SwitchDeclined,         ///< The user declined a question a window switch asked; nothing changed.
     WorkspaceColorRefused,  ///< A workspace colour action ran against a daemon that predates the colour.
     DaemonHidden,           ///< Hide from Sidebar unlisted a daemon; its Undo lists it again.
+    NowhereToGoBack,        ///< JumpBack found no place left to go back to.
 };
 
 /// Where a notice is shown.
@@ -181,6 +182,12 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 6000 },
                 .action = NoticeAction::UndoHide,
                 .actionText = "Undo" },
+    NoticeRow { .kind = NoticeKind::NowhereToGoBack,
+                .surface = NoticeSurface::Toast,
+                .glyph = "",
+                .duration = std::chrono::milliseconds { 2000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -191,7 +198,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::DaemonHidden) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::NowhereToGoBack) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.
@@ -273,6 +280,16 @@ namespace detail
     return Notice { .kind = NoticeKind::DaemonHidden,
                     .text = std::format("{} hidden from the sidebar", detail::shownText(name)),
                     .subject = std::move(daemon) };
+}
+
+/// What JumpBack says when no place is left to go back to.
+inline constexpr auto NowhereToGoBack = std::string_view { "Nowhere to go back to" };
+
+/// @return The NoticeKind::NowhereToGoBack notice: JumpBack has no place left to go back to
+///         (NowhereToGoBack).
+[[nodiscard]] inline Notice nowhereToGoBackNotice()
+{
+    return Notice { .kind = NoticeKind::NowhereToGoBack, .text = std::string { NowhereToGoBack } };
 }
 
 /// "Copied 3 lines".

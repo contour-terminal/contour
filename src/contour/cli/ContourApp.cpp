@@ -2001,9 +2001,12 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
     auto const spawner = vthost::makeNativeDaemonSpawner();
     // `--no-start`: a daemon that does not serve already stays down, and the client is told so; no
     // registered service is looked up, let alone repaired.
+    // Its ready line says so: a client that asked for it can tell a relay that never got the flag.
     if (options.noStart == OptionFlag::Given)
         return vthost::runStdioAttach(std::move(client),
-                                      vthost::makeLocalDaemonConnector(socketPath, *spawner, nullptr));
+                                      vthost::makeLocalDaemonConnector(socketPath, *spawner, nullptr),
+                                      {},
+                                      vthost::RelayNoStart::Honoured);
     // An auto-started daemon is told what `contour client` would tell it.
     auto const spawnOptions = vthost::DaemonSpawnOptions {
         .filter = options.log,

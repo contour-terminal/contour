@@ -39,7 +39,6 @@ using contour::cli::SshPrompts;
 using contour::config::HostEntry;
 using contour::config::HostScheme;
 using contour::config::HostUrl;
-using contour::remote::DialRefusal;
 using contour::remote::FailureRecordingTransport;
 using contour::remote::interactiveTransport;
 using contour::remote::observerTransport;

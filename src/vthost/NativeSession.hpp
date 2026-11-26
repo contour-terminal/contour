@@ -1610,6 +1610,9 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         /// The workspace it made for its creation token, by this ask or an earlier one whose answer was lost;
         /// 0 for one it selected.
         vtworkspace::WorkspaceId made {};
+        /// The connection whose earlier ask of the same creation token made @ref made, when that was another:
+        /// the same client's, its answer lost with it.
+        std::optional<ConnectionId> earlierAsker {};
         std::vector<RestoredWorkspace> announced; ///< The restore its answer tells.
     };
     /// The last promotion's, until a demotion. Loop thread.

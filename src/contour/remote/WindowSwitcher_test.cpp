@@ -363,7 +363,7 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
         auto& link = *links.emplace_back(DaemonLink::adopt(DaemonLink::Id { _nextId++ },
                                                            std::move(config),
                                                            std::move(observing),
-                                                           std::move(request),
+                                                           request,
                                                            std::move(interactive),
                                                            std::move(giveBack),
                                                            *this,
@@ -2164,7 +2164,7 @@ namespace
 /// @return The close node a close confirmation request carries (its first argument).
 [[nodiscard]] contour::window::CloseNode closeNodeOf(QList<QVariant> const& request)
 {
-    auto const node = request.at(0);
+    auto const& node = request.at(0);
     REQUIRE(node.metaType() == QMetaType::fromType<contour::window::CloseNode>());
     return node.value<contour::window::CloseNode>();
 }
@@ -2810,7 +2810,7 @@ TEST_CASE("JumpBack: a switcher pick and a workspace switch are recorded, a tab-
     auto* const here = rig.app.manager().actingSessionOfWindow(rig.shown());
     REQUIRE(here != nullptr);
     REQUIRE(here->operator()(contour::actions::SwitchToTab { .position = 2 }));
-    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], *second); }, 3000));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], second); }, 3000));
 
     // Back: the pick's origin, A's second workspace -- not the first tab the strip left.
     window.jumpBack();
@@ -3034,6 +3034,250 @@ TEST_CASE("JumpToNextAttention while the own workspace is being selected goes on
         3000));
 }
 
+namespace
+{
+/// @return The pane @p pane as @p window's own directory lists it; none while it lists none.
+[[nodiscard]] std::optional<contour::window::DirectoryPane> ownListedPane(
+    contour::window::WindowController& window, contour::window::PaneKey pane)
+{
+    auto const* const source = window.directorySource();
+    if (source == nullptr)
+        return std::nullopt;
+    auto const directory = source->directory();
+    auto const listed = contour::window::tabHoldingPane(directory, pane);
+    if (!listed)
+        return std::nullopt;
+    return *std::ranges::find(listed->tab->panes, pane, &contour::window::DirectoryPane::key);
+}
+
+/// @return The row of A's tab @p tab of workspace @p workspace in @p window's sidebar, the workspace unfolded
+///         first; negative for none.
+[[nodiscard]] int ownTabRow(contour::window::WindowController& window, uint64_t workspace, uint64_t tab)
+{
+    auto const find = [&] {
+        return sidebarRowWhere(window, [&](auto const& key) {
+            return key.kind == contour::window::SidebarRowKind::Tab && key.workspace == workspace
+                   && key.tab == tab && key.daemon != sidebarB();
+        });
+    };
+    if (find() < 0)
+    {
+        auto const holder = ownWorkspaceRow(window, workspace);
+        REQUIRE(holder >= 0);
+        window.sidebar().toggle(holder);
+    }
+    return find();
+}
+
+/// @return How many tabs @p window's own directory lists in @p workspace.
+[[nodiscard]] std::size_t ownTabCount(contour::window::WindowController& window, uint64_t workspace)
+{
+    auto const* const source = window.directorySource();
+    if (source == nullptr)
+        return 0;
+    auto const directory = source->directory();
+    auto const* const listed = contour::window::findWorkspace(directory, workspace);
+    return listed != nullptr ? listed->tabs.size() : std::size_t { 0 };
+}
+} // namespace
+
+// Final fix wave, item 1: the first press's switch, replaced by the second's, fails -- and its failure must
+// not end what the second press waits for.
+TEST_CASE("Two JumpToNextAttention presses within one round trip land on the second press's pane",
+          "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    auto const third = addWorkspace(rig.a).id;
+    printInPaneOf(rig.a, rig.aWorkspaces[1], std::string { BlockedStatus });
+    printInPaneOf(rig.a, third, std::string { BlockedStatus });
+    REQUIRE(waitUntil(
+        [&] {
+            return ownBlockedPanes(window, rig.aWorkspaces[1]).size() == 1
+                   && ownBlockedPanes(window, third).size() == 1;
+        },
+        3000));
+    auto const second = ownBlockedPanes(window, third).front();
+    // A's answers are held: both presses are made before the first's could land.
+    rig.a.holdEverything();
+
+    window.jumpToNextAttention();
+    window.jumpToNextAttention();
+
+    CHECK(window.jumpPending());
+    rig.a.releaseHeld();
+    CHECK(waitUntil([&] { return onA(rig, window, third) && activePaneOf(rig, window) == second; }, 3000));
+    // It landed: the pane counts as seen.
+    CHECK(waitUntil(
+        [&] {
+            auto const pane = ownListedPane(window, second);
+            return pane && !contour::window::isUnseen(*pane);
+        },
+        3000));
+}
+
+TEST_CASE("A row's action asked while a jump's workspace is being selected still runs",
+          "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    auto const third = addWorkspace(rig.a).id;
+    printInPaneOf(rig.a, rig.aWorkspaces[1], std::string { BlockedStatus });
+    REQUIRE(waitUntil([&] { return !ownBlockedPanes(window, rig.aWorkspaces[1]).empty(); }, 3000));
+    REQUIRE(waitUntil([&] { return ownTabCount(window, third) == 1; }, 3000));
+    rig.a.holdEverything();
+    window.jumpToNextAttention();
+    REQUIRE(window.jumpPending());
+
+    // New Tab Here on another workspace's row: its selection replaces the jump's, whose failure leaves it be.
+    pickFromMenu(window, ownWorkspaceRow(window, third), QStringLiteral("New Tab Here"));
+
+    CHECK(window.rowActionPending());
+    rig.a.releaseHeld();
+    CHECK(waitUntil([&] { return onA(rig, window, third) && ownTabCount(window, third) == 2; }, 3000));
+}
+
+TEST_CASE("JumpBack asked while a jump's workspace is being selected lands on its tab",
+          "[switch][sidebar][attention][jump][history]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    auto const third = addWorkspace(rig.a).id;
+    printInPaneOf(rig.a, third, std::string { BlockedStatus });
+    REQUIRE(waitUntil([&] { return !ownBlockedPanes(window, third).empty(); }, 3000));
+    // A's first workspace holds two tabs; the window shows the first, then goes to the second workspace.
+    auto const first = addSecondTab(rig.a, rig.aWorkspaces[0]);
+    auto other = std::optional<uint64_t> {};
+    REQUIRE(waitUntil(
+        [&] {
+            auto const shown = shownTab(rig, window);
+            if (shown && shown->first == rig.aWorkspaces[0] && shown->second != first.tab)
+                other = shown->second;
+            return other.has_value();
+        },
+        3000));
+    auto* const acting = rig.app.manager().actingSessionOfWindow(rig.shown());
+    REQUIRE(acting != nullptr);
+    REQUIRE(acting->operator()(contour::actions::SwitchToTab { .position = 1 }));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+    window.sidebar().activate(ownWorkspaceRow(window, rig.aWorkspaces[1]));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+    // Meanwhile the daemon has the other tab of the first workspace active: only the landing shows the first.
+    rig.a.onDaemon([&] {
+        rig.a.host->model().activateTab(vtworkspace::WorkspaceId { rig.aWorkspaces[0] },
+                                        vtworkspace::TabId { *other });
+        return 0;
+    });
+    rig.a.holdEverything();
+    window.jumpToNextAttention();
+    REQUIRE(window.jumpPending());
+
+    window.jumpBack();
+
+    CHECK(window.rowActionPending());
+    rig.a.releaseHeld();
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+}
+
+// The case above, in the order it flaked: the window hears the daemon select the jump's workspace before it
+// hears JumpBack's selection. The replaced switch's selection is not followed; following it dropped the
+// landing JumpBack waited for, and the window showed the tab the daemon had active instead.
+TEST_CASE("A selection a newer switch replaced is not followed while that switch is under way",
+          "[switch][sidebar][attention][jump][history]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    auto const third = addWorkspace(rig.a).id;
+    printInPaneOf(rig.a, third, std::string { BlockedStatus });
+    REQUIRE(waitUntil([&] { return !ownBlockedPanes(window, third).empty(); }, 3000));
+    auto const first = addSecondTab(rig.a, rig.aWorkspaces[0]);
+    auto other = std::optional<uint64_t> {};
+    REQUIRE(waitUntil(
+        [&] {
+            auto const shown = shownTab(rig, window);
+            if (shown && shown->first == rig.aWorkspaces[0] && shown->second != first.tab)
+                other = shown->second;
+            return other.has_value();
+        },
+        3000));
+    auto* const acting = rig.app.manager().actingSessionOfWindow(rig.shown());
+    REQUIRE(acting != nullptr);
+    REQUIRE(acting->operator()(contour::actions::SwitchToTab { .position = 1 }));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+    window.sidebar().activate(ownWorkspaceRow(window, rig.aWorkspaces[1]));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+    rig.a.onDaemon([&] {
+        rig.a.host->model().activateTab(vtworkspace::WorkspaceId { rig.aWorkspaces[0] },
+                                        vtworkspace::TabId { *other });
+        return 0;
+    });
+    auto* const link = rig.windowLink();
+    REQUIRE(link != nullptr);
+    rig.a.holdAfterSelectionOf(third);
+    window.jumpToNextAttention();
+    REQUIRE(window.jumpPending());
+    // The connection hears the jump's selection; the window reconciles it only once JumpBack has asked for
+    // its own, whose answer is held back meanwhile.
+    REQUIRE(waitUntil(
+        [&] { return link->directory().selected == std::optional { third }; }, 3000, GuiEvents::Held));
+    window.jumpBack();
+    drainGuiEvents();
+
+    CHECK_FALSE(onA(rig, window, third));
+    CHECK(window.rowActionPending());
+    rig.a.releaseHeld();
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+}
+
+// Final fix wave, item 2: an own row's action on the workspace the window shows is the newer navigation.
+TEST_CASE("An own row's action on the shown workspace ends the window's own jump under way",
+          "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    printInPaneOf(rig.a, rig.aWorkspaces[1], std::string { BlockedStatus });
+    REQUIRE(waitUntil([&] { return !ownBlockedPanes(window, rig.aWorkspaces[1]).empty(); }, 3000));
+    REQUIRE(waitUntil([&] { return ownTabCount(window, rig.aWorkspaces[0]) == 1; }, 3000));
+    rig.a.holdEverything();
+    window.jumpToNextAttention();
+    REQUIRE(window.jumpPending());
+
+    pickFromMenu(window, ownWorkspaceRow(window, rig.aWorkspaces[0]), QStringLiteral("New Tab Here"));
+
+    CHECK_FALSE(window.jumpPending());
+    rig.a.releaseHeld();
+    // The window stays where the action ran: the jump's switch was given up with it.
+    CHECK(waitUntil([&] { return ownTabCount(window, rig.aWorkspaces[0]) == 2; }, 3000));
+    CHECK_FALSE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 100));
+    CHECK(onA(rig, window, rig.aWorkspaces[0]));
+}
+
+TEST_CASE("Close Tab from an own row ends a jump to another daemon under way", "[switch][sidebar][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const first = addSecondTab(rig.a, rig.aWorkspaces[0]);
+    REQUIRE(waitUntil([&] { return ownTabCount(window, rig.aWorkspaces[0]) == 2; }, 3000));
+    std::ignore = blockPaneOfB(rig, rig.bWorkspaces[1]);
+    rig.b.holdNewConnectionsAtLayout();
+    window.jumpToNextAttention();
+    REQUIRE(waitUntil([&] { return rig.host.started == 1; }, 2000));
+    REQUIRE(window.sidebar().isJumpPending());
+    auto asked =
+        QSignalSpy { &window, &contour::window::WindowController::sidebarCloseConfirmationRequested };
+
+    pickFromMenu(window, ownTabRow(window, rig.aWorkspaces[0], first.tab), QStringLiteral("Close Tab…"));
+    REQUIRE(asked.count() == 1);
+    window.confirmClose(asked.front()[0]);
+
+    CHECK_FALSE(window.sidebar().isJumpPending());
+    rig.b.releaseHeld();
+    drainGuiEvents();
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(waitUntil([&] { return ownTabCount(window, rig.aWorkspaces[0]) == 1; }, 3000));
+}
+
 // Phase 7 review M8: an empty back stack says so.
 TEST_CASE("JumpBack with nowhere to go back to says so", "[switch][jump][history]")
 {
@@ -3046,6 +3290,8 @@ TEST_CASE("JumpBack with nowhere to go back to says so", "[switch][jump][history
     window.jumpBack();
 
     CHECK(saidLast(rig.said, QStringLiteral("Nowhere to go back to")));
+    // Shown as well: a brief notice, not words for a screen reader alone (final review, item 3).
+    CHECK(window.notices().toastText() == QStringLiteral("Nowhere to go back to"));
     // Once a place is recorded, the row can act.
     window.sidebar().activate(ownWorkspaceRow(window, rig.aWorkspaces[1]));
     REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
@@ -4640,6 +4886,8 @@ TEST_CASE("WindowSwitcher: a password host asks in the jumping window", "[switch
     }
 }
 
+namespace
+{
 /// Drops @p rig's B connections and waits for the window's link to dial B again.
 /// @return Whether the redial went through the transport the window's link was configured with.
 [[nodiscard]] bool redialsThroughWindowTransport(SwitchRig& rig)
@@ -4650,6 +4898,7 @@ TEST_CASE("WindowSwitcher: a password host asks in the jumping window", "[switch
     rig.b.dropConnections();
     return waitUntil([&] { return transport.dials() > before; }, 5000);
 }
+} // namespace
 
 TEST_CASE("WindowSwitcher: a window's link to a listed daemon dials every time as the window's own",
           "[switch][link][presence]")

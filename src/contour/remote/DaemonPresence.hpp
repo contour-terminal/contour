@@ -26,6 +26,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -169,9 +170,11 @@ struct PresenceOverrides
 /// listed (removed, hidden, or no window is on any daemon), and as the presence is destroyed. An observer
 /// dials only through PresenceDeps::observerTransport; a dial that was refused, or that failed for a reason
 /// the user must deal with first (NeedsInput, NotRunning, TooOld, Failed), is never redialed by the timer --
-/// only connect() redials it, interactively, and start() once the daemon runs; and a local daemon a
-/// discovery did not find serving is dialled again once a later one does. An observer whose daemon stopped
-/// reads NotRunning and dials it no more by itself (FailureRecordingTransport). A dial that failed for a
+/// only connect() redials it, interactively and never starting the daemon, and start() once the daemon runs;
+/// a local daemon a discovery did not find serving is dialled again once a later one does; and a local one
+/// found serving that reads TooOld or NotRunning is dialled again at every periodic refresh, by the discovery
+/// it asks, as a unix socket dial asks nothing and starts nothing. An observer whose daemon stopped reads
+/// NotRunning and dials it no more by itself (FailureRecordingTransport). A dial that failed for a
 /// reason that may pass is redialed in the background by PresenceDeps::redialBackoff, while a window is
 /// visible. A controller handed to a window (adoptObserver()) is the window's: the presence never stops it.
 ///
@@ -326,6 +329,14 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
         GaveUpAbsent, ///< Gave up finding the daemon gone after it served, or a discovery missed it since.
     };
 
+    /// Whether the user ended an observer's connect: then only Connect dials it again, never a redial or a
+    /// refresh, whatever its daemon does meanwhile.
+    enum class Hold : uint8_t
+    {
+        None = 0,         ///< Dialled again in the background as its state asks.
+        UserDisconnected, ///< Cancelled by the user: holds nothing until Connect.
+    };
+
     /// The connection this process keeps to a listed daemon no window of it is on, or why it keeps none.
     struct Observer
     {
@@ -338,6 +349,7 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
         uint32_t redials = 0;                   ///< The background redials since it was last connected.
         RedialState redial = RedialState::Idle; ///< Whether a background redial of the controller is due.
         LocalLiveness liveness = LocalLiveness::Unknown; ///< Whether its daemon is known to have gone.
+        Hold hold = Hold::None; ///< Whether the user cancelled it, which only Connect lifts.
     };
 
     /// Whether a discovery runs now: a refresh meanwhile starts none.
@@ -410,7 +422,7 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
     void startDiscovery();
     void armRefresh();
     /// Raises what @p controller, holding @p daemon's raise role, was handed, from the window focused last.
-    void raiseFor(window::DaemonRef const& daemon, NativeController& controller);
+    void raiseFor(window::DaemonRef const& daemon, NativeController& controller) const;
     /// Counts again the tabs that wait in the observers' daemons, and tells the application if that changed.
     void recountObservedWaiting();
     /// Tells the application how many tabs wait in the observed daemons, and every subscriber that the
@@ -423,8 +435,14 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
     [[nodiscard]] std::vector<WindowLinkView> windowLinks() const;
 
     /// Notes what the discovery just made says of each local daemon whose observer dials nothing more by
-    /// itself: one it missed has gone; one it found that had gone is dialled again.
-    void redialRestartedLocals();
+    /// itself: one it missed has gone; one it found that had gone is dialled again, as is one it found whose
+    /// observer reads Too old or Not running, while a window is visible (isRedialledByRefresh()).
+    /// @param stuck The local daemons whose observers read Too old or Not running as the periodic refresh
+    ///        asked this discovery (@ref _stuckAtRefresh): only those are dialled again, never one dialled
+    ///        since, nor at a discovery a giving-up observer asked for.
+    void redialRestartedLocals(std::span<window::DaemonRef const> stuck);
+    /// @return The local daemons whose observers a discovery would dial again (isRedialledByRefresh()).
+    [[nodiscard]] std::vector<window::DaemonRef> stuckLocals() const;
     /// @return Whether @p daemon is a local daemon the last discovery found serving.
     [[nodiscard]] bool isRunningLocal(window::DaemonRef const& daemon) const;
     /// @return Whether @p daemon is listed, as last decided.
@@ -441,6 +459,10 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
                                         window::DaemonSection lastKnown);
     /// @return Whether @p observer's dial failed for a reason that may pass.
     [[nodiscard]] static bool isRetryable(Observer const& observer);
+    /// @return Whether a periodic refresh dials @p daemon's @p observer again: a local daemon discovery finds
+    ///         serving, whose observer stopped at Too old or Not running -- the daemon may have been upgraded
+    ///         or started since, and a unix socket dial asks nothing and starts nothing.
+    [[nodiscard]] bool isRedialledByRefresh(window::DaemonRef const& daemon, Observer const& observer) const;
     /// @return The controller a verb on @p daemon's run @p instance goes to; null for none.
     [[nodiscard]] NativeController* controllerFor(window::DaemonRef const& daemon,
                                                   window::DaemonInstance instance) const;
@@ -454,6 +476,9 @@ class DaemonPresence final: public window::IDaemonSections, public IObserverPool
     /// What the last discovery found; none until one answered.
     std::optional<std::vector<cli::DiscoveredDaemon>> _discovered;
     Discovery _discovery = Discovery::Idle;
+    /// The local daemons whose observers read Too old or Not running as refresh() asked the running discovery
+    /// (stuckLocals()): what its result dials again (redialRestartedLocals()), and nothing else.
+    std::vector<window::DaemonRef> _stuckAtRefresh;
     RefreshArm _refreshArm = RefreshArm::Idle;
     std::set<std::string> _seenLocal;           ///< The local labels listed earlier in this run.
     std::set<std::string> _removed;             ///< The daemons removed for this run, by DaemonRef value.

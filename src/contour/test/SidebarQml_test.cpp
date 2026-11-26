@@ -4492,8 +4492,11 @@ TEST_CASE("a daemon row shows its name and link state (offscreen)",
         REQUIRE(other != nullptr);
         REQUIRE(host != nullptr);
         CHECK(headingPart(*other, "sidebarDaemonName").property("text").toString() == QStringLiteral("work"));
-        // A host that is not running offers nothing to press: nothing here starts it.
-        CHECK(daemonButtonsOf(*host).empty());
+        // A host that is not running offers Connect alone: it finds the daemon once it runs, and nothing here
+        // starts it.
+        auto const hostButtons = daemonButtonsOf(*host);
+        REQUIRE(hostButtons.size() == 1);
+        CHECK(hostButtons[0]->property("accessibleName").toString() == QStringLiteral("Connect"));
 
         // Not running: its mark from the link table, its words, and Start beside Remove.
         auto const look = contour::window::linkLookOf(DaemonLinkState::NotRunning, lookOf(row));
@@ -4794,8 +4797,8 @@ TEST_CASE("at its narrowest a daemon row keeps six letters of its name, in every
                 scene.controller.showSidebar(static_cast<int>(scene.token("minWidth")));
                 scene.layOut();
                 scene.layOut();
-                auto* heading =
-                    daemonHeadingOf(scene, QString::fromUtf8(daemonName.data(), daemonName.size()));
+                auto* heading = daemonHeadingOf(
+                    scene, QString::fromUtf8(daemonName.data(), static_cast<qsizetype>(daemonName.size())));
                 REQUIRE(heading != nullptr);
                 auto const& name = headingPart(*heading, "sidebarDaemonName");
                 auto const text = name.property("text").toString();
@@ -5187,6 +5190,45 @@ TEST_CASE("the Menu key on a daemon row opens its menu with Open in New Window (
         CHECK(std::ranges::count(
                   menu, std::string_view { "Open in New Window" }, &contour::command::ContextMenuEntry::title)
               == 1);
+    }
+}
+
+TEST_CASE("Return on a daemon row keeps the keyboard on it as its daemon connects (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto notConnected = starfiveSection();
+        notConnected.instance = {};
+        notConnected.state = contour::window::DaemonLinkState::NotConnected;
+        notConnected.directory = {};
+        onDaemon(
+            scene, QStringLiteral("local"), contour::window::DaemonLinkState::Connected, { notConnected });
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        auto const starfive = daemonRowIndex(scene, "starfive");
+        tree->setProperty("currentIndex", starfive);
+        auto& sections = scene.controller.sidebarSections();
+        sections.calls.clear();
+
+        // Return connects it; the connect gives its section a run, and a tree to list.
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        REQUIRE(sections.calls.size() == 1);
+        // The current row never leaves it, not even for a moment.
+        auto moved = QSignalSpy { tree, SIGNAL(currentIndexChanged()) };
+        sections.listed = { starfiveSection() };
+        scene.controller.sidebarModel().refreshNow();
+        QCoreApplication::processEvents();
+
+        CHECK(daemonRowIndex(scene, "starfive") == starfive);
+        CHECK(tree->property("currentIndex").toInt() == starfive);
+        CHECK(moved.count() == 0);
+        CHECK(tree->hasActiveFocus());
     }
 }
 

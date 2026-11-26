@@ -62,7 +62,7 @@ TEST_CASE("CloseDialogTable.a close on another daemon names it", "[closedialog]"
 TEST_CASE("CloseDialogTable.an own close says nothing of a daemon", "[closedialog]")
 {
     for (auto const kind: { CloseKind::Workspace, CloseKind::Tab, CloseKind::Pane })
-        CHECK(closeDialogText(kind, { .label = "x", .tabs = 1, .panes = 1, .program = "vim", .daemon = "" })
-                  .message.find("runs on")
-              == std::string::npos);
+        CHECK_FALSE(
+            closeDialogText(kind, { .label = "x", .tabs = 1, .panes = 1, .program = "vim", .daemon = "" })
+                .message.contains("runs on"));
 }

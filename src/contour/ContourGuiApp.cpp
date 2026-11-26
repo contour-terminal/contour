@@ -1292,7 +1292,7 @@ remote::DaemonLink& ContourGuiApp::adoptSwitchLink(remote::DaemonLinkConfig conf
         *_daemonLinks.emplace_back(remote::DaemonLink::adopt(remote::DaemonLinkId { _nextDaemonLinkId++ },
                                                              std::move(config),
                                                              std::move(observing),
-                                                             std::move(request),
+                                                             request,
                                                              std::move(interactive),
                                                              std::move(giveBack),
                                                              *this,

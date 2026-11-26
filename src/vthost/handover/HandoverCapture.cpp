@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -192,6 +193,20 @@ namespace
             attention.panes.push_back(HandoverPaneAttention { .session = session, .attention = pane });
         return attention;
     }
+
+    /// @return The workspaces @p host's recent promotions made, as a handover image carries them.
+    [[nodiscard]] std::vector<HandoverMadeForToken> madeForTokensOf(SessionHost const& host)
+    {
+        auto made = std::vector<HandoverMadeForToken> {};
+        for (auto const& entry: host.madeForTokens())
+        {
+            auto token = std::array<uint8_t, 16> {};
+            std::ranges::transform(
+                entry.token, token.begin(), [](std::byte b) { return std::to_integer<uint8_t>(b); });
+            made.push_back(HandoverMadeForToken { .token = token, .workspace = entry.workspace.value });
+        }
+        return made;
+    }
 } // namespace
 
 HandoverImage hostStructureOf(SessionHost const& host)
@@ -211,6 +226,7 @@ HandoverImage hostStructureOf(SessionHost const& host)
         .upgradeGeneration = 0,
         .cellPixelSize = host.learnedCellPixelSize(),
         .attention = attentionOf(host),
+        .madeForTokens = madeForTokensOf(host),
     };
     for (auto const id: host.sessionIds())
         image.sessions.push_back(sessionStructureOf(host, id));

@@ -961,6 +961,12 @@ TEST_CASE("snapshot plan: the daemon sections' scripts are listed and named", "[
         Expected { SnapshotScript::DaemonHiddenToast, "daemon-hidden-toast", SnapshotSections::Hidden },
         Expected {
             SnapshotScript::SidebarDaemonMenuLive, "sidebar-daemon-menu-live", SnapshotSections::TwoDaemons },
+        Expected { SnapshotScript::SidebarHostNotRunning,
+                   "sidebar-host-not-running",
+                   SnapshotSections::HostNotRunning },
+        Expected { SnapshotScript::SidebarHostNotRunningMenu,
+                   "sidebar-host-not-running-menu",
+                   SnapshotSections::HostNotRunning },
     };
     for (auto const& expected: Scripts)
     {

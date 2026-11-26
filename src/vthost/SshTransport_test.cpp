@@ -633,6 +633,49 @@ TEST_CASE("ssh connect succeeds after login noise", "[vthost][ssh]")
     CHECK(factory.describe() == "ssh://me@homepc");
 }
 
+// Final review M3: a remote command that drops --no-start -- a wrapper that runs the relay without it --
+// reads as a relay that cannot skip the start, never as a daemon watched in the background.
+TEST_CASE("ssh connect told not to start a daemon refuses a relay that does not say it honoured that",
+          "[vthost][ssh]")
+{
+    // The relay ran without the flag (the wrapper dropped it): its ready line states nothing.
+    {
+        auto fixture = SshFixture {};
+        fixture.target.remoteCommand = "my-wrapper --no-start";
+        fixture.target.remoteStart = vthost::RemoteStart::Never;
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReady }));
+
+        auto factory = fixture.factory();
+        auto const connection = fixture.loop.blockOn(factory.connect(fixture.loop));
+        REQUIRE_FALSE(connection.has_value());
+        CHECK(connection.error().kind == TransportErrorKind::RemoteProgramTooOld);
+        CHECK(connection.error().message.contains("remote_command"));
+        CHECK(state->terminated == 1);
+    }
+    // The relay got it: its ready line says so.
+    {
+        auto fixture = SshFixture {};
+        fixture.target.remoteStart = vthost::RemoteStart::Never;
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReadyNoStart }));
+
+        auto factory = fixture.factory();
+        auto const connection = fixture.loop.blockOn(factory.connect(fixture.loop));
+        INFO((connection ? std::string {} : connection.error().message));
+        CHECK(connection.has_value());
+    }
+    // An attach that may start one takes either ready line.
+    {
+        auto fixture = SshFixture {};
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReadyNoStart }));
+
+        auto factory = fixture.factory();
+        CHECK(fixture.loop.blockOn(factory.connect(fixture.loop)).has_value());
+    }
+}
+
 TEST_CASE("ssh connect names a refused login and the command to run once", "[vthost][ssh]")
 {
     auto fixture = SshFixture {};

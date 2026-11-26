@@ -164,6 +164,9 @@ void DaemonPresence::refresh()
 {
     if (_lifecycle == Lifecycle::ShutDown)
         return;
+    // Taken before reconcile(): an observer it dials now is not dialled again by the discovery it asks.
+    if (_deps.visibility() == AppVisibility::Visible)
+        _stuckAtRefresh = stuckLocals();
     startDiscovery();
     reconcile();
     if (_deps.visibility() == AppVisibility::Visible)
@@ -267,7 +270,8 @@ DaemonPresence::HandOffMark const* DaemonPresence::handOffOf(window::DaemonRef c
 
 ObserverWanted DaemonPresence::wantsObserver(window::DaemonRef const& daemon, DaemonLinkId leaving) const
 {
-    if (!isListed(daemon))
+    // A `link:` daemon has no observer: only the window on it reaches it (observerTransport()).
+    if (!isListed(daemon) || isOfKind(daemon, window::DaemonRefKind::Link))
         return ObserverWanted::No;
     auto const others = windowLinks();
     auto const otherIsOn = std::ranges::any_of(
@@ -415,6 +419,7 @@ void DaemonPresence::connect(window::DaemonRef const& daemon, vtworkspace::Works
         return;
     auto& observer = _observers[daemon];
     observer.redials = 0;
+    observer.hold = Hold::None;
     _awaitingStart.erase(daemon);
     auto transport = _deps.interactiveTransport(daemon, askingWindow);
     if (transport)
@@ -437,6 +442,7 @@ void DaemonPresence::disconnect(window::DaemonRef const& daemon)
     observer.recorder.reset();
     observer.redial = RedialState::Idle;
     observer.liveness = LocalLiveness::Unknown;
+    observer.hold = Hold::UserDisconnected;
     notify();
 }
 
@@ -824,8 +830,11 @@ void DaemonPresence::startDiscovery()
                              && std::ranges::contains(found, parsed->second, &cli::DiscoveredDaemon::label);
                   });
                   _discovered = std::move(found);
+                  // Only a periodic refresh's: the discovery a giving-up observer asks for (watch()) would
+                  // otherwise dial it again at once, and so on.
+                  auto const stuck = std::exchange(_stuckAtRefresh, {});
                   reconcile();
-                  redialRestartedLocals();
+                  redialRestartedLocals(stuck);
                   notify();
               });
 }
@@ -846,7 +855,7 @@ void DaemonPresence::armRefresh()
     });
 }
 
-void DaemonPresence::raiseFor(window::DaemonRef const& daemon, NativeController& controller)
+void DaemonPresence::raiseFor(window::DaemonRef const& daemon, NativeController& controller) const
 {
     // Handed out only while the daemon has no viewer and picked this process's observer (spec §2): each once,
     // across every process observing the daemon.
@@ -884,21 +893,35 @@ void DaemonPresence::notify()
     _subscribers.notify();
 }
 
-void DaemonPresence::redialRestartedLocals()
+std::vector<window::DaemonRef> DaemonPresence::stuckLocals() const
+{
+    auto stuck = std::vector<window::DaemonRef> {};
+    for (auto const& [daemon, observer]: _observers)
+        if (isRedialledByRefresh(daemon, observer))
+            stuck.push_back(daemon);
+    return stuck;
+}
+
+void DaemonPresence::redialRestartedLocals(std::span<window::DaemonRef const> stuck)
 {
     // A local daemon known to have gone, whose observer gave up, and that serves now -- started again outside
     // Contour, perhaps before any discovery saw it gone -- is dialled again, as an observer dials: never
-    // prompting, never starting a daemon. One never seen gone waits for Connect, as a remote one does: a dial
-    // that finds nothing where discovery finds a daemon is not retried at every discovery it asks for.
+    // prompting, never starting a daemon. So is one found serving whose observer read Too old or Not running:
+    // it may have been upgraded or started meanwhile, and the discovery each periodic refresh asks dials it
+    // again while a window is visible, a unix socket dial asking nothing and starting nothing.
+    auto const visible = _deps.visibility() == AppVisibility::Visible;
     for (auto& [daemon, observer]: _observers)
     {
+        // One the user disconnected is dialled again by Connect alone, even once its daemon restarted.
+        if (!isOfKind(daemon, window::DaemonRefKind::Local) || observer.hold == Hold::UserDisconnected)
+            continue;
         auto const idle =
             observer.refusal || !observer.controller || hasGivenUp(observer.controller->connectionState());
-        if (!isOfKind(daemon, window::DaemonRefKind::Local) || !idle)
-            continue;
-        if (!isRunningLocal(daemon))
+        if (idle && !isRunningLocal(daemon))
             observer.liveness = LocalLiveness::GaveUpAbsent;
-        else if (observer.liveness == LocalLiveness::GaveUpAbsent)
+        else if (idle && observer.liveness == LocalLiveness::GaveUpAbsent)
+            startObserver(daemon, observer);
+        else if (visible && std::ranges::contains(stuck, daemon) && isRedialledByRefresh(daemon, observer))
             startObserver(daemon, observer);
     }
 }
@@ -925,6 +948,32 @@ bool DaemonPresence::isRetryable(Observer const& observer)
     auto const failure =
         observer.recorder->lastFailure().or_else([&] { return observer.controller->failureKind(); });
     return failure && !linkStateOfFailure(*failure);
+}
+
+bool DaemonPresence::isRedialledByRefresh(window::DaemonRef const& daemon, Observer const& observer) const
+{
+    if (!isOfKind(daemon, window::DaemonRefKind::Local) || !isRunningLocal(daemon)
+        || observer.hold == Hold::UserDisconnected)
+        return false;
+    auto const state = [&]() -> std::optional<DaemonLinkState> {
+        if (observer.refusal)
+            return observer.refusal->state;
+        // An observer that holds nothing and was refused nothing has nothing a refresh could redial.
+        auto const* const controller = observer.controller.get();
+        if (controller == nullptr)
+            return std::nullopt;
+        // A daemon that read the observer's hello as a control one ended the connection: too old, whatever
+        // state the connection ended in.
+        if (controller->observeSupport() == ObserveSupport::TooOld)
+            return DaemonLinkState::TooOld;
+        if (!hasGivenUp(controller->connectionState()))
+            return std::nullopt;
+        return linkStateOf(controller->connectionState(),
+                           observer.recorder ? observer.recorder->lastFailure()
+                                             : std::optional<vthost::TransportErrorKind> {},
+                           controller->observeSupport());
+    }();
+    return state == DaemonLinkState::TooOld || state == DaemonLinkState::NotRunning;
 }
 
 NativeController* DaemonPresence::controllerFor(window::DaemonRef const& daemon,

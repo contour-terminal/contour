@@ -277,8 +277,8 @@ namespace
     /// @return The jump mode @p mode names, as QML passes it; Here for anything else.
     [[nodiscard]] JumpMode jumpModeOf(int mode) noexcept
     {
-        return mode == static_cast<int>(std::to_underlying(JumpMode::NewWindow)) ? JumpMode::NewWindow
-                                                                                 : JumpMode::Here;
+        return std::cmp_equal(mode, std::to_underlying(JumpMode::NewWindow)) ? JumpMode::NewWindow
+                                                                             : JumpMode::Here;
     }
 
     /// @param disclosure Whether a row's children show.
@@ -341,7 +341,7 @@ QString accessibleDescriptionOf(SidebarRow const& row)
     if (row.shownElsewhere == ShownElsewhere::Yes)
         parts.push_back(SidebarModel::tr("shown in another window"));
     // A daemon row already connecting says so in its link words.
-    if (row.pending == RowPending::Yes && !(daemon && row.linkState == DaemonLinkState::Connecting))
+    if (row.pending == RowPending::Yes && (!daemon || row.linkState != DaemonLinkState::Connecting))
         parts.push_back(SidebarModel::tr("connecting"));
     if (row.leaves.needYou > 0)
         parts.push_back(counted(PanesNeedYou, row.leaves.needYou));
@@ -497,6 +497,12 @@ int SidebarModel::rowIndexOf(SidebarRowKey const& key) const noexcept
 {
     auto const at = std::ranges::find(_rows, key, &SidebarRow::key);
     return at == _rows.end() ? -1 : static_cast<int>(std::distance(_rows.begin(), at));
+}
+
+SidebarTarget SidebarModel::targetOf(SidebarRowKey const& key) const
+{
+    auto const* const row = rowAt(rowIndexOf(key));
+    return row != nullptr ? sidebarTargetOf(*row) : sidebarTargetOf(key);
 }
 
 QVariant SidebarModel::data(QModelIndex const& index, int role) const
@@ -988,7 +994,7 @@ sidebarrows::RowActivation SidebarModel::activateRow(int row, JumpMode mode)
     // Another daemon's row, and any row opened beside, is jumped to; the keyboard stays where it was.
     if (mode == JumpMode::NewWindow || !isOwn(shown->key))
     {
-        _host.jumpTo(sidebarTargetOf(shown->key), mode);
+        _host.jumpTo(sidebarTargetOf(*shown), mode);
         return sidebarrows::RowActivation::Nothing;
     }
     switch (shown->key.kind)
@@ -1087,7 +1093,7 @@ void SidebarModel::openInNewWindow(int row)
     auto const* const shown = rowAt(row);
     if (shown == nullptr || shown->key.kind == SidebarRowKind::Hidden)
         return;
-    _host.jumpTo(sidebarTargetOf(shown->key), JumpMode::NewWindow);
+    _host.jumpTo(sidebarTargetOf(*shown), JumpMode::NewWindow);
 }
 
 void SidebarModel::setExpansion(int row, RowExpansion wanted)
@@ -1245,7 +1251,7 @@ void SidebarModel::setScope(config::SidebarScope scope)
 
 void SidebarModel::setScope(int scope)
 {
-    setScope(scope >= 0 && static_cast<std::size_t>(scope) < config::SidebarScopeCount
+    setScope(scope >= 0 && std::cmp_less(scope, config::SidebarScopeCount)
                  ? static_cast<config::SidebarScope>(scope)
                  : config::SidebarScope::All);
 }

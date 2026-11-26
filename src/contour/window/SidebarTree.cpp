@@ -263,7 +263,7 @@ namespace
         DaemonSection const& meta;           ///< Which daemon, its link, its name; its directory is unused.
         WorkspaceDirectory const& directory; ///< Its workspaces.
         TabAttention const& marks;           ///< The seen-state its panes are read with.
-        SectionHeading heading;              ///< Whether a Daemon row heads it.
+        SectionHeading heading {};           ///< Whether a Daemon row heads it.
         std::size_t position = 0;            ///< Its place among the sections.
         DaemonRowLink link = DaemonRowLink::Observer; ///< Who holds its daemon's link.
     };
@@ -282,9 +282,12 @@ namespace
     [[nodiscard]] SidebarRowKey keyOf(
         Section const& section, SidebarRowKind kind, uint64_t workspace, uint64_t tab, PaneKey pane)
     {
+        // A Daemon row is keyed by its daemon alone: a connect gives its section a run, and it stays the same
+        // row, keeping the keyboard and an open menu.
         return SidebarRowKey { .kind = kind,
                                .daemon = section.meta.daemon,
-                               .instance = section.meta.instance,
+                               .instance =
+                                   kind == SidebarRowKind::Daemon ? DaemonInstance {} : section.meta.instance,
                                .workspace = workspace,
                                .tab = tab,
                                .pane = pane };
@@ -462,6 +465,57 @@ std::string gitTextOf(DirectoryGit const& git)
 
 namespace
 {
+    /// Finishes @p heading, @p section's Daemon row, once its workspaces are known: its urgency and counts
+    /// roll up theirs, and it holds the selection and the pending jump its rows do not show.
+    /// @param sectionWorkspaces Every Workspace row of the section, listed or folded away.
+    /// @param below The rows listed beneath the heading.
+    void finishHeading(Building const& context,
+                       Section const& section,
+                       SidebarRow& heading,
+                       std::span<SidebarRow const> sectionWorkspaces,
+                       std::span<SidebarRow const> below)
+    {
+        heading.position = section.position;
+        heading.linkState = section.meta.state;
+        heading.linkReason = rowTextOf(section.meta.reason);
+        heading.locality = section.meta.locality;
+        heading.link = section.link;
+        if (!sectionWorkspaces.empty())
+        {
+            auto const& best = *std::ranges::max_element(sectionWorkspaces, {}, &SidebarRow::urgency);
+            heading.urgency = best.urgency;
+            heading.glyph = best.glyph;
+            for (auto const& workspaceRow: sectionWorkspaces)
+            {
+                heading.leaves.needYou += workspaceRow.leaves.needYou;
+                heading.leaves.working += workspaceRow.leaves.working;
+            }
+        }
+        if (section.directory.workspaces.empty())
+            heading.expansion = RowExpansion::None;
+        else if (context.narrowing())
+            heading.expansion = below.empty() ? RowExpansion::Collapsed : RowExpansion::Expanded;
+        else
+            heading.expansion = context.state.foldedDaemons.contains(section.meta.daemon)
+                                    ? RowExpansion::Collapsed
+                                    : RowExpansion::Expanded;
+        // A fold or a filter that hides the displayed tab hands its selection to the daemon row.
+        auto const& displayed = context.displayed;
+        auto const holdsDisplayed =
+            inSection(displayed, section) && displayed->tab
+            && std::ranges::any_of(section.directory.workspaces, [&](DirectoryWorkspace const& workspace) {
+                   return workspace.id == displayed->workspace
+                          && std::ranges::contains(workspace.tabs, *displayed->tab, &DirectoryTab::id);
+               });
+        auto const showsDisplayed =
+            std::ranges::any_of(below, [](SidebarRow const& r) { return r.selection != RowSelection::None; });
+        heading.selection =
+            holdsDisplayed && !showsDisplayed ? RowSelection::ContainsSelected : RowSelection::None;
+        if (std::ranges::any_of(JumpModes,
+                                [&](JumpMode mode) { return inSection(context.pending.of(mode), section); }))
+            heading.pending = RowPending::Yes;
+    }
+
     /// Appends @p section's rows to @p listing: its Daemon row when it has a heading, then its workspaces
     /// with their tabs and panes, as the state folds them and the filter and the scope narrow them.
     void appendSection(Building const& context, Section const& section, SidebarListing& listing)
@@ -478,6 +532,7 @@ namespace
 
         auto daemonRow = SidebarRow {};
         daemonRow.key = keyOf(section, SidebarRowKind::Daemon, 0, 0, {});
+        daemonRow.daemonInstance = meta.instance;
         daemonRow.title = daemonName;
         auto const daemonMatches = headed && !context.lowerFilter.empty()
                                    && matches(daemonRow, context.lowerFilter)
@@ -545,48 +600,11 @@ namespace
         auto const sectionWorkspaces = std::span { listing.workspaces }.subspan(firstWorkspace);
         auto const shownBelow = rows.size() > firstRow + (headed ? 1 : 0);
         if (headed)
-        {
-            auto& heading = rows[firstRow];
-            heading.position = section.position;
-            heading.linkState = meta.state;
-            heading.linkReason = rowTextOf(meta.reason);
-            heading.locality = meta.locality;
-            heading.link = section.link;
-            if (!sectionWorkspaces.empty())
-            {
-                auto const& best = *std::ranges::max_element(sectionWorkspaces, {}, &SidebarRow::urgency);
-                heading.urgency = best.urgency;
-                heading.glyph = best.glyph;
-                for (auto const& workspaceRow: sectionWorkspaces)
-                {
-                    heading.leaves.needYou += workspaceRow.leaves.needYou;
-                    heading.leaves.working += workspaceRow.leaves.working;
-                }
-            }
-            if (section.directory.workspaces.empty())
-                heading.expansion = RowExpansion::None;
-            else if (narrowing)
-                heading.expansion = shownBelow ? RowExpansion::Expanded : RowExpansion::Collapsed;
-            else
-                heading.expansion = daemonFolded ? RowExpansion::Collapsed : RowExpansion::Expanded;
-            // A fold or a filter that hides the displayed tab hands its selection to the daemon row.
-            auto const& displayed = context.displayed;
-            auto const holdsDisplayed =
-                inSection(displayed, section) && displayed->tab
-                && std::ranges::any_of(
-                    section.directory.workspaces, [&](DirectoryWorkspace const& workspace) {
-                        return workspace.id == displayed->workspace
-                               && std::ranges::contains(workspace.tabs, *displayed->tab, &DirectoryTab::id);
-                    });
-            auto const showsDisplayed =
-                std::ranges::any_of(std::span { rows }.subspan(firstRow + 1),
-                                    [](SidebarRow const& r) { return r.selection != RowSelection::None; });
-            heading.selection =
-                holdsDisplayed && !showsDisplayed ? RowSelection::ContainsSelected : RowSelection::None;
-            if (std::ranges::any_of(
-                    JumpModes, [&](JumpMode mode) { return inSection(context.pending.of(mode), section); }))
-                heading.pending = RowPending::Yes;
-        }
+            finishHeading(context,
+                          section,
+                          rows[firstRow],
+                          sectionWorkspaces,
+                          std::span<SidebarRow const> { rows }.subspan(firstRow + 1));
 
         // A pending jump's row is the deepest row shown on the way to its target.
         auto const sectionRows = std::span { rows }.subspan(firstRow);
@@ -639,15 +657,18 @@ SidebarListing sidebarListing(SidebarSources const& sources,
         auto const position = static_cast<std::size_t>(index);
         auto const& marks =
             section.daemon == sources.own && sources.ownMarks != nullptr ? *sources.ownMarks : nothingSeen;
+        auto const link = [&] {
+            if (section.feed == SectionFeed::Observer)
+                return DaemonRowLink::Observer;
+            return section.daemon == sources.own ? DaemonRowLink::OwnWindow : DaemonRowLink::OtherWindow;
+        }();
         appendSection(context,
                       Section { .meta = section,
                                 .directory = section.directory,
                                 .marks = marks,
                                 .heading = SectionHeading::Shown,
                                 .position = position,
-                                .link = section.feed == SectionFeed::Observer ? DaemonRowLink::Observer
-                                        : section.daemon == sources.own       ? DaemonRowLink::OwnWindow
-                                                                              : DaemonRowLink::OtherWindow },
+                                .link = link },
                       listing);
     }
     if (!sources.hidden.empty() && state.scope == config::SidebarScope::All)
@@ -753,7 +774,7 @@ std::string sidebarFooterGlyphText(SidebarFooter const& footer, config::SidebarL
     return text;
 }
 
-SidebarSummary sidebarSummary(std::span<SidebarRow const> rows, std::optional<WorkspaceKey> current)
+SidebarSummary sidebarSummary(std::span<SidebarRow const> rows, std::optional<WorkspaceKey> const& current)
 {
     auto summary = SidebarSummary {};
     for (auto const& row: rows | std::views::filter([](SidebarRow const& r) {
@@ -792,7 +813,7 @@ std::optional<std::size_t> firstMatchOf(std::span<SidebarRow const> rows, Sideba
             return matches(row, lowerFilter);
         // A tab's urgency rolls up its panes': while they are listed, the one that asks is the match.
         return needsMe(row.urgency)
-               && !(row.key.kind == SidebarRowKind::Tab && row.expansion == RowExpansion::Expanded);
+               && (row.key.kind != SidebarRowKind::Tab || row.expansion != RowExpansion::Expanded);
     };
     using Rule = std::function<bool(SidebarRow const&)>;
     auto const preferences = std::array<Rule, 4> {

@@ -170,12 +170,12 @@ struct DirectoryRig
         .interactiveTransport = [](contour::window::DaemonRef const&, WorkspaceId) { return refused(); },
         .makeObserver =
             [](contour::window::DaemonRef const&,
-               std::shared_ptr<vthost::ITransportFactory>,
+               std::shared_ptr<vthost::ITransportFactory> const&,
                vthost::client::BackoffSchedule) {
                 return std::unique_ptr<contour::remote::NativeController> {};
             },
         .windowLinks = [] { return std::vector<contour::remote::WindowLinkView> {}; },
-        .refreshTimer = [](std::chrono::milliseconds, std::function<void()>) {},
+        .refreshTimer = [](std::chrono::milliseconds, std::function<void()> const&) {},
         .visibility = [] { return contour::remote::AppVisibility::Hidden; },
         .startDaemon = [](contour::window::DaemonRef const&) {},
         .updateListing = [](std::function<void(contour::config::SidebarDaemons&)> const&) {},

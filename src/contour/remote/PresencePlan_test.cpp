@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/remote/NativeController.hpp>
+#include <contour/remote/ObserveSupport.hpp>
 #include <contour/remote/PresencePlan.hpp>
 
 #include <catch2/catch_test_macros.hpp>

@@ -38,12 +38,12 @@ class IAskpassBroker;
 /// What a remote host runs when its saved entry names no `remote_command:`.
 inline constexpr std::string_view DefaultRemoteCommand = "contour daemon --stdio";
 
-/// What a remote host runs instead of @ref DefaultRemoteCommand when the attach must not start a daemon
-/// there (a background observer): the relay reports an absent daemon rather than starting one.
 /// The relay's flag that tells it not to start a daemon: what a custom `remote_command:` is ended with when
 /// the attach must not start one.
 inline constexpr std::string_view NoStartFlag = "--no-start";
 
+/// What a remote host runs instead of @ref DefaultRemoteCommand when the attach must not start a daemon
+/// there (a background observer): the relay reports an absent daemon rather than starting one.
 inline constexpr std::string_view NoStartRemoteCommand = "contour daemon --stdio --no-start";
 
 static_assert(NoStartRemoteCommand.starts_with(DefaultRemoteCommand)
@@ -53,6 +53,13 @@ static_assert(NoStartRemoteCommand.starts_with(DefaultRemoteCommand)
 /// How long an attempt may take from spawning ssh to the remote relay's preamble.
 inline constexpr auto SshConnectTimeout = std::chrono::seconds { 30 };
 
+/// Whether reaching a host's daemon may start it when none runs there.
+enum class RemoteStart : std::uint8_t
+{
+    IfAbsent = 0, ///< Yes: what an attach the user asked for does.
+    Never,        ///< No: a background observer only watches a daemon that already runs.
+};
+
 /// Where an ssh attach goes.
 struct SshTarget
 {
@@ -60,6 +67,10 @@ struct SshTarget
     std::string host;                                                 ///< A name or an address, bare.
     std::optional<std::uint16_t> port;                                ///< Empty: ssh's own default.
     std::string remoteCommand = std::string { DefaultRemoteCommand }; ///< Run by the remote login.
+    /// Never for a remote command that tells the relay not to start a daemon (@ref NoStartFlag): a ready
+    /// line that does not state it honoured the flag (RelayNoStart::Honoured) is refused, as a relay that
+    /// cannot skip the start (SshFailure::RemoteContourCannotSkipStart).
+    RemoteStart remoteStart = RemoteStart::IfAbsent;
 };
 
 /// @param target Where to attach.
@@ -158,8 +169,9 @@ enum class SshFailure : std::uint8_t
     NoPreamble,             ///< ssh ended without the relay answering, for no reason recognized.
     Cancelled,              ///< The user dismissed a prompt, or the attempt was cancelled.
     RemoteDaemonAbsent,     ///< The relay was told not to start a daemon, and none serves there.
-    /// The remote `contour` has `daemon --stdio` but no `--no-start`: too old to be reached without letting
-    /// it start a daemon.
+    /// The remote `contour` has `daemon --stdio` but no `--no-start` -- too old to be reached without letting
+    /// it start a daemon -- or the relay's ready line does not state it honoured the flag (a
+    /// `remote_command:` that does not pass it on).
     RemoteContourCannotSkipStart,
 };
 

@@ -1085,7 +1085,7 @@ void NativeSession::emitSessionEvent(proto::SessionEventPdu const& event)
     if (_closed)
         return;
     if (_phase != ConnectionPhase::Viewing
-        && !(_phase == ConnectionPhase::Observing && reachesObservers(event)))
+        && (_phase != ConnectionPhase::Observing || !reachesObservers(event)))
         return;
     // Widening the narrow event set into the catalog variant the encoder speaks.
     std::visit([this](auto const& alternative) { send(0, proto::DecodedPdu { alternative }); }, event);
@@ -2555,7 +2555,7 @@ void NativeSession::servePromotion(proto::DecodedFrame const& frame, proto::Sele
     auto const intent = [&]() -> std::optional<proto::AttachIntent> {
         if (madeBefore)
             return proto::AttachIntent { .kind = proto::AttachIntentKind::Select,
-                                         .workspace = madeBefore->value };
+                                         .workspace = madeBefore->workspace.value };
         if (select.workspace == 0)
             return proto::AttachIntent { .kind = proto::AttachIntentKind::NewWorkspace };
         if (_host.model().workspace(vtworkspace::WorkspaceId { select.workspace }) != nullptr)
@@ -2584,8 +2584,9 @@ void NativeSession::servePromotion(proto::DecodedFrame const& frame, proto::Sele
         {
             auto const madeNow = intent->kind == proto::AttachIntentKind::NewWorkspace;
             if (madeNow && select.creationToken)
-                _host.rememberWorkspaceMadeFor(*select.creationToken,
-                                               vtworkspace::WorkspaceId { _selectedWorkspace });
+                _host.rememberWorkspaceMadeFor({ .token = *select.creationToken,
+                                                 .workspace = vtworkspace::WorkspaceId { _selectedWorkspace },
+                                                 .maker = _id });
             // Told to the first viewer since the restore, as an attach's ServerHello tells it: by the batch
             // that answers, there being no hello to carry it. Held until then: a connection that ends first
             // puts it back for the next viewer (returnRestoreAnnouncement()).
@@ -2593,6 +2594,8 @@ void NativeSession::servePromotion(proto::DecodedFrame const& frame, proto::Sele
             _promotionDone = PromotionDone {
                 .made = madeNow || madeBefore ? vtworkspace::WorkspaceId { _selectedWorkspace }
                                               : vtworkspace::WorkspaceId {},
+                .earlierAsker = madeBefore && madeBefore->maker != _id ? std::optional { madeBefore->maker }
+                                                                       : std::nullopt,
                 .announced = _restoreToAnnounce,
             };
         }
@@ -2621,7 +2624,12 @@ void NativeSession::serveDemotion(proto::DecodedFrame const& frame)
         // workspace it made for nobody else to show goes again, as a promotion never made would have left it.
         if (answerTold && !promotion->announced.empty())
             _host.returnRestoreAnnouncement(promotion->announced);
-        if (promotion->made.value != 0 && _host.clientsShowing(promotion->made.value).empty())
+        // A connection that asked it first, and still shows it, is one whose answer was lost with it -- the
+        // same client's, which the daemon may not have seen end yet: it shows it for nobody.
+        auto showing = _host.clientsShowing(promotion->made.value);
+        if (promotion->earlierAsker)
+            std::erase(showing, *promotion->earlierAsker);
+        if (promotion->made.value != 0 && showing.empty())
         {
             connectionLog()("{}: closing workspace {}, made for a promotion that was withdrawn",
                             _id,

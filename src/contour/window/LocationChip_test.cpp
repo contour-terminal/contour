@@ -209,11 +209,11 @@ TEST_CASE("locationChip.place", "[LocationChip]")
     using P = LocationChipPlace;
     struct Row
     {
-        BarPresence band;
-        BarCentre centre;
-        DaemonHosting hosting;
-        SidebarShown sidebar;
-        LocationChipPlace expected;
+        BarPresence band {};
+        BarCentre centre {};
+        DaemonHosting hosting {};
+        SidebarShown sidebar {};
+        LocationChipPlace expected {};
         HostChipState state = HostChipState::Connected;
     };
     constexpr auto Daemon = DaemonHosting::Daemon;

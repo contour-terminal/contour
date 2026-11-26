@@ -107,7 +107,7 @@ namespace
 
     /// Every row's "Open in New Window", which opens what the row names in a window of its own.
     template <typename State>
-    [[nodiscard]] typename detail::MenuTable<State>::Row openInNewWindowRow()
+    [[nodiscard]] detail::MenuTable<State>::Row openInNewWindowRow()
     {
         return detail::MenuTable<State>::command(actions::OpenInNewWindow {}, "Open in New Window")
             .shownWhen(opensInNewWindow<State>);

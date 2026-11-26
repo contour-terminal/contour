@@ -372,9 +372,8 @@ struct DaemonRowRoom
         return room.name;
     }();
     auto const icons = step.buttons == DaemonRowButtonForm::Icons;
-    auto const secondary = step.secondary == DaemonRowSecondary::Dropped
-                               ? (icons ? room.secondaryIcon : room.secondaryText)
-                               : 0.0;
+    auto const secondaryExtent = icons ? room.secondaryIcon : room.secondaryText;
+    auto const secondary = step.secondary == DaemonRowSecondary::Dropped ? secondaryExtent : 0.0;
     auto const buttons = (icons ? room.buttonIcon : room.buttonText) - secondary;
     auto const locality = step.locality == DaemonRowLocalityIcon::Dropped ? room.locality : 0.0;
     return room.fixed - locality + name + (step.words == DaemonRowWords::Shown ? room.words : 0) + buttons;
@@ -444,7 +443,8 @@ struct DaemonRowRule
     DaemonLinkState state; ///< The link state.
     DaemonRowOffer local;  ///< This machine's daemon, which the row can start and unlist.
     /// A host's daemon: nothing here starts it, and a saved host is not unlisted by Remove (Hide is its
-    /// verb), so a host that is not running offers neither.
+    /// verb), so a host that is not running offers neither -- only Connect, which dials it without starting
+    /// it, and so finds it once it runs, as a too old one once it was upgraded.
     DaemonRowOffer remote;
 };
 
@@ -485,11 +485,16 @@ inline constexpr std::array<DaemonRowRule, DaemonLinkStateCount> DaemonRowRules 
                                .buttons = { DaemonRowButton::Start, DaemonRowButton::Remove } },
                     .remote = { .withTree = DaemonRowAction::ToggleFold,
                                 .withoutTree = DaemonRowAction::Nothing,
-                                .buttons = { DaemonRowButton::None, DaemonRowButton::None } } },
-    detail::sameEverywhere(DaemonLinkState::TooOld,
-                           { .withTree = DaemonRowAction::ToggleFold,
-                             .withoutTree = DaemonRowAction::Nothing,
-                             .buttons = { DaemonRowButton::None, DaemonRowButton::None } }),
+                                .buttons = { DaemonRowButton::Connect, DaemonRowButton::None } } },
+    // A local one is dialled again by every periodic refresh (DaemonPresence::refresh()): a unix socket dial
+    // asks nothing and starts nothing.
+    DaemonRowRule { .state = DaemonLinkState::TooOld,
+                    .local = { .withTree = DaemonRowAction::ToggleFold,
+                               .withoutTree = DaemonRowAction::Nothing,
+                               .buttons = { DaemonRowButton::None, DaemonRowButton::None } },
+                    .remote = { .withTree = DaemonRowAction::ToggleFold,
+                                .withoutTree = DaemonRowAction::Nothing,
+                                .buttons = { DaemonRowButton::Connect, DaemonRowButton::None } } },
     detail::sameEverywhere(DaemonLinkState::Failed,
                            { .withTree = DaemonRowAction::ToggleFold,
                              .withoutTree = DaemonRowAction::Nothing,

@@ -1702,13 +1702,13 @@ enum class WindowFocus : uint8_t
     Focused = 1,   ///< The window gained focus.
 };
 
-/// Client→server (Capability::DaemonFollow): select the one workspace this connection displays in full.
-/// The daemon pushes that workspace's layout and screens in full, and the other workspaces' panes as
-/// PaneSummary only.
 /// What a promotion that asks for a new workspace (SelectWorkspace::workspace 0) names itself by: random
 /// bytes the client draws once per promotion and sends again with every re-ask of it.
 using CreationToken = std::array<std::byte, 16>;
 
+/// Client→server (Capability::DaemonFollow): select the one workspace this connection displays in full.
+/// The daemon pushes that workspace's layout and screens in full, and the other workspaces' panes as
+/// PaneSummary only.
 struct SelectWorkspace
 {
     /// The daemon workspace to select; 0 asks the daemon to create one and select it.

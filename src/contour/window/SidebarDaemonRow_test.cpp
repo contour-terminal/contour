@@ -27,8 +27,15 @@ namespace
            | std::views::transform([](std::size_t i) { return static_cast<DaemonLinkState>(i); });
 }
 
-DaemonRef const Work = localDaemonRef("work");
-DaemonRef const Starfive = hostDaemonRef("starfive");
+[[nodiscard]] DaemonRef work()
+{
+    return localDaemonRef("work");
+}
+
+[[nodiscard]] DaemonRef starfive()
+{
+    return hostDaemonRef("starfive");
+}
 
 } // namespace
 
@@ -93,20 +100,29 @@ TEST_CASE("a daemon row offers the buttons its state names", "[sidebar][daemon-r
     }
 }
 
-TEST_CASE("a host that is not running offers neither Start nor Remove", "[sidebar][daemon-row]")
+TEST_CASE("a host that is not running offers Connect, neither Start nor Remove", "[sidebar][daemon-row]")
 {
     // A remote relay's "daemon absent" reads Not running, but nothing here starts a host's daemon, and Remove
-    // is for this machine's daemons alone: a saved host is hidden, not unlisted.
+    // is for this machine's daemons alone: a saved host is hidden, not unlisted. Connect dials it without
+    // starting it, and finds it once it runs.
     using enum DaemonRowButton;
     using Buttons = std::array<DaemonRowButton, 2>;
     auto const host =
         DaemonRowFacts { .state = DaemonLinkState::NotRunning, .locality = DaemonLocality::Remote };
-    CHECK(daemonRowButtons(host, RowPending::No) == Buttons { None, None });
+    CHECK(daemonRowButtons(host, RowPending::No) == Buttons { Connect, None });
     CHECK(daemonRowActivation(host, LastKnownTree::Absent) == DaemonRowAction::Nothing);
+    // A host too old offers Connect too, which finds it once it was upgraded; this machine's is dialled
+    // again by the periodic refresh, and offers nothing.
+    auto const tooOldHost =
+        DaemonRowFacts { .state = DaemonLinkState::TooOld, .locality = DaemonLocality::Remote };
+    auto const tooOldHere =
+        DaemonRowFacts { .state = DaemonLinkState::TooOld, .locality = DaemonLocality::Local };
+    CHECK(daemonRowButtons(tooOldHost, RowPending::No) == Buttons { Connect, None });
+    CHECK(daemonRowButtons(tooOldHere, RowPending::No) == Buttons { None, None });
     // Every other state offers a host what it offers this machine.
     for (auto const state: allLinkStates())
     {
-        if (state == DaemonLinkState::NotRunning)
+        if (state == DaemonLinkState::NotRunning || state == DaemonLinkState::TooOld)
             continue;
         INFO(std::format("state {}", static_cast<int>(state)));
         auto const local = DaemonRowFacts { .state = state, .locality = DaemonLocality::Local };
@@ -141,26 +157,26 @@ TEST_CASE("Connect is offered only where this process holds the link", "[sidebar
 TEST_CASE("Cancel ends a pending jump before a connect", "[sidebar][daemon-row]")
 {
     auto const intoWork = SidebarTarget {
-        .daemon = Work, .instance = DaemonInstance { 7 }, .workspace = 3, .tab = std::nullopt, .pane = {}
+        .daemon = work(), .instance = DaemonInstance { 7 }, .workspace = 3, .tab = std::nullopt, .pane = {}
     };
     auto const here = PendingJumps { .here = intoWork, .newWindow = std::nullopt };
     auto const opening = PendingJumps { .here = std::nullopt, .newWindow = intoWork };
 
     // A jump into the row's section is what Cancel ends, even while its daemon connects for it.
-    CHECK(cancelRouteOf(Work, here, DaemonLinkState::Connecting) == CancelRoute::JumpHere);
-    CHECK(cancelRouteOf(Work, here, DaemonLinkState::Connected) == CancelRoute::JumpHere);
+    CHECK(cancelRouteOf(work(), here, DaemonLinkState::Connecting) == CancelRoute::JumpHere);
+    CHECK(cancelRouteOf(work(), here, DaemonLinkState::Connected) == CancelRoute::JumpHere);
     // An Open in New Window into it is ended from its row too; the jump in this window first.
-    CHECK(cancelRouteOf(Work, opening, DaemonLinkState::Connecting) == CancelRoute::JumpNewWindow);
+    CHECK(cancelRouteOf(work(), opening, DaemonLinkState::Connecting) == CancelRoute::JumpNewWindow);
     CHECK(cancelRouteOf(
-              Work, PendingJumps { .here = intoWork, .newWindow = intoWork }, DaemonLinkState::Connected)
+              work(), PendingJumps { .here = intoWork, .newWindow = intoWork }, DaemonLinkState::Connected)
           == CancelRoute::JumpHere);
     // A jump elsewhere leaves this row's connect to its Cancel.
-    CHECK(cancelRouteOf(Starfive, here, DaemonLinkState::Connecting) == CancelRoute::Connect);
-    CHECK(cancelRouteOf(Starfive, opening, DaemonLinkState::Connecting) == CancelRoute::Connect);
-    CHECK(cancelRouteOf(Starfive, PendingJumps {}, DaemonLinkState::Connecting) == CancelRoute::Connect);
+    CHECK(cancelRouteOf(starfive(), here, DaemonLinkState::Connecting) == CancelRoute::Connect);
+    CHECK(cancelRouteOf(starfive(), opening, DaemonLinkState::Connecting) == CancelRoute::Connect);
+    CHECK(cancelRouteOf(starfive(), PendingJumps {}, DaemonLinkState::Connecting) == CancelRoute::Connect);
     // Nothing under way: nothing to cancel.
-    CHECK(cancelRouteOf(Starfive, PendingJumps {}, DaemonLinkState::Connected) == CancelRoute::None);
-    CHECK(cancelRouteOf(Starfive, here, DaemonLinkState::NotRunning) == CancelRoute::None);
+    CHECK(cancelRouteOf(starfive(), PendingJumps {}, DaemonLinkState::Connected) == CancelRoute::None);
+    CHECK(cancelRouteOf(starfive(), here, DaemonLinkState::NotRunning) == CancelRoute::None);
 }
 
 TEST_CASE("daemon row faces differ from every tab-status and link glyph, per look", "[sidebar][daemon-row]")
@@ -426,7 +442,7 @@ TEST_CASE("a long daemon name elides in the middle", "[sidebar][daemon-row]")
     CHECK(elided == elideMiddle(Long, LocationChipDaemonElidedMax, ElideUnit::Cells));
     CHECK(elided.starts_with("b"));
     CHECK(elided.ends_with("t"));
-    CHECK(elided.find("…") != std::string::npos);
+    CHECK(elided.contains("…"));
     // At its shortest it keeps six of its letters, three at either end.
     auto const shortest = daemonRowNameText(Long, DaemonRowFit::NameShort);
     CHECK(shortest == elideMiddle(Long, DaemonRowNameMinimumCells, ElideUnit::Cells));

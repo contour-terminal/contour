@@ -319,8 +319,9 @@ TEST_CASE("an observer without daemon-follow or workspace-meta is refused", "[vt
     auto const missing = GENERATE(proto::Capability::DaemonFollow, proto::Capability::WorkspaceMeta);
     auto f = ObserverFixture {};
     auto& client = f.flush.connect();
-    CHECK_FALSE(NativeSessionFlushTester::tryHandshake(*client.session,
-                                                       ObserverFixture::observerHelloWithout(missing)));
+    auto const accepted = NativeSessionFlushTester::tryHandshake(
+        *client.session, ObserverFixture::observerHelloWithout(missing));
+    CHECK_FALSE(accepted);
     f.settle();
     CHECK(client.session->phase() == NativeSession::ConnectionPhase::AwaitingHello);
     CHECK(f.flush.h.host.connectedObservers() == 0);
@@ -336,7 +337,8 @@ TEST_CASE("an Observe hello that does not share observe is answered as a Control
     auto f = ObserverFixture {};
     auto hello = ObserverFixture::observerHelloWithout(proto::Capability::Observe);
     auto& client = f.flush.connect();
-    REQUIRE(NativeSessionFlushTester::tryHandshake(*client.session, std::move(hello)));
+    auto const accepted = NativeSessionFlushTester::tryHandshake(*client.session, std::move(hello));
+    REQUIRE(accepted);
     f.settle();
 
     // As a daemon that predates the role reads it: told nothing, counted as no one.
@@ -750,8 +752,11 @@ TEST_CASE("tokens beyond the memory forget the oldest", "[vthost][native][observ
     // As many later promotions as the host remembers.
     for (auto const seed:
          std::views::iota(uint8_t { 1 }, static_cast<uint8_t>(vthost::PromotionTokenMemory + 1)))
-        host.rememberWorkspaceMadeFor(ObserverFixture::tokenOf(seed), vtworkspace::WorkspaceId { made });
-    REQUIRE(host.workspaceMadeFor(ObserverFixture::tokenOf(1)) == vtworkspace::WorkspaceId { made });
+        host.rememberWorkspaceMadeFor(
+            { .token = ObserverFixture::tokenOf(seed), .workspace = vtworkspace::WorkspaceId { made } });
+    REQUIRE(host.workspaceMadeFor(ObserverFixture::tokenOf(1)).transform([](auto const& entry) {
+        return entry.workspace;
+    }) == vtworkspace::WorkspaceId { made });
     auto const before = host.model().workspaceCount();
 
     auto const again = f.promoteToNew(oldest);

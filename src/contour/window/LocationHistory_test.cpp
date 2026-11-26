@@ -46,74 +46,98 @@ namespace
     return section;
 }
 
-auto const A = place("a", 1, 2);
-auto const B = place("b", 1, 1);
-auto const C = place("c", 3, 1);
-auto const X = place("x", 1, 1);
-auto const Y = place("y", 1, 1);
-auto const Z = place("z", 1, 1);
+[[nodiscard]] SidebarTarget placeA()
+{
+    return place("a", 1, 2);
+}
+
+[[nodiscard]] SidebarTarget placeB()
+{
+    return place("b", 1, 1);
+}
+
+[[nodiscard]] SidebarTarget placeC()
+{
+    return place("c", 3, 1);
+}
+
+[[nodiscard]] SidebarTarget placeX()
+{
+    return place("x", 1, 1);
+}
+
+[[nodiscard]] SidebarTarget placeY()
+{
+    return place("y", 1, 1);
+}
+
+[[nodiscard]] SidebarTarget placeZ()
+{
+    return place("z", 1, 1);
+}
 
 } // namespace
 
 TEST_CASE("LocationHistory: A→B→C, Back, Back lands on A", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, B, HistoryCause::Jump);
-    history.landed(B, C, HistoryCause::Jump);
-    CHECK(history.back(std::nullopt, anyPlace) == B);
-    CHECK(history.back(std::nullopt, anyPlace) == A);
+    history.landed(placeA(), placeB(), HistoryCause::Jump);
+    history.landed(placeB(), placeC(), HistoryCause::Jump);
+    CHECK(history.back(std::nullopt, anyPlace) == placeB());
+    CHECK(history.back(std::nullopt, anyPlace) == placeA());
     CHECK_FALSE(history.back(std::nullopt, anyPlace).has_value());
 }
 
 TEST_CASE("LocationHistory: Back's own landing is not recorded", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, B, HistoryCause::Jump);
-    history.landed(B, C, HistoryCause::Jump);
+    history.landed(placeA(), placeB(), HistoryCause::Jump);
+    history.landed(placeB(), placeC(), HistoryCause::Jump);
     REQUIRE(history.size() == 2);
-    REQUIRE(history.back(std::nullopt, anyPlace) == B);
-    history.landed(C, B, HistoryCause::Back);
+    REQUIRE(history.back(std::nullopt, anyPlace) == placeB());
+    history.landed(placeC(), placeB(), HistoryCause::Back);
     CHECK(history.size() == 1);
 }
 
 TEST_CASE("LocationHistory: a run of attention jumps is one entry", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, X, HistoryCause::Attention);
-    history.landed(X, Y, HistoryCause::Attention);
-    history.landed(Y, Z, HistoryCause::Attention);
+    history.landed(placeA(), placeX(), HistoryCause::Attention);
+    history.landed(placeX(), placeY(), HistoryCause::Attention);
+    history.landed(placeY(), placeZ(), HistoryCause::Attention);
     CHECK(history.size() == 1);
-    CHECK(history.back(std::nullopt, anyPlace) == A);
+    CHECK(history.back(std::nullopt, anyPlace) == placeA());
 }
 
 TEST_CASE("LocationHistory: a jump after a run ends it", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, X, HistoryCause::Attention);
-    history.landed(X, Y, HistoryCause::Attention);
-    history.landed(Y, C, HistoryCause::Jump);
-    CHECK(history.back(std::nullopt, anyPlace) == Y);
-    CHECK(history.back(std::nullopt, anyPlace) == A);
+    history.landed(placeA(), placeX(), HistoryCause::Attention);
+    history.landed(placeX(), placeY(), HistoryCause::Attention);
+    history.landed(placeY(), placeC(), HistoryCause::Jump);
+    CHECK(history.back(std::nullopt, anyPlace) == placeY());
+    CHECK(history.back(std::nullopt, anyPlace) == placeA());
 }
 
 TEST_CASE("LocationHistory: Back ends an attention run", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, X, HistoryCause::Attention);
-    REQUIRE(history.back(std::nullopt, anyPlace) == A);
-    history.landed(X, A, HistoryCause::Back);
-    history.landed(A, Y, HistoryCause::Attention);
+    history.landed(placeA(), placeX(), HistoryCause::Attention);
+    REQUIRE(history.back(std::nullopt, anyPlace) == placeA());
+    history.landed(placeX(), placeA(), HistoryCause::Back);
+    history.landed(placeA(), placeY(), HistoryCause::Attention);
     // The second run recorded its own origin.
     CHECK(history.size() == 1);
-    CHECK(history.back(std::nullopt, anyPlace) == A);
+    CHECK(history.back(std::nullopt, anyPlace) == placeA());
 }
 
 TEST_CASE("LocationHistory: gone entries are skipped", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, B, HistoryCause::Jump);
-    history.landed(B, C, HistoryCause::Jump);
-    CHECK(history.back(std::nullopt, [](SidebarTarget const& entry) { return entry != B; }) == A);
+    history.landed(placeA(), placeB(), HistoryCause::Jump);
+    history.landed(placeB(), placeC(), HistoryCause::Jump);
+    CHECK(history.back(std::nullopt, [](SidebarTarget const& entry) { return entry != placeB(); })
+          == placeA());
     // B is gone from the stack too.
     CHECK(history.size() == 0);
 }
@@ -122,17 +146,17 @@ TEST_CASE("LocationHistory: gone entries are skipped", "[history]")
 TEST_CASE("LocationHistory: an entry of a restarted daemon is gone", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, place("b", 1, 1, 1), HistoryCause::Jump);
-    history.landed(place("b", 1, 1, 1), C, HistoryCause::Jump);
+    history.landed(placeA(), place("b", 1, 1, 1), HistoryCause::Jump);
+    history.landed(place("b", 1, 1, 1), placeC(), HistoryCause::Jump);
     // A runs as before; B restarted (run 2) and lists a workspace and a tab of the same ids.
-    auto const sections = std::vector { sectionOf("a", 1, A.workspace, *A.tab),
+    auto const sections = std::vector { sectionOf("a", 1, placeA().workspace, *placeA().tab),
                                         sectionOf("b", 2, 1, 1),
-                                        sectionOf("c", 1, C.workspace, *C.tab) };
+                                        sectionOf("c", 1, placeC().workspace, *placeC().tab) };
     auto const stillExists = [&](SidebarTarget const& entry) {
         return placeStillExists(entry, sections);
     };
     CHECK_FALSE(placeStillExists(place("b", 1, 1, 1), sections));
-    CHECK(history.back(std::nullopt, stillExists) == A);
+    CHECK(history.back(std::nullopt, stillExists) == placeA());
 }
 
 TEST_CASE("LocationHistory: a place is still there only while its run lists its workspace and tab",
@@ -170,18 +194,18 @@ TEST_CASE("LocationHistory: a landing that goes nowhere records nothing", "[hist
 {
     auto history = LocationHistory { LocationHistoryCapacity };
     // The same workspace and tab, another pane of it.
-    auto pane = A;
+    auto pane = placeA();
     pane.pane = PaneKey { 7 };
-    history.landed(A, pane, HistoryCause::Jump);
+    history.landed(placeA(), pane, HistoryCause::Jump);
     // The same workspace re-selected, naming no tab.
-    auto workspace = A;
+    auto workspace = placeA();
     workspace.tab = std::nullopt;
-    history.landed(A, workspace, HistoryCause::Jump);
+    history.landed(placeA(), workspace, HistoryCause::Jump);
     // From nowhere.
-    history.landed(std::nullopt, B, HistoryCause::Jump);
+    history.landed(std::nullopt, placeB(), HistoryCause::Jump);
     CHECK(history.size() == 0);
     // Another tab of the same workspace is somewhere else.
-    history.landed(A, place("a", 1, 3), HistoryCause::Jump);
+    history.landed(placeA(), place("a", 1, 3), HistoryCause::Jump);
     CHECK(history.size() == 1);
 }
 
@@ -191,12 +215,12 @@ TEST_CASE("LocationHistory: Back skips the place the window is on", "[history]")
     auto history = LocationHistory { LocationHistoryCapacity };
     auto const first = place("a", 1, 1);
     auto const second = place("a", 1, 2);
-    history.landed(A, first, HistoryCause::Jump);
+    history.landed(placeA(), first, HistoryCause::Jump);
     history.landed(first, second, HistoryCause::Jump);
     // A tab-strip click from the second tab back to the first: unrecorded.
     CHECK(history.canGoBack(first, anyPlace));
-    CHECK(history.back(first, anyPlace) == A);
-    CHECK_FALSE(history.canGoBack(A, anyPlace));
+    CHECK(history.back(first, anyPlace) == placeA());
+    CHECK_FALSE(history.canGoBack(placeA(), anyPlace));
 }
 
 TEST_CASE("LocationHistory: a workspace entry is where the window is on any tab of it", "[history]")
@@ -204,41 +228,41 @@ TEST_CASE("LocationHistory: a workspace entry is where the window is on any tab 
     auto history = LocationHistory { LocationHistoryCapacity };
     auto workspace = place("a", 1, 1);
     workspace.tab = std::nullopt;
-    history.landed(A, B, HistoryCause::Jump);
-    history.landed(workspace, C, HistoryCause::Jump);
-    CHECK(history.back(place("a", 1, 9), anyPlace) == A);
+    history.landed(placeA(), placeB(), HistoryCause::Jump);
+    history.landed(workspace, placeC(), HistoryCause::Jump);
+    CHECK(history.back(place("a", 1, 9), anyPlace) == placeA());
 }
 
 TEST_CASE("LocationHistory: canGoBack pops nothing", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
     CHECK_FALSE(history.canGoBack(std::nullopt, anyPlace));
-    history.landed(A, B, HistoryCause::Jump);
-    CHECK(history.canGoBack(B, anyPlace));
-    CHECK_FALSE(history.canGoBack(B, [](SidebarTarget const&) { return false; }));
+    history.landed(placeA(), placeB(), HistoryCause::Jump);
+    CHECK(history.canGoBack(placeB(), anyPlace));
+    CHECK_FALSE(history.canGoBack(placeB(), [](SidebarTarget const&) { return false; }));
     CHECK(history.size() == 1);
 }
 
 TEST_CASE("LocationHistory: a Back that lands where it was ends a run all the same", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, X, HistoryCause::Attention);
-    history.landed(X, X, HistoryCause::Back);
-    history.landed(X, Y, HistoryCause::Attention);
+    history.landed(placeA(), placeX(), HistoryCause::Attention);
+    history.landed(placeX(), placeX(), HistoryCause::Back);
+    history.landed(placeX(), placeY(), HistoryCause::Attention);
     // The second run recorded its own origin.
-    CHECK(history.back(std::nullopt, anyPlace) == X);
-    CHECK(history.back(std::nullopt, anyPlace) == A);
+    CHECK(history.back(std::nullopt, anyPlace) == placeX());
+    CHECK(history.back(std::nullopt, anyPlace) == placeA());
 }
 
 // Phase 7 review M5: a jump back that fails or is cancelled puts its place back.
 TEST_CASE("LocationHistory: a restored place is the next Back's", "[history]")
 {
     auto history = LocationHistory { LocationHistoryCapacity };
-    history.landed(A, B, HistoryCause::Jump);
-    history.landed(B, C, HistoryCause::Jump);
+    history.landed(placeA(), placeB(), HistoryCause::Jump);
+    history.landed(placeB(), placeC(), HistoryCause::Jump);
     auto const popped = history.back(std::nullopt, anyPlace);
-    REQUIRE(popped == B);
+    REQUIRE(popped == placeB());
     history.restore(*popped);
-    CHECK(history.back(std::nullopt, anyPlace) == B);
-    CHECK(history.back(std::nullopt, anyPlace) == A);
+    CHECK(history.back(std::nullopt, anyPlace) == placeB());
+    CHECK(history.back(std::nullopt, anyPlace) == placeA());
 }

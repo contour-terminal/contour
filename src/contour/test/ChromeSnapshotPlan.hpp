@@ -171,6 +171,12 @@ enum class SnapshotScript : uint8_t
     /// sidebar-two-daemons with starfive's row menu open, starfive connected and observed: Open in New
     /// Window, New Workspace, then Hide from Sidebar.
     SidebarDaemonMenuLive,
+    /// sidebar-two-daemons with starfive a saved host found not running: its row offers Connect, which finds
+    /// the daemon once it runs and never starts it.
+    SidebarHostNotRunning,
+    /// sidebar-host-not-running with starfive's row menu open: Open in New Window (a switch to a host starts
+    /// its daemon there), New Workspace, Connect, then Hide from Sidebar.
+    SidebarHostNotRunningMenu,
 };
 
 /// What the workspace sidebar of a script shows.
@@ -194,11 +200,14 @@ enum class SnapshotSections : uint8_t
     Connecting,   //!< The same, starfive connecting.
     Reconnecting, //!< The same, starfive reconnecting: its workspace last known.
     TooOld,       //!< The same, starfive too old for this client.
+    /// The same, starfive a saved host found not running (NotRunning's starfive is this machine's).
+    HostNotRunning,
     Pending,      //!< TwoDaemons, a jump under way to starfive's ci workspace.
     NeedsMeEmpty, //!< `work` alone under the Needs-me scope, nothing needing the user.
     /// NotRunning, starfive under a long name, the sidebar at its narrowest.
     Narrow,
-    /// TwoDaemons, starfive's build tab of two panes (build, tests), its rows unfolded.
+    /// TwoDaemons, starfive's build tab of two panes (build, tests), its rows unfolded; billing lists only
+    /// claude and build beside them, so the window's daemon heading stays in view at every host's type size.
     OtherDaemonRows,
     /// TwoDaemons, and the local home and the saved host vega hidden by the user: the Hidden row last.
     Hidden,
@@ -2587,6 +2596,17 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenSidebarDaemonMenu,
                         .sidebar = SnapshotSidebar::Tree,
                         .sections = SnapshotSections::TwoDaemons },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHostNotRunning,
+                        .name = "sidebar-host-not-running",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::HostNotRunning },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHostNotRunningMenu,
+                        .name = "sidebar-host-not-running-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarDaemonMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::HostNotRunning },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

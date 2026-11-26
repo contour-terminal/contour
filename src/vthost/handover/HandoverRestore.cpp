@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iterator>
@@ -124,6 +125,17 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
                 _model.closePane(workspace->id(), tab->id(), leaf->id());
 
     discardEmptyWorkspaces();
+
+    // A promotion asked again across the upgrade selects what its first ask made, while that is still there
+    // (workspaceMadeFor()). The connection that asked ended at the exec: the entry names none of this
+    // image's.
+    for (auto const& made: image.madeForTokens)
+    {
+        auto token = proto::CreationToken {};
+        std::ranges::transform(made.token, token.begin(), [](uint8_t b) { return std::byte { b }; });
+        rememberWorkspaceMadeFor(
+            { .token = token, .workspace = vtworkspace::WorkspaceId { made.workspace }, .maker = {} });
+    }
 
     // Each session crossed with the scrollback limit its terminal was built with, which its state restored:
     // the configuration this image loaded applies to it now, before any client sees it, as a reload would.

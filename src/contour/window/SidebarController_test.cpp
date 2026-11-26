@@ -855,7 +855,7 @@ namespace
 ///         carries for the picker to hand back.
 [[nodiscard]] contour::window::SidebarRowKey pickedRow(QList<QVariant> const& request)
 {
-    auto const key = request.at(1);
+    auto const& key = request.at(1);
     REQUIRE(key.metaType() == QMetaType::fromType<contour::window::SidebarRowKey>());
     return key.value<contour::window::SidebarRowKey>();
 }

@@ -762,11 +762,17 @@ DaemonLink* WindowSwitcher::adoptLink(Request const& request, uint64_t workspace
     if (adoption.controller == nullptr)
         return nullptr;
     auto& observing = adoption.controller;
+    // The run the workspace is an id of: none for a new one, else the one asked for or the observer's.
+    auto const instance = [&]() -> uint64_t {
+        if (workspace == 0)
+            return 0;
+        if (request.target.instance.value != 0)
+            return request.target.instance.value;
+        return observing->daemonInstance().value_or(0);
+    }();
     auto promotion = PromotionRequest {
         .workspace = workspace,
-        .daemonInstance = workspace == 0                       ? 0
-                          : request.target.instance.value != 0 ? request.target.instance.value
-                                                               : observing->daemonInstance().value_or(0),
+        .daemonInstance = instance,
         .directoryFromSession = std::nullopt,
         .area = *area,
         .cell = ownController != nullptr ? ownController->lastStatedCell() : std::nullopt,

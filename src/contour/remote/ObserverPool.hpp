@@ -81,7 +81,8 @@ class IObserverPool
 
     /// @param daemon The daemon a window leaves.
     /// @param leaving The link the window leaves it through.
-    /// @return Yes if @p daemon stays listed and no window link but @p leaving is on it.
+    /// @return Yes if @p daemon stays listed, can be observed (not a `link:` daemon, which only its window
+    ///         reaches) and no window link but @p leaving is on it.
     [[nodiscard]] virtual ObserverWanted wantsObserver(window::DaemonRef const& daemon,
                                                        DaemonLinkId leaving) const = 0;
 

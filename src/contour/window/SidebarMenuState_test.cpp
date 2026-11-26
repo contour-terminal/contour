@@ -223,8 +223,10 @@ TEST_CASE("a daemon row's menu state mirrors its buttons", "[sidebarmenu]")
               .hide
           == contour::command::HideOffer::NotOffered);
 
-    // Open in New Window, by the daemon's state: offered wherever a window on it could show.
-    for (auto const state: { DaemonLinkState::TooOld, DaemonLinkState::Failed, DaemonLinkState::NotRunning })
+    // Open in New Window, by the daemon's state: offered wherever a window on it could show -- a host not
+    // running among them, as a switch to a host starts its daemon there (this machine's is started by its
+    // row, above).
+    for (auto const state: { DaemonLinkState::TooOld, DaemonLinkState::Failed })
         CHECK(sidebarDaemonMenuStateOf(
                   daemonRow(hostDaemonRef("starfive"), state, DaemonLocality::Remote, RowPending::No),
                   OtherDaemon)
@@ -233,7 +235,8 @@ TEST_CASE("a daemon row's menu state mirrors its buttons", "[sidebarmenu]")
     for (auto const state: { DaemonLinkState::NotConnected,
                              DaemonLinkState::Connected,
                              DaemonLinkState::Reconnecting,
-                             DaemonLinkState::NeedsInput })
+                             DaemonLinkState::NeedsInput,
+                             DaemonLinkState::NotRunning })
         CHECK(sidebarDaemonMenuStateOf(
                   daemonRow(hostDaemonRef("starfive"), state, DaemonLocality::Remote, RowPending::No),
                   OtherDaemon)

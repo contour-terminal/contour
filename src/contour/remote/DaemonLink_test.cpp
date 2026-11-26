@@ -3058,7 +3058,7 @@ struct AdoptRig
                                                   std::move(config),
                                                   observer ? std::move(observer)
                                                            : connectedObserver(daemon, timeline),
-                                                  std::move(request),
+                                                  request,
                                                   makeTestTlsTransport(daemon.endpoint()),
                                                   recordGiveBack(givenBack),
                                                   host,
@@ -3070,13 +3070,11 @@ struct AdoptRig
     [[nodiscard]] bool landed() const { return arrived->has_value() && arrived->value().has_value(); }
 };
 
-/// Detaches every pane @p window shows, as a link taking the window over does (DaemonLink::adoptWindow()):
-/// their devices closed, their sessions left running in the daemon. The window goes with its last pane.
-/// @return The panes, still alive until their exit is seen (endClosedSessions()).
-[[nodiscard]] std::vector<QPointer<contour::session::TerminalSession>> detachPanesOf(
-    contour::session::TerminalSessionManager& manager, vtworkspace::WorkspaceId window)
+/// Detaches @p panes, as a link taking their window over does (DaemonLink::adoptWindow()): their devices
+/// closed, their sessions left running in the daemon. The window goes with its last pane.
+void detachPanes(contour::session::TerminalSessionManager& manager,
+                 std::span<QPointer<contour::session::TerminalSession> const> panes)
 {
-    auto const panes = watchedSessionsOf(manager, window);
     for (auto const& session: panes)
     {
         if (!session)
@@ -3087,6 +3085,15 @@ struct AdoptRig
         manager.model().setActivePane(tab->id(), leaf->id());
         manager.closeActivePane(session.data(), contour::session::SessionEnd::Detach);
     }
+}
+
+/// Detaches every pane @p window shows (detachPanes()).
+/// @return The panes, still alive until their exit is seen (endClosedSessions()).
+[[nodiscard]] std::vector<QPointer<contour::session::TerminalSession>> detachPanesOf(
+    contour::session::TerminalSessionManager& manager, vtworkspace::WorkspaceId window)
+{
+    auto const panes = watchedSessionsOf(manager, window);
+    detachPanes(manager, panes);
     return panes;
 }
 
@@ -3164,7 +3171,7 @@ TEST_CASE("DaemonLink: a refused promotion gives the observer back unpromoted", 
     auto request = daemon.promotionOf(workspaces[0], AdoptingArea, std::nullopt);
     ++request.daemonInstance;
 
-    rig.adopt(std::move(request));
+    rig.adopt(request);
 
     REQUIRE(waitUntil([&] { return rig.arrived->has_value(); }, 2000));
     CHECK_FALSE(rig.arrived->value().has_value());
@@ -3186,7 +3193,7 @@ TEST_CASE("DaemonLink: a given-back link reads as finished and is destroyed", "[
     auto rig = AdoptRig { daemon };
     auto request = daemon.promotionOf(workspaces[0], AdoptingArea, std::nullopt);
     ++request.daemonInstance;
-    rig.adopt(std::move(request));
+    rig.adopt(request);
     REQUIRE(waitUntil([&] { return rig.givenBack->calls == 1; }, 2000));
 
     CHECK(rig.link->liveController() == nullptr);
@@ -3247,6 +3254,100 @@ TEST_CASE("DaemonLink: KeepAsObserver demotes at once and gives back only after 
     CHECK(rig.givenBack->calls == 1);
     CHECK(daemon.waitUntilOnDaemon(
         [&] { return daemon.host->connectedObservers() == 1 && daemon.host->connectedClients() == 0; }));
+    manager.releaseBinding(onB);
+}
+
+// Final review M1: a demoted connection keeps no screen of the sessions it mirrored once its last pane goes.
+TEST_CASE("DaemonLink: a demoted connection drops its screens once its last pane unbinds",
+          "[attach][link][adopt]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 1);
+    auto rig = AdoptRig { daemon };
+    rig.adopt(daemon.promotionOf(workspaces[0], AdoptingArea, std::nullopt));
+    REQUIRE(waitUntil([&] { return rig.landed(); }, 2000));
+    auto& manager = rig.app.manager();
+    auto const window = contour::test::ScopedController { manager };
+    window->createNewTab();
+    REQUIRE(rig.link->adoptWindow(window.id).has_value());
+    auto* const controller = rig.link->liveController();
+    REQUIRE(controller != nullptr);
+    REQUIRE(waitUntil(
+        [&] {
+            return contour::remote::NativeControllerTestAccess::heldScreenCount(*controller).value_or(0) > 0;
+        },
+        2000));
+
+    rig.link->leaveDaemon(contour::remote::LeaveKind::KeepAsObserver, {});
+    auto other = DetachRecordingFactory {};
+    auto onB = contour::test::DaemonNamedBinding {
+        other,
+        contour::session::SwitchTarget {
+            .kind = vthost::proto::SwitchDaemonKind::Host, .daemon = "b", .workspace = {} }
+    };
+    manager.bindWindow(window.id, onB);
+    settleGui();
+    // Demoted, but its window still shows the panes drawn from them.
+    CHECK(contour::remote::NativeControllerTestAccess::heldScreenCount(*controller).value_or(0) > 0);
+
+    endClosedSessions(detachPanesOf(manager, window.id));
+    REQUIRE(waitUntil(
+        [&] {
+            drainGuiEvents();
+            return rig.givenBack->calls == 1;
+        },
+        2000));
+    REQUIRE(rig.givenBack->controller != nullptr);
+    CHECK(contour::remote::NativeControllerTestAccess::heldScreenCount(*rig.givenBack->controller)
+          == std::optional<std::size_t> { 0 });
+    manager.releaseBinding(onB);
+}
+
+TEST_CASE("DaemonLink: a connection handed back shows the panes it let go when adopted again",
+          "[attach][link][adopt]")
+{
+    // A→B→A: the panes the window let go as it left A were detached, not closed -- their sessions run on in
+    // A -- so the connection A's observer kept realizes them again for the window that comes back.
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 1);
+    auto rig = AdoptRig { daemon };
+    rig.adopt(daemon.promotionOf(workspaces[0], AdoptingArea, std::nullopt));
+    REQUIRE(waitUntil([&] { return rig.landed(); }, 2000));
+    auto& manager = rig.app.manager();
+    auto const window = contour::test::ScopedController { manager };
+    window->createNewTab();
+    REQUIRE(rig.link->adoptWindow(window.id).has_value());
+    REQUIRE(rig.link->liveController()->bindsPanes());
+
+    // A→B.
+    rig.link->leaveDaemon(contour::remote::LeaveKind::KeepAsObserver, {});
+    auto other = DetachRecordingFactory {};
+    auto onB = contour::test::DaemonNamedBinding {
+        other,
+        contour::session::SwitchTarget {
+            .kind = vthost::proto::SwitchDaemonKind::Host, .daemon = "b", .workspace = {} }
+    };
+    auto const panesOfA = watchedSessionsOf(manager, window.id);
+    manager.bindWindow(window.id, onB);
+    window->createNewTab();
+    detachPanes(manager, panesOfA);
+    endClosedSessions(panesOfA);
+    REQUIRE(waitUntil(
+        [&] {
+            drainGuiEvents();
+            return rig.givenBack->calls == 1;
+        },
+        2000));
+    REQUIRE(rig.givenBack->controller != nullptr);
+
+    // B→A, on the connection handed back.
+    rig.link->stop();
+    rig.observer = std::move(rig.givenBack->controller);
+    *rig.arrived = std::nullopt;
+    rig.adopt(daemon.promotionOf(workspaces[0], AdoptingArea, std::nullopt));
+    REQUIRE(waitUntil([&] { return rig.landed(); }, 2000));
+    REQUIRE(rig.link->adoptWindow(window.id).has_value());
+    CHECK(rig.link->liveController()->bindsPanes());
     manager.releaseBinding(onB);
 }
 
@@ -3520,9 +3621,12 @@ class NoDiscovery final: public contour::cli::IDaemonDiscovery
     [[nodiscard]] std::vector<contour::cli::DiscoveredDaemon> discover() override { return {}; }
 };
 
-/// The fixture daemon as the saved host `starfive`.
-auto const StarfiveAddress =
-    contour::remote::DaemonAddress { .kind = vthost::proto::SwitchDaemonKind::Host, .name = "starfive" };
+/// @return The fixture daemon as the saved host `starfive`.
+[[nodiscard]] contour::remote::DaemonAddress starfiveAddress()
+{
+    return contour::remote::DaemonAddress { .kind = vthost::proto::SwitchDaemonKind::Host,
+                                            .name = "starfive" };
+}
 
 /// A presence over the fixture daemon, the saved host `starfive`, fed by the links a test hands it: what a
 /// window leaving the daemon gives its connection back to. A window of the process is on another daemon
@@ -3646,7 +3750,7 @@ struct LinkPresence
     contour::remote::IDaemonLinkHost& host,
     contour::session::TerminalSessionManager& manager)
 {
-    auto config = linkConfig(daemon.endpoint(), timeline, {}, {}, {}, StarfiveAddress);
+    auto config = linkConfig(daemon.endpoint(), timeline, {}, {}, {}, starfiveAddress());
     auto const arrived = std::make_shared<bool>(false);
     config.arrival = contour::remote::SwitchArrival {
         .mode = contour::session::SwitchMode::Switch,

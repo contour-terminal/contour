@@ -44,7 +44,7 @@ namespace contour::session
     return SwitchTarget { .kind = *kind,
                           .daemon = std::string { parsed->second },
                           .workspace = std::move(workspace),
-                          .focus = std::move(focus),
+                          .focus = focus,
                           .instance = instance };
 }
 

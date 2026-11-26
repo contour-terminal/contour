@@ -622,7 +622,8 @@ QVariantMap UiStyleProvider::daemonRowButton(int button, int pending) const
     auto const cells = _groups.layout.sidebar == config::SidebarLook::CellTree;
     auto const words =
         QCoreApplication::translate(std::string(DaemonRowContext).c_str(), std::string(face.words).c_str());
-    auto const rowPending = pending == std::to_underlying(RowPending::Yes) ? RowPending::Yes : RowPending::No;
+    auto const rowPending =
+        std::cmp_equal(pending, std::to_underlying(RowPending::Yes)) ? RowPending::Yes : RowPending::No;
     // The verb in full, as the row's menu says it: one word beside the name, but a tooltip stands alone.
     auto const toolTip =
         command::daemonRowVerbTitle(static_cast<command::DaemonRowVerb>(button),

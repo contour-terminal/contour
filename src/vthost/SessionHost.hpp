@@ -1813,17 +1813,27 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param entries What takeRestoreEntries() handed over, the next client told them instead.
     void returnRestoreAnnouncement(std::vector<RestoredWorkspace> entries);
 
+    /// A workspace a promotion made, by its creation token.
+    struct MadeForToken
+    {
+        proto::CreationToken token {};         ///< The promotion's creation token.
+        vtworkspace::WorkspaceId workspace {}; ///< The workspace it made.
+        ConnectionId maker {};                 ///< The connection whose ask made it.
+    };
+
     /// @param token A promotion's creation token (proto::SelectWorkspace::creationToken).
-    /// @return The workspace made for @p token, while it is remembered and still holds a tab; nullopt
-    ///         otherwise, when a promotion naming it makes one anew.
-    [[nodiscard]] std::optional<vtworkspace::WorkspaceId> workspaceMadeFor(
-        proto::CreationToken const& token) const;
+    /// @return The workspace made for @p token, and the connection that asked first, while it is remembered
+    ///         and still holds a tab; nullopt otherwise, when a promotion naming it makes one anew.
+    [[nodiscard]] std::optional<MadeForToken> workspaceMadeFor(proto::CreationToken const& token) const;
 
     /// Remembers that @p workspace was made for the promotion naming @p token, forgetting the oldest token
     /// beyond PromotionTokenMemory.
-    /// @param token The promotion's creation token.
-    /// @param workspace The workspace it made.
-    void rememberWorkspaceMadeFor(proto::CreationToken const& token, vtworkspace::WorkspaceId workspace);
+    /// @param made The promotion's creation token, the workspace it made, and the connection that asked.
+    void rememberWorkspaceMadeFor(MadeForToken made);
+
+    /// @return The workspace each recent promotion's creation token made, oldest first: what a handover
+    ///         image carries (handover::HandoverImage::madeForTokens).
+    [[nodiscard]] std::deque<MadeForToken> const& madeForTokens() const noexcept { return _madeForTokens; }
 
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
@@ -2320,9 +2330,10 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// The same, for the session STREAM observers — the other subscriber list.
     /// @param method A SessionStreamEvents member function pointer.
-    /// @param args The event arguments (copied once here, then passed to each observer).
+    /// @param args The event arguments, passed to each observer as they are: an argument an observer may
+    /// change as it reacts is copied by the caller first.
     template <typename Method, typename... Args>
-    void fanOutStream(Method method, Args... args)
+    void fanOutStream(Method method, Args const&... args)
     {
         for (auto* observer: _streamSubscribers)
             (observer->*method)(args...);
@@ -2792,7 +2803,7 @@ class SessionHost final: public vtworkspace::ModelEvents
         _restoreAnnouncement {}; ///< What @ref takeRestoreAnnouncement has yet to tell.
     /// The workspace each recent promotion's creation token made, oldest first; at most PromotionTokenMemory.
     /// Loop thread.
-    std::deque<std::pair<proto::CreationToken, vtworkspace::WorkspaceId>> _madeForTokens;
+    std::deque<MadeForToken> _madeForTokens;
 
     /// The UUIDs and names of workspaces, tabs and panes. Declared before the model, whose events bind into
     /// it.

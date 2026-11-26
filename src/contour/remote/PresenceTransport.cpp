@@ -63,10 +63,10 @@ namespace
     /// How a dial reaches its daemon.
     struct DialPolicy
     {
-        askpass::AskpassRouteId route; ///< Where its prompts are shown.
+        askpass::AskpassRouteId route {}; ///< Where its prompts are shown.
         /// Whether anyone may be asked: Batch also dials a tls host only when its daemon can be verified
         /// without a question.
-        cli::SshPrompts prompts;
+        cli::SshPrompts prompts {};
         /// Whether a tls host is dialled only once its daemon can be verified without a question.
         UnaskedTrust trust = UnaskedTrust::Unchecked;
     };

@@ -1000,4 +1000,36 @@ TEST_CASE("a restored host continues the ledger's serials", "[vthost][handover][
     REQUIRE(live->eventually([&] { return attentionOf(*live, id).bellSerial > last; }));
     CHECK(attentionOf(*live, id).seenStatusGeneration == 7);
 }
+
+TEST_CASE("a restored host selects what a promotion's token made before the upgrade",
+          "[vthost][handover][threading][observer]")
+{
+    auto old = oneSession();
+    auto* const workspace = old->host.createWorkspace();
+    REQUIRE(workspace != nullptr);
+    auto const made = workspace->id();
+    auto token = proto::CreationToken {};
+    token.fill(std::byte { 0x5A });
+    old->host.rememberWorkspaceMadeFor(
+        { .token = token, .workspace = made, .maker = ConnectionId { .endpoint = "native", .index = 3 } });
+
+    // Through the codec, as the exec carries it.
+    auto const encoded = encodeHandover(handOver(std::move(old)));
+    auto image = decodeHandover(encoded);
+    REQUIRE(image.has_value());
+    REQUIRE(image->madeForTokens.size() == 1);
+    CHECK(image->madeForTokens.front().workspace == made.value);
+    auto const live = takeOver(*std::move(image));
+
+    // A re-ask after the upgrade selects the workspace the first ask made, by its token; the connection that
+    // asked ended at the exec, and names none of the new image's.
+    auto const remembered = live->host.workspaceMadeFor(token);
+    REQUIRE(remembered.has_value());
+    CHECK(remembered->workspace == made);
+    CHECK(remembered->maker == ConnectionId {});
+    // Another token made nothing.
+    auto other = token;
+    other.back() = std::byte { 0 };
+    CHECK_FALSE(live->host.workspaceMadeFor(other).has_value());
+}
 #endif

@@ -71,13 +71,22 @@ namespace
             std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
         connect(core::net::EventLoop& /*loop*/) override
         {
+            return refused();
+        }
+
+        [[nodiscard]] std::string describe() const override { return "a daemon the window left"; }
+
+      private:
+        /// A coroutine of its own, so that the loop is no reference parameter of one.
+        [[nodiscard]] static core::async::Task<
+            std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+        refused()
+        {
             co_return std::unexpected(vthost::TransportError {
                 .kind = vthost::TransportErrorKind::Refused,
                 .message = "the window left the daemon",
             });
         }
-
-        [[nodiscard]] std::string describe() const override { return "a daemon the window left"; }
     };
 
     /// @return Why a promotion was not asked of the daemon, in words for the user.
@@ -197,7 +206,7 @@ std::unique_ptr<DaemonLink> DaemonLink::adopt(Id id,
     // Told on the GUI thread, posted to the controller: only while the link is there to hear it, for the
     // controller may outlive it, handed back.
     auto promoted =
-        link->_controller->promote(std::move(request),
+        link->_controller->promote(request,
                                    std::move(interactive),
                                    [guard = QPointer<QObject> { &link->_receiver },
                                     self = link.get()](std::expected<uint64_t, std::string> landed) {
@@ -770,6 +779,10 @@ std::optional<uint64_t> DaemonLink::arrivalWorkspace() const
 uint64_t DaemonLink::followedSelection()
 {
     auto const selected = _controller->selectedWorkspace();
+    // A batch stating what a replaced switch selected is not followed: the switch that replaced it is
+    // answered later, and following the one in between would show a workspace nobody asked for any more.
+    if (_switch && _shown && _switch->replaced.contains(selected))
+        return _shown->daemonWorkspace;
     if (!_revertTo)
         return selected;
     // What the switch was given up for has ended since: the daemon selects another in its place, and no batch
@@ -842,7 +855,12 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
     auto const sent = _controller->select(workspace, workspace == 0 ? activePaneSession() : std::nullopt);
     if (!sent)
         return std::unexpected(sent.error());
-    // Only the latest switch of the window lands.
+    // Only the latest switch of the window lands, and only its selection is followed: the daemon states each
+    // selection it makes, and one it made for a replaced switch first is not where the window is going.
+    auto replaced = _switch ? std::move(_switch->replaced) : std::set<uint64_t> {};
+    if (_switch && _switch->to != 0)
+        replaced.insert(_switch->to);
+    replaced.erase(workspace);
     failSwitch("another switch of this window replaced it");
     _revertTo.reset();
     _switch = PendingSwitch {
@@ -850,6 +868,7 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
         .request = *sent,
         .before = std::move(before),
         .landed = std::move(landed),
+        .replaced = std::move(replaced),
     };
     return {};
 }
@@ -1050,12 +1069,16 @@ std::unordered_map<uint64_t, window::SessionAttention> DaemonLink::daemonMarks()
 window::SelectResult DaemonLink::select(uint64_t workspace)
 {
     auto const local = _shown ? std::optional { _shown->local } : std::nullopt;
-    auto const selected =
-        selectWorkspace(workspace, [this, local](std::expected<uint64_t, std::string> const& outcome) {
+    // The window's request this is: a refusal ends what it was made for, never what a later request -- which
+    // replaced it, and whose own switch failed this one -- left waiting.
+    auto const* const asking = local ? _sessions.controllerOwning(*local) : nullptr;
+    auto const navigation = asking != nullptr ? asking->navigationSerial() : window::NavigationSerial {};
+    auto const selected = selectWorkspace(
+        workspace, [this, local, navigation](std::expected<uint64_t, std::string> const& outcome) {
             if (outcome || !local)
                 return;
             if (auto* const controller = _sessions.controllerOwning(*local))
-                controller->cancelPendingJump();
+                controller->cancelPendingJumpOf(navigation);
         });
     if (!selected)
     {

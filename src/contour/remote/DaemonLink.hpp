@@ -329,8 +329,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @param panes The panes the window shows, by their daemon sessions.
     void reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes) override;
     /// Has its window show @p workspace of its daemon (selectWorkspace()); a refusal is logged, as the
-    /// window has no one to tell,
-    /// and a refusal by the daemon cancels the window's pending jump (WindowController::cancelPendingJump()).
+    /// window has no one to tell, and a refusal by the daemon cancels what the window's request was made for
+    /// -- unless a later request replaced it (WindowController::cancelPendingJumpOf()).
     /// @param workspace The daemon's workspace id.
     /// @return Refused when the selection could not be sent.
     window::SelectResult select(uint64_t workspace) override;
@@ -568,7 +568,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// Ends a wait for a first tab, if one was latched, and logs how it ended.
     void endSwitchWait(std::string_view how);
     /// @return The workspace the window is to display: what the connection selects, unless a switch that was
-    ///         given up still waits for its revert (@see cancelSwitch()).
+    ///         given up still waits for its revert (@see cancelSwitch()), or it is what a switch the one
+    ///         under way replaced selected (PendingSwitch::replaced).
     [[nodiscard]] uint64_t followedSelection();
     /// @return Whether the connection's last settled layout of @p daemonWorkspace holds a tab: only then has
     ///         a window switched to it something to show. One that holds none would empty the window, which
@@ -696,6 +697,9 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
         /// not among them.
         std::set<uint64_t> before;
         SwitchLanded landed; ///< Told how it went.
+        /// The workspaces of the window's earlier switches this one replaced: the daemon may state one of
+        /// them selected before it answers this one, and the window does not follow it (followedSelection()).
+        std::set<uint64_t> replaced;
     };
     std::optional<PendingSwitch> _switch;
     /// What the switch under way waits for (switchWait()): decided as the target's settled layout arrives

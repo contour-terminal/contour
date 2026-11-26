@@ -754,6 +754,10 @@ class SidebarModel: public QAbstractListModel
     /// @param key A row's key.
     /// @return The row's index, or -1 when it is not listed.
     [[nodiscard]] int rowIndexOf(SidebarRowKey const& key) const noexcept;
+    /// @param key A row's key, as a menu carries it.
+    /// @return What a jump from that row names (sidebarTargetOf()): a daemon row's in the run its section
+    ///         lists now, which its key leaves out; a row no longer listed, what its key names.
+    [[nodiscard]] SidebarTarget targetOf(SidebarRowKey const& key) const;
     /// @param kind A workspace or a tab row.
     /// @param workspace The workspace's id, as the window's directory lists it.
     /// @param tab The tab's id; 0 for a workspace row.

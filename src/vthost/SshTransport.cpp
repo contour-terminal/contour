@@ -138,7 +138,8 @@ namespace
         { .failure = SshFailure::RemoteContourCannotSkipStart,
           .kind = TransportErrorKind::RemoteProgramTooOld,
           .format = "Contour on {0} is too old to be watched in the background (its `contour daemon --stdio` "
-                    "has no `--no-start`). Upgrade it there, or connect to it." },
+                    "has no `--no-start`), or the host's `remote_command:` does not pass `--no-start` on. "
+                    "Upgrade it there, or connect to it." },
     });
 
     static_assert(SshFailureMessages.size() == SshFailureCount,
@@ -536,6 +537,12 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
                 if (ready.skipped != 0)
                     clientLog()(
                         "ssh: {} printed {} bytes before the stdio preamble", describe(), ready.skipped);
+                // Told not to start a daemon, the relay says it did not: one that does not say so never got
+                // the flag, and may have started one.
+                if (_target.remoteStart == RemoteStart::Never && ready.noStart != RelayNoStart::Honoured)
+                    return failWith(
+                        *child,
+                        sshTransportError(SshFailure::RemoteContourCannotSkipStart, { .target = _target }));
                 // The child is the connection's lifetime: ssh is reaped only once its socket is gone.
                 return std::make_unique<Connection>(
                     Connection { .lifetime = std::move(child), .socket = std::move(socket), .token = {} });

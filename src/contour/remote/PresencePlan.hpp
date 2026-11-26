@@ -7,6 +7,7 @@
 /// the configuration, the GUI state and the windows report, and lists what it returns.
 
 #include <contour/remote/DaemonLinkHost.hpp>
+#include <contour/remote/ObserveSupport.hpp>
 #include <contour/remote/SwitchPlan.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
 #include <contour/window/DaemonLinkLook.hpp>
@@ -24,9 +25,6 @@
 
 namespace contour::remote
 {
-
-/// @see NativeController.hpp; declared here so the plan stays free of the controller.
-enum class ObserveSupport : uint8_t;
 
 /// What the user and the configuration chose about listing daemons.
 struct ListingSettings
@@ -50,8 +48,8 @@ struct PresenceInputs
 /// One daemon the sidebar lists.
 struct ListedDaemon
 {
-    window::DaemonRef daemon;        ///< Which daemon.
-    window::DaemonLocality locality; ///< Local for a `local:` daemon; Remote for a host or a link.
+    window::DaemonRef daemon;           ///< Which daemon.
+    window::DaemonLocality locality {}; ///< Local for a `local:` daemon; Remote for a host or a link.
 
     bool operator==(ListedDaemon const&) const = default;
 };

@@ -478,6 +478,10 @@ class GatedSocket final: public core::net::testing::SocketDecorator
     /// Lets every frame through up to and including the next LayoutState of @p window, and holds the rest.
     void holdAfterLayoutOf(uint64_t window) { _holdAfter = window; }
 
+    /// Lets every frame through up to and including the next LayoutBatchEnd stating @p workspace selected,
+    /// and holds the rest: the client hears a selection the daemon made, and not yet the one it made next.
+    void holdAfterSelectionOf(uint64_t workspace) { _holdAfterSelection = workspace; }
+
     /// Lets every frame through up to the next LayoutState, and holds it and the rest: the connection is up,
     /// and no layout of it has come in.
     void holdAtNextLayout() { _holdAtLayout = true; }
@@ -493,6 +497,7 @@ class GatedSocket final: public core::net::testing::SocketDecorator
     void release(core::net::EventLoop& loop)
     {
         _holdAfter.reset();
+        _holdAfterSelection.reset();
         _holdAtLayout = false;
         _holding = false;
         _flushing = true;
@@ -520,7 +525,7 @@ class GatedSocket final: public core::net::testing::SocketDecorator
   private:
     [[nodiscard]] bool passesStraight() const noexcept { return !armed() && !_flushing && _stream.empty(); }
 
-    [[nodiscard]] bool armed() const noexcept { return _holdAfter || _holdAtLayout; }
+    [[nodiscard]] bool armed() const noexcept { return _holdAfter || _holdAfterSelection || _holdAtLayout; }
 
     /// Takes one write: what may pass is written on, the rest kept.
     [[nodiscard]] core::async::Task<Written> take(std::vector<std::byte> bytes)
@@ -544,7 +549,10 @@ class GatedSocket final: public core::net::testing::SocketDecorator
                 break;
             }
             passing += decoded->consumed;
-            if (layout != nullptr && layout->workspace == *_holdAfter)
+            if (layout != nullptr && _holdAfter && layout->workspace == *_holdAfter)
+                _holding = true;
+            if (auto const* end = std::get_if<vthost::proto::LayoutBatchEnd>(&decoded->pdu);
+                end != nullptr && _holdAfterSelection && end->selected == *_holdAfterSelection)
                 _holding = true;
         }
         auto chunk = std::vector<std::byte>(_stream.begin(), _stream.begin() + static_cast<long>(passing));
@@ -577,9 +585,10 @@ class GatedSocket final: public core::net::testing::SocketDecorator
     std::unique_ptr<core::net::ISocket> _inner;
     std::set<GatedSocket*>& _live;
     std::optional<uint64_t> _holdAfter;
-    bool _holdAtLayout = false; ///< Holds from the next LayoutState on, that one included.
-    bool _holding = false;      ///< The gate tripped: everything since is kept.
-    bool _flushing = false;     ///< What was kept is being written on; what comes meanwhile queues behind it.
+    std::optional<uint64_t> _holdAfterSelection; ///< Holds after the batch stating this selection.
+    bool _holdAtLayout = false;                  ///< Holds from the next LayoutState on, that one included.
+    bool _holding = false;                       ///< The gate tripped: everything since is kept.
+    bool _flushing = false; ///< What was kept is being written on; what comes meanwhile queues behind it.
     std::vector<std::byte> _stream;
 };
 
@@ -888,6 +897,17 @@ struct DaemonFixture
         onDaemon([this, window] {
             for (auto* socket: gated)
                 socket->holdAfterLayoutOf(window);
+            return 0;
+        });
+    }
+
+    /// Has every connection let frames through up to and including the next batch stating @p workspace
+    /// selected, and hold the rest until releaseHeld().
+    void holdAfterSelectionOf(uint64_t workspace)
+    {
+        onDaemon([this, workspace] {
+            for (auto* socket: gated)
+                socket->holdAfterSelectionOf(workspace);
             return 0;
         });
     }

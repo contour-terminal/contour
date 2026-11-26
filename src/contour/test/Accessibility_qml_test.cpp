@@ -945,7 +945,7 @@ TEST_CASE("accessibility: a daemon row is a tree item named by its daemon, its s
     model.refreshNow();
     auto const daemon = model.rowIndexOf(SidebarRowKey { .kind = SidebarRowKind::Daemon,
                                                          .daemon = starfive.daemon,
-                                                         .instance = starfive.instance,
+                                                         .instance = {},
                                                          .workspace = 0,
                                                          .tab = 0,
                                                          .pane = {} });
@@ -1034,7 +1034,7 @@ TEST_CASE("accessibility: Connect, Start, Cancel and Remove are named buttons wi
         model.refreshNow();
         auto const daemon = model.rowIndexOf(SidebarRowKey { .kind = SidebarRowKind::Daemon,
                                                              .daemon = starfiveRef,
-                                                             .instance = starfive.instance,
+                                                             .instance = {},
                                                              .workspace = 0,
                                                              .tab = 0,
                                                              .pane = {} });

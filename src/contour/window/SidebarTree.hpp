@@ -66,10 +66,12 @@ struct SidebarRowKey
 {
     SidebarRowKind kind = SidebarRowKind::Workspace; ///< What the row stands for.
     DaemonRef daemon {};                             ///< The daemon of its section; empty for none.
-    DaemonInstance instance {};                      ///< That daemon's run, which its ids belong to.
-    uint64_t workspace = 0;                          ///< The workspace's daemon id.
-    uint64_t tab = 0;                                ///< The tab's id; 0 for a workspace row.
-    PaneKey pane;                                    ///< The pane's key; zero for a workspace or tab row.
+    /// That daemon's run, which its ids belong to; none on a Daemon row, which names no id and keeps its
+    /// identity as its daemon connects (SidebarRow::daemonInstance holds the run it lists).
+    DaemonInstance instance {};
+    uint64_t workspace = 0; ///< The workspace's daemon id.
+    uint64_t tab = 0;       ///< The tab's id; 0 for a workspace row.
+    PaneKey pane;           ///< The pane's key; zero for a workspace or tab row.
 
     auto operator<=>(SidebarRowKey const&) const = default;
 };
@@ -209,7 +211,9 @@ struct SidebarTarget
 
 /// @param key A row of a workspace, a tab, a pane or a daemon.
 /// @return What the row names, as a jump goes there: its workspace, and the tab and pane a tab or pane row
-///         names; a daemon row names its daemon's default workspace (workspace 0, which no workspace is).
+///         names; a daemon row names its daemon's default workspace (workspace 0, which no workspace is), in
+///         no particular run, as its key carries none (sidebarTargetOf(SidebarRow const&) names the listed
+///         one).
 [[nodiscard]] inline SidebarTarget sidebarTargetOf(SidebarRowKey const& key)
 {
     auto target = SidebarTarget {
@@ -332,6 +336,9 @@ struct SidebarRow
     std::optional<TabIcon> icon {};
     /// A Daemon row: where its link stands. Every other row leaves it at its default.
     DaemonLinkState linkState = DaemonLinkState::NotConnected;
+    /// A Daemon row: the run of its daemon its section lists now, which a jump from the row names; none while
+    /// not connected. Every other row carries its run in its key.
+    DaemonInstance daemonInstance {};
     std::string linkReason;                             ///< A Daemon row: why its link failed; plain text.
     DaemonLocality locality = DaemonLocality::Remote;   ///< A Daemon row: whether it runs on this machine.
     DaemonRowLink link = DaemonRowLink::Observer;       ///< A Daemon row: who holds its link.
@@ -345,6 +352,18 @@ struct SidebarRow
 
     bool operator==(SidebarRow const&) const = default;
 };
+
+/// @param row A row of a workspace, a tab, a pane or a daemon.
+/// @return What the row names, as a jump goes there (sidebarTargetOf(SidebarRowKey const&)), a daemon row's
+/// in
+///         the run its section lists now.
+[[nodiscard]] inline SidebarTarget sidebarTargetOf(SidebarRow const& row)
+{
+    auto target = sidebarTargetOf(row.key);
+    if (row.key.kind == SidebarRowKind::Daemon)
+        target.instance = row.daemonInstance;
+    return target;
+}
 
 /// A tab, named by its workspace: a tab id is unique only within its workspace.
 struct TabRef
@@ -500,7 +519,7 @@ enum class BreadcrumbDepth : uint8_t
 /// @return The summary, over the workspace rows of every section; a last-known workspace still names the
 ///         current one, but asks nothing of the others' roll-up.
 [[nodiscard]] SidebarSummary sidebarSummary(std::span<SidebarRow const> rows,
-                                            std::optional<WorkspaceKey> current);
+                                            std::optional<WorkspaceKey> const& current);
 
 /// @param urgency A pane's urgency.
 /// @return Whether it asks for the user: NeedsYou, Failed or DoneUnseen (the classes an attention jump

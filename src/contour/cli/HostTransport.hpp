@@ -16,6 +16,7 @@
 #include <string_view>
 
 #include <vthost/AttachBudget.hpp>
+#include <vthost/SshTransport.hpp>
 
 namespace core::platform
 {
@@ -63,12 +64,9 @@ enum class SshPrompts : std::uint8_t
     return vthost::AttachBudget { transportBound + SshAttachMargin };
 }
 
-/// Whether reaching a host's daemon may start it when none runs there.
-enum class RemoteStart : std::uint8_t
-{
-    IfAbsent = 0, ///< Yes: what an attach the user asked for does.
-    Never,        ///< No: a background observer only watches a daemon that already runs.
-};
+/// Whether reaching a host's daemon may start it when none runs there (the ssh transport checks the relay's
+/// word for Never).
+using RemoteStart = vthost::RemoteStart;
 
 /// What an ssh host needs to have its prompts answered: both are shared by every host of the process.
 struct SshPrompting

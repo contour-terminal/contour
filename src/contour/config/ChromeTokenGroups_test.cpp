@@ -2859,9 +2859,10 @@ TEST_CASE("a last-known sidebar row is dimmer than a live one yet reads at 3:1",
                 REQUIRE(defaultColorPalettes(name, palette));
                 auto const colors = chromeSchemeColorsOf(palette);
                 auto const bar = slotIn(colors, fill.slot);
-                auto const live = mixColor(bar, slotIn(colors, liveInk.slot), liveInk.alphaPercent / 100.0f);
-                auto const lastKnown =
-                    mixColor(bar, slotIn(colors, dimInk.slot), dimInk.alphaPercent / 100.0f);
+                auto const live = mixColor(
+                    bar, slotIn(colors, liveInk.slot), static_cast<float>(liveInk.alphaPercent) / 100.0f);
+                auto const lastKnown = mixColor(
+                    bar, slotIn(colors, dimInk.slot), static_cast<float>(dimInk.alphaPercent) / 100.0f);
                 CHECK(contrastRatio(lastKnown, bar) >= MinimumMarkContrast);
                 CHECK(contrastRatio(live, bar) / contrastRatio(lastKnown, bar) >= MinimumDimGap);
             }
