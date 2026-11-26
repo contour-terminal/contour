@@ -8,6 +8,7 @@
 //   extension_host_probe --receive-grant <helper arguments>
 //   extension_host_probe --receive-grant [--sandboxed] [--outer-filter=K] [--sandbox-op=OP] <helper
 //   arguments> extension_host_probe --mutate <helper arguments> --seed=N
+//   extension_host_probe --contained <helper arguments> --profile-file=PATH --port=N   (Windows)
 //
 // Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
 // as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
@@ -25,6 +26,13 @@
 //
 // With any of --sandboxed, --outer-filter or --sandbox-op (Linux), it locks itself down as the host does and
 // tries one operation from a thread started before: SandboxProbe.hpp says what it reports.
+//
+// With --contained (Windows), it tries what the extension host's AppContainer must refuse it, bound to its
+// parent likewise, and reports on its control channel: `container=` `yes` or `no` (its token's word) or
+// `unknown`; `profile-file=`, opening PATH (a file of the user's that the parent made) for reading;
+// `connect=`, a TCP connection to 127.0.0.1:N (where the parent listens); `spawn=`, starting the system's
+// cmd.exe. Each is `ok`, or `refused:<what>:<error>` naming the call that failed and its Win32 error. Then
+// `end`, and it waits for its control channel to end.
 //
 // With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
 // --receive-grant does, and flips bytes of the whole object at random on a thread of its own while Contour
@@ -78,6 +86,7 @@
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
+    #include <WinSock2.h>
     #include <Windows.h>
 #else
     #include <sys/resource.h>
@@ -295,7 +304,10 @@ enum class StandardStream : uint8_t
                                      .environment = process::defaultHelperEnvironment(),
                                      .extraArguments = { std::next(firstOther), arguments.end() },
                                      .caps = {},
-                                     .standardError = std::nullopt },
+                                     .standardError = std::nullopt,
+                                     // What is proved here is the parent's end, not the helper's confinement;
+                                     // an uncontained helper starts under wine too.
+                                     .isolation = process::ProcessIsolation::None },
         vtextension::wasm::remote::errorLogWriter()
     };
     auto connection = connector.connect();
@@ -481,6 +493,144 @@ constexpr auto Seed = std::string_view { "--seed=" };
                                                                           : ProbeExit::ReportFailed;
 }
 
+#ifdef _WIN32
+/// The prefix of the option naming the user's file --contained tries to open.
+constexpr auto ProfileFile = std::string_view { "--profile-file=" };
+
+/// The prefix of the option naming the loopback port --contained tries to connect to.
+constexpr auto Port = std::string_view { "--port=" };
+
+/// @return `refused:<what>:<error>`: the call @p what failed with the Win32 error @p error.
+[[nodiscard]] std::string refusedBy(std::string_view what, DWORD error)
+{
+    return std::format("refused:{}:{}", what, error);
+}
+
+/// @return Whether this process's token is an AppContainer's: `yes`, `no`, or `unknown`.
+[[nodiscard]] std::string_view containerOf()
+{
+    auto isAppContainer = DWORD { 0 };
+    auto length = DWORD { 0 };
+    if (!::GetTokenInformation(::GetCurrentProcessToken(),
+                               TokenIsAppContainer,
+                               &isAppContainer,
+                               sizeof(isAppContainer),
+                               &length))
+        return "unknown";
+    return isAppContainer != 0 ? "yes" : "no";
+}
+
+/// @return What opening @p path for reading came to.
+[[nodiscard]] std::string openFile(std::string_view path)
+{
+    auto const wide = std::filesystem::path { std::u8string { path.begin(), path.end() } };
+    auto* const file = ::CreateFileW(
+        wide.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return refusedBy("CreateFileW", ::GetLastError());
+    ::CloseHandle(file);
+    return "ok";
+}
+
+/// @return What connecting to 127.0.0.1:@p port came to.
+[[nodiscard]] std::string connectLoopback(uint16_t port)
+{
+    auto data = WSADATA {};
+    if (auto const error = ::WSAStartup(MAKEWORD(2, 2), &data); error != 0)
+        return refusedBy("WSAStartup", static_cast<DWORD>(error));
+    auto const result = [port] {
+        auto const socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (std::cmp_equal(socket, INVALID_SOCKET))
+            return refusedBy("socket", static_cast<DWORD>(::WSAGetLastError()));
+        auto address = sockaddr_in {};
+        address.sin_family = AF_INET;
+        address.sin_port = ::htons(port);
+        address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+        auto const connected =
+            ::connect(socket, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0
+                ? std::string { "ok" }
+                : refusedBy("connect", static_cast<DWORD>(::WSAGetLastError()));
+        ::closesocket(socket);
+        return connected;
+    }();
+    ::WSACleanup();
+    return result;
+}
+
+/// @return What starting the system's cmd.exe came to; a child that started is ended at once.
+[[nodiscard]] std::string spawnProcess()
+{
+    auto directory = std::wstring(MAX_PATH, L'\0');
+    auto const length = ::GetSystemDirectoryW(directory.data(), static_cast<UINT>(directory.size()));
+    if (length == 0 || length >= directory.size())
+        return refusedBy("GetSystemDirectoryW", ::GetLastError());
+    directory.resize(length);
+    auto const program = directory + L"\\cmd.exe";
+    auto commandLine = std::wstring { L"cmd.exe /c exit 0" };
+    auto startup = STARTUPINFOW {};
+    startup.cb = sizeof(startup);
+    auto info = PROCESS_INFORMATION {};
+    if (!::CreateProcessW(program.c_str(),
+                          commandLine.data(),
+                          nullptr,
+                          nullptr,
+                          FALSE,
+                          CREATE_NO_WINDOW,
+                          nullptr,
+                          nullptr,
+                          &startup,
+                          &info))
+        return refusedBy("CreateProcessW", ::GetLastError());
+    ::TerminateProcess(info.hProcess, 0);
+    ::CloseHandle(info.hThread);
+    ::CloseHandle(info.hProcess);
+    return "ok";
+}
+
+/// Tries what an AppContainer must refuse, reports how each went, then waits for its control channel to end.
+[[nodiscard]] ProbeExit contained(std::span<std::string_view const> arguments)
+{
+    auto helperArguments = std::vector<std::string_view> {};
+    auto profileFile = std::optional<std::string_view> {};
+    auto port = std::optional<uint16_t> {};
+    for (auto const argument: arguments)
+    {
+        if (argument.starts_with(ProfileFile))
+            profileFile = argument.substr(ProfileFile.size());
+        else if (argument.starts_with(Port))
+        {
+            auto const digits = argument.substr(Port.size());
+            auto value = uint16_t {};
+            if (std::from_chars(digits.data(), digits.data() + digits.size(), value).ec != std::errc {})
+                return ProbeExit::Usage;
+            port = value;
+        }
+        else
+            helperArguments.push_back(argument);
+    }
+    auto const parsed = parseHelperArguments(helperArguments);
+    if (!parsed || !profileFile || !port)
+        return ProbeExit::Usage;
+    if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
+        return ProbeExit::ParentGone;
+    auto control = Channel::adopt(parsed->control);
+    if (!control)
+        return ProbeExit::NoControl;
+    auto const text = std::format("container={}\nprofile-file={}\nconnect={}\nspawn={}\nend\n",
+                                  containerOf(),
+                                  openFile(*profileFile),
+                                  connectLoopback(*port),
+                                  spawnProcess());
+    if (!sendText(*control, text))
+        return ProbeExit::ReportFailed;
+    auto buffer = std::array<uint8_t, 64> {};
+    while (control->receiveSome(buffer))
+    {
+    }
+    return ProbeExit::Reported;
+}
+#endif
+
 } // namespace
 
 // The third parameter is what POSIX systems pass and Windows' C runtime passes too: the environment, read
@@ -509,6 +659,10 @@ int main(int argc, char const* argv[], char const* envp[])
         }
         if (arguments.front() == "--mutate")
             return mutate(rest);
+#ifdef _WIN32
+        if (arguments.front() == "--contained")
+            return contained(rest);
+#endif
         return ProbeExit::Usage;
     }();
     if (exit == ProbeExit::ParentGone)

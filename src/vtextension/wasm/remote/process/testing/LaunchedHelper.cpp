@@ -4,17 +4,21 @@
 #include <core/Clock.hpp>
 #include <core/Environment.hpp>
 
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
@@ -50,6 +54,25 @@ std::vector<std::pair<std::string, std::string>> sanitizerEnvironment()
     return environment;
 }
 
+bool runsOnWine() noexcept
+{
+#ifdef _WIN32
+    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
+    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
+#else
+    return false;
+#endif
+}
+
+ProcessIsolation helperIsolation() noexcept
+{
+#ifdef _WIN32
+    return runsOnWine() ? ProcessIsolation::None : ProcessIsolation::AppContainer;
+#else
+    return ProcessIsolation::None;
+#endif
+}
+
 ProcessId ownProcessId() noexcept
 {
     return currentProcessId();
@@ -64,6 +87,95 @@ std::optional<transport::NativeHandle> ownStandardError() noexcept
 #else
     return STDERR_FILENO;
 #endif
+}
+
+#ifdef _WIN32
+std::optional<CapturedStandardError> CapturedStandardError::create()
+{
+    auto path = std::wstring(MAX_PATH, L'\0');
+    auto const length = ::GetTempPathW(static_cast<DWORD>(path.size()), path.data());
+    if (length == 0 || length >= path.size())
+        return std::nullopt;
+    path.resize(length);
+    auto name = std::wstring(MAX_PATH, L'\0');
+    if (::GetTempFileNameW(path.c_str(), L"ceh", 0, name.data()) == 0)
+        return std::nullopt;
+    auto* const file = ::CreateFileW(name.c_str(),
+                                     GENERIC_READ | GENERIC_WRITE,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                     nullptr,
+                                     CREATE_ALWAYS,
+                                     FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+                                     nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return std::nullopt;
+    return CapturedStandardError { file };
+}
+
+CapturedStandardError::CapturedStandardError(CapturedStandardError&& other) noexcept:
+    _file { std::exchange(other._file, INVALID_HANDLE_VALUE) }
+{
+}
+
+CapturedStandardError::~CapturedStandardError()
+{
+    if (_file != INVALID_HANDLE_VALUE)
+        ::CloseHandle(_file);
+}
+
+std::string CapturedStandardError::text() const
+{
+    // The child's copy shares this handle's file position: read from the start, then leave it at the end.
+    auto text = std::string {};
+    if (!::SetFilePointerEx(_file, LARGE_INTEGER {}, nullptr, FILE_BEGIN))
+        return text;
+    auto buffer = std::array<char, 4096> {};
+    auto read = DWORD { 0 };
+    while (::ReadFile(_file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read != 0)
+        text.append(buffer.data(), read);
+    return text;
+}
+#endif
+
+namespace
+{
+    /// @return How @p status says a process ended: its exit code in hex, or its signal.
+    [[nodiscard]] std::string endingOf(std::optional<ExitStatus> const& status)
+    {
+        if (!status)
+            return "it still runs, or could not be waited for";
+        if (status->kind == ExitKind::Exited)
+            return std::format("it exited with 0x{:08X}", static_cast<uint32_t>(status->value));
+        return std::format("a signal ended it: {}", status->value);
+    }
+
+    /// @return @p ending, then what the process wrote: @p written.
+    [[nodiscard]] std::string withStandardError(std::string const& ending, std::string const& written)
+    {
+        if (written.empty())
+            return std::format("{}; it wrote nothing to stderr", ending);
+        return std::format("{}; its stderr: {}", ending, written);
+    }
+} // namespace
+
+std::string endOf(IProcessLauncher& launcher,
+                  IProcessHandle& process,
+                  StandardErrorReader const& standardError)
+{
+    // Reaped first: what it wrote as it ended is in the file by then.
+    auto const ending = endingOf(awaitReap(launcher, process));
+    return withStandardError(ending, standardError());
+}
+
+void checkEndedCleanly(IProcessLauncher& launcher,
+                       IProcessHandle& process,
+                       StandardErrorReader const& standardError)
+{
+    auto const status = awaitReap(launcher, process);
+    auto const clean = ExitStatus { .kind = ExitKind::Exited, .value = 0 };
+    if (status != clean)
+        UNSCOPED_INFO(withStandardError(endingOf(status), standardError()));
+    CHECK(status == clean);
 }
 
 std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process)
@@ -161,7 +273,8 @@ PreparedHelperLaunch prepareHelperLaunch(HelperLaunch launch)
                              .arguments = {},
                              .environment = std::move(launch.environment),
                              .caps = {},
-                             .standardError = launch.standardError };
+                             .standardError = launch.standardError,
+                             .isolation = launch.isolation };
     spec.inherited.push_back(control->helper.nativeHandle());
     for (auto const& lane: lanes)
         spec.inherited.push_back(lane.helper.nativeHandle());

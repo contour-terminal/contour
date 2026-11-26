@@ -24,13 +24,14 @@ namespace vtextension::wasm::remote
 /// Why no extension host serves.
 enum class HostRefusal : uint8_t
 {
-    HelperNotFound,  ///< The host executable is missing, or cannot be executed.
-    OutOfResources,  ///< The system is out of memory, processes or handles.
-    Unsupported,     ///< The system lacks what starting a host takes.
-    LaunchRefused,   ///< The system refused to start it for another reason.
-    ProtocolVersion, ///< It speaks another protocol version than Contour.
-    LockdownFailed,  ///< It failed to confine itself.
-    Unsandboxed,     ///< It runs without a sandbox, which Contour requires.
+    HelperNotFound,   ///< The host executable is missing, or cannot be executed.
+    OutOfResources,   ///< The system is out of memory, processes or handles.
+    Unsupported,      ///< The system lacks what starting a host takes.
+    LaunchRefused,    ///< The system refused to start it for another reason.
+    HelperNotGranted, ///< Its directory does not let it run contained, and only its installer can grant that.
+    ProtocolVersion,  ///< It speaks another protocol version than Contour.
+    LockdownFailed,   ///< It failed to confine itself.
+    Unsandboxed,      ///< It runs without a sandbox, which Contour requires.
 };
 
 /// The last reason: what every table and loop over the reasons ends at. refusalSource()'s switch, which has
@@ -54,7 +55,8 @@ enum class RefusalSource : uint8_t
         case HostRefusal::HelperNotFound:
         case HostRefusal::OutOfResources:
         case HostRefusal::Unsupported:
-        case HostRefusal::LaunchRefused: return RefusalSource::Launch;
+        case HostRefusal::LaunchRefused:
+        case HostRefusal::HelperNotGranted: return RefusalSource::Launch;
         case HostRefusal::ProtocolVersion:
         case HostRefusal::LockdownFailed:
         case HostRefusal::Unsandboxed: return RefusalSource::Handshake;
@@ -91,6 +93,9 @@ inline constexpr auto RefusalPersistenceRows = std::array {
     RefusalPersistenceRow { .refusal = HostRefusal::Unsupported,
                             .persistence = RefusalPersistence::Transient },
     RefusalPersistenceRow { .refusal = HostRefusal::LaunchRefused,
+                            .persistence = RefusalPersistence::Transient },
+    // Said once; a reinstall may grant it while Contour runs.
+    RefusalPersistenceRow { .refusal = HostRefusal::HelperNotGranted,
                             .persistence = RefusalPersistence::Transient },
     // The host installed with Contour speaks Contour's version; another one stays installed.
     RefusalPersistenceRow { .refusal = HostRefusal::ProtocolVersion,

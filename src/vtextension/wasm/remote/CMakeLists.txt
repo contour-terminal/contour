@@ -80,7 +80,9 @@ target_compile_definitions(vtextension_remote_wire PUBLIC
 set(_process_sources_Linux process/Process_linux.cpp process/Process_linux.hpp)
 set(_process_sources_FreeBSD process/Process_freebsd.cpp)
 set(_process_sources_Darwin process/Process_macos.cpp)
-set(_process_sources_Windows process/AppContainer_win32.cpp process/AppContainer_win32.hpp process/Process_win32.cpp)
+set(_process_sources_Windows
+    process/AppContainer_win32.cpp process/AppContainer_win32.hpp process/LaunchRefusal_win32.cpp
+    process/LaunchRefusal_win32.hpp process/Process_win32.cpp process/Process_win32.hpp)
 set(_process_source "${_process_sources_${CMAKE_SYSTEM_NAME}}")
 if(_process_source AND NOT WIN32)
     # What the POSIX launchers share.
@@ -111,6 +113,10 @@ if(_process_source)
         ${_process_source}
     )
     target_link_libraries(vtextension_remote_process PUBLIC core::platform)
+    if(WIN32)
+        # The extension host's AppContainer profile (process/AppContainer_win32.cpp).
+        target_link_libraries(vtextension_remote_process PRIVATE userenv)
+    endif()
     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
     target_compile_definitions(vtextension_remote_process PUBLIC
         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
@@ -125,6 +131,10 @@ if(_process_source)
             process/testing/SandboxProbe.hpp)
         target_link_libraries(extension_host_probe PRIVATE
             vtextension_host vtextension_remote_process vtextension_remote_wire)
+        if(WIN32)
+            # --contained tries a loopback connection.
+            target_link_libraries(extension_host_probe PRIVATE ws2_32)
+        endif()
         # Where a sandbox is built (VTEXTENSION_{LINUX,FREEBSD,MACOS}_SANDBOX), the probe also locks
         # itself down as the host does, and process_test proves the sandbox with it and tests its pieces.
         if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
@@ -172,6 +182,10 @@ if(_process_source)
         endif()
         if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
+        endif()
+        if(WIN32)
+            # Sandbox.windowsHelperRunsContained listens on loopback for the contained probe.
+            target_link_libraries(vtextension_process_test PRIVATE ws2_32)
         endif()
         add_dependencies(vtextension_process_test extension_host_probe)
         target_compile_definitions(vtextension_process_test PRIVATE

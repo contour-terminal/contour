@@ -15,6 +15,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -25,6 +26,14 @@
 
 namespace vtextension::wasm::remote::process::testing
 {
+
+/// @return Whether this process runs on wine (ntdll exports wine_get_version()), which stubs AppContainers: a
+///         contained launch there proves nothing, and fails every case it would start. False off Windows.
+[[nodiscard]] bool runsOnWine() noexcept;
+
+/// @return What the extension host is started in by a test that starts it as Contour does: its AppContainer
+///         on Windows, nothing under wine, and nothing on POSIX, where the helper confines itself.
+[[nodiscard]] ProcessIsolation helperIsolation() noexcept;
 
 /// How long a test waits for a child to do what it was told.
 inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
@@ -48,6 +57,53 @@ inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
 /// @return Whether it is reaped: whether it is gone for good.
 [[nodiscard]] bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process);
 
+#ifdef _WIN32
+/// Windows: a temporary file a child's stderr is written to (HelperLaunch::standardError), so that a test can
+/// say what a child that failed to start wrote, even where its stderr does not reach the test's log. Deleted
+/// once closed.
+class CapturedStandardError
+{
+  public:
+    /// @return A fresh file; nothing if it could not be made.
+    [[nodiscard]] static std::optional<CapturedStandardError> create();
+
+    CapturedStandardError(CapturedStandardError&& other) noexcept;
+    CapturedStandardError& operator=(CapturedStandardError&&) = delete;
+    CapturedStandardError(CapturedStandardError const&) = delete;
+    CapturedStandardError& operator=(CapturedStandardError const&) = delete;
+    ~CapturedStandardError();
+
+    /// @return The handle a child is given as its stderr.
+    [[nodiscard]] transport::NativeHandle handle() const noexcept { return _file; }
+
+    /// @return Everything written to it so far.
+    [[nodiscard]] std::string text() const;
+
+  private:
+    explicit CapturedStandardError(transport::NativeHandle file) noexcept: _file { file } {}
+
+    transport::NativeHandle _file;
+};
+#endif
+
+/// What a child wrote to its stderr, read when asked: only once the child was reaped, so that a write it made
+/// as it ended is not lost.
+using StandardErrorReader = std::function<std::string()>;
+
+/// Reaps @p process, which ended before it did what it was started for, and says how it ended: its exit
+/// code in hex, so that an NTSTATUS such as 0xC0000135 (a DLL not found) or 0xC0000022 (access denied) is
+/// recognised, or its signal; then what it wrote, read through @p standardError once it was reaped.
+/// @return One line for a test's INFO or FAIL.
+[[nodiscard]] std::string endOf(IProcessLauncher& launcher,
+                                IProcessHandle& process,
+                                StandardErrorReader const& standardError);
+
+/// Reaps @p process and checks that it exited 0; if it did not, the check says how it ended and what it
+/// wrote (endOf()), as a helper's sanitizer report at teardown would explain.
+void checkEndedCleanly(IProcessLauncher& launcher,
+                       IProcessHandle& process,
+                       StandardErrorReader const& standardError);
+
 /// Reads a probe's report off @p channel: `key=value` lines, the last `end`.
 /// @return Its lines, `end` included, once all of it arrived; nothing if the channel failed first.
 [[nodiscard]] std::optional<std::vector<std::string>> readReport(transport::Channel& channel);
@@ -64,6 +120,9 @@ struct HelperLaunch
     std::vector<std::pair<std::string, std::string>> environment {}; ///< The child's environment.
     /// Its stderr (LaunchSpec::standardError): by default this process's own, so that what it reports shows.
     std::optional<transport::NativeHandle> standardError = ownStandardError();
+    /// What the system confines it to as it starts: nothing by default; helperIsolation() for the extension
+    /// host as Contour starts it.
+    ProcessIsolation isolation = ProcessIsolation::None;
 };
 
 /// A started child: Contour's ends of everything it was handed, and the process. Its destructor ends and

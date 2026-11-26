@@ -114,6 +114,7 @@ enum class LockdownStep : uint8_t
     Profile,          ///< A sandbox profile (macOS: Seatbelt).
     Container,        ///< A container of its own (Windows: AppContainer).
     Mitigations,      ///< The process mitigations it runs under (Windows).
+    Job,              ///< A job that ends it with Contour and limits what it starts (Windows).
 };
 
 /// Which way a PDU travels.

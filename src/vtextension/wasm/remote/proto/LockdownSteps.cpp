@@ -41,6 +41,7 @@ namespace
                           .text = "the process cannot be started in a container of its own" },
         LockdownStepRow { .step = LockdownStep::Mitigations,
                           .text = "its process mitigations cannot be turned on" },
+        LockdownStepRow { .step = LockdownStep::Job, .text = "the process does not run in a job of its own" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, LockdownStepTable.size()),
@@ -48,7 +49,7 @@ namespace
                                           return std::to_underlying(LockdownStepTable[index].step) == index;
                                       }),
                   "LockdownStepTable lists every LockdownStep at its own index");
-    static_assert(LockdownStepTable.back().step == LockdownStep::Mitigations,
+    static_assert(LockdownStepTable.back().step == LockdownStep::Job,
                   "LockdownStepTable ends at the last LockdownStep");
 } // namespace
 

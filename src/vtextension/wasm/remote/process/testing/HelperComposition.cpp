@@ -108,6 +108,13 @@ std::vector<std::pair<std::string, std::string>> helperEnvironment()
     return environment;
 }
 
+LockdownRequirement helperLockdown() noexcept
+{
+    if (host::ThisPlatformSandbox == host::PlatformSandbox::None || runsOnWine())
+        return LockdownRequirement::AcceptUnsandboxed;
+    return LockdownRequirement::RequireLockedDown;
+}
+
 HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace, ArgumentRewrite laterArguments):
     _teardownGrace { teardownGrace },
     _recording { std::make_shared<RecordingLauncher>(makeSystemProcessLauncher(),
@@ -129,14 +136,14 @@ HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace, Ar
 
 std::shared_ptr<ProcessHostConnector> HelperComposition::connector(HelperBackendConfig const& config) const
 {
-    return std::make_shared<ProcessHostConnector>(
-        _supervisor->mailbox(),
-        ProcessHostConfig { .helper = config.helper,
-                            .environment = helperEnvironment(),
-                            .extraArguments = config.extraArguments,
-                            .caps = {},
-                            .standardError = originalStandardError },
-        errorLogWriter());
+    return std::make_shared<ProcessHostConnector>(_supervisor->mailbox(),
+                                                  ProcessHostConfig { .helper = config.helper,
+                                                                      .environment = helperEnvironment(),
+                                                                      .extraArguments = config.extraArguments,
+                                                                      .caps = {},
+                                                                      .standardError = originalStandardError,
+                                                                      .isolation = config.isolation },
+                                                  errorLogWriter());
 }
 
 std::unique_ptr<IWasmBackend> HelperComposition::backend(HelperBackendConfig const& config) const

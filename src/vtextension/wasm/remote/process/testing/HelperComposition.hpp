@@ -20,6 +20,7 @@
 #include <vtextension/wasm/remote/RemoteBackend.hpp>
 #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
 #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+#include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
 
 namespace vtextension::wasm::remote::process::testing
@@ -33,19 +34,19 @@ inline constexpr auto HelperTeardownGrace = std::chrono::milliseconds { 2000 };
 ///         the helper reports as the tests do.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>> helperEnvironment();
 
-/// What a composition holds its helpers to unless told otherwise: locked down, where this build has a
-/// sandbox.
-inline constexpr auto HelperLockdown = host::ThisPlatformSandbox == host::PlatformSandbox::None
-                                           ? LockdownRequirement::AcceptUnsandboxed
-                                           : LockdownRequirement::RequireLockedDown;
+/// @return What a composition holds its helpers to unless told otherwise: locked down, where this build has a
+///         sandbox and the system it runs on provides it -- not under wine, which stubs AppContainers.
+[[nodiscard]] LockdownRequirement helperLockdown() noexcept;
 
 /// Which helper a composition's backend starts, and what it holds it to.
 struct HelperBackendConfig
 {
-    std::filesystem::path helper;                  ///< The executable.
-    std::vector<std::string> extraArguments {};    ///< Appended to its command line.
-    LockdownRequirement lockdown = HelperLockdown; ///< Which helpers are driven.
-    HostTimeouts timeouts {};                      ///< Its budgets.
+    std::filesystem::path helper;                    ///< The executable.
+    std::vector<std::string> extraArguments {};      ///< Appended to its command line.
+    LockdownRequirement lockdown = helperLockdown(); ///< Which helpers are driven.
+    HostTimeouts timeouts {};                        ///< Its budgets.
+    /// What it is started in: as Contour starts it (helperIsolation()) unless a test says otherwise.
+    ProcessIsolation isolation = helperIsolation();
 };
 
 /// A supervisor over the system's launcher, recorded, waiting a teardown grace for each helper let go (by

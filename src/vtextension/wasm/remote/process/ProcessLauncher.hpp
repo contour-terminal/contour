@@ -49,9 +49,38 @@ enum class LaunchError : uint8_t
 {
     NotFound,    ///< The executable does not exist, or cannot be executed.
     Resources,   ///< The system is out of memory, processes or handles.
-    Unsupported, ///< The system lacks what the launcher needs (Linux: waiting on pidfds, kernel 5.4).
+    Unsupported, ///< The system lacks what the launcher needs (UnsupportedTexts says what, per system).
+    NotGranted,  ///< Windows: the executable's directory does not let an AppContainer run it, and this user
+                 ///< may not grant that; its installer must.
     Stopped,     ///< Whoever launches has stopped launching.
     Io,          ///< The system refused for any other reason.
+};
+
+/// The systems a launcher is built for, as far as what they lack differs.
+enum class LauncherSystem : uint8_t
+{
+    Other,   ///< A system whose launcher needs nothing it may lack.
+    Linux,   ///< Linux: waiting on pidfds.
+    Windows, ///< Windows: app containers and their attributes.
+};
+
+/// The system this build's launcher is for.
+inline constexpr auto ThisLauncherSystem =
+#ifdef _WIN32
+    LauncherSystem::Windows;
+#else
+    #ifdef __linux__
+    LauncherSystem::Linux;
+    #else
+    LauncherSystem::Other;
+    #endif
+#endif
+
+/// What `Unsupported` says a system lacks, one row per system at its enumerator's index.
+inline constexpr auto UnsupportedTexts = std::array<std::string_view, 3> {
+    "the system lacks what it takes",
+    "the system lacks what it takes (on Linux, kernel 5.4 or later)",
+    "the system lacks what it takes (on Windows, app containers: Windows 10 or later)",
 };
 
 /// One way a launch fails, said once: what it means, and what it tells of a host that failed to start so.
@@ -68,7 +97,7 @@ struct LaunchErrorRow
 {
     // Not constexpr: a constant-evaluated copy of a disengaged optional does not compile with every standard
     // library this builds with.
-    static auto const table = std::array<LaunchErrorRow, 5> { {
+    static auto const table = std::array<LaunchErrorRow, 6> { {
         { .error = LaunchError::NotFound,
           .text = "the program is missing, or cannot be executed",
           .refusal = HostRefusal::HelperNotFound },
@@ -76,8 +105,11 @@ struct LaunchErrorRow
           .text = "the system is out of memory, processes or handles",
           .refusal = HostRefusal::OutOfResources },
         { .error = LaunchError::Unsupported,
-          .text = "the system lacks what it takes (on Linux, kernel 5.4 or later)",
+          .text = UnsupportedTexts[std::to_underlying(ThisLauncherSystem)],
           .refusal = HostRefusal::Unsupported },
+        { .error = LaunchError::NotGranted,
+          .text = "its directory does not let it run contained, and only its installer can grant that",
+          .refusal = HostRefusal::HelperNotGranted },
         { .error = LaunchError::Stopped, .text = "Contour is shutting down", .refusal = std::nullopt },
         { .error = LaunchError::Io, .text = "the system refused", .refusal = HostRefusal::LaunchRefused },
     } };
@@ -128,6 +160,16 @@ using Waitable = void*;
 using Waitable = int;
 #endif
 
+/// What the system confines a process to as it starts it, beyond what it is handed. A process can enter a
+/// Windows AppContainer only at its creation, so there it is the parent's to choose; a POSIX helper confines
+/// itself, and every POSIX launcher starts it alike under either value.
+enum class ProcessIsolation : uint8_t
+{
+    None,         ///< Nothing beyond its handles, its environment and (Windows) its job.
+    AppContainer, ///< Windows: in the extension host's AppContainer (AppContainer_win32.hpp), with no
+                  ///< capabilities, and allowed no child process.
+};
+
 /// What to start.
 struct LaunchSpec
 {
@@ -145,6 +187,7 @@ struct LaunchSpec
     /// (defaultHelperStandardError()); a test names a copy of its own stderr taken before anything captured
     /// it, so that what a helper reports stays visible however the test redirects its own.
     std::optional<transport::NativeHandle> standardError {};
+    ProcessIsolation isolation = ProcessIsolation::None; ///< What the system confines it to as it starts.
 };
 
 /// One started process. Non-copyable, non-movable; used by one thread at a time (the supervisor's).

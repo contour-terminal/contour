@@ -82,7 +82,7 @@ constexpr auto Patience = std::chrono::seconds { 5 };
 {
     return HelperBackendConfig { .helper = VTEXTENSION_HELPER_PATH,
                                  .extraArguments = {},
-                                 .lockdown = process::testing::HelperLockdown,
+                                 .lockdown = process::testing::helperLockdown(),
                                  .timeouts = timeouts };
 }
 

@@ -30,6 +30,8 @@ namespace vtextension::wasm::host
 {
 
 /// Which system's sandbox makeSystemSandbox() makes in this build.
+/// CONTOUR_PLATFORM_SANDBOX is an index into these, in this order: keep `_platform_sandboxes` in CMakeLists.txt
+/// the same.
 enum class PlatformSandbox : uint8_t
 {
     None,    ///< None: the host runs unsandboxed.
@@ -113,7 +115,8 @@ class ISandbox
     [[nodiscard]] virtual std::expected<void, ConfinementFailure> lockDown() = 0;
 
     /// @return How far the host is confined once both steps were taken without a failure: what its Hello
-    ///         states then. `Unsandboxed` where the system has no sandbox, `LockedDown` where it has one.
+    ///         states then. `Unsandboxed` where the system has no sandbox, `LockedDown` where it has one --
+    ///         on Windows only where the parent started the host in its AppContainer, which lockDown() asks.
     [[nodiscard]] virtual remote::proto::LockdownState lockdownState() const noexcept = 0;
 };
 

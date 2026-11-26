@@ -1,21 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The read and execute access every AppContainer needs on the extension host's directory. Chromium's
-// sandbox/win (app_container_base.cc) likewise grants ALL APPLICATION PACKAGES on the files a contained
-// process must load.
+// The extension host's AppContainer: its profile, and the read and execute access every AppContainer needs
+// on the helper's directory. The design follows Chromium's sandbox/win (app_container_base.cc), which also
+// creates or derives one named profile and grants ALL APPLICATION PACKAGES on the files a contained process
+// must load.
 #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <memory>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <AclAPI.h>
 #include <sddl.h>
+#include <userenv.h>
 
 namespace vtextension::wasm::remote::process
 {
@@ -99,17 +104,34 @@ namespace
         return LocalMemory { sid };
     }
 
-    /// @return Why a DACL could not be read or written, as a launch failure: `Unsupported` where this user
-    ///         may not change it.
-    [[nodiscard]] LaunchError daclErrorOf(DWORD error) noexcept
+    /// @return Why a DACL could not be read or written at @p step, as a launch failure: `NotGranted` where
+    ///         this user may not change it.
+    [[nodiscard]] LaunchRefusal daclRefusalOf(LaunchStep step, DWORD error) noexcept
     {
-        return error == ERROR_ACCESS_DENIED ? LaunchError::Unsupported : LaunchError::Io;
+        return LaunchRefusal { .error =
+                                   error == ERROR_ACCESS_DENIED ? LaunchError::NotGranted : LaunchError::Io,
+                               .step = step,
+                               .code = error };
+    }
+
+    /// @return @p path in UTF-8, as every line Contour logs is; path::string() would spell it in the ANSI
+    ///         code page, and throw where that has no spelling.
+    [[nodiscard]] std::string utf8Of(std::filesystem::path const& path)
+    {
+        auto const utf8 = path.u8string();
+        return std::string { utf8.begin(), utf8.end() };
     }
 } // namespace
 
 AppContainerApi systemAppContainerApi()
 {
     return AppContainerApi {
+        .createProfile =
+            [](PCWSTR name, PCWSTR displayName, PCWSTR description, PSID* sid) {
+                return ::CreateAppContainerProfile(name, displayName, description, nullptr, 0, sid);
+            },
+        .deriveSid = [](PCWSTR name,
+                        PSID* sid) { return ::DeriveAppContainerSidFromAppContainerName(name, sid); },
         .readDacl =
             [](PCWSTR path, PACL* dacl, PSECURITY_DESCRIPTOR* descriptor) {
                 return ::GetNamedSecurityInfoW(path,
@@ -134,16 +156,32 @@ AppContainerApi systemAppContainerApi()
     };
 }
 
-std::expected<void, LaunchError> ensurePackagesCanExecute(std::filesystem::path const& directory,
-                                                          AppContainerApi const& api)
+std::expected<OwnedSid, LaunchRefusal> ensureAppContainer(AppContainerApi const& api)
+{
+    auto const name = std::wstring { AppContainerName };
+    PSID sid = nullptr;
+    auto result = api.createProfile(
+        name.c_str(), L"Contour extension host", L"Runs Contour's status-line extensions.", &sid);
+    if (result == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS))
+        result = api.deriveSid(name.c_str(), &sid);
+    if (FAILED(result) || sid == nullptr)
+        return std::unexpected(LaunchRefusal { .error = LaunchError::Unsupported,
+                                               .step = LaunchStep::Profile,
+                                               .code = static_cast<DWORD>(result) });
+    return OwnedSid { sid };
+}
+
+std::expected<void, LaunchRefusal> ensurePackagesCanExecute(std::filesystem::path const& directory,
+                                                            AppContainerApi const& api)
 {
     auto const packages = allApplicationPackages();
     if (!packages)
-        return std::unexpected(LaunchError::Io);
+        return std::unexpected(LaunchRefusal {
+            .error = LaunchError::Io, .step = LaunchStep::PackagesSid, .code = ::GetLastError() });
     PACL dacl = nullptr;
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     if (auto const error = api.readDacl(directory.c_str(), &dacl, &descriptor); error != ERROR_SUCCESS)
-        return std::unexpected(daclErrorOf(error));
+        return std::unexpected(daclRefusalOf(LaunchStep::ReadGrant, error));
     auto const ownedDescriptor = LocalMemory { descriptor };
     if (grantsReadAndExecute(dacl, packages.get()))
         return {};
@@ -160,11 +198,51 @@ std::expected<void, LaunchError> ensurePackagesCanExecute(std::filesystem::path 
     access.Trustee.ptstrName = static_cast<LPWSTR>(packages.get());
     PACL granted = nullptr;
     if (auto const error = ::SetEntriesInAclW(1, &access, dacl, &granted); error != ERROR_SUCCESS)
-        return std::unexpected(LaunchError::Io);
+        return std::unexpected(
+            LaunchRefusal { .error = LaunchError::Io, .step = LaunchStep::Grant, .code = error });
     auto const ownedGranted = LocalMemory { granted };
     if (auto const error = api.writeDacl(directory.c_str(), granted); error != ERROR_SUCCESS)
-        return std::unexpected(daclErrorOf(error));
+        return std::unexpected(daclRefusalOf(LaunchStep::WriteGrant, error));
     return {};
+}
+
+AppContainerProvision::AppContainerProvision(AppContainerApi api,
+                                             std::function<void(std::string_view line)> diagnostics):
+    _api { std::move(api) }, _diagnostics { std::move(diagnostics) }
+{
+}
+
+std::expected<PSID, LaunchRefusal> AppContainerProvision::prepare(std::filesystem::path const& directory)
+{
+    if (!_sid)
+    {
+        auto sid = ensureAppContainer(_api);
+        if (!sid)
+            return std::unexpected(sid.error());
+        _sid = *std::move(sid);
+    }
+    if (!std::ranges::contains(_grantedDirectories, directory))
+    {
+        // Asked at every launch, as an administrator may grant it meanwhile; said once, not at every launch.
+        if (auto const granted = ensurePackagesCanExecute(directory, _api); !granted)
+        {
+            if (granted.error().error == LaunchError::NotGranted
+                && !std::ranges::contains(_ungrantableDirectories, directory))
+            {
+                _ungrantableDirectories.push_back(directory);
+                _diagnostics(
+                    std::format("The extension host in {} cannot run contained: Windows app containers "
+                                "may not read and execute that directory, and this user may not "
+                                "grant it. The installer must grant ALL APPLICATION PACKAGES ({}) "
+                                "read and execute access there.",
+                                utf8Of(directory),
+                                utf8Of(std::filesystem::path { AllApplicationPackagesSid })));
+            }
+            return std::unexpected(granted.error());
+        }
+        _grantedDirectories.push_back(directory);
+    }
+    return _sid->get();
 }
 
 } // namespace vtextension::wasm::remote::process

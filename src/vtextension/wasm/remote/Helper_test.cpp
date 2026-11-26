@@ -66,11 +66,14 @@ namespace contract = vtextension::wasm::testing::contract;
 namespace
 {
 
-/// How far a helper of this build confines itself: locked down where the build has a sandbox.
-constexpr auto ThisBuildLockdown =
-    vtextension::wasm::host::ThisPlatformSandbox == vtextension::wasm::host::PlatformSandbox::None
-        ? proto::LockdownState::Unsandboxed
-        : proto::LockdownState::LockedDown;
+/// @return How far a helper of this build, started as Contour starts it, confines itself: locked down where
+///         the build has a sandbox and the system provides it (not under wine).
+[[nodiscard]] proto::LockdownState thisBuildLockdown() noexcept
+{
+    return process::testing::helperLockdown() == LockdownRequirement::RequireLockedDown
+               ? proto::LockdownState::LockedDown
+               : proto::LockdownState::Unsandboxed;
+}
 
 /// @return A launch of the extension host executable with @p leading arguments before its own.
 [[nodiscard]] HelperLaunch helperLaunch(std::vector<std::string> leading = {},
@@ -81,7 +84,8 @@ constexpr auto ThisBuildLockdown =
                           .trailing = {},
                           .parentProcessId = parentProcessId,
                           .dataBytes = process::DefaultDataBytes,
-                          .environment = process::testing::helperEnvironment() };
+                          .environment = process::testing::helperEnvironment(),
+                          .isolation = process::testing::helperIsolation() };
 }
 
 #ifdef __linux__
@@ -128,8 +132,9 @@ struct LimitValues
                                 ? proto::MemoryMode::Shared
                                 : proto::MemoryMode::Copy;
     CHECK(*hello
-          == proto::Pdu { proto::Hello {
-              .version = proto::ProtocolVersion, .memoryMode = memoryMode, .lockdown = ThisBuildLockdown } });
+          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                         .memoryMode = memoryMode,
+                                         .lockdown = thisBuildLockdown() } });
     return control;
 }
 
@@ -272,7 +277,7 @@ TEST_CASE("Helper.locksDown", "[vtextension]")
     auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch());
     REQUIRE(helper.has_value());
     auto control = receiveHello(*helper);
-    STATIC_CHECK(ThisBuildLockdown == proto::LockdownState::LockedDown);
+    CHECK(thisBuildLockdown() == proto::LockdownState::LockedDown);
     {
         auto const closed = std::move(control);
     }
@@ -307,7 +312,7 @@ TEST_CASE("Process.unsandboxedIsRefusedUnlessAccepted", "[vtextension]")
         auto const backend = processBackend(LockdownRequirement::RequireLockedDown);
         auto const runtime = contract::createRuntime(*backend);
         auto const loaded = runtime->load(ModuleIdentity {}, toModule(contract::InstanceModule));
-        if constexpr (ThisBuildLockdown == proto::LockdownState::LockedDown)
+        if (thisBuildLockdown() == proto::LockdownState::LockedDown)
             CHECK(loaded.has_value());
         else
         {
@@ -316,7 +321,7 @@ TEST_CASE("Process.unsandboxedIsRefusedUnlessAccepted", "[vtextension]")
         }
     }
     checkHelpersEndedCleanly();
-    auto const refusedOnes = ThisBuildLockdown == proto::LockdownState::LockedDown ? 0U : 1U;
+    auto const refusedOnes = thisBuildLockdown() == proto::LockdownState::LockedDown ? 0U : 1U;
     CHECK(killsFor(process::KillReason::Requested) == requested + refusedOnes);
 }
 

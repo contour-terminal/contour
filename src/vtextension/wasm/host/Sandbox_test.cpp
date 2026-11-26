@@ -9,6 +9,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -19,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/wasm/host/ContainerSandbox.hpp>
 #include <vtextension/wasm/host/DescriptorRights.hpp>
 #include <vtextension/wasm/host/HostBootstrap.hpp>
 #include <vtextension/wasm/host/Sandbox.hpp>
@@ -56,9 +59,12 @@ TEST_CASE("Sandbox.nullSandboxTakesBothStepsUnsandboxed", "[vtextension][host]")
 
 TEST_CASE("Sandbox.systemWithoutOneRunsUnsandboxed", "[vtextension][host]")
 {
-    // A system without a sandbox makes the null one, which confines nothing. Where there is one, it would
-    // confine this very process: the probe proves it in a child of its own (SandboxProbe_test.cpp).
-    if constexpr (ThisPlatformSandbox != PlatformSandbox::None)
+    // A system without a sandbox makes the null one, which confines nothing. So does Windows' for a process
+    // its parent started in no AppContainer, as this test process is: it verifies, finds none, and confines
+    // nothing. Where the sandbox confines on its own, it would confine this very process: the probe proves it
+    // in a child of its own (SandboxProbe_test.cpp).
+    if constexpr (ThisPlatformSandbox != PlatformSandbox::None
+                  && ThisPlatformSandbox != PlatformSandbox::Windows)
         SKIP("this system has a sandbox");
     auto const sandbox = makeSystemSandbox(SandboxDescriptors { .control = {} }, GuestCode::Interpreted);
     REQUIRE(sandbox != nullptr);
@@ -77,6 +83,116 @@ TEST_CASE("Sandbox.failureSaysTheStepAndWhatTheSystemSaid", "[vtextension][host]
           == std::string { proto::lockdownStepText(proto::LockdownStep::SystemCalls) } + ": "
                  + systemErrorText(1));
     CHECK_FALSE(systemErrorText(1).empty());
+}
+
+namespace
+{
+using vtextension::wasm::host::ContainerApi;
+using vtextension::wasm::host::JobMembership;
+using vtextension::wasm::host::TokenContainer;
+
+/// What a fake container API was asked, and what it answers.
+struct ContainerAnswers
+{
+    std::expected<TokenContainer, int> token = TokenContainer::AppContainer; ///< The token's answer.
+    std::vector<std::expected<void, int>> mitigations = { {}, {} };          ///< Each mitigation's answer.
+    std::expected<JobMembership, int> job = JobMembership::Inside;           ///< The job's answer.
+    std::size_t mitigationsAsked = 0;                                        ///< How many were set.
+    std::size_t jobAsked = 0; ///< How often the job was asked of.
+};
+
+/// @return An API answering as @p answers says, and counting into it.
+[[nodiscard]] ContainerApi fakeContainerApi(std::shared_ptr<ContainerAnswers> const& answers)
+{
+    auto api = ContainerApi { .tokenContainer = [answers] { return answers->token; },
+                              .mitigations = {},
+                              .jobMembership =
+                                  [answers] {
+                                      ++answers->jobAsked;
+                                      return answers->job;
+                                  } };
+    for (auto const index: std::views::iota(std::size_t { 0 }, answers->mitigations.size()))
+        api.mitigations.emplace_back([answers, index] {
+            ++answers->mitigationsAsked;
+            return answers->mitigations.at(index);
+        });
+    return api;
+}
+
+/// @return What a container sandbox over @p answers makes of its lockdown, and the state it states then.
+[[nodiscard]] std::pair<std::expected<void, ConfinementFailure>, proto::LockdownState> containerLockdown(
+    std::shared_ptr<ContainerAnswers> const& answers)
+{
+    auto const sandbox = vtextension::wasm::host::makeContainerSandbox(fakeContainerApi(answers));
+    auto const restricted = sandbox->restrictBeforeThreads();
+    REQUIRE(restricted.has_value());
+    auto const lockedDown = sandbox->lockDown();
+    return { lockedDown, sandbox->lockdownState() };
+}
+} // namespace
+
+TEST_CASE("Sandbox.containerDecidesUnsandboxedFailedOrLockedDown", "[vtextension][host]")
+{
+    // Windows' sandbox, over fake answers: wherever the host is built, as the decision is free of Windows.
+    constexpr auto Refused = static_cast<int>(0x8007'0005U); // E_ACCESSDENIED
+    auto const answers = std::make_shared<ContainerAnswers>();
+
+    SECTION("in a container, every mitigation set, in a job: locked down")
+    {
+        auto const [lockedDown, state] = containerLockdown(answers);
+        CHECK(lockedDown.has_value());
+        CHECK(state == proto::LockdownState::LockedDown);
+        CHECK(answers->mitigationsAsked == 2);
+        CHECK(answers->jobAsked == 1);
+    }
+    SECTION("in no container: unsandboxed, and nothing else asked")
+    {
+        answers->token = TokenContainer::None;
+        auto const [lockedDown, state] = containerLockdown(answers);
+        CHECK(lockedDown.has_value());
+        CHECK(state == proto::LockdownState::Unsandboxed);
+        CHECK(answers->mitigationsAsked == 0);
+        CHECK(answers->jobAsked == 0);
+    }
+    SECTION("a token that cannot be asked: the container fails")
+    {
+        answers->token = std::unexpected(Refused);
+        auto const [lockedDown, state] = containerLockdown(answers);
+        REQUIRE_FALSE(lockedDown.has_value());
+        CHECK(lockedDown.error()
+              == ConfinementFailure { .step = proto::LockdownStep::Container, .code = Refused });
+        CHECK(state == proto::LockdownState::Unsandboxed);
+    }
+    SECTION("a refused mitigation fails, and every other step still runs")
+    {
+        answers->mitigations.front() = std::unexpected(Refused);
+        answers->job = JobMembership::Outside;
+        auto const [lockedDown, state] = containerLockdown(answers);
+        REQUIRE_FALSE(lockedDown.has_value());
+        // The first that failed is stated.
+        CHECK(lockedDown.error()
+              == ConfinementFailure { .step = proto::LockdownStep::Mitigations, .code = Refused });
+        CHECK(answers->mitigationsAsked == 2);
+        CHECK(answers->jobAsked == 1);
+        CHECK(state != proto::LockdownState::LockedDown);
+    }
+    SECTION("in no job: the job fails, as a step of its own")
+    {
+        answers->job = JobMembership::Outside;
+        auto const [lockedDown, state] = containerLockdown(answers);
+        REQUIRE_FALSE(lockedDown.has_value());
+        CHECK(lockedDown.error()
+              == ConfinementFailure { .step = proto::LockdownStep::Job,
+                                      .code = vtextension::wasm::host::NotInJobCode });
+        CHECK(state != proto::LockdownState::LockedDown);
+    }
+    SECTION("a job that cannot be asked of: the job fails with what the system said")
+    {
+        answers->job = std::unexpected(Refused);
+        auto const [lockedDown, state] = containerLockdown(answers);
+        REQUIRE_FALSE(lockedDown.has_value());
+        CHECK(lockedDown.error() == ConfinementFailure { .step = proto::LockdownStep::Job, .code = Refused });
+    }
 }
 
 TEST_CASE("Sandbox.rightsTableCoversEveryRole", "[vtextension][host]")

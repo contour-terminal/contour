@@ -127,7 +127,8 @@ namespace
             case LockdownStep::DescriptorRights:
             case LockdownStep::Profile:
             case LockdownStep::Container:
-            case LockdownStep::Mitigations: return true;
+            case LockdownStep::Mitigations:
+            case LockdownStep::Job: return true;
         }
         return false;
     }

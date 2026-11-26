@@ -73,6 +73,8 @@ TEST_CASE("ProcessHostConnector.lastingRefusalsStartNoOtherHost", "[vtextension]
         Expectation { .refusal = HostRefusal::OutOfResources, .persistence = RefusalPersistence::Transient },
         Expectation { .refusal = HostRefusal::Unsupported, .persistence = RefusalPersistence::Transient },
         Expectation { .refusal = HostRefusal::LaunchRefused, .persistence = RefusalPersistence::Transient },
+        Expectation { .refusal = HostRefusal::HelperNotGranted,
+                      .persistence = RefusalPersistence::Transient },
         Expectation { .refusal = HostRefusal::ProtocolVersion, .persistence = RefusalPersistence::Lasting },
         Expectation { .refusal = HostRefusal::LockdownFailed, .persistence = RefusalPersistence::Lasting },
         Expectation { .refusal = HostRefusal::Unsandboxed, .persistence = RefusalPersistence::Lasting });

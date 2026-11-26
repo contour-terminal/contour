@@ -96,6 +96,7 @@ namespace
                                                           .extraArguments = {},
                                                           .caps = {},
                                                           .standardError = defaultHelperStandardError(),
+                                                          .isolation = ProcessIsolation::AppContainer,
                                                       },
                                                       config.refusals);
     }

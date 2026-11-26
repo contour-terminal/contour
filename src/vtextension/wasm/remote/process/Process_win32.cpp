@@ -7,6 +7,13 @@
 // handle closes (the process handle's), allows it no second process, caps its memory and lets an unhandled
 // exception end it rather than open a dialog.
 //
+// Isolated (ProcessIsolation::AppContainer), two attributes more: PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES
+// starts it in the extension host's AppContainer, with no capabilities, and
+// PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY forbids it any child process through its token, not only through
+// the job's process count. The profile and the helper directory's grant are ensured on the first such launch
+// (AppContainer_win32.hpp). Its working directory is then its executable's own, which the grant lets it open,
+// rather than the volume's root, which an AppContainer may not.
+//
 // The child gets the null device as stdin and stdout, the stderr it is given or else the null device -- never
 // this process's console unasked -- the environment it is given and nothing else, the root of its
 // executable's volume as its working directory, and a console of its own that shows no window
@@ -21,6 +28,8 @@
 // only right before CreateProcessW() are they made inheritable; right after it they are closed, whatever it
 // returned. The window is that one call. Helper launches never race one another in it: every one runs on the
 // supervisor's thread. macOS has the like window, on its channel ends (Process_macos.cpp).
+#include <vtextension/wasm/remote/process/Process_win32.hpp>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -29,6 +38,7 @@
 #include <cwctype>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -40,6 +50,9 @@
 #include <vector>
 
 #include <vtextension/wasm/BuildInstrumentation.hpp>
+#include <vtextension/wasm/remote/HostRefusals.hpp>
+#include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
+#include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 
 #define WIN32_LEAN_AND_MEAN
@@ -83,6 +96,12 @@ namespace
         }
     }
 
+    /// @return Why a call at @p step that set @p error failed to start a process, and where.
+    [[nodiscard]] LaunchRefusal refusalOf(LaunchStep step, DWORD error) noexcept
+    {
+        return LaunchRefusal { .error = launchErrorOf(error), .step = step, .code = error };
+    }
+
     /// @return @p text, UTF-8, as UTF-16; nothing if it is not UTF-8.
     [[nodiscard]] std::optional<std::wstring> wideOf(std::string_view text)
     {
@@ -118,7 +137,7 @@ namespace
                 continue;
             }
             // Backslashes double only before a quote; the quote itself is escaped.
-            commandLine.append(c == L'"' ? backslashes * 2 + 1 : backslashes, L'\\');
+            commandLine.append(c == L'"' ? (backslashes * 2) + 1 : backslashes, L'\\');
             backslashes = 0;
             commandLine += c;
         }
@@ -190,14 +209,21 @@ namespace
                 ::DeleteProcThreadAttributeList(_list);
         }
 
-        /// Sets @p attribute to the handles @p values, which must outlive the list's use.
+        /// Sets @p attribute, the launch's @p step, to @p values, which must outlive the list's use.
         /// @return Nothing; or why the list refused it.
-        [[nodiscard]] std::expected<void, LaunchError> set(DWORD_PTR attribute,
-                                                           std::span<HANDLE> values) noexcept
+        template <typename T, std::size_t Extent>
+        [[nodiscard]] std::expected<void, LaunchRefusal> set(LaunchStep step,
+                                                             DWORD_PTR attribute,
+                                                             std::span<T, Extent> values) noexcept
         {
-            if (!::UpdateProcThreadAttribute(
-                    _list, 0, attribute, values.data(), values.size_bytes(), nullptr, nullptr))
-                return std::unexpected(launchErrorOf(::GetLastError()));
+            if (!::UpdateProcThreadAttribute(_list,
+                                             0,
+                                             attribute,
+                                             static_cast<void*>(values.data()),
+                                             values.size_bytes(),
+                                             nullptr,
+                                             nullptr))
+                return std::unexpected(refusalOf(step, ::GetLastError()));
             return {};
         }
 
@@ -225,11 +251,12 @@ namespace
 
     /// Makes each of @p handles inheritable.
     /// @return Nothing; or why one could not be.
-    [[nodiscard]] std::expected<void, LaunchError> allowInheritance(std::span<HANDLE const> handles) noexcept
+    [[nodiscard]] std::expected<void, LaunchRefusal> allowInheritance(
+        std::span<HANDLE const> handles) noexcept
     {
         for (auto* const handle: handles)
             if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
-                return std::unexpected(launchErrorOf(::GetLastError()));
+                return std::unexpected(refusalOf(LaunchStep::Inheritance, ::GetLastError()));
         return {};
     }
 
@@ -383,16 +410,63 @@ namespace
         std::vector<std::pair<uint64_t, HANDLE>> _watched; ///< Each key's process, owned by its handle.
     };
 
+    /// What an isolated launch adds to the attribute list: the container and the child process policy.
+    struct ContainedAttributes
+    {
+        SECURITY_CAPABILITIES capabilities; ///< The container's SID, and no capability.
+        DWORD childProcessPolicy;           ///< PROCESS_CREATION_CHILD_PROCESS_RESTRICTED.
+    };
+
     class Win32ProcessLauncher final: public IProcessLauncher
     {
       public:
+        /// @param api What isolated launches' containers are ensured through.
+        /// @param diagnostics Where a refusal its launch error cannot tell apart is said, once per step and
+        ///        code, and a grant this user may not make: Contour's error log.
+        Win32ProcessLauncher(AppContainerApi api, std::function<void(std::string_view line)> diagnostics):
+            _containers { std::move(api), diagnostics }, _diagnostics { std::move(diagnostics) }
+        {
+        }
+
         [[nodiscard]] std::expected<std::unique_ptr<IProcessHandle>, LaunchError> launch(
             LaunchSpec const& spec) override
         {
+            return start(spec).transform_error([this](LaunchRefusal const& refusal) {
+                if (std::ranges::contains(DetailedLaunchErrors, refusal.error)
+                    && !std::ranges::contains(_saidRefusals, std::pair { refusal.step, refusal.code }))
+                {
+                    _saidRefusals.emplace_back(refusal.step, refusal.code);
+                    _diagnostics(launchRefusalLine(refusal));
+                }
+                return refusal.error;
+            });
+        }
+
+        [[nodiscard]] std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makeWaitSet(
+            core::IClock& clock) override
+        {
+            auto wake = OwnedHandle { ::CreateEventW(nullptr, FALSE, FALSE, nullptr) };
+            if (!wake)
+                return std::unexpected(launchErrorOf(::GetLastError()));
+            return std::make_unique<Win32ExitWaitSet>(clock, std::move(wake));
+        }
+
+      private:
+        /// Starts @p spec's process.
+        /// @return Its handle; or why and where the system refused.
+        [[nodiscard]] std::expected<std::unique_ptr<IProcessHandle>, LaunchRefusal> start(
+            LaunchSpec const& spec)
+        {
             auto const executable = std::filesystem::absolute(spec.executable);
             auto const attributes = ::GetFileAttributesW(executable.c_str());
-            if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
-                return std::unexpected(LaunchError::NotFound);
+            if (attributes == INVALID_FILE_ATTRIBUTES)
+                return std::unexpected(LaunchRefusal { .error = LaunchError::NotFound,
+                                                       .step = LaunchStep::Executable,
+                                                       .code = ::GetLastError() });
+            if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                return std::unexpected(LaunchRefusal { .error = LaunchError::NotFound,
+                                                       .step = LaunchStep::Executable,
+                                                       .code = ERROR_DIRECTORY });
 
             // The child's copies, uninheritable until right before CreateProcessW() (the file head's window).
             auto owned = std::vector<OwnedHandle> {};
@@ -401,7 +475,7 @@ namespace
             {
                 auto copy = copyOf(handle);
                 if (!copy)
-                    return std::unexpected(launchErrorOf(::GetLastError()));
+                    return std::unexpected(refusalOf(LaunchStep::CopyHandle, ::GetLastError()));
                 childHandles.push_back(copy.get());
                 owned.push_back(std::move(copy));
             }
@@ -415,7 +489,7 @@ namespace
             if (nullDevice.get() == INVALID_HANDLE_VALUE)
             {
                 std::ignore = nullDevice.release();
-                return std::unexpected(launchErrorOf(::GetLastError()));
+                return std::unexpected(refusalOf(LaunchStep::NullDevice, ::GetLastError()));
             }
             // The stderr the spec names, if it is a handle; the null device if not.
             auto errorOutput = OwnedHandle {};
@@ -429,16 +503,49 @@ namespace
             if (errorOutput)
                 handleList.push_back(errorOutput.get());
 
+            auto contained = std::optional<ContainedAttributes> {};
+            if (spec.isolation == ProcessIsolation::AppContainer)
+            {
+                auto const container = _containers.prepare(executable.parent_path());
+                if (!container)
+                    return std::unexpected(container.error());
+                contained = ContainedAttributes {
+                    .capabilities = SECURITY_CAPABILITIES { .AppContainerSid = *container,
+                                                            .Capabilities = nullptr,
+                                                            .CapabilityCount = 0,
+                                                            .Reserved = 0 },
+                    .childProcessPolicy = PROCESS_CREATION_CHILD_PROCESS_RESTRICTED,
+                };
+            }
+
             auto job = makeJob(spec.caps.dataBytes);
             if (!job)
-                return std::unexpected(launchErrorOf(::GetLastError()));
+                return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
             auto jobList = std::array<HANDLE, 1> { job.get() };
-            auto list = AttributeList::create(2);
+            auto list = AttributeList::create(contained ? 4 : 2);
             if (!list)
-                return std::unexpected(launchErrorOf(::GetLastError()));
-            if (auto const set = list->set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handleList).and_then([&] {
-                    return list->set(PROC_THREAD_ATTRIBUTE_JOB_LIST, jobList);
-                });
+                return std::unexpected(refusalOf(LaunchStep::AttributeList, ::GetLastError()));
+            if (auto const set =
+                    list->set(LaunchStep::HandleList,
+                              PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                              std::span { handleList })
+                        .and_then([&] {
+                            return list->set(
+                                LaunchStep::JobList, PROC_THREAD_ATTRIBUTE_JOB_LIST, std::span { jobList });
+                        })
+                        .and_then([&]() -> std::expected<void, LaunchRefusal> {
+                            if (!contained)
+                                return {};
+                            return list
+                                ->set(LaunchStep::Container,
+                                      PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+                                      std::span { &contained->capabilities, 1 })
+                                .and_then([&] {
+                                    return list->set(LaunchStep::ChildProcessPolicy,
+                                                     PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY,
+                                                     std::span { &contained->childProcessPolicy, 1 });
+                                });
+                        });
                 !set)
                 return std::unexpected(set.error());
 
@@ -449,13 +556,14 @@ namespace
             {
                 auto const wide = wideOf(argument);
                 if (!wide)
-                    return std::unexpected(LaunchError::Io);
+                    return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
                 appendArgument(commandLine, *wide);
             }
             auto block = environmentBlock(spec.environment);
             if (!block)
-                return std::unexpected(LaunchError::Io);
-            auto const workingDirectory = executable.root_path().wstring();
+                return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
+            auto const workingDirectory =
+                (contained ? executable.parent_path() : executable.root_path()).wstring();
 
             auto startup = STARTUPINFOEXW {};
             startup.StartupInfo.cb = sizeof(startup);
@@ -484,26 +592,27 @@ namespace
             nullDevice.reset();
             errorOutput.reset();
             if (!created)
-                return std::unexpected(launchErrorOf(error));
+                return std::unexpected(refusalOf(LaunchStep::CreateProcess, error));
             ::CloseHandle(info.hThread);
             return std::make_unique<Win32ProcessHandle>(
                 OwnedHandle { info.hProcess }, std::move(job), static_cast<ProcessId>(info.dwProcessId));
         }
 
-        [[nodiscard]] std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makeWaitSet(
-            core::IClock& clock) override
-        {
-            auto wake = OwnedHandle { ::CreateEventW(nullptr, FALSE, FALSE, nullptr) };
-            if (!wake)
-                return std::unexpected(launchErrorOf(::GetLastError()));
-            return std::make_unique<Win32ExitWaitSet>(clock, std::move(wake));
-        }
+        AppContainerProvision _containers; ///< Ensured on the first isolated launch; used on this one thread.
+        std::function<void(std::string_view line)> _diagnostics;
+        std::vector<std::pair<LaunchStep, DWORD>> _saidRefusals; ///< Each step and code said already.
     };
 } // namespace
 
+std::shared_ptr<IProcessLauncher> makeWin32ProcessLauncher(
+    AppContainerApi api, std::function<void(std::string_view line)> diagnostics)
+{
+    return std::make_shared<Win32ProcessLauncher>(std::move(api), std::move(diagnostics));
+}
+
 std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
 {
-    return std::make_shared<Win32ProcessLauncher>();
+    return makeWin32ProcessLauncher(systemAppContainerApi(), errorLogWriter());
 }
 
 ProcessId currentProcessId() noexcept

@@ -35,6 +35,9 @@ struct ProcessHostConfig
     /// Where its stderr goes (LaunchSpec::standardError): by default the null device, or this process's own
     /// in a build whose helpers report diagnostics (defaultHelperStandardError()).
     std::optional<transport::NativeHandle> standardError = defaultHelperStandardError();
+    /// What the system confines it to as it starts: the extension host's AppContainer, as Contour starts it.
+    /// A test composition under wine, which stubs AppContainers, names None.
+    ProcessIsolation isolation = ProcessIsolation::AppContainer;
 };
 
 /// Whether a host this connector started was ever refused for a lasting reason (refusalPersistence()).
