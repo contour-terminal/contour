@@ -534,7 +534,7 @@ void NativeClient::noteSystemWake()
 void NativeClient::handshakeExpired(void* self)
 {
     auto& client = *static_cast<NativeClient*>(self);
-    if (client._closing || client._detached || client._negotiated || client._refusal)
+    if (client._closing || client._detached || client._negotiated || client.isTurnedAway())
         return;
     client._lossReason = std::format(
         "the daemon did not answer the handshake within {} s",
@@ -802,7 +802,12 @@ std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace,
     // does not have leaves the selection as it was, and a new one (0) is named by that batch alone.
     auto const serial = send(proto::DecodedPdu {
         proto::SelectWorkspace { .workspace = workspace, .directoryFromSession = directoryFrom } });
-    return serial != 0 ? std::optional { serial } : std::nullopt;
+    if (serial == 0)
+        return std::nullopt;
+    // An observer's select promotes it, once the batch answering this one states the selection.
+    if (_role == proto::ConnectionRole::Observe)
+        _promotionSerial = serial;
+    return serial;
 }
 
 Delivery NativeClient::reportFocus(proto::WindowFocus focus, std::span<uint64_t const> shownSessions)
@@ -822,6 +827,24 @@ Delivery NativeClient::sendMarkSeen(uint64_t session, proto::SeenSerials seen)
     if (!shares(proto::Capability::DaemonAttention)
         || send(proto::DecodedPdu { proto::MarkSeen { .session = session, .seen = seen } }) == 0)
         return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
+Delivery NativeClient::observeOnly()
+{
+    // A daemon that did not negotiate it would read it as a PDU it does not know: it is not sent at all.
+    if (!shares(proto::Capability::Observe))
+        return Delivery::Unsupported;
+    auto const serial = send(proto::DecodedPdu { proto::ObserveOnly {} });
+    if (serial == 0)
+        return Delivery::Unsupported;
+    // What a reconnect resumes, and what the controller reads: an observer selects nothing. A daemon that
+    // ends its batches answers with one, before which what a batch states is older than the demotion.
+    _selectedWorkspace = 0;
+    _role = proto::ConnectionRole::Observe;
+    _promotionSerial.reset();
+    if (shares(proto::Capability::LayoutBatch))
+        _demotionSerial = serial;
     return Delivery::Sent;
 }
 
@@ -1088,10 +1111,25 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     auto const& pdu = frame.pdu;
     if (auto const* end = std::get_if<proto::LayoutBatchEnd>(&pdu))
     {
+        // A batch the daemon ended before it read the demotion states the workspace the connection gave up.
+        auto const predatesDemotion = _demotionSerial && end->causeSerial < *_demotionSerial;
+        if (!predatesDemotion)
+            _demotionSerial.reset();
         // The daemon states the selection after each batch: a workspace it created for selectWorkspace(0), or
         // one it selected instead of a workspace that closed. 0: it has no workspace left.
-        if (shares(proto::Capability::DaemonFollow))
+        if (shares(proto::Capability::DaemonFollow) && !predatesDemotion)
             _selectedWorkspace = end->selected;
+        // The batch answering an observer's select, stating a selection, promoted it: what the daemon refused
+        // it as an observer it may be asked again as a viewer.
+        if (_promotionSerial && end->causeSerial >= *_promotionSerial)
+        {
+            _promotionSerial.reset();
+            if (_selectedWorkspace != 0)
+            {
+                _role = proto::ConnectionRole::Attach;
+                _unsupported.forgetRefusals();
+            }
+        }
         if (_onLayoutBatchEnd)
             _onLayoutBatchEnd(*end);
         return true;
@@ -1204,7 +1242,7 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
 {
     // From the first hello only: the handshake, and the identity with it, is the connection's, and a mirror
     // already judged by that identity must not see it change under its feet.
-    if (_negotiated || _refusal)
+    if (_negotiated || isTurnedAway())
     {
         errorLog()("attach: ignoring a second ServerHello");
         return;
@@ -1214,6 +1252,15 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     {
         _refusal = outcome.error();
         errorLog()("attach: {}; detaching", refusalMessage());
+        return;
+    }
+    // A daemon that predates observing reads the Observe role as Control: what it accepted is no observer.
+    if (_handshake.role == proto::ConnectionRole::Observe
+        && !outcome->shared.contains(proto::Capability::Observe))
+    {
+        _roleAcceptance = RoleAcceptance::ObserveUnsupported;
+        _handshakeTimer.reset();
+        errorLog()("attach: the daemon does not offer observing (it predates it); detaching");
         return;
     }
     _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
@@ -1274,6 +1321,7 @@ void NativeClient::sendHello(std::optional<proto::KeyProof> proof)
                                                   .capabilities = _handshake.capabilities,
                                                   .token = proof ? std::string {} : _handshake.token,
                                                   .sessionSettings = _handshake.sessionSettings,
+                                                  .role = _handshake.role,
                                                   .clientArea = _handshake.clientArea,
                                                   .attachIntent = _handshake.attachIntent,
                                                   .profileName = _handshake.profileName,
@@ -1308,7 +1356,7 @@ core::async::Task<PumpResult> NativeClient::pump()
         _connection.get(),
         [this](proto::DecodedFrame const& frame) {
             handlePdu(frame);
-            return !_detached && !_refusal;
+            return !_detached && !isTurnedAway();
         },
         [this] { return _detached; });
     _challenges.close();

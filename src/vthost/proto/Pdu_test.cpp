@@ -984,6 +984,30 @@ TEST_CASE("an unknown ConnectionRole byte reads as Control, never as Attach", "[
     CHECK(decodeAs<ClientHello>(helloWithRoleByte(7)).role == ConnectionRole::Control);
 }
 
+TEST_CASE("role byte 2 decodes as Observe", "[vthost][proto][observer]")
+{
+    STATIC_CHECK(std::to_underlying(ConnectionRole::Observe) == 2);
+    CHECK(decodeAs<ClientHello>(helloWithRoleByte(2)).role == ConnectionRole::Observe);
+    CHECK(
+        std::get<ClientHello>(roundTrip(DecodedPdu { ClientHello { .role = ConnectionRole::Observe } })).role
+        == ConnectionRole::Observe);
+}
+
+TEST_CASE("role byte 3 still decodes as Control", "[vthost][proto][observer]")
+{
+    CHECK(decodeAs<ClientHello>(helloWithRoleByte(3)).role == ConnectionRole::Control);
+}
+
+TEST_CASE("ObserveOnly is a bodiless PDU of tag 65 that round-trips and ignores appended bytes",
+          "[vthost][pdu][observer]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ObserveOnly) == 65);
+    CHECK(roundTrip(DecodedPdu { ObserveOnly {} }) == DecodedPdu { ObserveOnly {} });
+    auto appended = Writer {};
+    appended.u8(7);
+    CHECK(decodeAs<ObserveOnly>(frameOf(PduType::ObserveOnly, appended.view())) == ObserveOnly {});
+}
+
 TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty", "[vthost][proto]")
 {
     auto const hello = ServerHello { .releaseVersion = "0.8.1" };
@@ -2343,11 +2367,25 @@ TEST_CASE("LayoutBatchEnd round-trips, and a newer peer's appended bytes do not 
         CHECK(std::get<LayoutBatchEnd>(roundTrip(DecodedPdu { LayoutBatchEnd { .causeSerial = cause } }))
                   .causeSerial
               == cause);
+    // The restore counts a promotion's answer appends.
+    auto const promoted =
+        LayoutBatchEnd { .causeSerial = 4, .selected = 2, .restoredWorkspaces = 3, .restoredTabs = 5 };
+    CHECK(roundTrip(DecodedPdu { promoted }) == DecodedPdu { promoted });
+    auto const tabsAlone = LayoutBatchEnd { .causeSerial = 4, .selected = 2, .restoredTabs = 1 };
+    CHECK(roundTrip(DecodedPdu { tabsAlone }) == DecodedPdu { tabsAlone });
     auto body = Writer {};
     body.varint(5);
     body.varint(7); // the selected workspace
+    body.varint(2); // restored workspaces
+    body.varint(3); // restored tabs
     body.varint(9); // a field a later version appended
     CHECK(decodeAs<LayoutBatchEnd>(frameOf(PduType::LayoutBatchEnd, body.view()))
+          == LayoutBatchEnd { .causeSerial = 5, .selected = 7, .restoredWorkspaces = 2, .restoredTabs = 3 });
+    // A sender from before the restore counts ends with the selection: they read as none.
+    auto older = Writer {};
+    older.varint(5);
+    older.varint(7);
+    CHECK(decodeAs<LayoutBatchEnd>(frameOf(PduType::LayoutBatchEnd, older.view()))
           == LayoutBatchEnd { .causeSerial = 5, .selected = 7 });
     STATIC_CHECK(std::to_underlying(PduType::LayoutBatchEnd) == 39);
 }

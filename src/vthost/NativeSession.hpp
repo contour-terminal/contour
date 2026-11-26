@@ -77,6 +77,7 @@
 #include <vthost/KeyAuth.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PduPump.hpp>
+#include <vthost/RestoredCounts.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/proto/ControlVersions.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -146,6 +147,7 @@ struct HandshakePolicy
                                                                    proto::Capability::WorkspaceSwitch,
                                                                    proto::Capability::DaemonFollow,
                                                                    proto::Capability::DaemonAttention,
+                                                                   proto::Capability::Observe,
                                                                    proto::Capability::WorkspaceMeta,
                                                                    proto::Capability::ClientGoodbye,
                                                                    proto::Capability::LaunchFirstTab,
@@ -203,6 +205,7 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         AwaitingHello = 0, ///< No ClientHello accepted yet: nothing but a hello is read.
         Viewing,           ///< An accepted Attach hello: a client that shows the host's workspaces.
         Controlling, ///< An accepted Control hello: calls the daemon and its control API, views nothing.
+        Observing,   ///< An accepted Observe hello: told every workspace's layout and panes, shows none.
     };
 
     /// The largest snapshot payload one PDU carries; a grid bigger than this travels as several.
@@ -430,6 +433,13 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// @return Whether the connection shares Capability::DaemonFollow.
     [[nodiscard]] bool followsDaemon() const noexcept override { return summarizesPanes(); }
+
+    /// @return Whether the connection may show sessions' screens: every one but an observer, which shows
+    ///         none.
+    [[nodiscard]] bool mirrorsScreens() const noexcept override
+    {
+        return _phase != ConnectionPhase::Observing;
+    }
 
     /// @param session A hosted session.
     /// @return Whether @p session sits in the workspace this connection selects; false for one in no
@@ -681,10 +691,10 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
         Served = 1, ///< It was, and it has been carried out or refused.
     };
 
-    /// Serves @p frame if it is an EditTab (gated on Capability::TabEdits), a MergeTabIntoSplit (gated on
-    /// Capability::TabMerge) a MoveNode or a SetSplitOrientation (both gated on Capability::MoveNode):
-    /// applied to the daemon's model, whose events push the new layout to every client, and answered
-    /// Unsupported when the capability was not negotiated.
+    /// Serves @p frame if it is a ClosePane, an EditTab (gated on Capability::TabEdits), a MergeTabIntoSplit
+    /// (gated on Capability::TabMerge) a MoveNode or a SetSplitOrientation (both gated on
+    /// Capability::MoveNode): applied to the daemon's model, whose events push the new layout to every
+    /// client, and answered Unsupported when the capability was not negotiated.
     /// @param frame A frame received after the handshake.
     /// @return Whether it was such a verb.
     [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
@@ -696,6 +706,45 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     /// @param frame The frame read.
     /// @return Served when it was one of them.
     [[nodiscard]] TabVerb serveWorkspaceVerb(proto::DecodedFrame const& frame);
+
+    /// Serves @p frame for an observer (ConnectionPhase::Observing): only the requests of ObserverRequests,
+    /// gated on their capabilities as a viewer's are; a ResizeRequest is held for the viewer the connection
+    /// may become, never applied. Everything else is refused.
+    /// @param frame A frame received after the handshake.
+    void serveObserverRequest(proto::DecodedFrame const& frame);
+
+    /// Holds the client area and cell size @p resize states as the observer's display (@see StatedDisplay),
+    /// applying neither; an area out of range is logged and dropped, as a viewer's is.
+    /// @param resize The observer's ResizeRequest.
+    void holdClientArea(proto::ResizeRequest const& resize);
+
+    /// Serves an observer's SelectWorkspace: promotes the connection to a viewer of the workspace it names,
+    /// through the viewer setup an attach runs (becomeViewer), the held display applied before its plan;
+    /// workspace 0 has that plan create one, started where the session the request names is. A workspace the
+    /// daemon does not have, or cannot make, promotes nothing: the connection stays (or becomes again) an
+    /// observer. Answered, whatever came of it, by a layout batch naming the request and stating the
+    /// selection as it stands, as a viewer's select is; a promotion that is the first viewer since a restore
+    /// also states the restore announcement with it (LayoutBatchEnd::restoredWorkspaces).
+    /// @param frame The frame read, whose serial the answering layout batch names as its cause.
+    /// @param select The request it carries.
+    void servePromotion(proto::DecodedFrame const& frame, proto::SelectWorkspace const& select);
+
+    /// Serves a viewer's ObserveOnly: demotes the connection to an observer. It is told Quiet first, then
+    /// leaves the host's attached clients -- its area, cell and refinements no longer count, its workspace is
+    /// free at once -- stops counting in the census, fires client.detached, and is summarized every pane.
+    /// Refused unless the connection shares what an observer must (proto::sharesObserving). Answered by a
+    /// layout batch naming the request and selecting nothing, so the client tells what was pushed before it.
+    /// @param frame The frame read.
+    void serveDemotion(proto::DecodedFrame const& frame);
+
+    /// Makes this viewer an observer (@see serveDemotion), unasked and unanswered: also what a promotion
+    /// whose workspace could not be made falls back to.
+    void becomeObserver();
+
+    /// Has the next layout batch end name @p serial as its cause, opening one should none be open: the
+    /// answer a select, a promotion and a demotion are given. Nothing without Capability::LayoutBatch.
+    /// @param serial The serial of the request answered.
+    void answerWithLayoutBatch(uint64_t serial);
 
     /// Serves a SelectWorkspace whose capability was negotiated: selects the workspace it names, or creates
     /// one for workspace 0, and answers with the selection as it stands whatever came of it.
@@ -853,16 +902,16 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
     /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the
-    /// first session on an empty daemon); a Control connection gets the ServerHello and nothing else.
+    /// first session on an empty daemon); an Observe connection becomes an observer (see observeClient),
+    /// refused unless it shares what one needs (proto::sharesObserving) -- one that does not share the role
+    /// itself is answered as the Control connection a daemon without the role reads it as; a Control
+    /// connection gets the ServerHello and nothing else.
     /// @return False when the hello was missing or version-mismatched.
     [[nodiscard]] bool completeHandshake(proto::DecodedFrame const& frame);
 
-    /// What an accepted Attach hello starts: the census ticket and the host's subscriptions, the client's
-    /// settings and client area, the attach plan and what it creates, then the ServerHello naming the
-    /// followed workspaces, their layout, their sessions' snapshots and the open permission questions.
-    ///
-    /// The ServerHello waits for the plan because it states what the plan follows; nothing reaches the
-    /// peer before it, as @ref _negotiated is engaged only once it is sent.
+    /// What an accepted Attach hello starts: the hello adopted (adoptHello), the host's subscriptions taken
+    /// (subscribeToHost), and the connection made a viewer (becomeViewer), whose ServerHello names the
+    /// followed workspaces.
     /// @param serial The hello's serial, which the ServerHello answers.
     /// @param hello The accepted hello.
     /// @param reply The ServerHello, without its followed workspaces.
@@ -872,14 +921,83 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
                       proto::ServerHello reply,
                       proto::Negotiated negotiated);
 
+    /// What an accepted Observe hello starts: the hello adopted (adoptHello) and the connection counted as
+    /// the host's observer, then the ServerHello naming no workspace, the host's subscriptions, the raise
+    /// role, and every workspace's layout, metadata, pane summaries and attention.
+    /// @param serial The hello's serial, which the ServerHello answers.
+    /// @param hello The accepted hello.
+    /// @param reply The ServerHello.
+    /// @param negotiated What the handshake agreed on.
+    void observeClient(uint64_t serial,
+                       proto::ClientHello const& hello,
+                       proto::ServerHello reply,
+                       proto::Negotiated negotiated);
+
+    /// Adopts what an accepted hello states for the connection's life, whatever role it has: whether the
+    /// client follows the daemon, the profile or settings of the sessions it creates, the directory its
+    /// attach starts in, and its display (client area, cell size, colour preference), held until the
+    /// connection becomes a viewer (becomeViewer). Applies nothing to the host.
+    /// @param hello The accepted hello.
+    /// @param negotiated What the handshake agreed on.
+    void adoptHello(proto::ClientHello const& hello, proto::Negotiated const& negotiated);
+
+    /// Takes the host's stream, model and name subscriptions, so the connection is told what changes. Before
+    /// anything spawns for it: what spawns fans out to the subscribers.
+    void subscribeToHost();
+
+    /// Where the sessions an attach's plan creates start.
+    struct PlanSpawn
+    {
+        /// The absolute directory the hello stated; empty for none, which leaves the profile's.
+        std::filesystem::path workingDirectory;
+        /// The session whose working directory they start in, as a tab made from that pane would: what a
+        /// promotion to a new workspace names. Nullopt for none.
+        std::optional<vtworkspace::SessionId> directoryFrom;
+    };
+
+    /// The ServerHello an Attach hello is answered with once the attach plan ran, and what the handshake
+    /// agreed on, which is engaged as it is sent.
+    struct HelloAnswer
+    {
+        uint64_t serial = 0;          ///< The hello's serial, which the ServerHello answers.
+        proto::ServerHello reply;     ///< The ServerHello, without its followed workspaces.
+        proto::Negotiated negotiated; ///< What the handshake agreed on.
+    };
+
+    /// Makes the connection a viewer: counts it in the census, applies its held display (@see adoptHello) to
+    /// the host before the attach plan runs -- a promotion's without the colour preference, which its window
+    /// states per pane -- runs the plan (which counts it as the host's client and tells the control API),
+    /// answers a hello and states its raise role (a promoted observer was told it already), then pushes its
+    /// layout, the notices waiting for a client, its snapshots and the open permission questions.
+    ///
+    /// A hello's ServerHello waits for the plan because it states what the plan follows; nothing reaches
+    /// the peer before it, as @ref _negotiated is engaged only once it is sent.
+    /// @param intent What the plan decides from: the hello's, or the workspace a promotion selects or
+    /// creates.
+    /// @param spawn Where the sessions the plan creates start.
+    /// @param answer The ServerHello to answer with: engaged for an accepted Attach hello (answered with it
+    ///               and the restore announcement), nullopt for an observer's promotion (told no
+    ///               ServerHello).
+    void becomeViewer(proto::AttachIntent const& intent,
+                      PlanSpawn const& spawn,
+                      std::optional<HelloAnswer> answer);
+
     /// Decides which workspaces this connection follows and creates what that asks for: a first tab in the
     /// primary workspace, a workspace of its own, or a tab in the first workspace followed. Counts the
     /// connection as the host's client after deciding, so that it is not among the clients it is decided
     /// against.
     /// @param intent What the hello asked for; AllWorkspaces when Capability::AttachIntent is not shared.
-    /// @param workingDirectory The absolute directory the session the attach creates starts in; empty for
-    ///        its profile's.
-    void executeAttachPlan(proto::AttachIntent const& intent, std::filesystem::path const& workingDirectory);
+    /// @param spawn Where the sessions the plan creates start.
+    void executeAttachPlan(proto::AttachIntent const& intent, PlanSpawn const& spawn);
+
+    /// Bounds the client area a client states (sanePageSize); an out-of-range one is logged and dropped.
+    /// @param columns The stated column count.
+    /// @param lines The stated line count.
+    /// @param origin What carried it, for the log ("client", "hello client").
+    /// @return The bounded area, or nothing when it was out of range.
+    [[nodiscard]] std::optional<vtpty::PageSize> statedClientArea(uint32_t columns,
+                                                                  uint32_t lines,
+                                                                  std::string_view origin) const;
 
     /// Bounds the cell size a client states alongside a grid (vthost::sanePixelSize); an out-of-range one is
     /// logged and dropped, and the grid still applies.
@@ -1014,6 +1132,10 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
 
     /// Whether this connection is a viewer that mirrors program status (shares Capability::ProgramStatus).
     [[nodiscard]] bool mirrorsProgramStatus() const noexcept;
+
+    /// Whether this connection is pushed what the host's workspaces and panes are, as they change: their
+    /// layouts, metadata, summaries and attention. A viewer and an observer are, while open.
+    [[nodiscard]] bool receivesPushes() const noexcept;
 
     /// Whether this connection is told what changed in the panes it does not mirror (its client shares
     /// Capability::DaemonFollow).
@@ -1465,6 +1587,17 @@ class NativeSession final: public SessionStreamEvents, public UpgradeObserver
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
     /// How this connection's end is told to the host: Closed once the client said Goodbye, else a drop.
     DetachKind _detachKind = DetachKind::Dropped;
+    /// What a hello stated of the client's display: adopted with it (@see adoptHello) and applied to the
+    /// host as the connection becomes a viewer (@see becomeViewer).
+    struct StatedDisplay
+    {
+        std::optional<vtpty::PageSize> area;                          ///< Its client area, when in range.
+        std::optional<vtpty::ImageSize> cell;                         ///< Its cell size, when in range.
+        std::optional<vtbackend::ColorPreference> colorPreference {}; ///< The scheme it shows, when stated.
+    };
+    StatedDisplay _statedDisplay;
+    /// The restore announcement a promotion took, told by the layout batch end that answers it. Loop thread.
+    std::optional<RestoredCounts> _restoreToAnnounce;
     /// The directory the hello stated the attach's own session starts in (@ref attachSpawnRequest); empty for
     /// none. Kept for the first tab an OpenFirstTab asks for, which is the attach's session as well.
     std::filesystem::path _attachDirectory;

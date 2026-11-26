@@ -279,6 +279,7 @@ namespace vthost::testing
               .finishedSerial = 3,
               .finishedAtUnixMs = 1'790'000'000'000,
               .seenStatusGeneration = 4 } } },
+        { proto::PduType::ObserveOnly, proto::DecodedPdu { proto::ObserveOnly {} } },
         { proto::PduType::MarkSeen,
           proto::DecodedPdu { proto::MarkSeen {
               .session = 5,

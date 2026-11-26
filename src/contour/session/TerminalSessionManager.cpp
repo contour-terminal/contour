@@ -792,6 +792,8 @@ void TerminalSessionManager::clearFocusedWindow(vtworkspace::WorkspaceId window)
     if (_focusedWindow != window) // guarded like clearFocusIfCurrent
     {
         // Not the focus owner: its daemon still learns it is unfocused, whichever path moved focus away.
+        // A redundant safety net now that every focus move reports the window it leaves
+        // (moveFocusedWindow); NativeController::reportShown's dedupe drops it when nothing changed.
         reportShownPanes(window);
         return;
     }

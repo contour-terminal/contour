@@ -1449,12 +1449,36 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param client The connection, by its stream observer.
     void noteClientAttached(SessionStreamEvents* client);
 
-    /// Stops counting @p client, and fails the switches asked of its window. Idempotent, and a no-op for a
-    /// client never counted.
+    /// Stops counting @p client, attached client or observer, and fails the switches asked of its window.
+    /// Idempotent, and a no-op for a client never counted.
     /// @param client The connection, by its stream observer.
     /// @param kind How the connection ended: a drop keeps its workspace from a new window for the reconnect
     ///        grace (@see shownForAttach); a close frees it at once.
     void noteClientDetached(SessionStreamEvents const* client, DetachKind kind);
+
+    /// Counts @p observer as an observer (`ConnectionRole::Observe`), from its handshake on: told what every
+    /// stream observer is, never among the attached clients, and a candidate for the raise role while no
+    /// attached client following the daemon is (@see noteFocus). Idempotent. noteClientDetached() forgets it.
+    /// @param observer The connection, by its stream observer.
+    void noteObserverAttached(SessionStreamEvents* observer);
+
+    /// Forgets @p observer as an observer, as it is promoted to a viewer: the plan the promotion runs then
+    /// counts it as an attached client (noteClientAttached), which settles the raise role. Repaints every
+    /// host-drawn indicator row, as subscribeStream() does for a client that shows screens, since none was
+    /// for it. A no-op for a connection that is no observer.
+    /// @param observer The connection, by its stream observer.
+    void noteObserverPromoted(SessionStreamEvents* observer);
+
+    /// Turns the attached client @p client into an observer, as it is demoted: it leaves the attached clients
+    /// as a window that said it closes does (its workspace free at once, its switches failed), its shown
+    /// report, area, cell and refinements stop counting and the area is re-resolved without it, and the raise
+    /// role is settled anew with it among the observers. The connection told itself Quiet first, so a role
+    /// it held counts as given up. A no-op for a connection that is no attached client.
+    /// @param client The connection, by its stream observer, still reporting the workspace it selected.
+    void noteClientDemoted(SessionStreamEvents* client);
+
+    /// @return How many observers are handshaken (@see noteObserverAttached).
+    [[nodiscard]] std::size_t connectedObservers() const noexcept { return _observers.size(); }
 
     /// @return How many native Attach connections are handshaken. Neither a Control connection nor a tmux
     ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
@@ -1469,8 +1493,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Records that the window on @p client reported its focus. Gaining focus -- a Focused report after none
     /// or after an Unfocused one; a restated Focused is no move -- stamps the window with the next value of
     /// the host's counter, which the routing decisions order windows by; the raise role is
-    /// then settled again.
-    /// @param client The attached client; one never counted (@see noteClientAttached) is ignored.
+    /// then settled again. An observer's focus counts only while no attached client following the daemon
+    /// holds the role: then the raise holder is the observer focused last.
+    /// @param client The attached client or observer; one never counted (@see noteClientAttached,
+    ///        noteObserverAttached) is ignored.
     /// @param focus The window's focus now.
     void noteFocus(SessionStreamEvents const& client, proto::WindowFocus focus);
 
@@ -1540,8 +1566,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         ViewRouting.hpp.
     [[nodiscard]] std::vector<ConnectionView> connectionViews() const;
 
-    /// @return The connection holding the raise role: the window focused last, else the one attached last;
-    ///         nullopt with none attached. @see raiseHolder
+    /// @return The connection holding the raise role: among the attached clients that follow the daemon the
+    ///         window focused last, else the one attached last; with none, the same among the observers;
+    ///         nullopt with neither. @see raiseHolder
     [[nodiscard]] std::optional<ConnectionId> raiseHolderNow() const;
 
     /// Splits @p tab's active pane, backing the new leaf with a fresh session.
@@ -2327,6 +2354,26 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// as a frame would: the daemon renders none, and its clients mirror the row. Takes the terminal lock.
     void refreshStatusLine(HostedSession& session);
 
+    /// Repaints every session's indicator row that the host draws (@see refreshStatusLine).
+    void refreshHostDrawnStatusLines();
+
+    /// Stops counting @p client's area, cell and per-pane refinements, and re-resolves the area without them,
+    /// resizing what that moves. @see unsubscribeStream
+    void forgetClientArea(SessionStreamEvents* client);
+
+    /// Drops the panes @p client last reported showing: none of them is watched on its account any more.
+    void forgetShownReport(SessionStreamEvents const& client);
+
+    /// Removes @p client from the attached clients: its selection is stamped as left, and its workspace held
+    /// for its reconnect after a drop, or freed at once after a close.
+    /// @param client The connection, still reporting the workspace it selected.
+    /// @param kind How it left.
+    /// @return Whether it was an attached client.
+    [[nodiscard]] bool leaveAttachedClients(SessionStreamEvents const* client, DetachKind kind);
+
+    /// Fails every workspace switch asked of the window on @p gone, which will never answer it.
+    void abandonSwitchesOf(ConnectionId const& gone);
+
     /// A frame of @p session's extensions was published: repaints the row its clients mirror, and tells them.
     void extensionFramePublished(vtworkspace::SessionId session);
 
@@ -2609,6 +2656,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::vector<SessionStreamEvents*> _streamSubscribers;
     /// The handshaken native Attach connections. @see connectedClients
     std::vector<SessionStreamEvents*> _attachedClients;
+    /// The handshaken native Observe connections: told what every stream observer is, shown no workspace.
+    /// @see noteObserverAttached
+    std::vector<SessionStreamEvents*> _observers;
     /// A switch asked of a client and not yet answered. @see requestSwitch
     struct PendingSwitch
     {
@@ -2634,6 +2684,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _reconnectHolds;
     /// Names the raise holder again, and tells the connection that gained the role and the one that lost it.
     void settleRaiseRole();
+    /// @param clients Attached clients or observers, oldest first.
+    /// @return One view per connection among @p clients that follows the daemon, in their order.
+    [[nodiscard]] std::vector<ConnectionView> viewsOf(std::span<SessionStreamEvents* const> clients) const;
     /// The value the last focus report was stamped with. @see noteFocus
     uint64_t _focusCounter = 0;
     /// What each pane raised for the user's attention, and what a window saw of it. Loop thread.
@@ -2680,9 +2733,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] uint64_t statusGenerationOf(vtworkspace::SessionId session);
     /// Tells every stream observer what the ledger states of @p session, when @p change says it changed.
     void tellAttention(uint64_t session, AttentionChange change);
-    /// The stamp of each attached client's last `Focused` report; absent for one never focused.
+    /// The stamp of each attached client's and observer's last `Focused` report; absent for one never
+    /// focused.
     std::unordered_map<SessionStreamEvents const*, uint64_t> _focusSerials;
-    /// The attached clients whose last report said they are focused: a report that restates
+    /// The attached clients and observers whose last report said they are focused: a report that restates
     /// it stamps nothing.
     std::unordered_set<SessionStreamEvents const*> _focusedClients;
     /// Stamps @p workspace as left now; 0, a connection that selected none, is ignored. @see leftAt

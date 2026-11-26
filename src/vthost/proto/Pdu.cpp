@@ -379,6 +379,11 @@ namespace
         return std::to_underlying(PduType::MarkSeen);
     }
 
+    [[nodiscard]] constexpr uint64_t tagOf(ObserveOnly const&) noexcept
+    {
+        return std::to_underlying(PduType::ObserveOnly);
+    }
+
     [[nodiscard]] constexpr uint64_t tagOf(AuthChallenge const&) noexcept
     {
         return std::to_underlying(PduType::AuthChallenge);
@@ -1059,6 +1064,9 @@ namespace
     {
         out.varint(pdu.causeSerial);
         out.varint(pdu.selected);
+        // Zeros on every batch but a promotion's answer: a field appended after them must find them written.
+        out.varint(pdu.restoredWorkspaces);
+        out.varint(pdu.restoredTabs);
     }
 
     void encodeBody(Writer& out, UpgradeDaemon const& pdu)
@@ -1082,6 +1090,10 @@ namespace
     }
 
     void encodeBody(Writer&, Goodbye const&)
+    {
+    }
+
+    void encodeBody(Writer&, ObserveOnly const&)
     {
     }
 
@@ -1548,8 +1560,7 @@ namespace
         auto role = uint8_t {};
         if (!assign(in.u8(), role, error))
             return false;
-        pdu.role = role == std::to_underlying(ConnectionRole::Attach) ? ConnectionRole::Attach
-                                                                      : ConnectionRole::Control;
+        pdu.role = enumOrElse(role, ConnectionRole::Observe, ConnectionRole::Control);
         return true;
     }
 
@@ -2402,6 +2413,12 @@ namespace
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.causeSerial, error) || !assign(in.varint(), pdu.selected, error))
             return std::unexpected(error);
+        // A sender from before the restore counts, or a batch that states none, ends here. A count of
+        // workspaces without its tabs is a truncated body.
+        if (in.remaining() != 0
+            && (!assign(in.varint(), pdu.restoredWorkspaces, error)
+                || !assign(in.varint(), pdu.restoredTabs, error)))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -2494,6 +2511,11 @@ namespace
     DecodeResult decodeGoodbye(Reader&)
     {
         return Goodbye {};
+    }
+
+    DecodeResult decodeObserveOnly(Reader&)
+    {
+        return ObserveOnly {};
     }
 
     DecodeResult decodeOpenFirstTab(Reader& in)
@@ -3072,6 +3094,7 @@ namespace
         DecodeRow { PduType::SetWorkspaceColor, decodeSetWorkspaceColor },
         DecodeRow { PduType::PaneAttentionState, decodePaneAttentionState },
         DecodeRow { PduType::MarkSeen, decodeMarkSeen },
+        DecodeRow { PduType::ObserveOnly, decodeObserveOnly },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

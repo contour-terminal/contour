@@ -411,6 +411,13 @@ TEST_CASE("the trace shows a workspace's colour, set and cleared", "[vthost][pro
     CHECK(summarize(DecodedPdu { SetWorkspaceColor { .workspace = 3 } }) == "workspace=3 color=none");
 }
 
+TEST_CASE("the trace names an observer's hello and ObserveOnly", "[vthost][proto][trace][observer]")
+{
+    CHECK(toString(PduType::ObserveOnly) == "ObserveOnly");
+    CHECK(summarize(DecodedPdu { ClientHello { .role = ConnectionRole::Observe } }).contains("role=observe"));
+    CHECK(summarize(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }).contains("role=control"));
+}
+
 TEST_CASE("the trace shows a pane's attention and what a window saw, never a command line",
           "[vthost][proto][trace][daemon-attention]")
 {

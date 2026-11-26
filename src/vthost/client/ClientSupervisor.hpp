@@ -113,6 +113,11 @@ class ClientSupervisor
     /// @return The client of the connection under way; null between connections.
     [[nodiscard]] NativeClient* current() noexcept { return _current.get(); }
 
+    /// @return Whether the daemon took the last connection that it answered in the role its hello stated: an
+    ///         Observe hello answered by a daemon that predates observing ends the supervisor, as a refusal
+    ///         does, since no redial could observe it either.
+    [[nodiscard]] NativeClient::RoleAcceptance roleAcceptance() const noexcept { return _roleAcceptance; }
+
   private:
     /// How one connection ended.
     enum class Ending : uint8_t
@@ -205,6 +210,8 @@ class ClientSupervisor
     std::optional<core::platform::SteadyTimePoint> _upgradeHoldUntil;
     /// The workspace the last accepted connection selected, 0 for none: what the next one resumes.
     uint64_t _selected = 0;
+    /// @see roleAcceptance()
+    NativeClient::RoleAcceptance _roleAcceptance = NativeClient::RoleAcceptance::Accepted;
     /// The current connection's lifetime. Declared before @ref _current so that it outlives the client
     /// holding the socket it carries.
     std::shared_ptr<void> _currentLifetime;

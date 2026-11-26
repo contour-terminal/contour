@@ -7486,3 +7486,606 @@ TEST_CASE("a focus-only report keeps the shown set", "[attach][controller][daemo
     controller.reportFocus(vthost::proto::WindowFocus::Unfocused);
     CHECK(daemon.waitUntilOnDaemon([&] { return !daemon.host->isWatched(session.value); }));
 }
+
+// {{{ observing controllers
+namespace
+{
+
+/// A transport that counts its dials, each forwarded to a TLS transport to the fixture's daemon: which of a
+/// controller's transports a reconnect went through -- the window's, that may prompt and start the daemon, or
+/// the observer's, that does neither.
+class DialCountingTransport final: public vthost::ITransportFactory
+{
+  public:
+    explicit DialCountingTransport(vthost::TcpEndpoint endpoint):
+        _inner(makeTestTlsTransport(std::move(endpoint)))
+    {
+    }
+
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& loop) override
+    {
+        ++_dials;
+        return _inner->connect(loop);
+    }
+
+    [[nodiscard]] std::string describe() const override { return _inner->describe(); }
+
+    /// @return How many connections were dialled through this transport.
+    [[nodiscard]] int dials() const noexcept { return _dials.load(); }
+
+  private:
+    std::shared_ptr<vthost::ITransportFactory> _inner;
+    std::atomic<int> _dials = 0;
+};
+
+/// The client area and cell size of the window adopting a promoted connection.
+constexpr auto WindowArea = vtpty::PageSize { vtpty::LineCount(32), vtpty::ColumnCount(110) };
+constexpr auto WindowCell = std::optional { vtpty::ImageSize { vtpty::Width(9), vtpty::Height(18) } };
+
+/// How a promotion ended, as the GUI thread is told.
+using Landing = std::optional<std::expected<uint64_t, std::string>>;
+
+/// @return A handler recording how a promotion ended into @p landing.
+[[nodiscard]] contour::remote::PromotionLanded recordLanding(std::shared_ptr<Landing> landing)
+{
+    return [landing = std::move(landing)](std::expected<uint64_t, std::string> result) {
+        *landing = std::move(result);
+    };
+}
+
+/// @return How many observers and attached clients @p daemon counts, in that order.
+[[nodiscard]] std::pair<std::size_t, std::size_t> connectionsOf(DaemonFixture& daemon)
+{
+    return daemon.onDaemon([&daemon] {
+        return std::pair { daemon.host->connectedObservers(), daemon.host->connectedClients() };
+    });
+}
+
+/// The options of a controller that dials through @p transport in @p role, with a profile page size so its
+/// hello and its promotion state an area.
+[[nodiscard]] ControllerOptions observingOptions(
+    std::shared_ptr<vthost::ITransportFactory> transport,
+    vthost::proto::ConnectionRole role = vthost::proto::ConnectionRole::Observe)
+{
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = vtpty::PageSize { vtpty::LineCount(30), vtpty::ColumnCount(100) };
+    return ControllerOptions { .attachSettings = settings,
+                               .backoff = { .first = 10ms, .ceiling = 50ms },
+                               .role = role,
+                               .transport = std::move(transport) };
+}
+
+} // namespace
+
+TEST_CASE("an observing controller lists every workspace and mirrors none", "[attach][controller][observer]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             observingOptions(std::make_shared<DialCountingTransport>(daemon.endpoint())));
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    CHECK(waitUntil([&] {
+        auto const layouts = controller.settledLayouts();
+        return std::ranges::all_of(workspaces, [&](uint64_t id) { return layouts.contains(id); });
+    }));
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(controller.observeSupport() == contour::remote::ObserveSupport::Supported);
+    CHECK(controller.selectedWorkspace() == 0);
+    CHECK(controller.pendingCount() == 0);
+    CHECK(connectionsOf(daemon) == std::pair<std::size_t, std::size_t> { 1, 0 });
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 1);
+    CHECK(hellos.front().role == vthost::proto::ConnectionRole::Observe);
+    CHECK(hellos.front().workingDirectory.empty());
+}
+
+TEST_CASE("promote then demote over one connection", "[attach][controller][observer]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    // Nothing to demote yet; and an observer is only promoted once.
+    CHECK(controller.demote(observer).has_value());
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(
+        controller
+            .promote(workspaces[1], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .has_value());
+    CHECK(
+        controller
+            .promote(workspaces[0], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .error()
+        == contour::remote::SelectError::Busy);
+    REQUIRE(waitUntil([&] { return landing->has_value(); }));
+    CHECK(**landing == workspaces[1]);
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Attach);
+    CHECK(controller.selectedWorkspace() == workspaces[1]);
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->connectedClients() == 1; }));
+    CHECK(connectionsOf(daemon) == std::pair<std::size_t, std::size_t> { 0, 1 });
+    // The adopting window's area and cell went ahead of the select.
+    CHECK(daemon.clientFrames.areas() == std::vector { WindowArea });
+    CHECK(daemon.clientFrames.requestCells()
+          == std::vector { std::optional { vthost::proto::WireCellPixelSize { .width = 9, .height = 18 } } });
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 1);
+    // A promoted controller is no observer to promote.
+    auto const promoted = controller.promote(
+        workspaces[0], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing));
+    CHECK(promoted == std::unexpected { contour::remote::SelectError::Unsupported });
+
+    REQUIRE(controller.demote(observer).has_value());
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(controller.selectedWorkspace() == 0);
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->connectedObservers() == 1; }));
+    CHECK(connectionsOf(daemon) == std::pair<std::size_t, std::size_t> { 1, 0 });
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::ObserveOnly) == 1);
+
+    // All over the one connection.
+    CHECK(daemon.clientFrames.hellos().size() == 1);
+    CHECK(observer->dials() == 1);
+    CHECK(interactive->dials() == 0);
+}
+
+TEST_CASE("promotion to a workspace the daemon does not have leaves an observer",
+          "[attach][controller][observer]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(controller.promote(999, std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+                .has_value());
+    REQUIRE(waitUntil([&] { return landing->has_value(); }));
+    CHECK_FALSE(landing->value().has_value());
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(connectionsOf(daemon) == std::pair<std::size_t, std::size_t> { 1, 0 });
+
+    // It still dials as an observer.
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 2000));
+    CHECK(observer->dials() == 2);
+    CHECK(interactive->dials() == 0);
+}
+
+TEST_CASE("a drop mid-promotion reconnects as an observer and asks again",
+          "[attach][controller][observer][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    // The daemon's answer never reaches the client: the connection drops first.
+    daemon.holdEverything();
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(
+        controller
+            .promote(workspaces[1], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .has_value());
+    REQUIRE(daemon.waitUntilOnDaemon(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 1; }));
+    CHECK_FALSE(waitUntil([&] { return landing->has_value(); }, 20));
+    daemon.dropConnections();
+
+    REQUIRE(waitUntil([&] { return landing->has_value(); }, 2000));
+    CHECK(**landing == workspaces[1]);
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Attach);
+    CHECK(controller.selectedWorkspace() == workspaces[1]);
+    // An observer's hello, through the window's transport, then the area and the select once more.
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 2);
+    CHECK(hellos.back().role == vthost::proto::ConnectionRole::Observe);
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 2);
+    CHECK(daemon.clientFrames.areas() == std::vector { WindowArea, WindowArea });
+    CHECK(interactive->dials() == 1);
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->connectedClients() == 1; }));
+    CHECK(log.workspacesLost().empty());
+}
+
+TEST_CASE("a promotion a daemon restart interrupted fails and launches nothing",
+          "[attach][controller][observer][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    // Asked of one run of the daemon, whose answer never reaches the client: the next run has a workspace
+    // of the same id, which is not the one asked for.
+    daemon.holdEverything();
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(
+        controller
+            .promote(workspaces[0], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .has_value());
+    REQUIRE(daemon.waitUntilOnDaemon(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 1; }));
+    daemon.restartHost();
+
+    REQUIRE(waitUntil([&] { return landing->has_value(); }, 2000));
+    CHECK_FALSE(landing->value().has_value());
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(controller.selectedWorkspace() == 0);
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 2000));
+    // Nothing selected, launched or created on the new run: it is observed, as before the promotion.
+    CHECK(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->connectedObservers() == 1 && daemon.host->connectedClients() == 0; }));
+    CHECK(daemon.onDaemon([&daemon] { return daemon.host->sessionCount(); }) == 0);
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 1);
+    CHECK(daemon.clientFrames.hellos().back().role == vthost::proto::ConnectionRole::Observe);
+    // It dials as an observer again. (Through the window's transport while the daemon was down: how often it
+    // retried then is the backoff's business.)
+    auto const interactiveDials = interactive->dials();
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 3; }, 2000));
+    CHECK(interactive->dials() == interactiveDials);
+    CHECK(observer->dials() == 2);
+}
+
+TEST_CASE("a promotion the connection ends under is told so", "[attach][controller][observer]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 1);
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             observingOptions(std::make_shared<DialCountingTransport>(daemon.endpoint())));
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+
+    daemon.holdEverything();
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(
+        controller
+            .promote(workspaces[0], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .has_value());
+    REQUIRE(daemon.waitUntilOnDaemon(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 1; }));
+    controller.stop();
+
+    REQUIRE(waitUntil([&] { return landing->has_value(); }, 2000));
+    CHECK_FALSE(landing->value().has_value());
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+}
+
+TEST_CASE("an observing controller selects nothing but by promotion", "[attach][controller][observer]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             observingOptions(std::make_shared<DialCountingTransport>(daemon.endpoint())));
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    CHECK_FALSE(controller.select(workspaces[0]).has_value());
+    // Nor while a promotion is under way.
+    daemon.holdEverything();
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(
+        controller
+            .promote(workspaces[1], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .has_value());
+    CHECK_FALSE(controller.select(workspaces[0]).has_value());
+    REQUIRE(daemon.waitUntilOnDaemon(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) == 1; }));
+    CHECK_FALSE(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) > 1; }, 20));
+    CHECK(connectionsOf(daemon) == std::pair<std::size_t, std::size_t> { 0, 1 });
+    daemon.releaseHeld();
+    REQUIRE(waitUntil([&] { return landing->has_value(); }));
+    CHECK(**landing == workspaces[1]);
+    // An attach now: it selects as any window does.
+    CHECK(controller.select(workspaces[0]).has_value());
+}
+
+TEST_CASE("an observer of a daemon that ends no layout batch is not promoted",
+          "[attach][controller][observer][compat]")
+{
+    // Nothing would answer the select: the promotion would stay under way for good.
+    auto daemon = DaemonFixture { {}, servicesWithout(vthost::proto::Capability::LayoutBatch) };
+    auto const workspaces = seedWorkspaces(daemon, 1);
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             observingOptions(std::make_shared<DialCountingTransport>(daemon.endpoint())));
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    auto const landing = std::make_shared<Landing>();
+    CHECK(
+        controller
+            .promote(workspaces[0], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .error()
+        == contour::remote::SelectError::Unsupported);
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK_FALSE(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::SelectWorkspace) > 0; }, 20));
+}
+
+TEST_CASE("a daemon that cannot observe is not demoted to", "[attach][controller][observer][compat]")
+{
+    auto services = servicesWithout(vthost::proto::Capability::WorkspaceMeta);
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(
+        daemon.endpoint(), timeline, observingOptions(interactive, vthost::proto::ConnectionRole::Attach));
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    // The daemon shares Observe, but not what it serves a demotion with.
+    CHECK(controller.demote(std::make_shared<DialCountingTransport>(daemon.endpoint()))
+          == std::unexpected { contour::remote::SelectError::Unsupported });
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Attach);
+    CHECK_FALSE(
+        waitUntil([&] { return daemon.clientFrames.count(vthost::proto::PduType::ObserveOnly) > 0; }, 20));
+}
+
+TEST_CASE("a demoted controller reconnects as an observer", "[attach][controller][observer][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto options = observingOptions(interactive, vthost::proto::ConnectionRole::Attach);
+    options.intent = { .kind = vthost::proto::AttachIntentKind::Select, .workspace = workspaces[0] };
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline, std::move(options));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == workspaces[0]; }));
+
+    REQUIRE(controller.demote(observer).has_value());
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->connectedObservers() == 1; }));
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 2000));
+
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(controller.selectedWorkspace() == 0);
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 2);
+    CHECK(hellos.back().role == vthost::proto::ConnectionRole::Observe);
+    CHECK(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->connectedObservers() == 1 && daemon.host->connectedClients() == 0; }));
+    // The workspace it left is no window's: nothing is reported lost for an observer to close.
+    CHECK(log.workspacesLost().empty());
+}
+
+TEST_CASE("a promoted controller reconnects as an attach", "[attach][controller][observer][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(
+        controller
+            .promote(workspaces[1], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .has_value());
+    REQUIRE(waitUntil([&] { return landing->has_value(); }));
+
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 2000));
+
+    auto const hellos = daemon.clientFrames.hellos();
+    REQUIRE(hellos.size() == 2);
+    CHECK(hellos.back().role == vthost::proto::ConnectionRole::Attach);
+    // What it shows, and nothing a launch would pick: it was an observer, which never resumes into one.
+    CHECK(hellos.back().attachIntent.kind == vthost::proto::AttachIntentKind::Select);
+    CHECK(hellos.back().attachIntent.workspace == workspaces[1]);
+    CHECK(waitUntil([&] { return controller.selectedWorkspace() == workspaces[1]; }));
+    CHECK(controller.role() == vthost::proto::ConnectionRole::Attach);
+    CHECK(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->connectedObservers() == 0 && daemon.host->connectedClients() == 1; }));
+}
+
+TEST_CASE("both survive a live upgrade in their role", "[attach][controller][observer][upgrade]")
+{
+    using vthost::client::ConnectionState;
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities.idents.push_back(
+        std::to_underlying(vthost::proto::Capability::LiveUpgrade));
+    services.daemon = control;
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    auto const workspaces = seedWorkspaces(daemon, 2);
+    auto timeline = TestTimeline {};
+    auto const observingOwned =
+        makeNativeController(daemon.endpoint(),
+                             timeline,
+                             observingOptions(std::make_shared<DialCountingTransport>(daemon.endpoint())));
+    auto attachOptions = observingOptions(std::make_shared<DialCountingTransport>(daemon.endpoint()),
+                                          vthost::proto::ConnectionRole::Attach);
+    attachOptions.intent = { .kind = vthost::proto::AttachIntentKind::Select, .workspace = workspaces[0] };
+    auto const attachedOwned = makeNativeController(daemon.endpoint(), timeline, std::move(attachOptions));
+    auto& observing = *observingOwned;
+    auto& attached = *attachedOwned;
+    auto const observingLog = StateLog { observing };
+    auto const attachedLog = StateLog { attached };
+    requireConnected(observing);
+    requireConnected(attached);
+    REQUIRE(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->connectedObservers() == 1 && daemon.host->connectedClients() == 1; }));
+
+    daemon.onDaemon([&control] {
+        control.announceUpgrade("9.9.10");
+        control.closeObservers();
+        return 0;
+    });
+    REQUIRE(waitUntil([&] { return observingLog.count(ConnectionState::Connected) == 2; }, 2000));
+    REQUIRE(waitUntil([&] { return attachedLog.count(ConnectionState::Connected) == 2; }, 2000));
+    CHECK(observingLog.count(ConnectionState::Upgrading) == 1);
+    CHECK(attachedLog.count(ConnectionState::Upgrading) == 1);
+
+    CHECK(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->connectedObservers() == 1 && daemon.host->connectedClients() == 1; }));
+    CHECK(observing.role() == vthost::proto::ConnectionRole::Observe);
+    CHECK(observing.selectedWorkspace() == 0);
+    CHECK(attached.role() == vthost::proto::ConnectionRole::Attach);
+    CHECK(waitUntil([&] { return attached.selectedWorkspace() == workspaces[0]; }));
+    CHECK(observingLog.workspacesLost().empty());
+    CHECK(attachedLog.workspacesLost().empty());
+}
+
+TEST_CASE("against a daemon without observe it reports too old and stops",
+          "[attach][controller][observer][compat]")
+{
+    auto daemon = DaemonFixture { {}, servicesWithout(vthost::proto::Capability::Observe) };
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+
+    auto const connected = controller.connectAndWait(10s);
+    REQUIRE_FALSE(connected.has_value());
+    CHECK(controller.observeSupport() == contour::remote::ObserveSupport::TooOld);
+    // Not dialled again, however long it is given.
+    CHECK_FALSE(waitUntil([&] { return observer->dials() > 1; }, 40));
+    CHECK(observer->dials() == 1);
+    CHECK(daemon.waitUntilOnDaemon(
+        [&] { return daemon.host->connectedObservers() == 0 && daemon.host->connectedClients() == 0; }));
+}
+
+TEST_CASE("an observer whose daemon was downgraded under it reports too old and stops redialling",
+          "[attach][controller][observer][compat][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(controller.observeSupport() == contour::remote::ObserveSupport::Supported);
+
+    // Back as a daemon that predates observing.
+    daemon.whileDisconnected([&daemon] {
+        std::erase(daemon.services.handshake.capabilities.idents,
+                   std::to_underlying(vthost::proto::Capability::Observe));
+    });
+
+    REQUIRE(waitUntil([&] { return controller.observeSupport() == contour::remote::ObserveSupport::TooOld; },
+                      2000));
+    auto const dials = observer->dials();
+    CHECK_FALSE(waitUntil([&] { return observer->dials() > dials; }, 60));
+    CHECK(log.count(vthost::client::ConnectionState::Refused) == 1);
+}
+
+TEST_CASE("a demoted controller reconnects through the observer's transport",
+          "[attach][controller][observer][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    // The window's transport is the one that may prompt and start the daemon; the observer's does neither.
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(
+        daemon.endpoint(), timeline, observingOptions(interactive, vthost::proto::ConnectionRole::Attach));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(interactive->dials() == 1);
+
+    REQUIRE(controller.demote(observer).has_value());
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->connectedObservers() == 1; }));
+    for (auto const round: { 2, 3 })
+    {
+        daemon.dropConnections();
+        REQUIRE(waitUntil(
+            [&] {
+                return log.count(vthost::client::ConnectionState::Connected)
+                       == static_cast<std::size_t>(round);
+            },
+            2000));
+    }
+    CHECK(interactive->dials() == 1);
+    CHECK(observer->dials() == 2);
+}
+
+TEST_CASE("a promoted controller reconnects through the window's transport",
+          "[attach][controller][observer][reconnect]")
+{
+    auto daemon = DaemonFixture {};
+    auto const workspaces = seedWorkspaces(daemon, 1);
+    auto const observer = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto const interactive = std::make_shared<DialCountingTransport>(daemon.endpoint());
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, observingOptions(observer));
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto const landing = std::make_shared<Landing>();
+    REQUIRE(
+        controller
+            .promote(workspaces[0], std::nullopt, WindowArea, WindowCell, interactive, recordLanding(landing))
+            .has_value());
+    REQUIRE(waitUntil([&] { return landing->has_value(); }));
+    REQUIRE(interactive->dials() == 0);
+
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 2000));
+    CHECK(interactive->dials() == 1);
+    CHECK(observer->dials() == 1);
+}
+// }}}

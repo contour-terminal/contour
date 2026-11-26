@@ -408,6 +408,7 @@ if(VTHOST_TESTING)
         IdleExitWatcher_test.cpp
         LastSessionWatcher_test.cpp
         NativeSession_test.cpp
+        NativeSessionObserver_test.cpp
         PduPump_test.cpp
         ServiceControl_launchd_test.cpp
         ServiceControl_systemd_test.cpp
@@ -439,6 +440,7 @@ if(VTHOST_TESTING)
         testing/FaultyFileSystem.hpp
         testing/RecordedTranscripts.hpp
         testing/ControlHarness.hpp
+        testing/NativeSessionHarness.hpp
         testing/FakeCommandRunner.hpp
         testing/FakeDaemonControl.hpp
         testing/FakeExtensionHosting.hpp

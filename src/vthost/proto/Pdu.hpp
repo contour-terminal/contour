@@ -108,6 +108,7 @@ enum class PduType : uint8_t
     SetWorkspaceColor = 62,
     PaneAttentionState = 63,
     MarkSeen = 64,
+    ObserveOnly = 65,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -204,12 +205,14 @@ enum class HelloLayout : uint8_t
 
 /// What a connection is for. A Control connection asks the daemon about itself (DaemonStatusRequest,
 /// StopDaemon): it is no client, so it is shown no layout, spawns no first session and keeps nothing alive.
-/// Decoding fails closed: a role byte this version does not know reads as Control, so a future role never
-/// spawns a session.
+/// An Observe connection (Capability::Observe) is told the daemon's layout, workspace metadata, pane
+/// summaries and attention, and shows no screen until it selects a workspace. Decoding fails closed: a role
+/// byte this version does not know reads as Control, so a future role never spawns a session.
 enum class ConnectionRole : uint8_t
 {
     Attach = 0,  ///< A terminal client: it is shown the daemon's sessions and layout.
     Control = 1, ///< A probe or a command to the daemon itself.
+    Observe = 2, ///< A window that lists the daemon's workspaces and shows none of their screens.
 };
 
 /// The light/dark preference a ClientHello states for the sessions it follows: what the client's display
@@ -254,7 +257,7 @@ enum class AttachIntentKind : uint8_t
 {
     Default = 5,      ///< The daemon picks: the first workspace no window shows, else a new one.
     NewWorkspace = 6, ///< A new workspace of its own, selected at once.
-    Select = 7,       ///< Exactly the workspace named in AttachIntent::workspace.
+    Select = 7,       ///< Exactly the workspace named in AttachIntent::workspace; when it is gone, none.
     Resume = 8,       ///< The workspace named after a reconnect; when it is gone, as Default.
 };
 
@@ -1674,6 +1677,12 @@ struct LayoutBatchEnd
     /// The workspace this connection selects as of this batch, so a client learns a daemon-side reselection
     /// (its workspace closed) explicitly rather than inferring it from which snapshots arrive.
     uint64_t selected = 0;
+    /// Appended (Capability::Observe): the restore announcement ServerHello::restoredWorkspaces states, told
+    /// instead by the batch answering an observer's promotion when that promotion is the first viewer since
+    /// the restore. Zero on every other batch, and when a sender from before the field leaves it out.
+    uint32_t restoredWorkspaces = 0;
+    /// The tabs of those workspaces; zero as @ref restoredWorkspaces is.
+    uint32_t restoredTabs = 0;
     bool operator==(LayoutBatchEnd const&) const = default;
 };
 
@@ -1959,6 +1968,13 @@ struct MarkSeen
     bool operator==(MarkSeen const&) const = default;
 };
 
+/// Client→server (Capability::Observe): the viewer connection stops showing its workspace and observes the
+/// daemon instead, as a connection of ConnectionRole::Observe does. No body; there is no reply.
+struct ObserveOnly
+{
+    bool operator==(ObserveOnly const&) const = default;
+};
+
 /// @param summary A pane's summary.
 /// @return Whether it carries something a window raises for: a finished command, a bell, a notification.
 [[nodiscard]] inline bool carriesRaise(PaneSummary const& summary) noexcept
@@ -2122,7 +2138,8 @@ using DecodedPdu = std::variant<Invalid,
                                 OpenFirstTab,
                                 SetWorkspaceColor,
                                 PaneAttentionState,
-                                MarkSeen>;
+                                MarkSeen,
+                                ObserveOnly>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

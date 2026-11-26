@@ -1495,17 +1495,72 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
         refreshAllWorkspaceGit();
 }
 
+void SessionHost::noteObserverAttached(SessionStreamEvents* observer)
+{
+    if (std::ranges::contains(_observers, observer))
+        return;
+    _observers.push_back(observer);
+    settleRaiseRole();
+    // An observer lists every workspace in its sidebar: bring their git state up to date, as for a follower.
+    if (observer->followsDaemon())
+        refreshAllWorkspaceGit();
+}
+
+void SessionHost::noteObserverPromoted(SessionStreamEvents* observer)
+{
+    // Counted as an attached client by the plan the promotion runs next, which settles the role.
+    if (std::erase(_observers, observer) == 0)
+        return;
+    // Its stream subscription repainted no indicator row, taken while it showed no screen; it is to now.
+    refreshHostDrawnStatusLines();
+}
+
+void SessionHost::noteClientDemoted(SessionStreamEvents* client)
+{
+    // Leaves as a window that said it closes does: its workspace is free at once.
+    if (!leaveAttachedClients(client, DetachKind::Closed))
+        return;
+    forgetShownReport(*client);
+    forgetClientArea(client);
+    // It told itself Quiet, so a role it held is no longer held: settled anew below, among observers too.
+    if (_raiseHolder == std::optional { client->connectionId() })
+        _raiseHolder.reset();
+    _observers.push_back(client);
+    settleRaiseRole();
+    abandonSwitchesOf(client->connectionId());
+}
+
 void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKind kind)
 {
     // A window that is gone watches nothing.
-    std::erase_if(_shownReports, [gone = client->connectionId()](ShownReport const& report) {
-        return report.client == gone;
-    });
-    auto const counted = std::erase(_attachedClients, client) != 0;
-    if (!counted)
+    forgetShownReport(*client);
+    // An observer selects nothing, so leaves no workspace and was asked no switch: only the role moves on.
+    if (std::erase(_observers, client) != 0)
+    {
+        _focusSerials.erase(client);
+        _focusedClients.erase(client);
+        settleRaiseRole();
+        return;
+    }
+    if (!leaveAttachedClients(client, kind))
         return;
     _focusSerials.erase(client);
     _focusedClients.erase(client);
+    settleRaiseRole();
+    abandonSwitchesOf(client->connectionId());
+}
+
+void SessionHost::forgetShownReport(SessionStreamEvents const& client)
+{
+    std::erase_if(_shownReports, [gone = client.connectionId()](ShownReport const& report) {
+        return report.client == gone;
+    });
+}
+
+bool SessionHost::leaveAttachedClients(SessionStreamEvents const* client, DetachKind kind)
+{
+    if (std::erase(_attachedClients, client) == 0)
+        return false;
     _selectionSeen.erase(client);
     noteLeft(client->selectedWorkspace());
     // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
@@ -1523,9 +1578,12 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKi
             }
         }
     }
-    settleRaiseRole();
+    return true;
+}
+
+void SessionHost::abandonSwitchesOf(ConnectionId const& gone)
+{
     // A switch asked of a window that is gone will never be answered.
-    auto const gone = client->connectionId();
     auto abandoned = std::vector<uint32_t> {};
     for (auto const& [request, pending]: _pendingSwitches)
         if (pending->client == gone)
@@ -1563,7 +1621,7 @@ uint64_t SessionHost::leftAt(uint64_t workspace) const noexcept
 
 void SessionHost::noteFocus(SessionStreamEvents const& client, proto::WindowFocus focus)
 {
-    if (!std::ranges::contains(_attachedClients, &client))
+    if (!std::ranges::contains(_attachedClients, &client) && !std::ranges::contains(_observers, &client))
         return;
     // Only gaining focus stamps the window. A window restates its focus whenever the panes it shows change
     // (noteShown), and such a report, still on its way over the window's own connection while the user
@@ -1746,8 +1804,12 @@ std::optional<ConnectionId> SessionHost::clipboardTargetOf(vtworkspace::SessionI
 
 std::optional<ConnectionId> SessionHost::raiseHolderNow() const
 {
-    auto const views = connectionViews();
-    return raiseHolder(views);
+    // An observer raises only while no window that shows a workspace can: it is attached last, often, and
+    // focused when the user looks at its list, which must not take the role from a window showing panes.
+    if (auto const views = connectionViews(); !views.empty())
+        return raiseHolder(views);
+    auto const observers = viewsOf(_observers);
+    return raiseHolder(observers);
 }
 
 void SessionHost::settleRaiseRole()
@@ -1759,11 +1821,13 @@ void SessionHost::settleRaiseRole()
     auto const tell = [this](std::optional<ConnectionId> const& connection, proto::RaiseRole role) {
         if (!connection)
             return;
-        if (auto const found = std::ranges::find_if(
-                _attachedClients,
-                [&](SessionStreamEvents const* client) { return client->connectionId() == *connection; });
-            found != _attachedClients.end())
+        auto const named = [&](SessionStreamEvents const* client) {
+            return client->connectionId() == *connection;
+        };
+        if (auto const found = std::ranges::find_if(_attachedClients, named); found != _attachedClients.end())
             (*found)->raiseRoleChanged(role);
+        else if (auto const observer = std::ranges::find_if(_observers, named); observer != _observers.end())
+            (*observer)->raiseRoleChanged(role);
     };
     tell(previous, proto::RaiseRole::Quiet);
     tell(holder, proto::RaiseRole::Raise);
@@ -1794,9 +1858,14 @@ std::unordered_set<uint64_t> SessionHost::shownForAttach() const
 
 std::vector<ConnectionView> SessionHost::connectionViews() const
 {
+    return viewsOf(_attachedClients);
+}
+
+std::vector<ConnectionView> SessionHost::viewsOf(std::span<SessionStreamEvents* const> clients) const
+{
     // A client that is never told its role, nor asked to switch, must not hold either.
     return std::ranges::to<std::vector>(
-        _attachedClients
+        clients
         | std::views::filter([](SessionStreamEvents const* client) { return client->followsDaemon(); })
         | std::views::transform([this](SessionStreamEvents const* client) {
               auto const stamped = _focusSerials.find(client);
@@ -2540,8 +2609,12 @@ void SessionHost::subscribeStream(SessionStreamEvents* observer)
 {
     _streamSubscribers.push_back(observer);
     // Nothing repainted the rows while no client was attached: one attaching is handed them current.
-    if (!observer->mirrorsScreens())
-        return;
+    if (observer->mirrorsScreens())
+        refreshHostDrawnStatusLines();
+}
+
+void SessionHost::refreshHostDrawnStatusLines()
+{
     for (auto const& [id, session]: _sessions)
         if (session->indicatorRowIsHostDrawn())
             refreshStatusLine(*session);
@@ -2584,11 +2657,16 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     //
     // The order is settlePicks()' precondition: the picks before are taken first, then the client's
     // refinements and area go and the area is re-resolved, so the picks after are the final ones.
-    auto const before = snapshotPicks(observer);
-    forgetClientRefinements(observer);
-    _clientAreas.erase(observer);
+    forgetClientArea(observer);
+}
+
+void SessionHost::forgetClientArea(SessionStreamEvents* client)
+{
+    auto const before = snapshotPicks(client);
+    forgetClientRefinements(client);
+    _clientAreas.erase(client);
     // The departed client's cell stops counting too; with nobody left, the host keeps the cell it learned.
-    _clientCells.erase(observer);
+    _clientCells.erase(client);
     auto const area = resolveAuthoritativeArea();
     std::ignore = resizingWithCellPixelSize([&] { return settlePicks(area, before); });
 }

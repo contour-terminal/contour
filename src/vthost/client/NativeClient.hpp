@@ -402,6 +402,20 @@ class NativeClient final
         /// first, and is sent with the proof; a client with a token sends it at once, as a daemon that asks
         /// for no key sends no challenge to wait for.
         std::shared_ptr<IClientKeySource> keySource = {};
+        /// What the connection is to the daemon: a window's attach, or an observer listing its workspaces
+        /// without showing one (proto::ConnectionRole::Observe, which a daemon serves only when it shares
+        /// proto::Capability::Observe).
+        proto::ConnectionRole role = proto::ConnectionRole::Attach;
+    };
+
+    /// Whether the daemon took this client in the role its hello stated.
+    enum class RoleAcceptance : uint8_t
+    {
+        Accepted = 0, ///< Taken as asked, or not answered yet.
+        /// An Observe hello answered by a daemon that does not share proto::Capability::Observe: it read the
+        /// role as Control. The client ends as after a refusal (connected() stays false); redialling such a
+        /// daemon cannot observe it either.
+        ObserveUnsupported,
     };
 
     /// @param loop The event loop everything runs on.
@@ -556,6 +570,13 @@ class NativeClient final
     ///         Capability::DaemonAttention.
     [[nodiscard]] Delivery sendMarkSeen(uint64_t session, proto::SeenSerials seen);
 
+    /// Asks the daemon to demote this connection to an observer (proto::ObserveOnly): it shows no workspace
+    /// from then on, and every pane reaches it as a summary. The selection reads as none at once, and a
+    /// layout batch the daemon ended before it read the request states no selection here: only the batch
+    /// answering it (with Capability::LayoutBatch) and those after it do.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::Observe.
+    [[nodiscard]] Delivery observeOnly();
+
     /// Asks the daemon to open the first tab of the workspace this connection selects, which holds none (a
     /// launch that named it).
     /// @param workspace The daemon workspace the client saw hold no tab: the daemon opens the tab only if it
@@ -705,6 +726,14 @@ class NativeClient final
     /// @return The refusal.
     [[nodiscard]] std::optional<proto::HandshakeRefusal> const& refusal() const noexcept { return _refusal; }
 
+    /// @return What the connection is to the daemon now: the hello's role until observeOnly() or a promotion
+    ///         (a select an observer made, once the batch answering that select states a selection) changed
+    ///         it.
+    [[nodiscard]] proto::ConnectionRole role() const noexcept { return _role; }
+
+    /// @return Whether the daemon took the role the hello stated; Accepted until it answered.
+    [[nodiscard]] RoleAcceptance roleAcceptance() const noexcept { return _roleAcceptance; }
+
     /// @return refusal() in words for the user; when the daemon asked for a key, with the fingerprints that
     ///         were offered and a pointer to `identity_file`. Empty while there is no refusal.
     [[nodiscard]] std::string refusalMessage() const;
@@ -834,6 +863,13 @@ class NativeClient final
     /// @param self The NativeClient.
     static void handshakeExpired(void* self);
 
+    /// @return Whether the daemon turned the hello away: refused it, or did not take it in its role. The
+    ///         connection ends either way.
+    [[nodiscard]] bool isTurnedAway() const noexcept
+    {
+        return _refusal.has_value() || _roleAcceptance != RoleAcceptance::Accepted;
+    }
+
     /// Records what the daemon's ServerHello negotiated, or why it did not; only the first counts.
     /// @param hello The daemon's answer to this client's ClientHello.
     void handleServerHello(proto::ServerHello const& hello);
@@ -908,13 +944,23 @@ class NativeClient final
     uint64_t _nextSerial = 1;
     /// The EditTabs the daemon has not served yet, laid over its pushes (Capability::TabEditAcks).
     PendingTabEdits _pendingEdits;
-    vtbackend::HostIdentity _daemonIdentity;          ///< @see daemonIdentity()
-    std::string _daemonRelease;                       ///< @see daemonRelease()
-    uint64_t _daemonInstance = 0;                     ///< @see daemonInstance()
-    std::optional<RestoredCounts> _restoredCounts {}; ///< @see restoredCounts()
-    uint64_t _selectedWorkspace = 0;                  ///< @see selectedWorkspace()
-    std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
-    std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
+    vtbackend::HostIdentity _daemonIdentity;                   ///< @see daemonIdentity()
+    std::string _daemonRelease;                                ///< @see daemonRelease()
+    uint64_t _daemonInstance = 0;                              ///< @see daemonInstance()
+    std::optional<RestoredCounts> _restoredCounts {};          ///< @see restoredCounts()
+    uint64_t _selectedWorkspace = 0;                           ///< @see selectedWorkspace()
+    std::optional<proto::Negotiated> _negotiated;              ///< @see negotiated()
+    std::optional<proto::HandshakeRefusal> _refusal;           ///< @see refusal()
+    RoleAcceptance _roleAcceptance = RoleAcceptance::Accepted; ///< @see roleAcceptance()
+    /// What the connection is to the daemon now: the hello's role, Observe after observeOnly(), Attach once
+    /// the batch answering an observer's select (a promotion) states a selection. @see role()
+    proto::ConnectionRole _role = _handshake.role;
+    /// The serial of the select an observer sent (a promotion), until the batch answering it: that batch, not
+    /// any other stating a selection, makes the connection an attach.
+    std::optional<uint64_t> _promotionSerial;
+    /// The serial of the ObserveOnly sent, until the batch answering it: a batch ended before it states the
+    /// selection the connection gave up, which is not adopted.
+    std::optional<uint64_t> _demotionSerial;
     LivenessTracker _liveness;               ///< When the daemon last spoke, and whether it was probed.
     std::optional<std::string> _lossReason;  ///< @see lossReason()
     std::optional<std::string> _upgradingTo; ///< @see upgradingTo()

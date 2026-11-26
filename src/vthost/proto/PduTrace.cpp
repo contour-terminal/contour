@@ -71,6 +71,12 @@ namespace
         EnumName { .value = RaiseRole::Raise, .name = "raise" },
     };
 
+    constexpr auto ConnectionRoleNames = std::array {
+        EnumName { .value = ConnectionRole::Attach, .name = "attach" },
+        EnumName { .value = ConnectionRole::Control, .name = "control" },
+        EnumName { .value = ConnectionRole::Observe, .name = "observe" },
+    };
+
     constexpr auto ActivityNames = std::array {
         EnumName { .value = OutputActivity::None, .name = "none" },
         EnumName { .value = OutputActivity::Output, .name = "output" },
@@ -218,7 +224,7 @@ namespace
                            formatCapabilities(value.capabilities),
                            value.token.empty() ? "no" : "yes",
                            value.sessionSettings ? "yes" : "no",
-                           value.role == ConnectionRole::Control ? "control" : "attach",
+                           nameIn(ConnectionRoleNames, value.role),
                            value.clientArea
                                ? std::format("{}x{}", value.clientArea->columns, value.clientArea->lines)
                                : std::string { "none" },
@@ -594,7 +600,13 @@ namespace
                    "LayoutBatchEnd",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<LayoutBatchEnd>(pdu);
-                       return std::format("cause={} selected={}", value.causeSerial, value.selected);
+                       if (value.restoredWorkspaces == 0 && value.restoredTabs == 0)
+                           return std::format("cause={} selected={}", value.causeSerial, value.selected);
+                       return std::format("cause={} selected={} restored={}/{}",
+                                          value.causeSerial,
+                                          value.selected,
+                                          value.restoredWorkspaces,
+                                          value.restoredTabs);
                    } },
         TraceRow { PduType::SetSplitOrientation,
                    "SetSplitOrientation",
@@ -622,6 +634,7 @@ namespace
                    } },
         TraceRow { PduType::PanesReprojected, "PanesReprojected", nullptr },
         TraceRow { PduType::Goodbye, "Goodbye", nullptr },
+        TraceRow { PduType::ObserveOnly, "ObserveOnly", nullptr },
         TraceRow { PduType::OpenFirstTab,
                    "OpenFirstTab",
                    +[](DecodedPdu const& pdu) {

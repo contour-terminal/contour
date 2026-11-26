@@ -48,6 +48,10 @@ class UnsupportedTracker
     /// @return Whether the peer said it does not know @p type, so that it is not to be sent.
     [[nodiscard]] bool peerRefused(PduType type) const noexcept;
 
+    /// Forgets every refusal so far: the connection's role changed (an observer promoted), and what the peer
+    /// refused under the old one it may serve now. A tag it still does not know it refuses again, once.
+    void forgetRefusals() noexcept { _unsupportedByPeer.clear(); }
+
   private:
     std::set<uint64_t> _unsupportedByPeer; ///< The tags the peer answered with Unsupported.
 };

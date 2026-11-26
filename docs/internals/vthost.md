@@ -171,6 +171,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `Names` | 32 | `names` | The peer speaks the control API's `name` spelling: `name` keys, `object.rename`, `object.renamed`, `toName`. Without it the other end speaks the old one to it (`label` keys, `object.setLabel`, `workspace.rename`, `workspace.labelChanged`, `toLabel`) through vtcontrol's legacy spelling table (`LegacySpelling.hpp`); removed before 0.9.0 |
 | `WorkspaceColor` | 33 | `workspace-color` | `SetWorkspaceColor` (tag 62, client->server, body: the workspace id, a has-colour byte and a `u32` `0xRRGGBB`, 0 when cleared) sets or clears a workspace's colour in the daemon's model, and `WorkspaceMeta`'s colour field (the fourth presence bit, after `position`) states it: in full and as a delta on each change. Without it (an older daemon) a client sends nothing and keeps the workspace uncoloured; an older client is stated no colour, so its `WorkspaceMeta` bytes are what they were |
 | `DaemonAttention` | 34 | `daemon-attention` | The daemon owns the panes' attention (`AttentionLedger`): `PaneAttentionState` (tag 63, server->client) states a pane's flags in full -- output, bell, a finished command and its time (`finishedAtUnixMs`, an svarint) -- each with the ledger serial that raised it last, and the highest status generation a window saw; `MarkSeen` (tag 64, client->server, body: the session and the activity, bell, finished and status-generation serials seen) clears the flags those serials cover. `ReportFocus` gains the sessions of the panes the window shows, after the focus: a count, always written (0 when none), and the session ids, which a client states only to a daemon sharing the capability and an older daemon leaves unread. Without it a client keeps attention to itself, as before |
+| `Observe` | 35 | `observe` | The observer role (`ConnectionRole::Observe`, role byte 2; see [The Observe role](#observe-role)): a hello of that role lists the daemon's workspaces without showing any, and must share it, `DaemonFollow` and `WorkspaceMeta` (`proto::sharesObserving`). `ObserveOnly` (tag 65, client->server, no body) is the viewer's way to become an observer; from an observer it changes nothing. A daemon without it decodes role byte 2 as Control, so an observer's hello to it is answered as a Control connection's |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -375,7 +376,9 @@ follows, once, as the change left it -- a marked workspace the change removed go
 closes its own window for it -- and then one `LayoutBatchEnd`. The PTYs are resized as each event is fanned
 out, before that, for every client alike, so they have their sizes before the client sees the layout. Its field `causeSerial` is the serial of the
 latest `MoveNode` or `SelectWorkspace` whose effects the batch completes, 0 when no request of this client caused
-it. A client therefore
+it; and appended, only on the batch answering an observer's promotion that is the first viewer since a
+restore, `restoredWorkspaces` and `restoredTabs` -- the restore announcement a `ServerHello` carries for an
+attach, zero on every other batch (see [The Observe role](#observe-role)). A client therefore
 reconciles one **settled snapshot** per batch (`NativeController::layoutsSettled`): the layouts it holds when
 the end arrives are the state the change left, across every workspace, and a session that none of them names is
 gone, not in flight. The client that asked completes its move on the batch: the serials only grow per
@@ -1130,7 +1133,10 @@ selection: `NativeClient::selectedWorkspace()` starts as the one the `ServerHell
 the selected one closed). `ClientSupervisor` states it in every later connection's `Resume`;
 `NativeController::makeClient` keeps that intent and falls back to its own record (`_selected`, refreshed with each
 connection and batch) only where the intent names none. Reconnects state `Resume`, never `Default`, so a daemon
-that still counts the lost connection's selection does not hand the window a new workspace. A window whose
+that still counts the lost connection's selection does not hand the window a new workspace. A link that must
+not take what another window resumes (`NativeController::ResumeFallback::Nothing`: a sibling or moved window's,
+a promoted observer's) states `Select` instead, which selects exactly that workspace or none, never launches
+and never creates: its window then closes. A window whose
 workspace a reconnect lost displays what the connection selects instead, and closes only when that is nothing.
 The panes' seen and activity marks are kept per window under the daemon's session ids (`window::PaneKey`), so a
 reconnect, which realizes no new key, keeps them -- for a daemon that does not share `DaemonAttention`. One that does
@@ -1249,7 +1255,7 @@ that connection selects and what attaching creates:
 | --- | --- | --- |
 | `Default` (no capability: every client before intents) | the workspace with a tab that no connection selects and that one left most recently; of those never left, the first in the sidebar's order | a new workspace when every one is shown; the first tab, on a daemon with no tab at all; with a working directory stated, a tab in the selected workspace |
 | `NewWorkspace` | a new workspace of its own | that workspace |
-| `Select` | the named workspace, if it exists; else as `Default` | nothing |
+| `Select` | the named workspace, if it exists in this run; else none -- the client says it is gone | nothing |
 | `Resume` | the named workspace, if it survived holding a tab; else as `Default` | as `Default` when it did not survive |
 
 Their wire values start at 5: 0 to 4 named the retired intents of a connection that mirrored several
@@ -1408,8 +1414,8 @@ name a `command` (`CommandNeedsInput`), since running a program is typing it. Ea
 well (`block.finished` needs `screen`, every other kind `read`): `events.subscribe` narrows the kinds
 it is given, or every kind, to those the grants allow, and refuses one that names only forbidden kinds. The role's own verbs are gated alike: `DaemonStatusRequest` needs `read`, `StopDaemon`
 `write`, and without it they are answered `Unsupported`, the daemon logging why. A narrow token is
-for Control connections only: an `Attach` hello whose token lacks any grant is answered with the very
-bytes of a wrong token (`token lacks the grants an attach connection needs (has read,screen)` in the
+for Control connections only: an `Attach` or `Observe` hello whose token lacks any grant is answered with
+the very bytes of a wrong token (`token lacks the grants a client connection needs (has read,screen)` in the
 daemon's log), before it is counted or spawns a session.
 
 **Trusted transports.** No transport predicts trust: it is settled by the connect. The unix socket is gated by
@@ -1602,6 +1608,58 @@ later, the upgrade record of [Live upgrade](#live-upgrade)) and
 is appended to the hello and tells a client which release it met, which is what drives the GUI's drift
 badge (`vthost::client::assessDrift`). Bodies are append-only: a daemon that predates a field leaves it
 at the decoder's default, and a PDU tag it does not know is answered with `Unsupported`.
+<a id="observe-role"></a>
+The **Observe role** (`proto::ConnectionRole::Observe`, `Capability::Observe`) is a window's sidebar
+listing a daemon whose workspaces it shows none of. Its hello must share `Observe`, `DaemonFollow` and
+`WorkspaceMeta` (`proto::ObserverCapabilities`). One that does not share `Observe` is answered as the Control
+connection a daemon without the role decodes it as -- never served as an observer -- so the client tells a
+daemon that cannot be observed the same way whatever its version (`ObserveSupport::TooOld`); one that shares it
+but not the other two is refused, with the bytes of a version refusal and is answered with a `ServerHello` that selects no workspace and tells no
+restore announcement. It is then pushed what every following viewer is -- every workspace's `LayoutState`
+and `WorkspaceMeta`, a `PaneSummary` for every pane and, with `DaemonAttention`, every pane's attention --
+and mirrors none: no snapshot, no screen stream, no clipboard write, no permission question. It holds no
+census ticket (an idle daemon exits beside it), fires no `client.attached`/`client.detached`, is not among
+`SessionHost`'s attached clients (it is in its observer registry instead), and its client area is no
+client area: a `ResizeRequest`, like the hello's area and cell, is held on the connection, never applied.
+The hello's colour preference is not applied on promotion either: an observer has no runtime PDU to restate it
+by, so what it stated may be stale by then, and the promoted window states its scheme on each pane as it binds
+it (`PerformOperation`), as a reconnect does. It is served `ReportFocus`, `MarkSeen`, `ObserveOnly`, `Goodbye`, `Heartbeat`,
+`ResizeRequest`, `SelectWorkspace` and the sidebar's in-place verbs (`SetWorkspaceName`, `SetWorkspaceColor`,
+`CloseWorkspace`, `EditTab`, `ClosePane`), each gated as a viewer's is; anything else -- `Input`,
+`ResizePane`, `CreateTab`, every other viewer request -- is answered `Unsupported`. Its `ReportFocus` makes
+no pane watched, but takes part in the raise role: while no attached window follows the daemon, the
+observer focused last (else attached last) is the raise holder; once one does, it holds the role.
+
+**Promotion and demotion.** An observer's `SelectWorkspace` promotes it: the held area and cell are applied,
+then the same viewer setup an attach runs (`NativeSession::becomeViewer`) selects the workspace, so a promoted
+observer is indistinguishable from an `Attach` hello selecting it -- counted by the host and the census,
+`client.attached` fired, snapshots, waiting notices and open permission questions sent, and the host-drawn
+indicator rows repainted for it. Its raise role is not stated again: it was at its hello, and each change since
+as it happened. Workspace 0 is the plan's `NewWorkspace`, created after the held display is applied (its first
+shell spawns at the window's size) and started where the session the request names is; a workspace the daemon
+does not have promotes nothing, and one it cannot make leaves the connection observing again. Either way the
+answer is the `LayoutBatchEnd` naming the request, whose `selected` is 0 while the connection still observes;
+the first promotion since a restore also carries the restore announcement in it. A viewer's `ObserveOnly`
+(with what an observer's hello must share; refused otherwise) demotes it: it is told `Quiet`, leaves the
+attached clients as a window that said Goodbye does (its workspace free at once), its area, cell, refinements
+and shown panes stop counting, its census ticket is dropped and `client.detached` fired, and it is then
+summarized every pane as any observer. The demotion is answered by a `LayoutBatchEnd` naming it and selecting
+nothing: a batch the daemon ended before it read the request still states the workspace given up, and the
+client adopts no selection from one whose `causeSerial` is older than its `ObserveOnly`. Likewise the client
+becomes an attach on the batch answering its promotion's select, not on any batch that states a selection.
+
+On the client side the role is runtime state of `contour::remote::NativeController` (`Config::role`,
+`role()`), read by every hello: `promote()` states the adopting window's area and cell, then selects; it is
+refused without `LayoutBatch` (nothing would answer it). The connection observes until the answer: one dropped
+before it reconnects with an Observe hello and asks again, unless the daemon restarted meanwhile (its
+`daemonInstance` changed: the workspace id names another), which fails the promotion and launches nothing; so
+does a connection that ends for good, and an answer selecting another workspace than asked, which is demoted
+again. `select()` is refused while the connection observes or a promotion is under way. `demote()` sends
+`ObserveOnly`, refused unless the daemon shares what an observer's hello must. Each also swaps the transport the
+next dial goes through -- an interactive one for a window, one that prompts for nothing and starts no daemon
+for an observer -- read once per dial; a promotion that fails puts the observer's back. An Observe hello that a daemon answers without `Observe` (it read
+the role as Control) ends the connection as a refusal: `observeSupport()` reads `TooOld`, and nothing redials.
+
 `contour daemon status|stop|logs` and the GUI's restart reach the daemon through
 `client::DaemonControlPort` (`makeDaemonControl`), whose connect failure is typed
 (`ControlErrorCode::NotRunning` for a missing or refused socket) rather than a string the caller

@@ -121,6 +121,10 @@ struct ControllerOptions
     std::string homeDirectory = {};
     /// This machine, as the daemon's stated one is compared with; the default proves no machine.
     vtbackend::HostIdentity localIdentity = {};
+    /// What its connections are to the daemon; a window's attach by default.
+    vthost::proto::ConnectionRole role = vthost::proto::ConnectionRole::Attach;
+    /// What it dials through; null for a TLS transport to the fixture's endpoint (makeTestTlsTransport).
+    std::shared_ptr<vthost::ITransportFactory> transport = nullptr;
 };
 
 /// A TLS transport to @p endpoint, trusting what the endpoint's expected fingerprint says and keeping its
@@ -155,7 +159,8 @@ struct ControllerOptions
     vthost::TcpEndpoint endpoint, TestTimeline& timeline, ControllerOptions options = {})
 {
     return contour::remote::NativeController::Config {
-        .transport = makeTestTlsTransport(std::move(endpoint)),
+        .transport =
+            options.transport ? std::move(options.transport) : makeTestTlsTransport(std::move(endpoint)),
         .intent = options.intent,
         .profileName = std::string {},
         .workingDirectory = std::move(options.workingDirectory),
@@ -170,6 +175,7 @@ struct ControllerOptions
         .emptyWorkspace = options.emptyWorkspace,
         .homeDirectory = std::move(options.homeDirectory),
         .localIdentity = std::move(options.localIdentity),
+        .role = options.role,
     };
 }
 
@@ -262,7 +268,8 @@ class ClientFrameCounts
         std::array { vthost::proto::PduType::ResizeRequest,     vthost::proto::PduType::Heartbeat,
                      vthost::proto::PduType::ResizePane,        vthost::proto::PduType::OpenFirstTab,
                      vthost::proto::PduType::SetWorkspaceColor, vthost::proto::PduType::MarkSeen,
-                     vthost::proto::PduType::ReportFocus };
+                     vthost::proto::PduType::ReportFocus,       vthost::proto::PduType::SelectWorkspace,
+                     vthost::proto::PduType::ObserveOnly };
 
     /// @param type A counted kind.
     /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.
