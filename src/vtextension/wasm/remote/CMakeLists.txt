@@ -384,7 +384,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_so
     # runs WAMR's, its test-only twin contour-extension-host-wamr where it runs another
     # (../../../contour-extension-host). The contract, the bundled extensions and the process cases of
     # vtextension_helper_test, composed by testing/ProcessDefaultBackend.cpp over that helper, locked down where
-    # the build has a sandbox.
+    # the build has a sandbox; and the measurements, so that this helper is measured against WAMR in process.
     set(_wamr_helper contour-extension-host-wamr)
     if(CONTOUR_WASM_RUNTIME STREQUAL "wamr")
         set(_wamr_helper contour-extension-host)
@@ -392,6 +392,7 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_so
     add_executable(vtextension_wamr_helper_test
         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
         ProcessBackend_test.cpp
+        ProcessMeasure_test.cpp
         ReviewFocusProcess_test.cpp
         WamrHelper_test.cpp
         process/testing/HelperComposition.cpp
