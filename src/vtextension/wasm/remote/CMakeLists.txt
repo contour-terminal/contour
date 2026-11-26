@@ -80,7 +80,7 @@ target_compile_definitions(vtextension_remote_wire PUBLIC
 set(_process_sources_Linux process/Process_linux.cpp process/Process_linux.hpp)
 set(_process_sources_FreeBSD process/Process_freebsd.cpp)
 set(_process_sources_Darwin process/Process_macos.cpp)
-set(_process_sources_Windows process/Process_win32.cpp)
+set(_process_sources_Windows process/AppContainer_win32.cpp process/AppContainer_win32.hpp process/Process_win32.cpp)
 set(_process_source "${_process_sources_${CMAKE_SYSTEM_NAME}}")
 if(_process_source AND NOT WIN32)
     # What the POSIX launchers share.
@@ -138,6 +138,7 @@ if(_process_source)
             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
             HostRefusals_test.cpp
             LaneWatch_test.cpp
+            process/AppContainer_test.cpp
             process/ExtensionHostSupervisor_test.cpp
             process/HelperLocation_test.cpp
             process/HostComposition_test.cpp
