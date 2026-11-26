@@ -34,7 +34,11 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake)
 add_library(orchestrator_core STATIC
     core/Agents.cpp
     core/Agents.hpp
+    core/AppliesTo.hpp
     core/ArgumentKinds.hpp
+    core/Automation.cpp
+    core/Automation.hpp
+    core/AutomationRules.hpp
     core/Board.hpp
     core/Commands.cpp
     core/Commands.hpp
@@ -201,6 +205,7 @@ if(ORCHESTRATOR_TESTING)
     add_executable(orchestrator_test
         core/test_main.cpp
         core/ArgumentKinds_test.cpp
+        core/Automation_test.cpp
         core/Commands_test.cpp
         core/Config_test.cpp
         core/Engine_test.cpp
