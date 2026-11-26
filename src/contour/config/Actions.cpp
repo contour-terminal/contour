@@ -453,6 +453,7 @@ span<ActionCatalogEntry const> actionCatalog()
             "ToggleSidebarNeedsMe", Action { ToggleSidebarNeedsMe {} }, documentation::ToggleSidebarNeedsMe },
         ActionCatalogEntry {
             "JumpToNextAttention", Action { JumpToNextAttention {} }, documentation::JumpToNextAttention },
+        ActionCatalogEntry { "JumpBack", Action { JumpBack {} }, documentation::JumpBack },
         ActionCatalogEntry { "CancelSwitch", Action { CancelSwitch {} }, documentation::CancelSwitch },
         ActionCatalogEntry { "MarkSeen", Action { MarkSeen {} }, documentation::MarkSeen },
         ActionCatalogEntry {

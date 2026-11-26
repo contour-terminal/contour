@@ -171,7 +171,7 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
     void request(vtworkspace::WorkspaceId window,
                  contour::session::SwitchTarget target,
                  contour::session::SwitchMode mode,
-                 contour::session::SwitchLandBy landBy,
+                 contour::session::SwitchWaiter waiter,
                  contour::session::SwitchCompletion done) override
     {
         if (failWith)
@@ -182,7 +182,7 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         else if (forwardTo != nullptr)
         {
             requests.push_back({ .window = window, .target = target, .mode = mode, .done = {} });
-            forwardTo->request(window, std::move(target), mode, landBy, std::move(done));
+            forwardTo->request(window, std::move(target), mode, waiter, std::move(done));
         }
         else
             requests.push_back(
@@ -215,7 +215,7 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         createdLabels.push_back(std::move(label));
         auto target = daemon;
         target.workspace = contour::session::NewWorkspace {};
-        request(window, std::move(target), mode, contour::session::NoLandingDeadline, std::move(done));
+        request(window, std::move(target), mode, contour::session::UserSwitch, std::move(done));
     }
 
     /// No window here has a daemon behind it.

@@ -54,6 +54,7 @@
 #include <variant>
 #include <vector>
 
+#include <QtTest/QTest>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/ExtensionHosting.hpp>
@@ -1023,6 +1024,16 @@ inline void drainGuiEvents()
     QCoreApplication::processEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QCoreApplication::processEvents();
+}
+
+/// Lets the GUI thread run what was queued for a while: long enough for what the daemon would send to land.
+inline void settleGui()
+{
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 10))
+    {
+        drainGuiEvents();
+        QTest::qWait(10);
+    }
 }
 
 /// Looks at @p link's attach as the launch does -- without waiting -- until it settled.

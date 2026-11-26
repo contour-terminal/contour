@@ -266,32 +266,11 @@ inline constexpr auto SupersedingFrom = std::array<SwitchStage, SupersedeCauseCo
 }
 
 /// @param landBy When the newer request must land by: a program's has a time, the user's none
-///        (session::NoLandingDeadline).
+///        (session::UserSwitch).
 /// @return What a newer request of the window is, as a cause.
 [[nodiscard]] constexpr SupersedeCause newerRequestCause(session::SwitchLandBy const& landBy) noexcept
 {
     return landBy ? SupersedeCause::NewerRequest : SupersedeCause::NewerUserRequest;
-}
-
-/// When a switch to another daemon tells its completion that it switched.
-enum class SwitchTold : uint8_t
-{
-    /// Once the window is rebound to the daemon it switched to: a completion that acts in the window finds it
-    /// there, and a window that cannot be rebound fails the switch instead.
-    OnceLanded = 0,
-    /// Before the window leaves its daemon: the answer goes out on the connection it was asked on, which the
-    /// switch ends.
-    BeforeLeaving,
-};
-
-/// @param landBy When the switch must land by: a program's has a time, the user's none
-///        (session::NoLandingDeadline), as newerRequestCause() tells them apart.
-/// @return When a switch to another daemon tells its completion: a program's before the window leaves its
-///         daemon, since the program is answered on the connection it asked on (DaemonLink); the user's once
-///         the window is the other daemon's, so what runs on Switched runs in it.
-[[nodiscard]] constexpr SwitchTold switchToldOf(session::SwitchLandBy const& landBy) noexcept
-{
-    return landBy ? SwitchTold::BeforeLeaving : SwitchTold::OnceLanded;
 }
 
 /// How a workspace is named to the user: its name, else its active tab's title, else "workspace N".

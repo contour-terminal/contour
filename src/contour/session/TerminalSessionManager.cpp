@@ -2258,14 +2258,26 @@ void TerminalSessionManager::requestSwitch(TerminalSession const& acting,
         logNoDaemon("switch");
         return;
     }
+    auto done =
+        SwitchCompletion { [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+            if (!outcome)
+                managerLog()("Switch failed: {}", outcome.error());
+        } };
     _windowSwitching.request(window->id(),
                              std::move(target),
                              mode,
-                             NoLandingDeadline,
-                             [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
-                                 if (!outcome)
-                                     managerLog()("Switch failed: {}", outcome.error());
-                             });
+                             UserSwitch,
+                             recordingSwitchCompletion(window->id(), mode, std::move(done)));
+}
+
+SwitchCompletion TerminalSessionManager::recordingSwitchCompletion(vtworkspace::WorkspaceId window,
+                                                                   SwitchMode mode,
+                                                                   SwitchCompletion done) const
+{
+    auto* const controller = controllerDisplaying(window);
+    if (controller == nullptr || mode != SwitchMode::Switch)
+        return done;
+    return controller->recordingCompletion(window::HistoryCause::Jump, std::move(done));
 }
 
 void TerminalSessionManager::cycleDaemon(TerminalSession const& acting, actions::CycleDirection direction)

@@ -423,6 +423,9 @@ namespace
             native2026Only(
                 both(PlatformScope::MacOnly, Super, U'J', Any, { actions::JumpToNextAttention {} })),
             native2026Only(both(DesktopOnly, CtrlShift, U'J', Any, { actions::JumpToNextAttention {} })),
+            // Jump back: Shift+Command+J, Ctrl+Shift+Alt+J -- the next-attention chord plus a modifier.
+            native2026Only(both(PlatformScope::MacOnly, SuperShift, U'J', Any, { actions::JumpBack {} })),
+            native2026Only(both(DesktopOnly, CtrlShiftAlt, U'J', Any, { actions::JumpBack {} })),
             native2026Only(both(PlatformScope::MacOnly, SuperShift, U'E', Any, { actions::FocusSidebar {} })),
             native2026Only(both(DesktopOnly, CtrlShift, U'D', Any, { actions::FocusSidebar {} })),
             written(DesktopOnly, Primary, U'Z', Any, { actions::TogglePaneZoom {} }),

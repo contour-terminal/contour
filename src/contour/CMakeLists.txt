@@ -268,6 +268,7 @@ set(_header_files
     window/PopupAnchor.hpp
     window/Utf16Offsets.hpp
     window/SidebarDaemonRow.hpp
+    window/LocationHistory.hpp
     window/SidebarJumps.hpp
     window/SidebarSections.hpp
     window/SidebarTree.hpp
@@ -445,6 +446,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/Permission.cpp
         session/PermissionPrompt.cpp
         window/NoticeModel.cpp
+        window/LocationHistory.cpp
         window/SidebarJumps.cpp
         window/SidebarModel.cpp
         window/LocationChipModel.cpp
@@ -1856,6 +1858,8 @@ if(CONTOUR_TESTING)
         window/TabIcon_test.cpp
         window/StatusUrgency_test.cpp
         window/AttentionJump_test.cpp
+        window/LocationHistory.cpp
+        window/LocationHistory_test.cpp
         window/SidebarTree.cpp
         window/SidebarTree_test.cpp
         window/SidebarDaemonRow_test.cpp

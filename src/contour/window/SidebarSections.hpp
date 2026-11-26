@@ -14,11 +14,22 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace contour::window
 {
+
+/// The daemon a window is on, as its sidebar lists it: the section the window's own link feeds.
+struct OwnDaemon
+{
+    DaemonRef daemon;                                      ///< Which daemon.
+    DaemonInstance instance;                               ///< Which run of it.
+    std::string name;                                      ///< What its row calls it.
+    DaemonLocality locality = DaemonLocality::Remote;      ///< Whether it runs on this machine.
+    DaemonLinkState state = DaemonLinkState::NotConnected; ///< Where the window's link stands.
+};
 
 /// The window's sections.
 /// @param listed The sections the presence lists, in the order the sidebar shows them.
@@ -38,6 +49,32 @@ namespace contour::window
     else
         listed.push_back(std::move(own));
     return listed;
+}
+
+/// The window's sections, its own built from what its own link says of its daemon.
+/// @param listed The sections the presence lists, in the order the sidebar shows them.
+/// @param own The window's own daemon.
+/// @param directory Its workspaces, from the window's own link.
+/// @param displayedWorkspace The workspace the window displays, if any.
+/// @return As the overload above, the own section keeping what the presence lists of the workspaces other
+///         windows show.
+[[nodiscard]] inline std::vector<DaemonSection> windowSections(std::vector<DaemonSection> listed,
+                                                               OwnDaemon const& own,
+                                                               WorkspaceDirectory directory,
+                                                               std::optional<uint64_t> displayedWorkspace)
+{
+    auto section = DaemonSection { .daemon = own.daemon,
+                                   .instance = own.instance,
+                                   .name = own.name,
+                                   .locality = own.locality,
+                                   .state = own.state,
+                                   .reason = {},
+                                   .directory = std::move(directory),
+                                   .shownElsewhere = {},
+                                   .feed = SectionFeed::WindowLink };
+    if (auto const at = std::ranges::find(listed, own.daemon, &DaemonSection::daemon); at != listed.end())
+        section.shownElsewhere = at->shownElsewhere;
+    return windowSections(std::move(listed), std::move(section), displayedWorkspace);
 }
 
 /// Why a jump from a sidebar row is not made.

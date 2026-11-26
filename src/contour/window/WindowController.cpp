@@ -113,7 +113,11 @@ class WindowController::SidebarHost final: public ISidebarHost
                      // The rows the jump marks, and the chip that says where it goes.
                      window._sidebar->noteChanged();
                      window.refreshChip();
-                 } }
+                 },
+                 [&window](std::optional<SidebarTarget> from, SidebarTarget const& to, HistoryCause cause) {
+                     window._history.landed(std::move(from), to, cause);
+                 },
+                 [&window](SidebarTarget const& place) { window._history.restore(place); } }
     {
     }
 
@@ -142,9 +146,32 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     [[nodiscard]] HostMoves hostMoves() const override { return _window._manager.hostMovesOf(_window); }
 
-    void showPane(PaneKey pane) override { _window.jumpToPane(pane); }
+    // A row of the window's own daemon: the newer navigation ends a jump to another daemon still under way.
+    // Each is a place the window goes to, which JumpBack can return from.
+    void showPane(PaneKey pane) override
+    {
+        supersedeJump();
+        _window.navigateToPane(pane, _window.landingTo(_window.ownPlaceOfPane(pane), HistoryCause::Jump));
+    }
 
-    void showWorkspace(uint64_t workspace) override { std::ignore = _window.showWorkspace(workspace); }
+    void showWorkspace(uint64_t workspace) override
+    {
+        supersedeJump();
+        std::ignore = _window.navigateToWorkspace(
+            workspace,
+            [&window = _window,
+             landing = _window.landingTo(_window.ownPlaceOf(workspace, std::nullopt), HistoryCause::Jump)] {
+                window.recordLanding(landing);
+            });
+    }
+
+    /// Ends the jump in this window to another daemon under way, without a word (SidebarJumps::supersede()):
+    /// a navigation within the window's own daemon replaced it.
+    void supersedeJump() { _jumps.supersede(_window._displayed); }
+
+    /// Lets the jump in this window under way go without a word (SidebarJumps::release()): a switch of the
+    /// window that its sidebar did not ask for replaces it.
+    void releaseJump() { _jumps.release(); }
 
     void markSeen(PaneKey pane) override { _window.noteDirectoryPaneSeenByKey(pane); }
 
@@ -236,16 +263,20 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     [[nodiscard]] vtworkspace::WorkspaceId windowId() const override { return _window._displayed; }
 
-    void jumpTo(SidebarTarget target, JumpMode mode) override { jumpThen(std::move(target), mode, {}); }
+    void jumpTo(SidebarTarget target, JumpMode mode) override
+    {
+        jumpThen(std::move(target), mode, HistoryCause::Jump, {});
+    }
 
-    /// Jumps to @p target as jumpTo() does, then runs @p then once it landed (SidebarJumps::jumpTo()).
-    void jumpThen(SidebarTarget const& target, JumpMode mode, SidebarJumps::JumpThen then)
+    /// Jumps to @p target as jumpTo() does, for @p cause, then runs @p then once it landed
+    /// (SidebarJumps::jumpTo()).
+    void jumpThen(SidebarTarget const& target, JumpMode mode, HistoryCause cause, SidebarJumps::JumpThen then)
     {
         auto const listed = controlIdOf(target);
         if (!listed)
             errorLog()("Not jumping from the sidebar: its row names a run of {} that has ended.",
                        target.daemon.value);
-        _jumps.jumpTo(_window._displayed, target, mode, listed, currentPlace(), std::move(then));
+        _jumps.jumpTo(_window._displayed, target, mode, listed, currentPlace(), cause, std::move(then));
     }
 
     /// Makes a new workspace on @p daemon's daemon and jumps there (SidebarJumps::createAndJump()).
@@ -276,25 +307,26 @@ class WindowController::SidebarHost final: public ISidebarHost
 
     void raisePrompt() override { _window._promptHost->raise(); }
 
-  private:
-    /// @return Where the window is now, by its daemon's names; none for a window with no daemon.
+    /// @return Where the window is now, by its daemon's names -- the empty daemon for a window with none;
+    ///         none while it shows no workspace.
     [[nodiscard]] std::optional<SidebarTarget> currentPlace() const
     {
         auto const own = ownDaemon();
         auto const* const source = _window._directorySource;
-        if (!own || source == nullptr)
+        if (source == nullptr)
             return std::nullopt;
         auto const directory = source->directory();
         if (!directory.selected)
             return std::nullopt;
         auto const tab = displayedTab(directory);
-        return SidebarTarget { .daemon = own->daemon,
-                               .instance = own->instance,
+        return SidebarTarget { .daemon = own ? own->daemon : DaemonRef {},
+                               .instance = own ? own->instance : DaemonInstance {},
                                .workspace = *directory.selected,
                                .tab = tab ? std::optional { tab->tab } : std::nullopt,
                                .pane = std::nullopt };
     }
 
+  private:
     /// @return The control id of the workspace @p target names, from the directory of its daemon's section
     ///         (jumpControlIdOf()); StaleRun for a row of a run that has ended.
     [[nodiscard]] std::expected<std::array<uint8_t, 16>, JumpRefusal> controlIdOf(
@@ -911,6 +943,10 @@ command::MenuBarState WindowController::menuBarState() const
     }
 
     state.switching = switchingAvailability();
+    state.nextAttention =
+        nextAttentionTarget() ? command::JumpAvailability::Available : command::JumpAvailability::Unavailable;
+    state.jumpBack =
+        canJumpBack() ? command::JumpAvailability::Available : command::JumpAvailability::Unavailable;
     auto daemons = command::DaemonCommandSource { *this }.commands();
     std::erase_if(daemons, [](command::Command const& each) {
         return !std::holds_alternative<actions::SwitchToDaemon>(each.action);
@@ -991,14 +1027,14 @@ bool WindowController::isWorkspaceDropdownOpen() const noexcept
 
 command::WorkspaceMenuState WindowController::workspaceMenuStateOf(uint64_t workspace) const
 {
-    auto state = window::workspaceMenuStateOf(
-        _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {},
-        workspace,
-        menuMovesOf(_manager.hostMovesOf(*this)),
-        _manager.workspaceColorSupportOf(*this) == session::WorkspaceColorSupport::Supported
-            ? command::MenuColoring::Available
-            : command::MenuColoring::Unavailable,
-        _manager.model().colorPalette());
+    auto state = window::workspaceMenuStateOf(directoryNow(),
+                                              workspace,
+                                              menuMovesOf(_manager.hostMovesOf(*this)),
+                                              _manager.workspaceColorSupportOf(*this)
+                                                      == session::WorkspaceColorSupport::Supported
+                                                  ? command::MenuColoring::Available
+                                                  : command::MenuColoring::Unavailable,
+                                              _manager.model().colorPalette());
     // A workspace of the window's own daemon, which the window's switch names.
     state.open = openOfferOf(_manager.daemonRefOf(_displayed).value_or(DaemonRef {}));
     return state;
@@ -3736,15 +3772,177 @@ QString WindowController::beginSidebarDrag(int row)
 
 void WindowController::jumpToNextAttention()
 {
-    if (_directorySource == nullptr)
+    auto const target = nextAttentionTarget();
+    if (!target)
         return;
-    auto const* const active = activeSession();
-    auto const current =
-        active != nullptr ? std::optional { _manager.paneKeyOf(active->modelSessionId()) } : std::nullopt;
-    auto const target = nextAttention(_directorySource->directory(), _attention, current);
+    auto const own = _sidebarHost->ownDaemon();
+    if (target->daemon == (own ? own->daemon : DaemonRef {}))
+    {
+        _sidebarHost->supersedeJump();
+        navigateToPane(*target->pane, landingTo(target, HistoryCause::Attention));
+        return;
+    }
+    // The newer navigation wins: a pane of the window's own whose workspace is still being selected is given
+    // up.
     _pendingJump.reset();
-    if (target)
-        jumpToPane(*target);
+    _sidebarHost->jumpThen(*target, JumpMode::Here, HistoryCause::Attention, {});
+}
+
+std::optional<SidebarTarget> WindowController::nextAttentionTarget() const
+{
+    if (_directorySource == nullptr)
+        return std::nullopt;
+    auto const own = _sidebarHost->ownDaemon();
+    // A second press while a jump is under way goes on from where that one goes, not from the pane still
+    // shown: a jump to another daemon, or the window's own selecting the workspace of a pane.
+    auto current = _sidebarHost->pendingJumps().here;
+    if (!current)
+    {
+        auto const* const active = activeSession();
+        auto const from = _pendingJump        ? std::optional { _pendingJump->pane }
+                          : active != nullptr ? std::optional { _manager.paneKeyOf(active->modelSessionId()) }
+                                              : std::nullopt;
+        if (from)
+            current = ownPlaceOfPane(*from);
+    }
+    // A window with no daemon jumps among its own panes: its one section names the empty daemon.
+    return nextAttention(placesOf(directoryNow()), own ? own->daemon : DaemonRef {}, _attention, current);
+}
+
+void WindowController::jumpBack()
+{
+    auto const entry = _history.back(_sidebarHost->currentPlace(), placeStillThere());
+    if (!entry)
+    {
+        _noticeAnnouncer->announce(
+            QString::fromUtf8(NowhereToGoBack.data(), static_cast<qsizetype>(NowhereToGoBack.size())));
+        return;
+    }
+    auto const own = _sidebarHost->ownDaemon();
+    if (entry->daemon != (own ? own->daemon : DaemonRef {}))
+    {
+        // Another daemon's place is a jump there; one under way is replaced by it, as a newer jump is. One
+        // that fails or is cancelled puts the place back (SidebarJumps' Unreached).
+        _sidebarHost->jumpThen(*entry, JumpMode::Here, HistoryCause::Back, {});
+        return;
+    }
+    // A place of the window's own: the newer navigation ends a jump to another daemon still under way.
+    _sidebarHost->supersedeJump();
+    // The tab as it is, once its workspace shows: with its own active pane, as land() shows one.
+    auto const shown = navigateToWorkspace(
+        entry->workspace, [this, landing = landingTo(entry, HistoryCause::Back), tab = entry->tab] {
+            recordLanding(landing);
+            land(session::LandingFocus { .tab = tab, .pane = std::nullopt });
+        });
+    if (shown == SelectResult::Refused)
+        _history.restore(*entry);
+}
+
+bool WindowController::canJumpBack() const
+{
+    return _history.canGoBack(_sidebarHost->currentPlace(), placeStillThere());
+}
+
+std::function<bool(SidebarTarget const&)> WindowController::placeStillThere() const
+{
+    return [places = placesOf(directoryNow())](SidebarTarget const& place) {
+        return placeStillExists(place, places);
+    };
+}
+
+WorkspaceDirectory WindowController::directoryNow() const
+{
+    return _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
+}
+
+std::vector<DaemonSection> WindowController::sectionsOf(OwnDaemon const& own,
+                                                        WorkspaceDirectory directory) const
+{
+    auto const selected = directory.selected;
+    return windowSections(_manager.app().daemonSections().sections(), own, std::move(directory), selected);
+}
+
+std::vector<DaemonSection> WindowController::placesOf(WorkspaceDirectory directory) const
+{
+    if (auto const own = _sidebarHost->ownDaemon())
+        return sectionsOf(*own, std::move(directory));
+    // A window with no daemon goes back among its own workspaces only.
+    auto section = DaemonSection {};
+    section.directory = std::move(directory);
+    return { std::move(section) };
+}
+
+std::optional<SidebarTarget> WindowController::ownPlaceOf(uint64_t workspace,
+                                                          std::optional<uint64_t> tab) const
+{
+    auto here = _sidebarHost->currentPlace();
+    if (!here)
+        return std::nullopt;
+    here->workspace = workspace;
+    here->tab = tab;
+    here->pane = std::nullopt;
+    return here;
+}
+
+std::optional<SidebarTarget> WindowController::ownPlaceOfPane(PaneKey pane) const
+{
+    auto const directory = directoryNow();
+    auto const listed = tabHoldingPane(directory, pane);
+    if (!listed)
+        return std::nullopt;
+    auto place = ownPlaceOf(listed->workspace->id, listed->tab->id);
+    if (place)
+        place->pane = pane;
+    return place;
+}
+
+std::optional<SidebarTarget> WindowController::ownPlaceOfRow(SidebarRowKey const& row) const
+{
+    switch (row.kind)
+    {
+        case SidebarRowKind::Workspace: return ownPlaceOf(row.workspace, std::nullopt);
+        case SidebarRowKind::Tab: return ownPlaceOf(row.workspace, row.tab);
+        case SidebarRowKind::Pane: {
+            auto place = ownPlaceOf(row.workspace, row.tab);
+            if (place)
+                place->pane = row.pane;
+            return place;
+        }
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: break; // no place of a workspace
+    }
+    return std::nullopt;
+}
+
+std::optional<WindowController::PendingLanding> WindowController::landingTo(std::optional<SidebarTarget> to,
+                                                                            HistoryCause cause) const
+{
+    if (!to)
+        return std::nullopt;
+    return PendingLanding { .from = _sidebarHost->currentPlace(), .to = *std::move(to), .cause = cause };
+}
+
+void WindowController::recordLanding(std::optional<PendingLanding> const& landing)
+{
+    if (landing)
+        _history.landed(landing->from, landing->to, landing->cause);
+}
+
+session::SwitchCompletion WindowController::recordingCompletion(HistoryCause cause,
+                                                                session::SwitchCompletion done)
+{
+    // This switch replaces a jump the sidebar has under way, which therefore ends without a word.
+    _sidebarHost->releaseJump();
+    // Where the window is as it asks; where it is once told it switched -- a switch to another daemon is told
+    // once the window is that daemon's (session::SwitchTold::OnceLanded).
+    return [window = QPointer { this }, from = _sidebarHost->currentPlace(), cause, done = std::move(done)](
+               std::expected<vthost::proto::SwitchOutcome, std::string> outcome) {
+        if (window && outcome && *outcome == vthost::proto::SwitchOutcome::Switched)
+            if (auto const to = window->_sidebarHost->currentPlace())
+                window->_history.landed(from, *to, cause);
+        if (done)
+            done(std::move(outcome));
+    };
 }
 
 void WindowController::setDirectorySource(IWorkspaceDirectorySource* source)
@@ -3769,13 +3967,18 @@ void WindowController::cancelPendingNavigation() noexcept
 
 SelectResult WindowController::showWorkspace(uint64_t workspace)
 {
+    return navigateToWorkspace(workspace, {});
+}
+
+SelectResult WindowController::navigateToWorkspace(uint64_t workspace, std::function<void()> shown)
+{
     // Navigating supersedes what waited for an earlier look.
     cancelPendingNavigation();
-    if (_directorySource == nullptr)
-        return SelectResult::Refused;
-    if (_directorySource->directory().selected == workspace)
-        return SelectResult::Requested;
-    return _directorySource->select(workspace);
+    return afterShowing(workspace, [shown = std::move(shown)] {
+        if (shown)
+            shown();
+        return RowActionOutcome::Done;
+    });
 }
 
 void WindowController::land(session::LandingFocus const& focus)
@@ -3803,6 +4006,14 @@ void WindowController::land(session::LandingFocus const& focus)
 
 void WindowController::jumpToPane(PaneKey target)
 {
+    navigateToPane(target, std::nullopt);
+}
+
+void WindowController::navigateToPane(PaneKey target, std::optional<PendingLanding> landing)
+{
+    // A jump whose workspace is being selected already: a pane of the same one waits for that selection.
+    // Asking it again would end the first request, whose failure ends the jump that waits now.
+    auto const selecting = _pendingJump ? std::optional { _pendingJump->workspace } : std::nullopt;
     // Navigating supersedes what waited for an earlier look.
     cancelPendingNavigation();
     if (_directorySource == nullptr)
@@ -3812,11 +4023,12 @@ void WindowController::jumpToPane(PaneKey target)
     if (!listed)
         return;
     auto const holder = listed->workspace->id;
-    // Seen only once it lands: a switch that never does leaves the pane asking.
-    _pendingJump = PendingJump { .pane = target, .workspace = holder };
+    // Seen, and recorded, only once it lands: a switch that never does leaves the pane asking, and the window
+    // nowhere to go back from.
+    _pendingJump = PendingJump { .pane = target, .workspace = holder, .landing = std::move(landing) };
     if (directory.selected == holder)
         completePendingJump();
-    else if (_directorySource->select(holder) == SelectResult::Refused)
+    else if (selecting != holder && _directorySource->select(holder) == SelectResult::Refused)
         _pendingJump.reset();
 }
 
@@ -3864,7 +4076,7 @@ void WindowController::completePendingJump()
         return;
     // What the directory states of the pane counts as seen from here on: the jump is the user looking.
     noteDirectoryPaneSeenByKey(_pendingJump->pane);
-    _pendingJump.reset();
+    recordLanding(std::exchange(_pendingJump, std::nullopt)->landing);
 }
 
 void WindowController::noteDirectoryPaneSeenByKey(PaneKey key)
@@ -4059,19 +4271,23 @@ void WindowController::goToSidebarPane()
         jumpToPane(_sidebarActionRow->pane);
 }
 
-void WindowController::afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run)
+SelectResult WindowController::afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run)
 {
     _pendingRowAction.reset();
     if (_directorySource == nullptr)
-        return;
+        return SelectResult::Refused;
     auto const shown = _directorySource->directory().selected == workspace;
     if (shown && run() == RowActionOutcome::Done)
-        return;
+        return SelectResult::Requested;
     // A daemon states its selection later, and a pane may land only with its layout: the action waits, and is
     // dropped if the daemon refuses or the workspace is shown without it (cancelPendingJump()).
     _pendingRowAction = PendingRowAction { .workspace = workspace, .run = std::move(run) };
     if (!shown && _directorySource->select(workspace) == SelectResult::Refused)
+    {
         _pendingRowAction.reset();
+        return SelectResult::Refused;
+    }
+    return SelectResult::Requested;
 }
 
 namespace
@@ -4254,8 +4470,8 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         ConfirmedClose { .matches = holds<actions::ClosePane>, .kind = CloseKind::Pane },
     };
     // Another daemon's workspace, tab and pane rows: one table says what runs there, and how (spec §9).
-    auto const otherDaemon = row.kind != SidebarRowKind::Daemon && row.kind != SidebarRowKind::Hidden
-                             && rowOriginOf(row) == command::RowOrigin::OtherDaemon;
+    auto const nodeRow = row.kind != SidebarRowKind::Daemon && row.kind != SidebarRowKind::Hidden;
+    auto const otherDaemon = nodeRow && rowOriginOf(row) == command::RowOrigin::OtherDaemon;
     if (otherDaemon)
         switch (command::otherDaemonRouteOf(action))
         {
@@ -4278,13 +4494,35 @@ void WindowController::runSidebarAction(SidebarRowKey const& row, actions::Actio
         return;
     }
     // What the window shows is its own daemon's: another daemon's row is never run against it.
-    if (!otherDaemon)
+    if (otherDaemon)
+        return;
+    if (!nodeRow)
+    {
         runSidebarActionShown(row, action);
+        return;
+    }
+    // A row of the window's own daemon is a navigation of its own: it ends a jump to another daemon under
+    // way, and once its action ran there, the row is a place JumpBack returns from.
+    _sidebarHost->supersedeJump();
+    std::ignore = afterShowing(row.workspace,
+                               [this,
+                                landing = landingTo(ownPlaceOfRow(row), HistoryCause::Jump),
+                                run = shownRowAction(row, action)] {
+                                   auto const outcome = run();
+                                   if (outcome == RowActionOutcome::Done)
+                                       recordLanding(landing);
+                                   return outcome;
+                               });
 }
 
 command::RowOrigin WindowController::rowOriginOf(SidebarRowKey const& row) const
 {
     return window::rowOriginOf(row.daemon, _manager.daemonRefOf(_displayed));
+}
+
+bool WindowController::isOfOwnRunNow(SidebarRowKey const& row) const
+{
+    return row.instance == _manager.daemonInstanceOf(_displayed).value_or(DaemonInstance {});
 }
 
 void WindowController::jumpThenRun(SidebarRowKey const& row, actions::Action const& action)
@@ -4294,7 +4532,7 @@ void WindowController::jumpThenRun(SidebarRowKey const& row, actions::Action con
     if (!std::holds_alternative<actions::GoToPane>(action))
         then = [manager = &_manager, window = _windowId, row, action](vthost::proto::SwitchOutcome outcome) {
             // Here once the window shows the row -- a switch is told it landed once the window is the row's
-            // daemon's (remote::SwitchTold::OnceLanded) -- else in the window that showed it already and was
+            // daemon's (session::SwitchTold::OnceLanded) -- else in the window that showed it already and was
             // raised.
             auto* const runner = outcome == vthost::proto::SwitchOutcome::Switched
                                      ? manager->controllerOf(window)
@@ -4303,7 +4541,7 @@ void WindowController::jumpThenRun(SidebarRowKey const& row, actions::Action con
             if (runner != nullptr && runner->rowOriginOf(row) == command::RowOrigin::Own)
                 runner->runSidebarAction(row, action);
         };
-    _sidebarHost->jumpThen(sidebarTargetOf(row), JumpMode::Here, std::move(then));
+    _sidebarHost->jumpThen(sidebarTargetOf(row), JumpMode::Here, HistoryCause::Jump, std::move(then));
 }
 
 std::optional<DaemonSection> WindowController::sectionOf(DaemonRef const& daemon) const
@@ -4314,19 +4552,21 @@ std::optional<DaemonSection> WindowController::sectionOf(DaemonRef const& daemon
 void WindowController::colorSidebarWorkspace(SidebarRowKey const& row,
                                              std::optional<vtbackend::RGBColor> color)
 {
-    if (rowOriginOf(row) == command::RowOrigin::Own)
-        _manager.setWorkspaceColor(*this, row.workspace, color);
-    else
+    // A picker stays open as long as the close dialog does: an own row of a run that ended while it was open
+    // names nothing of the run serving now (as confirmClose()).
+    if (rowOriginOf(row) == command::RowOrigin::OtherDaemon)
         _manager.app().daemonSections().setWorkspaceColor(row.daemon, row.instance, row.workspace, color);
+    else if (isOfOwnRunNow(row))
+        _manager.setWorkspaceColor(*this, row.workspace, color);
 }
 
 void WindowController::colorSidebarTab(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color)
 {
-    if (rowOriginOf(row) == command::RowOrigin::Own)
-        _manager.colorTab(*this, row.tab, color);
-    else
+    if (rowOriginOf(row) == command::RowOrigin::OtherDaemon)
         _manager.app().daemonSections().setTabColor(
             row.daemon, row.instance, TabRef { .workspace = row.workspace, .tab = row.tab }, color);
+    else if (isOfOwnRunNow(row))
+        _manager.colorTab(*this, row.tab, color);
 }
 
 void WindowController::askToClose(CloseKind kind, SidebarRowKey const& key)
@@ -4413,6 +4653,10 @@ void WindowController::confirmClose(QVariant const& node)
         }
         return;
     }
+    // The window's own daemon restarted while the dialog was open: the ids name a run that has ended, and
+    // the new run's node of the same ids is not what the user was asked about.
+    if (!isOfOwnRunNow(row))
+        return;
     switch (closing->kind)
     {
         case CloseKind::Workspace: confirmCloseWorkspace(row.workspace); break;
@@ -4431,14 +4675,19 @@ void WindowController::confirmClose(QVariant const& node)
 
 void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action)
 {
-    afterShowing(row.workspace, [this, row, action] {
+    std::ignore = afterShowing(row.workspace, shownRowAction(row, action));
+}
+
+std::function<WindowController::RowActionOutcome()> WindowController::shownRowAction(
+    SidebarRowKey const& row, actions::Action const& action)
+{
+    return [this, row, action] {
         auto shown = std::optional<PaneKey> {};
         switch (row.kind)
         {
             case SidebarRowKind::Workspace: break;
             case SidebarRowKind::Tab: {
-                auto const directory =
-                    _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
+                auto const directory = directoryNow();
                 if (auto const listed = findTab(directory, row.workspace, row.tab);
                     listed && !listed->tab->panes.empty())
                     shown = listed->tab->panes.front().key;
@@ -4466,7 +4715,7 @@ void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::
             session->executeAction(action);
         _sidebarActionRow.reset();
         return RowActionOutcome::Done;
-    });
+    };
 }
 
 void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF windowPosition)
@@ -4499,7 +4748,7 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
     // The row's own daemon's directory: the window's for its own rows, the section's for another daemon's.
     auto const directory = [&] {
         if (origin == command::RowOrigin::Own)
-            return _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
+            return directoryNow();
         auto section = sectionOf(row.key.daemon);
         return section ? std::move(section->directory) : WorkspaceDirectory {};
     }();

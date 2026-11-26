@@ -75,6 +75,18 @@ namespace
         return wire;
     }
 
+    /// Adds the session of every leaf of @p pane to @p sessions.
+    void collectSessions(proto::WirePane const& pane, std::set<uint64_t>& sessions)
+    {
+        if (!pane.isSplit())
+        {
+            sessions.insert(pane.session);
+            return;
+        }
+        for (auto const& child: pane.children)
+            collectSessions(child, sessions);
+    }
+
     /// Forgets the record @p id names in @p screen's command-block table.
     /// @param screen The mirror whose table to update.
     /// @param id The host's id of the record.
@@ -604,6 +616,15 @@ RemoteScreen& NativeClient::screenFor(uint64_t session)
     return _screens.try_emplace(session, _historyKeep, _blockLimits).first->second;
 }
 
+void NativeClient::forgetUnlaidScreens()
+{
+    std::erase_if(_screens, [this](auto const& entry) {
+        return std::ranges::none_of(
+            _layoutSessions | std::views::values,
+            [&](std::set<uint64_t> const& named) { return named.contains(entry.first); });
+    });
+}
+
 uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
 {
     // A detached client is ending its connection in order: what it writes now would race the close.
@@ -1085,18 +1106,16 @@ void NativeClient::noteFirstSnapshot(uint64_t session)
 
 void NativeClient::handleLayout(proto::LayoutState const& layout)
 {
+    auto named = std::set<uint64_t> {};
+    for (auto const& tab: layout.tabs)
+        collectSessions(tab.root, named);
     if (_firstSnapshot == FirstSnapshot::Awaited && layout.workspace == _selectedWorkspace)
-    {
-        auto const collect = [this](auto const& self, proto::WirePane const& pane) -> void {
-            if (pane.isSplit())
-                for (auto const& child: pane.children)
-                    self(self, child);
-            else
-                _attachSessions.insert(pane.session);
-        };
-        for (auto const& tab: layout.tabs)
-            collect(collect, tab.root);
-    }
+        _attachSessions.insert(named.begin(), named.end());
+    // An emptied layout is a workspace the daemon removed.
+    if (named.empty())
+        _layoutSessions.erase(layout.workspace);
+    else
+        _layoutSessions.insert_or_assign(layout.workspace, std::move(named));
     if (_onLayout && _pendingEdits.empty())
         _onLayout(layout);
     else if (_onLayout)
@@ -1131,6 +1150,8 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
                 _unsupported.forgetRefusals();
             }
         }
+        // The batch states every layout that changed: a session none names now is gone.
+        forgetUnlaidScreens();
         if (_onLayoutBatchEnd)
             _onLayoutBatchEnd(*end);
         return true;

@@ -24,6 +24,7 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
 #include <contour/window/LocationChipModel.hpp>
+#include <contour/window/LocationHistory.hpp>
 #include <contour/window/MenuRouting.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
@@ -1449,6 +1450,22 @@ class WindowController:
     /// selected first; a daemon's selection lands later, and the tab and pane are shown then
     /// (completePendingJump()). Nothing when no pane asks for the user.
     void jumpToNextAttention();
+    /// Goes back one recorded place (the JumpBack action): skips places whose daemon run, workspace or tab is
+    /// gone (placeStillExists()), and the place the window is on. A place of the window's own daemon is shown
+    /// here -- its workspace selected, then its tab with its own active pane -- ending a jump to another
+    /// daemon still under way; another daemon's is jumped to, replacing one under way. A jump back that is
+    /// refused, fails or is cancelled puts its place back. Records nothing, and ends a run of attention
+    /// jumps. When no place is left, says so (NowhereToGoBack).
+    void jumpBack();
+    /// @return Whether jumpBack() would go somewhere: a recorded place is still there, and is not where the
+    ///         window is (the Window menu's Jump Back row).
+    [[nodiscard]] bool canJumpBack() const;
+    /// @param cause Why the window switches.
+    /// @param done What the switch's requester is told; empty for nothing.
+    /// @return @p done, recording this window's landing with @p cause when it switched: from where it is now
+    ///         to where it is once told so. Nothing is recorded for a window gone by then.
+    [[nodiscard]] session::SwitchCompletion recordingCompletion(HistoryCause cause,
+                                                                session::SwitchCompletion done);
     /// Shows @p target wherever it is: its workspace is selected first (a daemon's selection lands later, and
     /// the tab and pane are shown then), and it is counted as seen once shown. Replaces a pending jump.
     /// @param target The pane to show.
@@ -2118,11 +2135,30 @@ class WindowController:
     WindowId _windowId;
     vtworkspace::WorkspaceId _displayed;                   ///< The workspace the tab strip lists.
     IWorkspaceDirectorySource* _directorySource = nullptr; ///< @see directorySource
+    /// A landing the back stack records once it happened (LocationHistory::landed()).
+    struct PendingLanding
+    {
+        std::optional<SidebarTarget> from;       ///< Where the window was as it asked.
+        SidebarTarget to;                        ///< Where it goes.
+        HistoryCause cause = HistoryCause::Jump; ///< Why it goes there.
+    };
+    /// Shows @p target as jumpToPane() does, and records @p landing once it is shown.
+    /// @param target The pane to show.
+    /// @param landing What the back stack records then; none for nothing.
+    void navigateToPane(PaneKey target, std::optional<PendingLanding> landing);
+    /// Shows @p workspace as showWorkspace() does, then runs @p shown once the window shows it.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// @param shown What runs once it is shown; empty for nothing. Never run for a selection refused, or
+    /// given
+    ///        up for a newer navigation.
+    /// @return As showWorkspace().
+    [[nodiscard]] SelectResult navigateToWorkspace(uint64_t workspace, std::function<void()> shown);
     /// The pane a jump waits to show, and the directory workspace it selected for it.
     struct PendingJump
     {
-        PaneKey pane;       ///< The pane to show.
-        uint64_t workspace; ///< The directory's id of the workspace holding it.
+        PaneKey pane;                          ///< The pane to show.
+        uint64_t workspace;                    ///< The directory's id of the workspace holding it.
+        std::optional<PendingLanding> landing; ///< What the back stack records once it is shown.
     };
     /// Counts the directory's entry for @p key as seen: in this window's ledger, as far as an older daemon's
     /// flags go (the serials), or at the daemon that keeps the pane's flags, when it states something of
@@ -2168,23 +2204,63 @@ class WindowController:
     /// showing the workspace without it ends the wait (cancelPendingJump()).
     /// @param workspace The directory's id of the workspace.
     /// @param run What to do.
-    void afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run);
+    /// @return Requested when it ran or waits; Refused when the window has no source, or its source refused
+    ///         the selection.
+    [[nodiscard]] SelectResult afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run);
     /// Runs @p action for sidebar row @p row: by the row's id, leaving the window where it is, where the
     /// action has such a form (Mark seen, Rename, Move, Close Workspace), else on what the window shows, once
     /// the row is shown.
     void runSidebarAction(SidebarRowKey const& row, actions::Action const& action);
     /// Runs @p action on what the window shows, once @p row is shown (the tail of runSidebarAction()).
     void runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action);
+    /// @return What runs @p action on what the window shows once @p row's workspace is (afterShowing()).
+    [[nodiscard]] std::function<RowActionOutcome()> shownRowAction(SidebarRowKey const& row,
+                                                                   actions::Action const& action);
     /// @return Whether @p row is of the window's own daemon (or the window has none), or of another one.
     [[nodiscard]] command::RowOrigin rowOriginOf(SidebarRowKey const& row) const;
+    /// @return Whether @p row, one of the window's own daemon, was read from the run that daemon serves now:
+    ///         not one a restart ended, whose ids the new run may give to other nodes.
+    [[nodiscard]] bool isOfOwnRunNow(SidebarRowKey const& row) const;
+    /// @return The window's own directory as its source lists it now; the empty one while it has no source.
+    [[nodiscard]] WorkspaceDirectory directoryNow() const;
+    /// @return Every daemon's section as the window lists it, the window's own (@p own) with @p directory.
+    [[nodiscard]] std::vector<DaemonSection> sectionsOf(OwnDaemon const& own,
+                                                        WorkspaceDirectory directory) const;
+    /// @return The sections a place of the back stack is looked up in: every daemon listed, the window's own
+    ///         among them with @p directory; for a window with no daemon, @p directory alone.
+    [[nodiscard]] std::vector<DaemonSection> placesOf(WorkspaceDirectory directory) const;
+    /// @return The window's own place of @p workspace and, if named, its @p tab; none while the window shows
+    ///         no workspace.
+    [[nodiscard]] std::optional<SidebarTarget> ownPlaceOf(uint64_t workspace,
+                                                          std::optional<uint64_t> tab) const;
+    /// @return The place of @p pane in the window's own directory; none for a pane it does not list.
+    [[nodiscard]] std::optional<SidebarTarget> ownPlaceOfPane(PaneKey pane) const;
+    /// @return The window's own place of sidebar row @p row; none for a daemon or Hidden row.
+    [[nodiscard]] std::optional<SidebarTarget> ownPlaceOfRow(SidebarRowKey const& row) const;
+    /// @return The landing from where the window is now to @p to, for @p cause; none for no @p to.
+    [[nodiscard]] std::optional<PendingLanding> landingTo(std::optional<SidebarTarget> to,
+                                                          HistoryCause cause) const;
+    /// Records @p landing, which happened; nothing for none.
+    void recordLanding(std::optional<PendingLanding> const& landing);
+    /// @return Where jumpToNextAttention() goes now (nextAttention()): from the target of a jump under way,
+    /// or
+    ///         the window's own pane whose workspace is being selected, or else the active pane. The empty
+    ///         daemon names a pane of a window with no daemon. None when no pane asks for the user, or the
+    ///         window has no directory source.
+    [[nodiscard]] std::optional<SidebarTarget> nextAttentionTarget() const;
+    /// @return Whether a place of the back stack is still there (placeStillExists()), in every daemon's
+    ///         section as the window lists it now.
+    [[nodiscard]] std::function<bool(SidebarTarget const&)> placeStillThere() const;
     /// Jumps to another daemon's @p row, then runs @p action there once it landed: in this window, or in the
     /// window that showed the row already (command::OtherDaemonRoute::JumpFirst).
     void jumpThenRun(SidebarRowKey const& row, actions::Action const& action);
     /// @return The section @p daemon is listed by now; none for one not listed.
     [[nodiscard]] std::optional<DaemonSection> sectionOf(DaemonRef const& daemon) const;
     /// Colours @p row's workspace, or clears its colour: the window's own here, another daemon's there.
+    /// Nothing for an own row of a run that has ended.
     void colorSidebarWorkspace(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color);
-    /// Colours @p row's tab, or clears its colour: the window's own here, another daemon's there.
+    /// Colours @p row's tab, or clears its colour: the window's own here, another daemon's there. Nothing for
+    /// an own row of a run that has ended.
     void colorSidebarTab(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color);
     /// Opens the sidebar's colour picker over @p row, which a pick then colours: the request for its kind.
     void requestColorPick(SidebarRowKey const& row);
@@ -2437,6 +2513,8 @@ class WindowController:
     // This window's toast and banner, timed by _clock.
     NoticeModel _notices;
     // The sidebar's window-facing half and its model; the model is declared last, as it uses the rest.
+    /// The places this window left through a recorded landing (JumpBack).
+    LocationHistory _history { LocationHistoryCapacity };
     std::unique_ptr<SidebarHost> _sidebarHost;
     std::unique_ptr<SidebarModel> _sidebar;
     QPointer<SwitcherController> _switcher; ///< The switcher presented; null for none.

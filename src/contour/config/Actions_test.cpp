@@ -105,6 +105,17 @@ TEST_CASE("CancelSwitch round-trips by name", "[actions][parse][sidebar]")
     CHECK_FALSE(actions::isParameterized(*parsed));
 }
 
+TEST_CASE("JumpBack round-trips by name", "[actions][parse][sidebar][history]")
+{
+    auto const parsed = actions::fromString("JumpBack");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::JumpBack>(*parsed));
+    CHECK(actions::name(*parsed) == "JumpBack");
+    CHECK_FALSE(actions::isParameterized(*parsed));
+    // A held key walks the stack by one press, not through it.
+    CHECK(actions::isNonRepeatable(*parsed));
+}
+
 TEST_CASE("OpenInNewWindow round-trips by name", "[actions][parse][sidebar]")
 {
     auto const parsed = actions::fromString("OpenInNewWindow");

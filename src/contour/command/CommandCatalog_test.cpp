@@ -682,17 +682,10 @@ TEST_CASE("every new sidebar action has a catalog entry and a palette category",
 {
     using namespace actions;
     auto const sidebarActions = std::array {
-        Action { ToggleSidebar {} },
-        Action { FocusSidebar {} },
-        Action { JumpToNextAttention {} },
-        Action { MarkSeen {} },
-        Action { RenameWorkspace {} },
-        Action { MoveWorkspaceUp {} },
-        Action { MoveWorkspaceDown {} },
-        Action { CloseWorkspace {} },
-        Action { GoToPane {} },
-        Action { MoveTabToWorkspace {} },
-        Action { ToggleSidebarNeedsMe {} },
+        Action { ToggleSidebar {} },   Action { FocusSidebar {} },       Action { JumpToNextAttention {} },
+        Action { JumpBack {} },        Action { MarkSeen {} },           Action { RenameWorkspace {} },
+        Action { MoveWorkspaceUp {} }, Action { MoveWorkspaceDown {} },  Action { CloseWorkspace {} },
+        Action { GoToPane {} },        Action { MoveTabToWorkspace {} }, Action { ToggleSidebarNeedsMe {} },
     };
     for (auto const& action: sidebarActions)
     {
@@ -708,4 +701,5 @@ TEST_CASE("every new sidebar action has a catalog entry and a palette category",
     CHECK(commandCategory(Action { ToggleSidebar {} }) == CommandCategory::View);
     CHECK(commandCategory(Action { ToggleSidebarNeedsMe {} }) == CommandCategory::View);
     CHECK(commandCategory(Action { JumpToNextAttention {} }) == CommandCategory::Window);
+    CHECK(commandCategory(Action { JumpBack {} }) == CommandCategory::Window);
 }

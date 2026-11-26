@@ -15,6 +15,7 @@
 #include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarJumps.hpp>
+#include <contour/window/SidebarSections.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
@@ -291,16 +292,6 @@ namespace contour::window
 /// Registers the sidebar rows' enums with QML under Contour.Terminal, as SidebarRows. The first call
 /// registers; later ones return.
 void registerSidebarQmlTypes();
-
-/// The daemon a window is on, as its sidebar lists it: the section the window's own link feeds.
-struct OwnDaemon
-{
-    DaemonRef daemon;                                      ///< Which daemon.
-    DaemonInstance instance;                               ///< Which run of it.
-    std::string name;                                      ///< What its row calls it.
-    DaemonLocality locality = DaemonLocality::Remote;      ///< Whether it runs on this machine.
-    DaemonLinkState state = DaemonLinkState::NotConnected; ///< Where the window's link stands.
-};
 
 /// What the sidebar asks of the window it sits in. The window implements it; a test answers it with a fake.
 /// Every operation is the window's own (the same ones its actions reach), so the sidebar and the keyboard
@@ -759,14 +750,16 @@ class SidebarModel: public QAbstractListModel
     /// @return Whether @p row is of the window's own daemon (or the window has none), which the window's own
     ///         verbs -- rename, mark seen, drag, its menus -- act on; false for another daemon's row and for
     ///         a row that is not there.
-    [[nodiscard]] bool isOwnRow(int row) const noexcept;
+    [[nodiscard]] bool isOwnRow(int row) const;
     /// @param key A row's key.
     /// @return The row's index, or -1 when it is not listed.
     [[nodiscard]] int rowIndexOf(SidebarRowKey const& key) const noexcept;
     /// @param kind A workspace or a tab row.
     /// @param workspace The workspace's id, as the window's directory lists it.
     /// @param tab The tab's id; 0 for a workspace row.
-    /// @return The key of the window's own row of that node, on its own daemon and that daemon's run.
+    /// @return The key of the window's own row of that node, on its own daemon and that daemon's run as they
+    ///         are now (ISidebarHost::ownDaemon()), not as the rows were last built: right after a switch a
+    ///         key names the daemon switched to.
     [[nodiscard]] SidebarRowKey ownRowKey(SidebarRowKind kind, uint64_t workspace, uint64_t tab) const;
 
     /// Tells the model whether anyone can see its rows. The one-second timer runs only while they can.
@@ -967,15 +960,21 @@ class SidebarModel: public QAbstractListModel
     /// @return @p row, when it is a daemon row; null otherwise.
     [[nodiscard]] SidebarRow const* daemonRowAt(int row) const noexcept;
     /// @return @p row, when it is one of the window's own daemon's (isOwn()); null otherwise.
-    [[nodiscard]] SidebarRow const* ownRowAt(int row) const noexcept;
+    [[nodiscard]] SidebarRow const* ownRowAt(int row) const;
     [[nodiscard]] WorkspaceDirectory directory() const;
     /// @return The section @p daemon is listed by, as the daemon sections state it now; none for one not
     /// listed.
     [[nodiscard]] std::optional<DaemonSection> sectionOf(DaemonRef const& daemon) const;
     [[nodiscard]] Rebuilt build(WorkspaceDirectory const& directory) const;
     /// @return Whether @p key is of the window's own daemon (or the window has none): what the window's own
-    ///         verbs act on. Another daemon's rows are reached by a jump.
-    [[nodiscard]] bool isOwn(SidebarRowKey const& key) const noexcept;
+    ///         verbs act on. Another daemon's rows are reached by a jump. Asked of the window's live daemon
+    ///         (ISidebarHost::ownDaemon()), as WindowController::rowOriginOf() asks it: right after a switch
+    ///         the rows still show the daemon left until the queued rebuild, and a verb must not act on it.
+    [[nodiscard]] bool isOwn(SidebarRowKey const& key) const;
+    /// @return Whether @p key is of the own daemon the rows were built for (_own): what a rebuild lists as
+    /// the
+    ///         window's own. Rendering only; a verb asks isOwn().
+    [[nodiscard]] bool isShownAsOwn(SidebarRowKey const& key) const noexcept;
     /// Activates @p row as the user asked: the own daemon's is shown, another daemon's jumped to by @p mode.
     [[nodiscard]] sidebarrows::RowActivation activateRow(int row, JumpMode mode);
     /// Replaces the rows with @p next in one model reset: the first build's.
@@ -1027,7 +1026,8 @@ class SidebarModel: public QAbstractListModel
     std::map<SidebarRowKey, Urgency> _paneUrgency;
     /// The sections the last rebuild listed, each by its run: one not among them is a new baseline.
     std::set<SectionRun> _sectionRuns;
-    /// The window's own daemon at the last rebuild; none for a window with no daemon.
+    /// The window's own daemon at the last rebuild; none for a window with no daemon. What the rows are drawn
+    /// for only: a verb and a key ask the live one (isOwn(), ownRowKey()).
     std::optional<OwnDaemon> _own;
     QTimer _timer;
     /// Rebuilds on every change of the daemons listed; declared last, so it ends before anything it reaches.

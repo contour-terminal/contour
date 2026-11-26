@@ -114,8 +114,26 @@ struct SwitchTarget
 /// more.
 using SwitchLandBy = std::optional<core::platform::SteadyTimePoint>;
 
-/// No time a switch must land by: one the user drives from the GUI waits for nobody.
-inline constexpr auto NoLandingDeadline = SwitchLandBy {};
+/// When a switch to another daemon tells its completion that it switched.
+enum class SwitchTold : uint8_t
+{
+    /// Once the window is rebound to the daemon it switched to: a completion that acts in the window finds it
+    /// there, and a window that cannot be rebound fails the switch instead.
+    OnceLanded = 0,
+    /// Before the window leaves its daemon: the answer goes out on the connection it was asked on, which the
+    /// switch ends.
+    BeforeLeaving,
+};
+
+/// Who waits for a switch, as the request states it: until when, and when it is told.
+struct SwitchWaiter
+{
+    SwitchLandBy landBy;                      ///< When it must have landed by; none for the user's.
+    SwitchTold told = SwitchTold::OnceLanded; ///< When its completion is told it switched.
+};
+
+/// The user, driving a switch from the GUI: no time to land by, told once the window landed.
+inline constexpr auto UserSwitch = SwitchWaiter {};
 
 /// Called once when a switch request finished, or failed with the reason.
 using SwitchCompletion = std::function<void(std::expected<vthost::proto::SwitchOutcome, std::string>)>;
@@ -135,13 +153,13 @@ class WindowSwitching
     /// @param window The window asking.
     /// @param target Where to go.
     /// @param mode Replace this window's workspace or open a new window.
-    /// @param landBy When it must have landed by: one that cannot start before is refused, and one that has
-    ///        not landed by then gives up.
+    /// @param waiter Who waits for it: until when -- one that cannot start before is refused, and one that
+    ///        has not landed by then gives up -- and when @p done is told it switched.
     /// @param done Runs once on the GUI thread with the outcome or the failure reason.
     virtual void request(vtworkspace::WorkspaceId window,
                          SwitchTarget target,
                          SwitchMode mode,
-                         SwitchLandBy landBy,
+                         SwitchWaiter waiter,
                          SwitchCompletion done) = 0;
 
     /// Creates a workspace labelled @p label on @p daemon, then switches @p window to it or opens it; never

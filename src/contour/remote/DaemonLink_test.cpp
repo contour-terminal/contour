@@ -315,16 +315,6 @@ void endClosedSessions(std::span<QPointer<contour::session::TerminalSession> con
     return *std::ranges::find(listed->tab->panes, key, &contour::window::DirectoryPane::key);
 }
 
-/// Lets the GUI thread run what was queued for a while: long enough for what the daemon would send to land.
-void settleGui()
-{
-    for ([[maybe_unused]] auto const turn: std::views::iota(0, 10))
-    {
-        drainGuiEvents();
-        QTest::qWait(10);
-    }
-}
-
 /// @return The daemon workspace @p window displays through @p link, once the GUI ran what was queued; none
 ///         when the window is gone or displays none of the link's.
 [[nodiscard]] std::optional<uint64_t> displayedBy(contour::session::TerminalSessionManager const& manager,

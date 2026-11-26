@@ -822,6 +822,10 @@ TEST_CASE("default chords: Command+\\ and Ctrl+Shift+B toggle the sidebar, Comma
     CHECK(bindsChar<actions::ToggleSidebar>(desktop, U'B', CtrlShift));
     CHECK(bindsChar<actions::JumpToNextAttention>(desktop, U'J', CtrlShift));
     CHECK(bindsChar<actions::FocusSidebar>(desktop, U'D', CtrlShift));
+    // JumpBack: the next-attention chord plus a modifier.
+    CHECK(bindsChar<actions::JumpBack>(mac, U'J', CommandShift));
+    CHECK(bindsChar<actions::JumpBack>(
+        desktop, U'J', Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt }));
 
     for (auto const kind: AllKinds)
     {
@@ -830,6 +834,7 @@ TEST_CASE("default chords: Command+\\ and Ctrl+Shift+B toggle the sidebar, Comma
             auto const& action = mapping.binding.front();
             return std::holds_alternative<actions::ToggleSidebar>(action)
                    || std::holds_alternative<actions::JumpToNextAttention>(action)
+                   || std::holds_alternative<actions::JumpBack>(action)
                    || std::holds_alternative<actions::FocusSidebar>(action);
         }));
     }

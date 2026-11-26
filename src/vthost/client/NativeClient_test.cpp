@@ -2745,6 +2745,38 @@ TEST_CASE("a client learns the workspace the daemon selects instead of one that 
     CHECK(h.client->selectedWorkspace() == first);
 }
 
+// Phase 7 review M9: a long-lived connection keeps no screen of a session gone from every layout.
+TEST_CASE("a client forgets the screen of a session no layout names any more", "[vthost][attach][intent]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = selectingCapabilities();
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions { .capabilities = selectingCapabilities() } };
+    auto* const tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    auto leaves = std::vector<vtworkspace::SessionId> {};
+    tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+        if (pane.isLeaf())
+            leaves.push_back(pane.session());
+    });
+    REQUIRE(leaves.size() == 2);
+    auto const kept = leaves.front();
+    auto const closed = leaves.back();
+    auto scenario = [](IntentHarness* h, vtworkspace::SessionId gone) -> Task<void> {
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, gone] { return h->client->screens().contains(gone.value); });
+        h->host.closeSession(gone);
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, gone] { return !h->client->screens().contains(gone.value); });
+        h->client->detach();
+    }(&h, closed);
+    h.drive(std::move(scenario));
+
+    CHECK_FALSE(h.client->screens().contains(closed.value));
+    CHECK(h.client->screens().contains(kept.value));
+}
+
 TEST_CASE("selecting workspace 0 names the created workspace once its batch ends", "[vthost][attach][intent]")
 {
     auto services = vthost::NativeSessionServices {};

@@ -284,3 +284,116 @@ TEST_CASE("a daemon pane is seen at the daemon, with everything its entry states
     pane.status.push_back(recordOf(ProgramState::Error, 8));
     CHECK(isUnseen(pane));
 }
+
+namespace
+{
+/// The window's own daemon in the cross-daemon cases.
+DaemonRef const OwnRef = hostDaemonRef("alpha");
+
+/// A connected daemon's section listing @p directory.
+DaemonSection sectionOf(DaemonRef daemon,
+                        uint64_t instance,
+                        WorkspaceDirectory directory,
+                        DaemonLinkState state = DaemonLinkState::Connected)
+{
+    return DaemonSection { .daemon = std::move(daemon),
+                           .instance = DaemonInstance { instance },
+                           .name = {},
+                           .locality = DaemonLocality::Remote,
+                           .state = state,
+                           .reason = {},
+                           .directory = std::move(directory),
+                           .shownElsewhere = {},
+                           .feed = SectionFeed::Observer };
+}
+
+/// What a jump to pane @p key of @p section names (directoryOf() lists each pane in a tab of its key).
+SidebarTarget targetIn(DaemonSection const& section, uint64_t key)
+{
+    return SidebarTarget { .daemon = section.daemon,
+                           .instance = section.instance,
+                           .workspace = 1,
+                           .tab = key,
+                           .pane = PaneKey { key } };
+}
+} // namespace
+
+TEST_CASE("needs-you on another daemon before failed on this one", "[attention]")
+{
+    auto const sections = std::vector {
+        sectionOf(OwnRef, 1, directoryOf({ paneOf(1, { recordOf(ProgramState::Error, 1) }) })),
+        sectionOf(
+            hostDaemonRef("beta"), 2, directoryOf({ paneOf(7, { recordOf(ProgramState::Blocked, 1) }) })),
+    };
+    CHECK(nextAttention(sections, OwnRef, TabAttention {}, std::nullopt) == targetIn(sections[1], 7));
+}
+
+TEST_CASE("wraps across daemons in tree order", "[attention]")
+{
+    // beta and the own daemon both hold a pane of key 3: a pane is named by its daemon too.
+    auto const sections = std::vector {
+        sectionOf(
+            hostDaemonRef("beta"), 2, directoryOf({ paneOf(3, { recordOf(ProgramState::Blocked, 1) }) })),
+        sectionOf(OwnRef, 1, directoryOf({ paneOf(3, { recordOf(ProgramState::Blocked, 1) }) })),
+        sectionOf(hostDaemonRef("gamma"),
+                  4,
+                  directoryOf({ paneOf(5, { recordOf(ProgramState::Blocked, 1) }),
+                                paneOf(6, { recordOf(ProgramState::Blocked, 1) }) })),
+    };
+    auto const attention = TabAttention {};
+    CHECK(nextAttention(sections, OwnRef, attention, targetIn(sections[0], 3)) == targetIn(sections[1], 3));
+    CHECK(nextAttention(sections, OwnRef, attention, targetIn(sections[1], 3)) == targetIn(sections[2], 5));
+    // The last daemon's last candidate: the first daemon's comes next.
+    CHECK(nextAttention(sections, OwnRef, attention, targetIn(sections[2], 6)) == targetIn(sections[0], 3));
+}
+
+TEST_CASE("a not-connected daemon contributes nothing", "[attention]")
+{
+    auto const sections = std::vector {
+        sectionOf(OwnRef, 1, directoryOf({ paneOf(1, { recordOf(ProgramState::Done, 1) }) })),
+        sectionOf(hostDaemonRef("beta"),
+                  2,
+                  directoryOf({ paneOf(7, { recordOf(ProgramState::Blocked, 1) }) }),
+                  DaemonLinkState::NotConnected),
+    };
+    // Its last-known Blocked pane is skipped: the own Done one is what is left.
+    CHECK(nextAttention(sections, OwnRef, TabAttention {}, std::nullopt) == targetIn(sections[0], 1));
+    // The window's own section counts whatever its link's state.
+    auto ownDown = sections;
+    ownDown[0].state = DaemonLinkState::Reconnecting;
+    CHECK(nextAttention(ownDown, OwnRef, TabAttention {}, std::nullopt) == targetIn(ownDown[0], 1));
+}
+
+TEST_CASE("the own section's window-kept flags count", "[attention]")
+{
+    // An in-process (or older daemon's) pane: its flags are the window's ledger's, the directory states none.
+    auto pane = paneOf(2);
+    pane.flagSource = FlagSource::Window;
+    auto const sections = std::vector {
+        sectionOf(OwnRef, 1, directoryOf({ paneOf(1), pane })),
+        sectionOf(hostDaemonRef("beta"), 2, directoryOf({ paneOf(2) })),
+    };
+    auto attention = TabAttention {};
+    CHECK(nextAttention(sections, OwnRef, attention, std::nullopt) == std::nullopt);
+    REQUIRE(
+        attention.noteBell(PaneKey { 2 }, contour::platform::SessionVisibility::Hidden, OutputOrigin::Live)
+        == AttentionChange::Changed);
+    CHECK(nextAttention(sections, OwnRef, attention, std::nullopt) == targetIn(sections[0], 2));
+}
+
+TEST_CASE("a pending target is where the next press starts", "[attention]")
+{
+    auto const sections = std::vector {
+        sectionOf(OwnRef, 1, directoryOf({ paneOf(1) })),
+        sectionOf(hostDaemonRef("beta"),
+                  2,
+                  directoryOf({ paneOf(3, { recordOf(ProgramState::Blocked, 1) }),
+                                paneOf(4, { recordOf(ProgramState::Blocked, 1) }) })),
+    };
+    auto const attention = TabAttention {};
+    // From the pane still shown, the first press goes to beta's first blocked pane ...
+    auto const first = nextAttention(sections, OwnRef, attention, targetIn(sections[0], 1));
+    REQUIRE(first == targetIn(sections[1], 3));
+    // ... and a second press while that jump is pending goes on from it, not back to it.
+    CHECK(nextAttention(sections, OwnRef, attention, first) == targetIn(sections[1], 4));
+}

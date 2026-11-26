@@ -1703,6 +1703,7 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - FilterWorkspaces  Opens the workspace sidebar's filter.\n"
     "{comment} - ToggleSidebarNeedsMe Lists only what needs you in the workspace sidebar, or everything.\n"
     "{comment} - JumpToNextAttention Shows the next pane that needs you.\n"
+    "{comment} - JumpBack          Goes back to where the window was before its last jump or switch.\n"
     "{comment} - CancelSwitch      Ends a sidebar jump still under way, leaving the window as it was.\n"
     "{comment} - MarkSeen          Marks the active pane's output as seen.\n"
     "{comment} - RenameWorkspace   Renames the current workspace inline.\n"

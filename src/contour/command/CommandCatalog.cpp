@@ -153,6 +153,7 @@ namespace
         ActionCategory { .name = "FilterWorkspaces", .category = CommandCategory::View },
         ActionCategory { .name = "ToggleSidebarNeedsMe", .category = CommandCategory::View },
         ActionCategory { .name = "JumpToNextAttention", .category = CommandCategory::Window },
+        ActionCategory { .name = "JumpBack", .category = CommandCategory::Window },
         ActionCategory { .name = "CancelSwitch", .category = CommandCategory::Window },
         ActionCategory { .name = "MarkSeen", .category = CommandCategory::Window },
         ActionCategory { .name = "RenameWorkspace", .category = CommandCategory::Window },

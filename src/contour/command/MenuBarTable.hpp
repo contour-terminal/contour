@@ -83,6 +83,13 @@ enum class InputProtection : std::uint8_t
     On,      ///< The user's read-only lock holds.
 };
 
+/// Whether a jump of the window (Next Needing Me, Jump Back) would go somewhere now.
+enum class JumpAvailability : std::uint8_t
+{
+    Unavailable = 0, ///< It would do nothing: nowhere to go, or the window has no directory to go in.
+    Available,       ///< It goes somewhere.
+};
+
 /// The world, as the menu bar needs to see it.
 struct MenuBarState
 {
@@ -106,6 +113,8 @@ struct MenuBarState
     std::vector<std::string> hostNames {};                    ///< Saved hosts, sorted.
     std::vector<std::string> layoutNames {};                  ///< Saved layouts, sorted.
     DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether the window has a daemon to switch.
+    JumpAvailability nextAttention = JumpAvailability::Unavailable; ///< Whether a pane needs the user.
+    JumpAvailability jumpBack = JumpAvailability::Unavailable; ///< Whether a place is left to go back to.
     /// The palette's "Switch to daemon" commands for this window (the SwitchToDaemon ones of
     /// DaemonCommandSource): every other local daemon and saved host. One source, so the menu and the palette
     /// cannot list different daemons. Each row is titled by its Command::argument.
@@ -150,9 +159,6 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption {
         .action = "FilterWorkspaces",
         .reason = "reached from the palette, key bindings and the sidebar's filter button" },
-    MenuReachabilityExemption {
-        .action = "JumpToNextAttention",
-        .reason = "reached from the palette and key bindings; it needs the attention ledger" },
     MenuReachabilityExemption {
         .action = "CancelSwitch",
         .reason =

@@ -7376,6 +7376,11 @@ bool TerminalSession::operator()(actions::JumpToNextAttention)
     return onWindowOf(*_manager, *this, &window::WindowController::jumpToNextAttention);
 }
 
+bool TerminalSession::operator()(actions::JumpBack)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::jumpBack);
+}
+
 bool TerminalSession::operator()(actions::MarkSeen)
 {
     return onWindowOf(*_manager, *this, &window::WindowController::markActivePaneSeen);

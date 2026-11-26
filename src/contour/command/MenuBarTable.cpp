@@ -77,6 +77,16 @@ namespace
     {
         return state.switching == DaemonSwitching::Available;
     }
+
+    bool canJumpToNextAttention(MenuBarState const& state) noexcept
+    {
+        return state.nextAttention == JumpAvailability::Available;
+    }
+
+    bool canJumpBack(MenuBarState const& state) noexcept
+    {
+        return state.jumpBack == JumpAvailability::Available;
+    }
     // }}}
 
     /// A row that needs a window to act on.
@@ -406,7 +416,9 @@ namespace
             // Switching a window between daemons; both rows exist only for a window with a daemon behind it.
             Table::submenu("Switch To Daemon", switchToDaemonRows).shownWhen(canSwitchDaemon),
             windowCommand(ShowSwitcher {}, "Daemon & Workspace Switcher…").shownWhen(canSwitchDaemon),
-            Table::separator().shownWhen(canSwitchDaemon),
+            windowCommand(JumpToNextAttention {}, "Next Needing Me").enabledWhen(canJumpToNextAttention),
+            windowCommand(JumpBack {}, "Jump Back").enabledWhen(canJumpBack),
+            Table::separator(),
             Table::rows(tabListRows),
         };
         return rows;

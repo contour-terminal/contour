@@ -154,6 +154,7 @@ char modes=[Any] mods=[Shift|Alt|Control] input=U+004E clicks=- -> NewWorkspace 
 char modes=[Any] mods=[Shift|Control] input=U+005C clicks=- -> ToggleSplitOrientation declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0042 clicks=- -> ToggleSidebar declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+004A clicks=- -> JumpToNextAttention declined=pass gated=no
+char modes=[Any] mods=[Shift|Alt|Control] input=U+004A clicks=- -> JumpBack declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0044 clicks=- -> FocusSidebar declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+005A clicks=- -> TogglePaneZoom declined=pass gated=no
 char modes=[Any] mods=[Alt] input=U+0031 clicks=- -> SwitchToTab, position: 1 declined=pass gated=no
@@ -219,6 +220,7 @@ char modes=[Any] mods=[Shift|Control] input=U+0057 clicks=- -> ClosePane decline
 char modes=[Any] mods=[Shift|Alt|Control] input=U+004E clicks=- -> NewWorkspace declined=pass gated=no
 char modes=[Any] mods=[Shift|Control] input=U+0042 clicks=- -> ToggleSidebar declined=pass gated=yes
 char modes=[Any] mods=[Shift|Control] input=U+004A clicks=- -> JumpToNextAttention declined=pass gated=yes
+char modes=[Any] mods=[Shift|Alt|Control] input=U+004A clicks=- -> JumpBack declined=pass gated=yes
 char modes=[Any] mods=[Shift|Control] input=U+0044 clicks=- -> FocusSidebar declined=pass gated=yes
 char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
 char modes=[~AltScreen] mods=[Shift|Control] input=U+004C clicks=- -> ClearToPrompt declined=consume gated=no

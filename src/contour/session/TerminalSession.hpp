@@ -1870,6 +1870,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ToggleSidebarNeedsMe);
     bool operator()(actions::CancelSwitch);
     bool operator()(actions::JumpToNextAttention);
+    bool operator()(actions::JumpBack);
     bool operator()(actions::MarkSeen);
     bool operator()(actions::RenameWorkspace);
     bool operator()(actions::MoveWorkspaceUp);

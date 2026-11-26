@@ -420,6 +420,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param mode Replace what the window shows, or show the target in a new window.
     void requestSwitch(TerminalSession const& acting, SwitchTarget target, SwitchMode mode);
 
+    /// The completion every switch the user asks of a window -- an action or a switcher pick -- is made with.
+    /// @param window The window switching.
+    /// @param mode A switch in place, or an Open.
+    /// @param done What the requester is told.
+    /// @return @p done, recording the window's landing as a place it can go back to (JumpBack) when it
+    ///         switches in place (WindowController::recordingCompletion()); @p done as it is for an Open,
+    ///         which moves no window of it, or a window with no controller.
+    [[nodiscard]] SwitchCompletion recordingSwitchCompletion(vtworkspace::WorkspaceId window,
+                                                             SwitchMode mode,
+                                                             SwitchCompletion done) const;
+
     /// Shows the next or previous daemon of the ring (@see nextDaemon) in the window hosting @p acting.
     /// @param acting The session that triggered the action.
     /// @param direction Which way to step.

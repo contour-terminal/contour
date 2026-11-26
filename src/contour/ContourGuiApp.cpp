@@ -4861,15 +4861,19 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             },
         .request =
             [this](vtworkspace::WorkspaceId window, session::SwitchTarget target, session::SwitchMode mode) {
+                auto done = session::SwitchCompletion {
+                    [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+                        if (!outcome)
+                            attachLog()("switch from the switcher failed: {}", outcome.error());
+                    }
+                };
+                // A switcher pick is a place the window can go back to (JumpBack).
                 _windowSwitching->request(
                     window,
                     std::move(target),
                     mode,
-                    session::NoLandingDeadline,
-                    [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
-                        if (!outcome)
-                            attachLog()("switch from the switcher failed: {}", outcome.error());
-                    });
+                    session::UserSwitch,
+                    sessionsManager().recordingSwitchCompletion(window, mode, std::move(done)));
             },
         .startDaemon = [this](std::string const& label) { return namedDaemonStart(label); },
         .createWorkspace =

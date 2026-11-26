@@ -423,27 +423,34 @@ SidebarRow const* SidebarModel::daemonRowAt(int row) const noexcept
     return shown != nullptr && shown->key.kind == SidebarRowKind::Daemon ? shown : nullptr;
 }
 
-bool SidebarModel::isOwn(SidebarRowKey const& key) const noexcept
+bool SidebarModel::isOwn(SidebarRowKey const& key) const
+{
+    auto const own = _host.ownDaemon();
+    return !own || key.daemon == own->daemon;
+}
+
+bool SidebarModel::isShownAsOwn(SidebarRowKey const& key) const noexcept
 {
     return !_own || key.daemon == _own->daemon;
 }
 
-SidebarRow const* SidebarModel::ownRowAt(int row) const noexcept
+SidebarRow const* SidebarModel::ownRowAt(int row) const
 {
     auto const* const shown = rowAt(row);
     return shown != nullptr && isOwn(shown->key) ? shown : nullptr;
 }
 
-bool SidebarModel::isOwnRow(int row) const noexcept
+bool SidebarModel::isOwnRow(int row) const
 {
     return ownRowAt(row) != nullptr;
 }
 
 SidebarRowKey SidebarModel::ownRowKey(SidebarRowKind kind, uint64_t workspace, uint64_t tab) const
 {
+    auto const own = _host.ownDaemon();
     return SidebarRowKey { .kind = kind,
-                           .daemon = _own ? _own->daemon : DaemonRef {},
-                           .instance = _own ? _own->instance : DaemonInstance {},
+                           .daemon = own ? own->daemon : DaemonRef {},
+                           .instance = own ? own->instance : DaemonInstance {},
                            .workspace = workspace,
                            .tab = tab,
                            .pane = {} };
@@ -640,19 +647,7 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
     if (_own)
     {
         hidden = _sections.hiddenDaemons();
-        auto listed = _sections.sections();
-        auto own = DaemonSection { .daemon = _own->daemon,
-                                   .instance = _own->instance,
-                                   .name = _own->name,
-                                   .locality = _own->locality,
-                                   .state = _own->state,
-                                   .reason = {},
-                                   .directory = directory,
-                                   .shownElsewhere = {},
-                                   .feed = SectionFeed::WindowLink };
-        if (auto const at = std::ranges::find(listed, own.daemon, &DaemonSection::daemon); at != listed.end())
-            own.shownElsewhere = at->shownElsewhere;
-        sections = windowSections(std::move(listed), std::move(own), current);
+        sections = windowSections(_sections.sections(), *_own, directory, current);
         auto const shown = displayed ? std::optional { SidebarTarget { .daemon = _own->daemon,
                                                                        .instance = _own->instance,
                                                                        .workspace = displayed->workspace,
@@ -672,7 +667,7 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
 
     // A tab's icon is the window's to say: the directory knows neither its profile nor what runs in it.
     for (auto& row: listing.rows)
-        if (row.key.kind == SidebarRowKind::Tab && isOwn(row.key))
+        if (row.key.kind == SidebarRowKind::Tab && isShownAsOwn(row.key))
             if (auto const listed = findTab(directory, row.key.workspace, row.key.tab))
                 row.icon = _host.tabIcon(*listed->tab);
     // The footer and the summary count every pane and workspace, whatever the filter hides.
@@ -684,7 +679,7 @@ SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) c
                                                  .workspace = *current } }
                 : std::nullopt);
     // The switcher lists the window's own daemon's workspaces from here; the other daemons it lists itself.
-    std::erase_if(listing.workspaces, [this](SidebarRow const& row) { return !isOwn(row.key); });
+    std::erase_if(listing.workspaces, [this](SidebarRow const& row) { return !isShownAsOwn(row.key); });
     return Rebuilt { .rows = std::move(listing.rows),
                      .workspaces = std::move(listing.workspaces),
                      .footer = footer,
@@ -859,12 +854,12 @@ void SidebarModel::announceNewNeeds(std::span<DaemonSection const> sections, Wor
         auto const baseline = swapped || !_sectionRuns.contains(run);
         runs.insert(std::move(run));
         // The window's own panes are read against its own seen-state; another daemon's as it states them.
-        auto const ownSection = isOwn(SidebarRowKey { .kind = SidebarRowKind::Pane,
-                                                      .daemon = daemon,
-                                                      .instance = instance,
-                                                      .workspace = 0,
-                                                      .tab = 0,
-                                                      .pane = {} });
+        auto const ownSection = isShownAsOwn(SidebarRowKey { .kind = SidebarRowKind::Pane,
+                                                             .daemon = daemon,
+                                                             .instance = instance,
+                                                             .workspace = 0,
+                                                             .tab = 0,
+                                                             .pane = {} });
         for (auto const& workspace: directory.workspaces)
             for (auto const& tab: workspace.tabs)
                 for (auto const& pane: tab.panes)

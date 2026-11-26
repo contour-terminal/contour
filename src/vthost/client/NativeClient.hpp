@@ -941,6 +941,12 @@ class NativeClient final
     proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
     HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
+    /// The sessions each workspace's layout names, by workspace, as the daemon last stated them: a screen of
+    /// a session none of them names once a batch ends is gone with it (forgetUnlaidScreens()).
+    std::map<uint64_t, std::set<uint64_t>> _layoutSessions;
+    /// Drops the screens of the sessions no layout names any more: a long-lived connection, an observer's
+    /// above all, keeps no screen of every session that ever said something.
+    void forgetUnlaidScreens();
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.
     std::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> _pendingImages;

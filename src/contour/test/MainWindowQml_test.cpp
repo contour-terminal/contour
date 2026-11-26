@@ -4960,6 +4960,49 @@ TEST_CASE("Main.qml notices: the toast sits in a band that holds it, else in the
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 
+    // Review (Phase 6 round 2, item 4): the band's centre -- the title, or the breadcrumb beside a sidebar --
+    // stuck out beside the pill ("…aude"); it gives way while the toast holds the centre.
+    SECTION("the macOS row: the band's centre gives way to the toast")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        showWindow(*root);
+        auto const* title = root->findChild<QQuickItem*>(QStringLiteral("bandTitleRow"));
+        auto const* breadcrumb = root->findChild<QQuickItem*>(QStringLiteral("breadcrumb"));
+        REQUIRE(title != nullptr);
+        REQUIRE(breadcrumb != nullptr);
+        // Whichever the row's centre is now, both give way alike.
+        CHECK(title->opacity() == 1);
+        CHECK(breadcrumb->opacity() == 1);
+
+        controller.notices().post(copiedNotice());
+        QCoreApplication::processEvents();
+        auto const* toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(toast->property("host").toString() == "titleBand");
+        CHECK(QTest::qWaitFor([&] { return title->opacity() == 0 && breadcrumb->opacity() == 0; }, 2000));
+        // Review (Phase 7, M6): gone, not only faded -- no click target beside the pill, nothing read out.
+        CHECK_FALSE(title->isEnabled());
+        CHECK_FALSE(breadcrumb->isEnabled());
+        auto const ignored = [](QQuickItem const* item) {
+            for (auto const* child: item->findChildren<QObject*>(Qt::FindDirectChildrenOnly))
+                if (child->inherits("QQuickAccessibleAttached"))
+                    return child->property("ignored").toBool();
+            return false;
+        };
+        for (auto const* part: { "bandTitle", "bandJump" })
+        {
+            INFO(part);
+            auto const* item = root->findChild<QQuickItem*>(QString::fromLatin1(part));
+            REQUIRE(item != nullptr);
+            CHECK(ignored(item));
+        }
+        CHECK(ignored(breadcrumb));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
     SECTION("the ContourLinux row with the strip hidden: no band, so in the content")
     {
         QQmlEngine engine;

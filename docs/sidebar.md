@@ -78,7 +78,19 @@ blocked.
 **⌘J** (macOS) or **Ctrl+Shift+J** (Linux and Windows), the `JumpToNextAttention` action, shows the next pane
 that asks something of you. It visits needs-you panes first, then failed, then done-not-seen, each class in
 sidebar order, and wraps around. It never lands on a working or idle pane. Landing on a pane marks it seen.
+It looks across every daemon the sidebar lists that is connected, in the tree's order, so a pane on another
+daemon that needs you comes before one here that only failed; going there switches the window to that daemon.
+Pressing it again while that switch connects goes on to the next item, and showing anything of this window's
+own daemon meanwhile ends the switch.
 **Mark Seen** in a row's menu (the `MarkSeen` action) does that without going there.
+
+**⇧⌘J** (macOS) or **Ctrl+Shift+Alt+J** (Linux and Windows), the `JumpBack` action, goes back to where the
+window was before its last jump, workspace switch, sidebar activation or switcher pick; each press goes one
+place further back, up to 16. A run of `JumpToNextAttention` counts as one place, so after working through what
+needed you one press returns to where you started. Switching tabs in the tab strip is not a place of its own,
+and places whose daemon restarted, or whose workspace or tab closed, are skipped, as is the place the window is on
+now. A jump back that fails or is cancelled keeps its place; with nowhere left, the window says "Nowhere to go back
+to". Both are in the **Window** menu, as **Next Needing Me** and **Jump Back**, greyed while they would do nothing.
 
 The footer shows the key, so you find it again.
 
@@ -89,6 +101,7 @@ The footer shows the key, so you find it again.
 | `ToggleSidebar`: show or hide | ⌘\ | Ctrl+Shift+B |
 | `FocusSidebar`: move keyboard focus into it, showing it first when hidden | ⌘⇧E | Ctrl+Shift+D |
 | `JumpToNextAttention` | ⌘J | Ctrl+Shift+J |
+| `JumpBack`: go back to where the window was before its last jump or switch | ⇧⌘J | Ctrl+Shift+Alt+J |
 | `CycleWorkspace`: show the next / previous workspace | ⌃⌘↓ / ⌃⌘↑ | Ctrl+Alt+PageDown / PageUp |
 | `MoveWorkspaceDown` / `MoveWorkspaceUp`: move the current workspace in the list | ⌃⇧⌘↓ / ⌃⇧⌘↑ | Ctrl+Shift+Alt+PageDown / PageUp |
 | `NewWorkspace`: create a workspace and show it | ⇧⌘N | Ctrl+Shift+Alt+N |

@@ -1019,9 +1019,11 @@ TEST_CASE("DaemonPresence: Remove drops a not-running daemon for this run only",
 {
     auto daemon = DaemonFixture {};
     auto rig = PresenceRig { daemon };
+    // Each look is waited out before `running` changes: a refresh while one runs starts none, and the look
+    // reads `running` off the GUI thread. The window's own daemon is listed before any look finishes.
     rig.discovery->running = { "default" };
     rig.presence->refresh();
-    REQUIRE(waitUntil([&] { return rig.section(Default).has_value(); }));
+    REQUIRE(waitUntil([&] { return rig.presence->localDaemons().size() == 1; }));
     auto const work = contour::window::localDaemonRef("work");
     rig.discovery->running = { "default", "work" };
     rig.presence->refresh();
@@ -1029,6 +1031,7 @@ TEST_CASE("DaemonPresence: Remove drops a not-running daemon for this run only",
     // It stops: listed for the rest of the run all the same.
     rig.discovery->running = { "default" };
     rig.presence->refresh();
+    REQUIRE(waitUntil([&] { return rig.presence->localDaemons().size() == 1; }));
     REQUIRE(rig.section(work).has_value());
 
     rig.presence->remove(work);

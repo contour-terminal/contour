@@ -86,6 +86,7 @@ Shift or moves, and the table says why.
 | Toggle split orientation | `Ctrl+Shift+\` | `⌃⇧\` | |
 | Show or hide the workspace sidebar (`ToggleSidebar`) | `Ctrl+Shift+B` | `⌘\` | `native2026` only |
 | Jump to the next pane that needs you (`JumpToNextAttention`) | `Ctrl+Shift+J` | `⌘J` | `native2026` only |
+| Jump back to where the window was (`JumpBack`) | `Ctrl+Shift+Alt+J` | `⇧⌘J` | `native2026` only |
 | Focus the workspace sidebar (`FocusSidebar`) | `Ctrl+Shift+D` | `⇧⌘E` | `native2026` only |
 | Find (`SearchReverse`) | `Ctrl+Shift+F` | `⌘F` | |
 | Next / previous match | `F3` / `Shift+F3` | `⌘G` / `⇧⌘G`, and `F3` / `Shift+F3` | |
@@ -328,6 +329,7 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 | `FilterWorkspaces` | none | none | Opens the sidebar's filter with the keyboard in it, showing the sidebar first when hidden. |
 | `ToggleSidebarNeedsMe` | none | none | Lists only the rows on the way to a pane that needs you (blocked, failed, or done and not seen), plus the tab shown; again lists everything. Shows the sidebar first when hidden. Also the sidebar's Needs-me control and View ▸ Show Only What Needs Me. |
 | `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
+| `JumpBack` | `Ctrl+Shift+Alt+J` | `⇧⌘J` | Goes back to where the window was before its last jump, workspace switch, sidebar activation or switcher pick; each press goes one place further back (up to 16). A run of `JumpToNextAttention` counts as one place, and places whose daemon restarted or whose workspace or tab closed are skipped. |
 | `CancelSwitch` | none | none | Ends a jump the sidebar started that is still under way, leaving the window where it was; nothing while none is. It does not end a daemon's connect, which the daemon row's Cancel ends. |
 | `MarkSeen` | none | none | Marks the active pane's output as seen. |
 | `RenameWorkspace` | none | none | Renames the current workspace inline. |

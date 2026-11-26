@@ -275,6 +275,8 @@ ThemedWindow
         // or still fading out.
         presence: appWindow.band.band
         centre: appWindow.band.centre
+        // The notice toast, while the band hosts it, takes the band's centre.
+        centreYielded: noticeToast.shown && noticeToast.host === "titleBand"
         // A concealed "reveal" band leaves the screen and the accessibility tree once it has slid away (or,
         // under Reduce Motion, faded out). A "pinned" one overlays the top rows like a revealed one, held there
         // while the remote connection is interrupted.

@@ -100,7 +100,7 @@ class WindowSwitcher final: public SwitchingService
     void request(vtworkspace::WorkspaceId window,
                  session::SwitchTarget target,
                  session::SwitchMode mode,
-                 session::SwitchLandBy landBy,
+                 session::SwitchWaiter waiter,
                  session::SwitchCompletion done) override;
 
     /// Ends the switch @p window waits in, if any: whatever it started goes with the window, which a deadline
@@ -164,7 +164,7 @@ class WindowSwitcher final: public SwitchingService
         vtworkspace::WorkspaceId window;
         session::SwitchTarget target;
         session::SwitchMode mode;
-        session::SwitchLandBy landBy; ///< When it must have landed by, if it must.
+        session::SwitchWaiter waiter; ///< Until when it must have landed, and when done is told it switched.
         session::SwitchCompletion done;
         SameDaemon sameDaemon = SameDaemon::No;
         uint64_t serial = 0;                    ///< Which request of its window this is (@see _busy).

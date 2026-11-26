@@ -15,6 +15,7 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/PermissionFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
+#include <contour/test/SwitcherFakes.hpp>
 #include <contour/window/SidebarJumps.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/WindowController.hpp>
@@ -580,14 +581,28 @@ enum class RigListing : uint8_t
 {
     OwnOnly = 0, ///< Nothing but the window's own daemon: the production presence finds no daemon of a test.
     WithB,       ///< Daemon B too, as the saved host `b`, observed while no window is on it.
+    BothListed, ///< B as WithB, and A too, as the local daemon `a` running now: a window can come back to it.
+};
+
+/// What a SwitchRig's switcher reaches as the presence of the listed daemons.
+enum class SwitcherPool : uint8_t
+{
+    Fake = 0, ///< The rig's FakeObserverPool: a jump dials its own connection, and a left link is stopped.
+    Presence, ///< The application's presence itself, as production wires it: a jump adopts its observer.
 };
 
 /// Finds no local daemon: a test's presence never reaches this machine's.
-class NoLocalDaemons final: public contour::cli::IDaemonDiscovery
+[[nodiscard]] std::shared_ptr<contour::cli::IDaemonDiscovery> noLocalDaemons()
 {
-  public:
-    [[nodiscard]] std::vector<contour::cli::DiscoveredDaemon> discover() override { return {}; }
-};
+    return std::make_shared<contour::test::FixedDiscovery>(std::vector<contour::cli::DiscoveredDaemon> {});
+}
+
+/// Finds the local daemon `a` running, as a presence that lists every local daemon running would.
+[[nodiscard]] std::shared_ptr<contour::cli::IDaemonDiscovery> localDaemonA()
+{
+    return std::make_shared<contour::test::FixedDiscovery>(std::vector {
+        contour::cli::DiscoveredDaemon { .label = "a", .socket = {}, .workspaces = std::nullopt } });
+}
 
 /// Two daemons of distinct runs, A of two workspaces (the second hidden, so a launch brings back only the
 /// first) and B of two (or of none but its own empty one), a window on A's first, and the switcher.
@@ -603,9 +618,10 @@ struct SwitchRig
     std::vector<std::unique_ptr<DaemonLink>> links;
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     FakeApp host { app.manager(), links, timeline, { { "a", a.endpoint() }, { "b", b.endpoint() } } };
-    FakeObserverPool pool;           ///< The presence the switcher reaches; lists nothing unless a test says.
-    FixedRandom random;              ///< Draws the creation tokens.
-    FixtureLister* lister = nullptr; ///< The switcher's.
+    FakeObserverPool
+        pool;           ///< The switcher's presence (SwitcherPool::Fake); lists nothing unless a test says.
+    FixedRandom random; ///< Draws the creation tokens.
+    FixtureLister* lister = nullptr;                       ///< The switcher's.
     std::vector<contour::remote::SwitchPickRequest> picks; ///< What the switcher popup was asked to show.
     ManualSwitchTimer timer;                               ///< The switcher's deadlines.
     std::unique_ptr<contour::remote::WindowSwitcher> switcher;
@@ -619,6 +635,16 @@ struct SwitchRig
     /// @param listing What the window's sidebar lists besides its own daemon.
     explicit SwitchRig(RigListing listing):
         SwitchRig(contour::remote::NativeController::SwitchRequests::Answered, DaemonBStart::Seeded, listing)
+    {
+    }
+
+    /// @param listing What the window's sidebar lists besides its own daemon.
+    /// @param switcherPool What the switcher reaches as the presence.
+    SwitchRig(RigListing listing, SwitcherPool switcherPool):
+        SwitchRig(contour::remote::NativeController::SwitchRequests::Answered,
+                  DaemonBStart::Seeded,
+                  listing,
+                  switcherPool)
     {
     }
 
@@ -637,9 +663,11 @@ struct SwitchRig
     /// @param switchRequests Whether the window's client answers the daemon's switch requests.
     /// @param bStart How daemon B starts.
     /// @param listing What the window's sidebar lists besides its own daemon.
+    /// @param switcherPool What the switcher reaches as the presence.
     SwitchRig(contour::remote::NativeController::SwitchRequests switchRequests,
               DaemonBStart bStart,
-              RigListing listing = RigListing::OwnOnly):
+              RigListing listing = RigListing::OwnOnly,
+              SwitcherPool switcherPool = SwitcherPool::Fake):
         bWorkspaces(bStart == DaemonBStart::Seeded ? seedWorkspaces(b, 2) : std::vector<uint64_t> {}),
         app { std::make_unique<contour::test::MockPtySessionFactory>(),
               nullptr,
@@ -659,10 +687,13 @@ struct SwitchRig
         auto made = std::make_unique<FixtureLister>(
             std::map<std::string, DaemonFixture*> { { "a", &a }, { "b", &b }, { "down", &b } });
         lister = made.get();
+        auto& reached = switcherPool == SwitcherPool::Presence
+                            ? static_cast<contour::remote::IObserverPool&>(presence())
+                            : static_cast<contour::remote::IObserverPool&>(pool);
         switcher = std::make_unique<contour::remote::WindowSwitcher>(
             app.manager(),
             host,
-            pool,
+            reached,
             std::move(made),
             [this](contour::remote::SwitchPickRequest pick) {
                 picks.push_back(std::move(pick));
@@ -727,20 +758,24 @@ struct SwitchRig
     {
         if (listing == RigListing::OwnOnly)
             return {};
+        // Each daemon's observer reaches that daemon: A by its local label, every other one B.
+        auto const endpointOf = [this](contour::window::DaemonRef const& daemon) {
+            return daemon == contour::window::localDaemonRef("a") ? a.endpoint() : b.endpoint();
+        };
         return contour::remote::PresenceOverrides {
             .makeObserver =
-                [this](contour::window::DaemonRef const&,
-                       std::shared_ptr<vthost::ITransportFactory> transport,
-                       vthost::client::BackoffSchedule backoff) {
+                [this, endpointOf](contour::window::DaemonRef const& daemon,
+                                   std::shared_ptr<vthost::ITransportFactory> transport,
+                                   vthost::client::BackoffSchedule backoff) {
                     return makeNativeController(
-                        b.endpoint(),
+                        endpointOf(daemon),
                         timeline,
                         ControllerOptions { .backoff = backoff,
                                             .role = vthost::proto::ConnectionRole::Observe,
                                             .transport = std::move(transport) });
                 },
             .refreshTimer = [](std::chrono::milliseconds, std::function<void()> const&) {},
-            .discovery = std::make_shared<NoLocalDaemons>(),
+            .discovery = listing == RigListing::BothListed ? localDaemonA() : noLocalDaemons(),
             // B's configuration lists it; what the user chose is the app's GUI state, as production reads it.
             .settings =
                 [this] {
@@ -756,9 +791,9 @@ struct SwitchRig
                     }
                     return settings;
                 },
-            .observerTransport = [this](contour::window::DaemonRef const&)
+            .observerTransport = [endpointOf](contour::window::DaemonRef const& daemon)
                 -> std::expected<std::shared_ptr<vthost::ITransportFactory>, contour::remote::DialRefusal> {
-                return makeTestTlsTransport(b.endpoint());
+                return makeTestTlsTransport(endpointOf(daemon));
             },
             .windowLinks = [this] { return linkViews(); },
         };
@@ -812,8 +847,7 @@ struct SwitchRig
         SwitchTarget target, SwitchMode mode = SwitchMode::Switch) const
     {
         auto told = Told {};
-        switcher->request(
-            shown(), std::move(target), mode, contour::session::NoLandingDeadline, told.completion());
+        switcher->request(shown(), std::move(target), mode, contour::session::UserSwitch, told.completion());
         REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
         return *told.outcome;
     }
@@ -1087,14 +1121,16 @@ TEST_CASE("WindowSwitcher: a program's switch to another daemon is told it switc
     auto told = Told {};
     auto completion = told.completion();
     // A program's switch has a time to land by (proto::SwitchRequest).
-    rig.switcher->request(rig.shown(),
-                          to(daemonB(), "2"),
-                          SwitchMode::Switch,
-                          rig.host.clock.now() + 20s,
-                          [&](std::expected<SwitchOutcome, std::string> outcome) {
-                              toldWhileOld = rig.windowLink() == &oldLink && oldLink.isLive();
-                              completion(std::move(outcome));
-                          });
+    rig.switcher->request(
+        rig.shown(),
+        to(daemonB(), "2"),
+        SwitchMode::Switch,
+        contour::session::SwitchWaiter { .landBy = rig.host.clock.now() + 20s,
+                                         .told = contour::session::SwitchTold::BeforeLeaving },
+        [&](std::expected<SwitchOutcome, std::string> outcome) {
+            toldWhileOld = rig.windowLink() == &oldLink && oldLink.isLive();
+            completion(std::move(outcome));
+        });
     REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
     REQUIRE(*told.outcome == SwitchOutcome::Switched);
     CHECK(toldWhileOld == true);
@@ -1122,7 +1158,7 @@ TEST_CASE(
     rig.switcher->request(rig.shown(),
                           to(daemonB(), "2"),
                           SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           [&](std::expected<SwitchOutcome, std::string> outcome) {
                               toldOn = rig.windowLink();
                               daemonWhenTold = rig.app.manager().daemonRefOf(rig.shown());
@@ -1285,11 +1321,8 @@ TEST_CASE("WindowSwitcher: a daemon lost after the connect and before the first 
     hide(rig.b, rig.bWorkspaces[1]);
     rig.b.holdNewConnectionsAtLayout();
     auto told = Told {};
-    rig.switcher->request(rig.shown(),
-                          to(daemonB(), "2"),
-                          SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
-                          told.completion());
+    rig.switcher->request(
+        rig.shown(), to(daemonB(), "2"), SwitchMode::Switch, contour::session::UserSwitch, told.completion());
     // The new link's connection selects B's workspace, and is held before its first layout.
     REQUIRE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) == 1; }));
     CHECK_FALSE(told.outcome.has_value());
@@ -1326,7 +1359,7 @@ TEST_CASE(
     rig.switcher->request(rig.shown(),
                           to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
                           SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           told.completion());
     REQUIRE(waitUntil(
         [&] { return rig.a.onDaemon([&rig] { return rig.a.host->model().workspaceCount(); }) == 3; }));
@@ -1361,7 +1394,7 @@ TEST_CASE("WindowSwitcher: a switch within the daemon whose target never shows t
     rig.switcher->request(rig.shown(),
                           to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
                           SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           told.completion());
     REQUIRE(waitUntil(
         [&] { return rig.a.onDaemon([&rig] { return rig.a.host->model().workspaceCount(); }) == 3; }));
@@ -1401,7 +1434,7 @@ TEST_CASE("WindowSwitcher: a timed-out switch to a new workspace hides the one t
     rig.switcher->request(rig.shown(),
                           to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
                           SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           told.completion());
     // The daemon makes the workspace; its layout is held on the way to the window's connection.
     REQUIRE(waitUntil(
@@ -1434,11 +1467,8 @@ TEST_CASE("WindowSwitcher: a switch to another daemon whose target never shows t
     hide(rig.b, rig.bWorkspaces[1]);
     rig.b.holdNewConnectionsAtLayout();
     auto told = Told {};
-    rig.switcher->request(rig.shown(),
-                          to(daemonB(), "2"),
-                          SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
-                          told.completion());
+    rig.switcher->request(
+        rig.shown(), to(daemonB(), "2"), SwitchMode::Switch, contour::session::UserSwitch, told.completion());
     // The new link's connection selects B's workspace, and is held before its first layout.
     REQUIRE(waitUntil([&] { return showing(rig.b, rig.bWorkspaces[1]) == 1; }));
     REQUIRE(rig.timer.armed.size() == 1);
@@ -1478,7 +1508,7 @@ TEST_CASE(
     rig.switcher->request(rig.shown(),
                           to(daemonB(), std::string { contour::remote::NewWorkspaceSpec }),
                           SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           told.completion());
     // B makes the workspace for the new link's connection, whose first layout is held.
     REQUIRE(waitUntil([&] {
@@ -1531,11 +1561,8 @@ TEST_CASE("WindowSwitcher: a switch to a workspace holding no tab waits for one,
     auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
     rig.lister->staleHoldingTab.insert(bOwn);
     auto told = Told {};
-    rig.switcher->request(rig.shown(),
-                          to(daemonB(), "1"),
-                          SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
-                          told.completion());
+    rig.switcher->request(
+        rig.shown(), to(daemonB(), "1"), SwitchMode::Switch, contour::session::UserSwitch, told.completion());
     REQUIRE(waitUntil([&] { return showing(rig.b, bOwn) == 1; }, 2000));
     REQUIRE(rig.timer.armed.size() == 1);
     auto const& link = *rig.links.back();
@@ -1582,11 +1609,8 @@ TEST_CASE("WindowSwitcher: a deadline passing before the target's layout arrived
     rig.lister->staleHoldingTab.insert(bOwn);
     auto told = Told {};
     rig.timer.firing = ManualSwitchTimer::Firing::AtOnce;
-    rig.switcher->request(rig.shown(),
-                          to(daemonB(), "1"),
-                          SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
-                          told.completion());
+    rig.switcher->request(
+        rig.shown(), to(daemonB(), "1"), SwitchMode::Switch, contour::session::UserSwitch, told.completion());
     drainGuiEvents();
 
     REQUIRE(told.outcome.has_value());
@@ -1607,7 +1631,7 @@ TEST_CASE("WindowSwitcher: a switch waiting for a tab ends for a newer switch of
     rig.switcher->request(rig.shown(),
                           to(daemonB(), "1"),
                           SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           waiting.completion());
     REQUIRE(waitUntil([&] { return showing(rig.b, bOwn) == 1; }, 2000));
     REQUIRE(waitUntil(
@@ -1632,11 +1656,8 @@ TEST_CASE("WindowSwitcher: the close of a window ends the switch it waits in", "
     auto const bOwn = rig.b.onDaemon([&] { return rig.b.host->workspaceId().value; });
     rig.lister->staleHoldingTab.insert(bOwn);
     auto told = Told {};
-    rig.switcher->request(rig.shown(),
-                          to(daemonB(), "1"),
-                          SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
-                          told.completion());
+    rig.switcher->request(
+        rig.shown(), to(daemonB(), "1"), SwitchMode::Switch, contour::session::UserSwitch, told.completion());
     REQUIRE(waitUntil([&] { return showing(rig.b, bOwn) == 1; }, 2000));
     REQUIRE(waitUntil(
         [&] { return rig.links.back()->switchWait() == contour::remote::SwitchWait::ForFirstTab; }));
@@ -1808,18 +1829,21 @@ TEST_CASE("WindowSwitcher: a switch within the daemon lands on the row's tab", "
     CHECK(shown->indexOf(shown->activeTab()->id()) == 0);
 }
 
-TEST_CASE("WindowSwitcher: a landing naming a tab alone shows that tab's active pane, not its first",
-          "[switch][link][jump]")
+namespace
 {
-    auto rig = SwitchRig {};
-    // A's second workspace's tab, split, its active pane not the one listed first.
+/// A split tab of a daemon's, by the daemon's ids.
+struct SplitTab
+{
+    uint64_t tab = 0;    ///< The tab's id on the daemon.
+    uint64_t first = 0;  ///< The session of the pane listed first.
+    uint64_t active = 0; ///< The session of its active pane, listed last.
+};
+
+/// Splits the tab of A's second workspace, its active pane made the one listed last: not the one listed
+/// first, which a landing on the tab must not show.
+[[nodiscard]] SplitTab splitSecondWorkspaceOfA(SwitchRig& rig)
+{
     auto const id = vtworkspace::WorkspaceId { rig.aWorkspaces[1] };
-    struct SplitTab
-    {
-        uint64_t tab = 0;
-        uint64_t first = 0;
-        uint64_t active = 0;
-    };
     auto const split = rig.a.onDaemon([&] {
         auto* const tab = rig.a.host->model().workspace(id)->tabAt(0);
         rig.a.host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
@@ -1835,6 +1859,16 @@ TEST_CASE("WindowSwitcher: a landing naming a tab alone shows that tab's active 
                           .active = tab->activePane()->session().value };
     });
     REQUIRE(split.active != split.first);
+    return split;
+}
+} // namespace
+
+TEST_CASE("WindowSwitcher: a landing naming a tab alone shows that tab's active pane, not its first",
+          "[switch][link][jump]")
+{
+    auto rig = SwitchRig {};
+    // A's second workspace's tab, split, its active pane not the one listed first.
+    auto const split = splitSecondWorkspaceOfA(rig);
     auto target = to(daemonA(), "2");
     target.focus = contour::session::LandingFocus { .tab = split.tab, .pane = std::nullopt };
 
@@ -2296,6 +2330,756 @@ TEST_CASE("WindowSwitcher: Split on another daemon's tab jumps there, then split
         3000));
 }
 
+namespace
+{
+/// A program status OSC that marks its pane Blocked: it asks the user.
+constexpr auto BlockedStatus = std::string_view { "\033]7501;state=blocked:id=agent\033\\" };
+
+/// @return Whether the window of @p rig is on B.
+[[nodiscard]] bool onB(SwitchRig& rig)
+{
+    return rig.app.manager().daemonRefOf(rig.shown()) == sidebarB();
+}
+
+/// @return The panes of @p directory's workspace @p workspace it lists Blocked, in its order.
+[[nodiscard]] std::vector<contour::window::PaneKey> blockedPanesIn(
+    contour::window::WorkspaceDirectory const& directory, uint64_t workspace)
+{
+    auto keys = std::vector<contour::window::PaneKey> {};
+    if (auto const* const listed = contour::window::findWorkspace(directory, workspace))
+        for (auto const& tab: listed->tabs)
+            for (auto const& pane: tab.panes)
+                if (std::ranges::any_of(pane.status, [](auto const& record) {
+                        return record.state == vtbackend::ProgramState::Blocked;
+                    }))
+                    keys.push_back(pane.key);
+    return keys;
+}
+
+/// @return The panes of B's workspace @p workspace the window's sidebar lists Blocked, in its order.
+[[nodiscard]] std::vector<contour::window::PaneKey> blockedPanesOfB(SwitchRig& rig, uint64_t workspace)
+{
+    return blockedPanesIn(awaitSectionB(rig, workspace).directory, workspace);
+}
+
+/// @return The pane @p window has active; none for none.
+[[nodiscard]] std::optional<contour::window::PaneKey> activePaneOf(SwitchRig& rig,
+                                                                   contour::window::WindowController& window)
+{
+    auto const* const active = window.activeSession();
+    return active != nullptr ? std::optional { rig.app.manager().paneKeyOf(active->modelSessionId()) }
+                             : std::nullopt;
+}
+
+/// @return Whether @p window is on B with @p pane active.
+[[nodiscard]] bool showsPaneOfB(SwitchRig& rig,
+                                contour::window::WindowController& window,
+                                contour::window::PaneKey pane)
+{
+    return onB(rig) && activePaneOf(rig, window) == pane;
+}
+
+/// Has B's pane of @p workspace go Blocked, and waits for the window's sidebar to list it so.
+/// @return Its pane key.
+[[nodiscard]] contour::window::PaneKey blockPaneOfB(SwitchRig& rig, uint64_t workspace)
+{
+    printInPaneOf(rig.b, workspace, std::string { BlockedStatus });
+    REQUIRE(waitUntil([&] { return !blockedPanesOfB(rig, workspace).empty(); }, 3000));
+    return blockedPanesOfB(rig, workspace).front();
+}
+
+/// @return The row of A's workspace @p workspace in @p window's sidebar; negative for none.
+[[nodiscard]] int ownWorkspaceRow(contour::window::WindowController& window, uint64_t workspace)
+{
+    return sidebarRowWhere(window, [&](auto const& key) {
+        return key.kind == contour::window::SidebarRowKind::Workspace && key.workspace == workspace
+               && key.daemon != sidebarB();
+    });
+}
+} // namespace
+
+TEST_CASE("JumpToNextAttention lands on another daemon's blocked pane", "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const pane = blockPaneOfB(rig, rig.bWorkspaces[1]);
+
+    window.jumpToNextAttention();
+
+    auto const& requests = rig.app.switching().requests;
+    REQUIRE(requests.size() == 1);
+    CHECK(requests.front().mode == SwitchMode::Switch);
+    REQUIRE(waitUntil([&] { return onB(rig); }, 3000));
+    CHECK(waitUntil(
+        [&] {
+            auto const* const source = window.directorySource();
+            auto const* const active = window.activeSession();
+            return source != nullptr && source->directory().selected == rig.bWorkspaces[1]
+                   && active != nullptr && rig.app.manager().paneKeyOf(active->modelSessionId()) == pane;
+        },
+        3000));
+}
+
+TEST_CASE("an own-row activation while a jump connects ends that jump", "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    std::ignore = blockPaneOfB(rig, rig.bWorkspaces[1]);
+    // B's new link is held before it shows anything: the jump stays connecting.
+    rig.b.holdNewConnectionsAtLayout();
+    window.jumpToNextAttention();
+    REQUIRE(waitUntil([&] { return rig.host.started == 1; }, 2000));
+    REQUIRE(window.sidebar().isJumpPending());
+    auto const saidBefore = rig.said != nullptr ? rig.said->said.size() : std::size_t { 0 };
+
+    auto const own = ownWorkspaceRow(window, rig.aWorkspaces[1]);
+    REQUIRE(own >= 0);
+    window.sidebar().activate(own);
+
+    CHECK(rig.app.switching().cancels == std::vector { rig.shown() });
+    CHECK_FALSE(window.sidebar().isJumpPending());
+    rig.b.releaseHeld();
+    drainGuiEvents();
+    // The window stays on A, on the workspace the newer navigation chose, and the ended jump said nothing.
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(waitUntil([&] { return rig.launchLink().workspaceOf(rig.shown()) == rig.aWorkspaces[1]; }, 3000));
+    CHECK((rig.said == nullptr || rig.said->said.size() == saidBefore));
+}
+
+// Carry-over (Task 26, correction 22): a second press while a jump connects goes on from where that jump
+// goes.
+TEST_CASE("JumpToNextAttention while a jump connects goes on from that jump's pane",
+          "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const first = blockPaneOfB(rig, rig.bWorkspaces[0]);
+    auto const second = blockPaneOfB(rig, rig.bWorkspaces[1]);
+    rig.b.holdNewConnectionsAtLayout();
+
+    window.jumpToNextAttention();
+    auto const& requests = rig.app.switching().requests;
+    REQUIRE(requests.size() == 1);
+    REQUIRE(window.sidebar().isJumpPending());
+    auto const firstAsked = requests.front().target.focus.pane;
+    REQUIRE(firstAsked.has_value());
+    REQUIRE((*firstAsked == first || *firstAsked == second));
+
+    // The window still shows A's pane: from it, the first would be asked again.
+    window.jumpToNextAttention();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests.back().target.focus.pane.has_value());
+    CHECK(requests.back().target.focus.pane != firstAsked);
+    rig.b.releaseHeld();
+}
+
+// Phase 7 review I3: once the window is on B, a press goes on to a pane of B's other workspace along the
+// window's own link, with no new switch -- the link a jump lands on carries every pane's program status.
+namespace
+{
+/// @return The panes of workspace @p workspace that @p window's own directory -- not the presence's section
+///         of its daemon -- lists Blocked.
+[[nodiscard]] std::vector<contour::window::PaneKey> ownBlockedPanes(contour::window::WindowController& window,
+                                                                    uint64_t workspace)
+{
+    auto const* const source = window.directorySource();
+    return source != nullptr ? blockedPanesIn(source->directory(), workspace)
+                             : std::vector<contour::window::PaneKey> {};
+}
+
+/// Presses JumpToNextAttention until @p window shows one of @p candidates on B.
+/// @return The pane it landed on.
+[[nodiscard]] contour::window::PaneKey landOnB(SwitchRig& rig,
+                                               contour::window::WindowController& window,
+                                               std::span<contour::window::PaneKey const> candidates)
+{
+    window.jumpToNextAttention();
+    REQUIRE(waitUntil(
+        [&] {
+            return std::ranges::any_of(candidates,
+                                       [&](auto const pane) { return showsPaneOfB(rig, window, pane); });
+        },
+        3000));
+    return *activePaneOf(rig, window);
+}
+
+/// Presses JumpToNextAttention twice on B: on to @p other, of B's workspace @p workspace, then back to
+/// @p landed. Neither press asks for a switch.
+void triageOnB(SwitchRig& rig,
+               contour::window::WindowController& window,
+               contour::window::PaneKey landed,
+               contour::window::PaneKey other,
+               uint64_t workspace)
+{
+    auto const requests = rig.app.switching().requests.size();
+    window.jumpToNextAttention();
+    CHECK(waitUntil([&] { return showsPaneOfB(rig, window, other); }, 3000));
+    CHECK(window.directorySource()->directory().selected == workspace);
+    window.jumpToNextAttention();
+    CHECK(waitUntil([&] { return showsPaneOfB(rig, window, landed); }, 3000));
+    CHECK(rig.app.switching().requests.size() == requests);
+}
+} // namespace
+
+TEST_CASE("JumpToNextAttention on B goes on to B's other workspace", "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const blocked =
+        std::array { blockPaneOfB(rig, rig.bWorkspaces[0]), blockPaneOfB(rig, rig.bWorkspaces[1]) };
+    auto const landed = landOnB(rig, window, blocked);
+    auto const at = landed == blocked[0] ? std::size_t { 1 } : std::size_t { 0 };
+    // This rig's pool has no observer to hand over: the jump dialled B afresh, and the status of the panes
+    // the window does not show comes with the connection's first coalesced flush, after the layout it landed
+    // on.
+    REQUIRE(waitUntil(
+        [&] { return std::ranges::contains(ownBlockedPanes(window, rig.bWorkspaces[at]), blocked[at]); },
+        3000));
+    triageOnB(rig, window, landed, blocked[at], rig.bWorkspaces[at]);
+}
+
+TEST_CASE("JumpToNextAttention on B goes on to a pane of B's other workspace blocked after the landing",
+          "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const first = blockPaneOfB(rig, rig.bWorkspaces[0]);
+    auto const landed = landOnB(rig, window, std::span { &first, 1 });
+
+    auto const later = blockPaneOfB(rig, rig.bWorkspaces[1]);
+    REQUIRE(waitUntil(
+        [&] { return std::ranges::contains(ownBlockedPanes(window, rig.bWorkspaces[1]), later); }, 3000));
+    triageOnB(rig, window, landed, later, rig.bWorkspaces[1]);
+}
+
+TEST_CASE("JumpToNextAttention on B goes on to B's other workspace, on the observer the jump adopted",
+          "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB, SwitcherPool::Presence };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const blocked =
+        std::array { blockPaneOfB(rig, rig.bWorkspaces[0]), blockPaneOfB(rig, rig.bWorkspaces[1]) };
+    auto const landed = landOnB(rig, window, blocked);
+    // As production's: the jump took the presence's observer of B over, which held every pane's status.
+    CHECK(rig.host.adopted == 1);
+    auto const at = landed == blocked[0] ? std::size_t { 1 } : std::size_t { 0 };
+    // So the other workspace's pane is listed Blocked the moment the window lands, with nothing to wait for.
+    CHECK(std::ranges::contains(ownBlockedPanes(window, rig.bWorkspaces[at]), blocked[at]));
+    triageOnB(rig, window, landed, blocked[at], rig.bWorkspaces[at]);
+}
+
+TEST_CASE("Open in New Window on an observed daemon adopts its observer, and the new window sees B's other "
+          "workspace at once",
+          "[switch][sidebar][attention][jump][presence]")
+{
+    auto rig = SwitchRig { RigListing::WithB, SwitcherPool::Presence };
+    rig.presence().linkSetChanged();
+    auto const blocked =
+        std::array { blockPaneOfB(rig, rig.bWorkspaces[0]), blockPaneOfB(rig, rig.bWorkspaces[1]) };
+    std::ignore = awaitSectionB(rig, rig.bWorkspaces[1]);
+    auto const connectionsBefore = connections(rig.b);
+
+    REQUIRE(rig.request(to(hostB(), "1"), SwitchMode::Open) == SwitchOutcome::Switched);
+
+    // As a switch in place does: the presence's observer of B is the new window's connection, no second one.
+    CHECK(rig.host.adopted == 1);
+    CHECK(connections(rig.b) == connectionsBefore);
+    REQUIRE(rig.host.opened.size() == 1);
+    auto& other = *rig.host.opened.front()->controller;
+    REQUIRE(waitUntil([&] {
+        auto const* const source = other.directorySource();
+        return source != nullptr && source->directory().selected == rig.bWorkspaces[0];
+    }));
+    // The observer held every workspace's status: the new window lists B's other workspace's blocked pane the
+    // moment it shows B, with no flush to wait for, so Next Needing Me goes on to it.
+    CHECK(std::ranges::contains(ownBlockedPanes(other, rig.bWorkspaces[1]), blocked[1]));
+    // The asking window stayed where it was.
+    CHECK(rig.launchLink().workspaceOf(rig.shown()) == rig.aWorkspaces[0]);
+}
+
+// {{{ JumpBack
+namespace
+{
+/// @return The workspace @p window shows, and the tab its active pane is in; none for none.
+[[nodiscard]] std::optional<std::pair<uint64_t, uint64_t>> shownTab(SwitchRig& rig,
+                                                                    contour::window::WindowController& window)
+{
+    auto const* const source = window.directorySource();
+    auto const* const active = window.activeSession();
+    if (source == nullptr || active == nullptr)
+        return std::nullopt;
+    auto const directory = source->directory();
+    auto const listed =
+        contour::window::tabHoldingPane(directory, rig.app.manager().paneKeyOf(active->modelSessionId()));
+    if (!listed || directory.selected != listed->workspace->id)
+        return std::nullopt;
+    return std::pair { listed->workspace->id, listed->tab->id };
+}
+
+/// @return Whether @p window is on A, showing @p workspace (and tab @p tab, when named).
+[[nodiscard]] bool onA(SwitchRig& rig,
+                       contour::window::WindowController& window,
+                       uint64_t workspace,
+                       std::optional<uint64_t> tab = std::nullopt)
+{
+    if (onB(rig))
+        return false;
+    auto const shown = shownTab(rig, window);
+    return shown && shown->first == workspace && (!tab || shown->second == *tab);
+}
+
+/// Waits for the presence to observe A, the daemon the window left, under its run: a jump back names it.
+void awaitAObserved(SwitchRig& rig)
+{
+    auto const run = rig.a.onDaemon([&rig] { return rig.a.host->instance(); });
+    auto state = std::string {};
+    auto const observed = waitUntil(
+        [&] {
+            // As the application tells its presence whenever a link ends or attaches.
+            rig.presence().linkSetChanged();
+            auto const sections = rig.presence().sections();
+            auto const found = std::ranges::find(
+                sections, contour::window::localDaemonRef("a"), &contour::window::DaemonSection::daemon);
+            state = found == sections.end() ? std::string { "unlisted" }
+                                            : std::format("state {} run {} feed {} reason {}",
+                                                          static_cast<int>(found->state),
+                                                          found->instance.value,
+                                                          static_cast<int>(found->feed),
+                                                          found->reason);
+            return found != sections.end() && found->state == contour::window::DaemonLinkState::Connected
+                   && found->instance == contour::window::DaemonInstance { run };
+        },
+        3000);
+    INFO(state);
+    REQUIRE(observed);
+}
+
+/// Activates B's workspace row @p workspace in @p window's sidebar, and waits for the window to show it.
+void jumpToB(SwitchRig& rig, contour::window::WindowController& window, uint64_t workspace)
+{
+    std::ignore = awaitSectionB(rig, workspace);
+    auto const row = rowOfB(window, contour::window::SidebarRowKind::Workspace, workspace);
+    REQUIRE(row >= 0);
+    window.sidebar().activate(row);
+    REQUIRE(waitUntil(
+        [&] {
+            auto const shown = shownTab(rig, window);
+            return onB(rig) && shown && shown->first == workspace;
+        },
+        3000));
+}
+} // namespace
+
+TEST_CASE("JumpBack returns to the previous daemon's tab", "[switch][sidebar][jump][history]")
+{
+    auto rig = SwitchRig { RigListing::BothListed };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    // A second tab on A's workspace, the active one.
+    auto const first = addSecondTab(rig.a, rig.aWorkspaces[0]);
+    REQUIRE(waitUntil(
+        [&] {
+            auto const shown = shownTab(rig, window);
+            return shown && shown->first == rig.aWorkspaces[0] && shown->second != first.tab;
+        },
+        3000));
+    auto const tab = shownTab(rig, window)->second;
+
+    jumpToB(rig, window, rig.bWorkspaces[1]);
+    awaitAObserved(rig);
+    window.jumpBack();
+
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], tab); }, 3000));
+    // Its own landing is not a place to go back to.
+    window.jumpBack();
+    drainGuiEvents();
+    CHECK(rig.app.switching().requests.size() == 2);
+}
+
+TEST_CASE("JumpBack while a jump connects supersedes it", "[switch][sidebar][jump][history]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    // A's second workspace, shown from the sidebar: A's first is the place to go back to.
+    auto const own = ownWorkspaceRow(window, rig.aWorkspaces[1]);
+    REQUIRE(own >= 0);
+    window.sidebar().activate(own);
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+    // B's new link is held before it shows anything: the jump stays connecting.
+    std::ignore = awaitSectionB(rig, rig.bWorkspaces[1]);
+    rig.b.holdNewConnectionsAtLayout();
+    window.sidebar().activate(rowOfB(window, contour::window::SidebarRowKind::Workspace, rig.bWorkspaces[1]));
+    REQUIRE(waitUntil([&] { return rig.host.started == 1; }, 2000));
+    REQUIRE(window.sidebar().isJumpPending());
+
+    window.jumpBack();
+
+    CHECK(rig.app.switching().cancels == std::vector { rig.shown() });
+    CHECK_FALSE(window.sidebar().isJumpPending());
+    rig.b.releaseHeld();
+    drainGuiEvents();
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0]); }, 3000));
+    // B's connection went back to observing it: its section stays listed and connected.
+    CHECK(waitUntil(
+        [&] {
+            auto const sections = rig.presence().sections();
+            auto const found =
+                std::ranges::find(sections, sidebarB(), &contour::window::DaemonSection::daemon);
+            return found != sections.end() && found->state == contour::window::DaemonLinkState::Connected;
+        },
+        3000));
+}
+
+TEST_CASE("JumpBack after a triage run returns to where it started",
+          "[switch][sidebar][attention][jump][history]")
+{
+    auto rig = SwitchRig { RigListing::BothListed };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    // Two tabs of B's first workspace whose panes ask the user: the run goes onto B, then between them.
+    auto const workspace = rig.bWorkspaces[0];
+    printInPaneOf(rig.b, workspace, std::string { BlockedStatus });
+    std::ignore = addSecondTab(rig.b, workspace);
+    printInPaneOf(rig.b, workspace, std::string { BlockedStatus });
+    REQUIRE(waitUntil([&] { return blockedPanesOfB(rig, workspace).size() == 2; }, 3000));
+    auto const blocked = blockedPanesOfB(rig, workspace);
+    auto const shows = [&](contour::window::PaneKey pane) {
+        return showsPaneOfB(rig, window, pane);
+    };
+
+    // Three attention jumps: onto B, then between its two panes, the window's own by then.
+    window.jumpToNextAttention();
+    REQUIRE(waitUntil([&] { return shows(blocked[0]) || shows(blocked[1]); }, 3000));
+    auto const landed = *activePaneOf(rig, window);
+    auto const other = landed == blocked[0] ? blocked[1] : blocked[0];
+    window.jumpToNextAttention();
+    REQUIRE(waitUntil([&] { return shows(other); }, 3000));
+    window.jumpToNextAttention();
+    REQUIRE(waitUntil([&] { return shows(landed); }, 3000));
+
+    // One press: where the run started, not a pane along it.
+    awaitAObserved(rig);
+    window.jumpBack();
+
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0]); }, 3000));
+}
+
+TEST_CASE("JumpBack: a switcher pick and a workspace switch are recorded, a tab-strip switch is not",
+          "[switch][jump][history]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    auto* const acting = rig.app.manager().actingSessionOfWindow(rig.shown());
+    REQUIRE(acting != nullptr);
+    // A's first workspace holds two tabs; the first is active.
+    auto const first = addSecondTab(rig.a, rig.aWorkspaces[0]);
+    auto second = std::optional<uint64_t> {};
+    REQUIRE(waitUntil(
+        [&] {
+            auto const shown = shownTab(rig, window);
+            if (shown && shown->second != first.tab)
+                second = shown->second;
+            return second.has_value();
+        },
+        3000));
+    REQUIRE(acting->operator()(contour::actions::SwitchToTab { .position = 1 }));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+
+    // A workspace switch (SwitchToWorkspace), from A's first workspace's first tab.
+    REQUIRE(acting->operator()(contour::actions::SwitchToWorkspace { .index = 2 }));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+    // A switcher pick back to the first workspace, made as the switcher's request service makes it.
+    auto told = Told {};
+    rig.switcher->request(
+        rig.shown(),
+        to(daemonA(), "1"),
+        SwitchMode::Switch,
+        contour::session::UserSwitch,
+        rig.app.manager().recordingSwitchCompletion(rig.shown(), SwitchMode::Switch, told.completion()));
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0]); }, 3000));
+    // A tab-strip switch there: no place of its own.
+    auto* const here = rig.app.manager().actingSessionOfWindow(rig.shown());
+    REQUIRE(here != nullptr);
+    REQUIRE(here->operator()(contour::actions::SwitchToTab { .position = 2 }));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], *second); }, 3000));
+
+    // Back: the pick's origin, A's second workspace -- not the first tab the strip left.
+    window.jumpBack();
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+    // Back again: the switch's origin, the first workspace's first tab.
+    window.jumpBack();
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+}
+
+// Review Focus 3, as Task 21's A→B→A case: JumpBack's landing on A before the panes it left there unbound.
+// Phase 7 review I2: on production's wiring -- the presence is the switcher's pool, so A's link is demoted as
+// the window leaves, and is handed back to the presence only once its panes are gone, which here is after
+// JumpBack landed on A again.
+TEST_CASE("A→B→JumpBack before A's panes unbound leaves exactly one connection to A",
+          "[switch][sidebar][jump][history][threading]")
+{
+    auto rig = SwitchRig { RigListing::BothListed, SwitcherPool::Presence };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const leftOnA = rig.windowSessions();
+    std::ignore = awaitSectionB(rig, rig.bWorkspaces[1]);
+    window.sidebar().activate(rowOfB(window, contour::window::SidebarRowKind::Workspace, rig.bWorkspaces[1]));
+    REQUIRE(waitUntil([&] { return onB(rig); }, 3000));
+    rig.presence().linkSetChanged();
+    // A's old panes are closed but not gone: no exit watcher runs in this rig, so each goes only once the
+    // test says its exit was seen, below. Until then A's link holds them, and its connection.
+    REQUIRE(std::ranges::any_of(leftOnA, [](auto const& pane) { return static_cast<bool>(pane); }));
+
+    window.jumpBack();
+
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0]); }, 3000));
+    // B's jump adopted the presence's observer; the jump back found none of A's to adopt, and dialled.
+    CHECK(rig.host.adopted == 1);
+    // A's old panes go now, as each one's watcher would see its closed device: A's old link hands its
+    // connection back to the presence, which a window is on A again by then.
+    for (auto const& session: leftOnA)
+        if (session && session->terminal().device().isClosed())
+            session->onClosed();
+    rig.presence().linkSetChanged();
+    CHECK(waitUntil(
+        [&] {
+            drainGuiEvents();
+            return connections(rig.a) == 1;
+        },
+        3000));
+    settleGui();
+    rig.presence().linkSetChanged();
+    settleGui();
+    CHECK(connections(rig.a) == 1);
+    CHECK(rig.windowLink() != &rig.launchLink());
+}
+
+namespace
+{
+/// @return The row of A's pane @p pane of workspace @p workspace in @p window's sidebar, once it lists it.
+[[nodiscard]] int ownPaneRow(contour::window::WindowController& window, uint64_t workspace, uint64_t pane)
+{
+    auto row = -1;
+    REQUIRE(waitUntil(
+        [&] {
+            row = sidebarRowWhere(window, [&](auto const& key) {
+                return key.kind == contour::window::SidebarRowKind::Pane && key.workspace == workspace
+                       && key.pane == contour::window::PaneKey { pane } && key.daemon != sidebarB();
+            });
+            return row >= 0;
+        },
+        3000));
+    return row;
+}
+
+/// @return How many things the window of @p rig said so far.
+[[nodiscard]] std::size_t saidCount(SwitchRig const& rig)
+{
+    return rig.said != nullptr ? rig.said->said.size() : std::size_t { 0 };
+}
+} // namespace
+
+// Phase 7 review I1: an own-row menu action is a navigation of the window's own, as an activation is.
+TEST_CASE(
+    "Go to Pane on an own pane row while a jump connects ends that jump, and is a place to go back from",
+    "[switch][sidebar][jump][history]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    auto const split = splitSecondWorkspaceOfA(rig);
+    std::ignore = ownPaneRow(window, rig.aWorkspaces[1], split.first);
+    // B's new link is held before it shows anything: the jump stays connecting.
+    std::ignore = awaitSectionB(rig, rig.bWorkspaces[1]);
+    rig.b.holdNewConnectionsAtLayout();
+    window.sidebar().activate(rowOfB(window, contour::window::SidebarRowKind::Workspace, rig.bWorkspaces[1]));
+    REQUIRE(waitUntil([&] { return rig.host.started == 1; }, 2000));
+    REQUIRE(window.sidebar().isJumpPending());
+    auto const saidBefore = saidCount(rig);
+    auto const shownBefore = rig.shown();
+
+    pickFromMenu(window, ownPaneRow(window, rig.aWorkspaces[1], split.first), QStringLiteral("Go to Pane"));
+
+    CHECK(rig.app.switching().cancels == std::vector { shownBefore });
+    CHECK_FALSE(window.sidebar().isJumpPending());
+    rig.b.releaseHeld();
+    drainGuiEvents();
+    // The window stays on A, on the pane the newer navigation chose, and the ended jump said nothing.
+    CHECK(rig.windowLink() == &rig.launchLink());
+    REQUIRE(waitUntil(
+        [&] {
+            return onA(rig, window, rig.aWorkspaces[1])
+                   && activePaneOf(rig, window) == contour::window::PaneKey { split.first };
+        },
+        3000));
+    CHECK(saidCount(rig) == saidBefore);
+    // Where Go to Pane left from is a place to go back to.
+    window.jumpBack();
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0]); }, 3000));
+}
+
+// Phase 7 review M1: the tab comes back as it is, its own active pane focused, not its first.
+TEST_CASE("JumpBack to a tab of another own workspace shows its active pane",
+          "[switch][sidebar][jump][history]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    auto const split = splitSecondWorkspaceOfA(rig);
+    auto const showsActive = [&] {
+        return onA(rig, window, rig.aWorkspaces[1], split.tab)
+               && activePaneOf(rig, window) == contour::window::PaneKey { split.active };
+    };
+    window.sidebar().activate(ownWorkspaceRow(window, rig.aWorkspaces[1]));
+    REQUIRE(waitUntil(showsActive, 3000));
+    window.sidebar().activate(ownWorkspaceRow(window, rig.aWorkspaces[0]));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0]); }, 3000));
+
+    window.jumpBack();
+
+    CHECK(waitUntil(showsActive, 3000));
+    drainGuiEvents();
+    // Nor was the tab's active pane changed on the daemon.
+    CHECK(rig.a.onDaemon([&] {
+        return rig.a.host->model()
+            .workspace(vtworkspace::WorkspaceId { rig.aWorkspaces[1] })
+            ->tabAt(0)
+            ->activePane()
+            ->session()
+            .value;
+    }) == split.active);
+}
+
+// Phase 7 review M2: a navigation that never happened is no place to go back from, nor a run's start.
+TEST_CASE("An attention jump whose workspace was never selected records nothing",
+          "[switch][sidebar][attention][jump][history]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    // A's second workspace's pane asks the user; A's first holds two tabs, the second active.
+    printInPaneOf(rig.a, rig.aWorkspaces[1], std::string { BlockedStatus });
+    REQUIRE(waitUntil([&] { return !ownBlockedPanes(window, rig.aWorkspaces[1]).empty(); }, 3000));
+    auto const first = addSecondTab(rig.a, rig.aWorkspaces[0]);
+    auto second = std::optional<uint64_t> {};
+    REQUIRE(waitUntil(
+        [&] {
+            auto const shown = shownTab(rig, window);
+            if (shown && shown->first == rig.aWorkspaces[0] && shown->second != first.tab)
+                second = shown->second;
+            return second.has_value();
+        },
+        3000));
+    auto const connected = [&] {
+        auto const* const controller = rig.launchLink().liveController();
+        return controller != nullptr
+               && controller->connectionState() == vthost::client::ConnectionState::Connected;
+    };
+
+    // While A is away, the press selects nothing.
+    rig.a.refuseConnections();
+    REQUIRE(waitUntil([&] { return !connected(); }, 2000));
+    window.jumpToNextAttention();
+    rig.a.serveAgain();
+    REQUIRE(waitUntil(connected, 3000));
+    REQUIRE(waitUntil([&] { return showing(rig.a, rig.aWorkspaces[0]) == 1; }, 3000));
+    // A tab-strip click, unrecorded, then a press that lands.
+    auto* const acting = rig.app.manager().actingSessionOfWindow(rig.shown());
+    REQUIRE(acting != nullptr);
+    REQUIRE(acting->operator()(contour::actions::SwitchToTab { .position = 1 }));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+    window.jumpToNextAttention();
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+
+    // The run began where the press that landed was made, not where the one that went nowhere was.
+    window.jumpBack();
+    CHECK(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[0], first.tab); }, 3000));
+}
+
+// Phase 7 review M4: a second press while the window's own workspace is being selected goes on from there.
+TEST_CASE("JumpToNextAttention while the own workspace is being selected goes on from that pane",
+          "[switch][sidebar][attention][jump]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    // Two blocked panes of A's second workspace, in two tabs, the first tab active: what the workspace shows
+    // when no jump lands in it is the first press's pane.
+    printInPaneOf(rig.a, rig.aWorkspaces[1], std::string { BlockedStatus });
+    auto const first = addSecondTab(rig.a, rig.aWorkspaces[1]);
+    printInPaneOf(rig.a, rig.aWorkspaces[1], std::string { BlockedStatus });
+    rig.a.onDaemon([&rig, &first] {
+        rig.a.host->model().activateTab(vtworkspace::WorkspaceId { rig.aWorkspaces[1] },
+                                        vtworkspace::TabId { first.tab });
+        return 0;
+    });
+    REQUIRE(waitUntil([&] { return ownBlockedPanes(window, rig.aWorkspaces[1]).size() == 2; }, 3000));
+    auto const blocked = ownBlockedPanes(window, rig.aWorkspaces[1]);
+    // A's answer to the selection is held: the first press's pane waits for its workspace.
+    rig.a.holdEverything();
+
+    window.jumpToNextAttention();
+    window.jumpToNextAttention();
+    rig.a.releaseHeld();
+
+    // The second press went on to the other pane, not to the first one again.
+    CHECK(waitUntil(
+        [&] { return onA(rig, window, rig.aWorkspaces[1]) && activePaneOf(rig, window) == blocked[1]; },
+        3000));
+}
+
+// Phase 7 review M8: an empty back stack says so.
+TEST_CASE("JumpBack with nowhere to go back to says so", "[switch][jump][history]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    CHECK_FALSE(window.canJumpBack());
+    CHECK(window.menuBarState().jumpBack == contour::command::JumpAvailability::Unavailable);
+    CHECK(window.menuBarState().nextAttention == contour::command::JumpAvailability::Unavailable);
+
+    window.jumpBack();
+
+    CHECK(saidLast(rig.said, QStringLiteral("Nowhere to go back to")));
+    // Once a place is recorded, the row can act.
+    window.sidebar().activate(ownWorkspaceRow(window, rig.aWorkspaces[1]));
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+    CHECK(window.canJumpBack());
+    CHECK(window.menuBarState().jumpBack == contour::command::JumpAvailability::Available);
+}
+
+// Phase 7 review M10: a switch the sidebar did not ask for replaces its jump, which says nothing.
+TEST_CASE("A workspace switch while a sidebar jump connects ends that jump without a word",
+          "[switch][sidebar][jump]")
+{
+    auto rig = SwitchRig { RigListing::WithB };
+    rig.presence().linkSetChanged();
+    auto& window = *rig.window->controller;
+    std::ignore = awaitSectionB(rig, rig.bWorkspaces[1]);
+    rig.b.holdNewConnectionsAtLayout();
+    window.sidebar().activate(rowOfB(window, contour::window::SidebarRowKind::Workspace, rig.bWorkspaces[1]));
+    REQUIRE(waitUntil([&] { return rig.host.started == 1; }, 2000));
+    REQUIRE(window.sidebar().isJumpPending());
+    auto const saidBefore = saidCount(rig);
+
+    auto* const acting = rig.app.manager().actingSessionOfWindow(rig.shown());
+    REQUIRE(acting != nullptr);
+    REQUIRE(acting->operator()(contour::actions::SwitchToWorkspace { .index = 2 }));
+
+    CHECK_FALSE(window.sidebar().isJumpPending());
+    REQUIRE(waitUntil([&] { return onA(rig, window, rig.aWorkspaces[1]); }, 3000));
+    rig.b.releaseHeld();
+    drainGuiEvents();
+    CHECK(rig.windowLink() == &rig.launchLink());
+    CHECK(saidCount(rig) == saidBefore);
+}
+// }}}
+
 TEST_CASE("WindowSwitcher: New Tab Here on a workspace another window shows runs in that window",
           "[switch][sidebar][jump]")
 {
@@ -2644,6 +3428,164 @@ TEST_CASE("WindowSwitcher: after a pick on another daemon's tab, the own tab's p
     drainGuiEvents();
     CHECK(colourOfB() == plum);
 }
+
+// Review (Phase 6 round 2, item 1): the own row keys came from the rows' cached own daemon, which a switch
+// updates only by the rebuild it queues; until then CloseWorkspace named the daemon just left, and closed
+// its workspace of the same id there.
+TEST_CASE(
+    "WindowSwitcher: CloseWorkspace right after a switch closes the workspace of the daemon switched to",
+    "[switch][sidebar][jump]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    // Workspace ids start at 1 on every daemon: A's second workspace and B's share theirs.
+    auto const shared = rig.aWorkspaces[1];
+    window.sidebar().refreshNow();
+    auto asked =
+        QSignalSpy { &window, &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    auto told = Told {};
+    auto completion = told.completion();
+    // Dispatched in the switch's completion: the window is B's, and the rebuild it queued has not run.
+    rig.switcher->request(rig.shown(),
+                          to(daemonB(), "2"),
+                          SwitchMode::Switch,
+                          contour::session::UserSwitch,
+                          [&](std::expected<SwitchOutcome, std::string> outcome) {
+                              rig.app.manager().closeWorkspace(window, shared);
+                              completion(std::move(outcome));
+                          });
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    REQUIRE(*told.outcome == SwitchOutcome::Switched);
+    REQUIRE(rig.bWorkspaces[1] == shared);
+    REQUIRE(asked.count() == 1);
+    // The node names the daemon the window is on now, not the one it left.
+    auto const onB = rig.app.manager().daemonRefOf(rig.shown());
+    REQUIRE(onB.has_value());
+    CHECK(closeNodeOf(asked.front()).row.daemon == *onB);
+    window.confirmClose(asked.front()[0]);
+
+    CHECK(rig.b.waitUntilOnDaemon(
+        [&] { return rig.b.host->model().workspace(vtworkspace::WorkspaceId { shared }) == nullptr; }));
+    drainGuiEvents();
+    CHECK(holdsWorkspace(rig.a, shared));
+    CHECK(rig.a.clientFrames.count(vthost::proto::PduType::CloseWorkspace) == 0);
+}
+
+TEST_CASE("WindowSwitcher: the active tab's colour pick right after a switch names the daemon switched to",
+          "[switch][sidebar][jump][tabcolor]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    window.setTabBarVisibility(contour::config::TabBarVisibility::Never);
+    window.sidebar().refreshNow();
+    auto picked = QSignalSpy { &window, &contour::window::WindowController::sidebarTabColorPickRequested };
+    auto told = Told {};
+    auto completion = told.completion();
+    auto const left = rig.app.manager().daemonRefOf(rig.shown());
+    rig.switcher->request(rig.shown(),
+                          to(daemonB(), "2"),
+                          SwitchMode::Switch,
+                          contour::session::UserSwitch,
+                          [&](std::expected<SwitchOutcome, std::string> outcome) {
+                              window.beginActiveTabColorPick();
+                              completion(std::move(outcome));
+                          });
+    REQUIRE(waitUntil([&] { return told.outcome.has_value(); }, 2000));
+    REQUIRE(*told.outcome == SwitchOutcome::Switched);
+    REQUIRE(picked.count() == 1);
+    auto const key = rowKeyOf(picked.front()[1]);
+    auto const onB = rig.app.manager().daemonRefOf(rig.shown());
+    REQUIRE(onB.has_value());
+    CHECK(onB != left);
+    CHECK(key.daemon == *onB);
+    CHECK(key.workspace == rig.bWorkspaces[1]);
+    CHECK(key.instance
+          == rig.app.manager().daemonInstanceOf(rig.shown()).value_or(contour::window::DaemonInstance {}));
+
+    // The pick, committed with the key it was opened with, colours B's tab; A's of the same ids keeps none.
+    auto const teal = vtbackend::RGBColor { 0x00, 0x80, 0x80 };
+    window.setRowColor(picked.front()[1], QColor { teal.red, teal.green, teal.blue });
+    auto const colourOn = [&](DaemonFixture& daemon, uint64_t workspace) {
+        return daemon.onDaemon([&]() -> std::optional<vtbackend::RGBColor> {
+            auto* const held = daemon.host->model().workspace(vtworkspace::WorkspaceId { workspace });
+            return held != nullptr && held->tabAt(0) != nullptr ? held->tabAt(0)->color() : std::nullopt;
+        });
+    };
+    CHECK(waitUntil([&] { return colourOn(rig.b, rig.bWorkspaces[1]) == teal; }, 2000));
+    drainGuiEvents();
+    CHECK_FALSE(colourOn(rig.a, rig.aWorkspaces[1]).has_value());
+}
+
+// Review (Phase 6 round 2, item 2): a close asked of the window's own daemon that restarted while the dialog
+// was open names the run that ended; the new run's node of the same ids is not what the user was asked.
+TEST_CASE("WindowSwitcher: a close of the own daemon's ended run closes nothing", "[switch][sidebar]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    auto const workspace = rig.aWorkspaces[1];
+    auto asked =
+        QSignalSpy { &window, &contour::window::WindowController::closeWorkspaceConfirmationRequested };
+    rig.app.manager().closeWorkspace(window, workspace);
+    REQUIRE(asked.count() == 1);
+    auto stale = closeNodeOf(asked.front());
+    REQUIRE(stale.row.instance
+            == rig.app.manager().daemonInstanceOf(rig.shown()).value_or(contour::window::DaemonInstance {}));
+    stale.row.instance = contour::window::DaemonInstance { stale.row.instance.value + 1 };
+
+    // How long a close is given to reach A, in waitUntil()'s 5 ms attempts: the stale one's must not within
+    // it, the control's must.
+    constexpr auto CloseAttempts = 200;
+    auto const closed = [&] {
+        return !holdsWorkspace(rig.a, workspace);
+    };
+    window.confirmClose(QVariant::fromValue(stale));
+    CHECK_FALSE(waitUntil(closed, CloseAttempts));
+
+    // The control: the node as asked, of the run the window is on, closes it within the same time.
+    window.confirmClose(asked.front()[0]);
+    CHECK(waitUntil(closed, CloseAttempts));
+}
+
+// Review (pass 2, M1): the colour picker stays open as long as the close dialog does, and commits to the row
+// key it was opened with: one of the own daemon's run that ended colours nothing of the run serving now.
+TEST_CASE("WindowSwitcher: a colour pick of the own daemon's ended run colours nothing", "[switch][sidebar]")
+{
+    auto rig = SwitchRig {};
+    auto& window = *rig.window->controller;
+    // A sidebar placement draws no tab strip: the pick opens over the tab's sidebar row.
+    window.setTabBarVisibility(contour::config::TabBarVisibility::Never);
+    window.sidebar().refreshNow();
+    auto picked = QSignalSpy { &window, &contour::window::WindowController::sidebarTabColorPickRequested };
+    window.beginActiveTabColorPick();
+    REQUIRE(picked.count() == 1);
+    auto stale = rowKeyOf(picked.front()[1]);
+    REQUIRE(stale.instance
+            == rig.app.manager().daemonInstanceOf(rig.shown()).value_or(contour::window::DaemonInstance {}));
+    stale.instance = contour::window::DaemonInstance { stale.instance.value + 1 };
+    auto staleWorkspace = stale;
+    staleWorkspace.kind = contour::window::SidebarRowKind::Workspace;
+
+    // How long a colour is given to reach A, in waitUntil()'s 5 ms attempts: the stale pick's must not within
+    // it, the control's must.
+    constexpr auto ColourAttempts = 200;
+    auto const teal = vtbackend::RGBColor { 0x00, 0x80, 0x80 };
+    auto const tealColour = QColor { teal.red, teal.green, teal.blue };
+    auto const colouredOnA = [&] {
+        return rig.a.onDaemon([&] {
+            auto const* const held =
+                rig.a.host->model().workspace(vtworkspace::WorkspaceId { stale.workspace });
+            auto const* const tab = held != nullptr ? held->tabAt(0) : nullptr;
+            return (tab != nullptr && tab->color() == teal) || (held != nullptr && held->color() == teal);
+        });
+    };
+    window.setRowColor(QVariant::fromValue(stale), tealColour);
+    window.setRowColor(QVariant::fromValue(staleWorkspace), tealColour);
+    CHECK_FALSE(waitUntil(colouredOnA, ColourAttempts));
+
+    // The control: the pick as opened, of the run the window is on, colours it within the same time.
+    window.setRowColor(picked.front()[1], tealColour);
+    CHECK(waitUntil(colouredOnA, ColourAttempts));
+}
 // }}}
 
 TEST_CASE("WindowSwitcher: of two clients showing a workspace, only the one asked switches", "[switch][link]")
@@ -2693,7 +3635,7 @@ TEST_CASE("WindowSwitcher: a window with no daemon behind it switches nowhere", 
     auto told = Told {};
 
     switcher.request(
-        local.id, to(daemonB()), SwitchMode::Switch, contour::session::NoLandingDeadline, told.completion());
+        local.id, to(daemonB()), SwitchMode::Switch, contour::session::UserSwitch, told.completion());
 
     REQUIRE(told.outcome.has_value());
     CHECK_FALSE(told.outcome->has_value());
@@ -2764,7 +3706,7 @@ struct InProcessRig
         switcher.request(window->displayedWorkspace(),
                          std::move(target),
                          mode,
-                         contour::session::NoLandingDeadline,
+                         contour::session::UserSwitch,
                          told.completion());
         return told;
     }
@@ -2932,7 +3874,7 @@ TEST_CASE("WindowSwitcher: a reconnect forgets the workspace a timed-out switch 
     rig.switcher->request(rig.shown(),
                           to(daemonA(), std::string { contour::remote::NewWorkspaceSpec }),
                           SwitchMode::Switch,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           told.completion());
     REQUIRE(waitUntil(
         [&] { return rig.a.onDaemon([&rig] { return rig.a.host->model().workspaceCount(); }) == 3; }));
@@ -3003,7 +3945,8 @@ TEST_CASE(
                                                  [&said](contour::window::JumpEvent event,
                                                          contour::window::SidebarTarget const&,
                                                          std::string const&) { said.push_back(event); },
-                                                 [] {} };
+                                                 [] {},
+                                                 {} };
     jumps.createAndJump(rig.shown(),
                         contour::window::SidebarTarget { .daemon = contour::window::DaemonRef { "local:b" },
                                                          .instance = {},
@@ -3060,7 +4003,7 @@ TEST_CASE("WindowSwitcher: the switcher popup's pick re-enters the switch, and E
         .request =
             [&](vtworkspace::WorkspaceId window, SwitchTarget target, SwitchMode mode) {
                 rig.switcher->request(
-                    window, std::move(target), mode, contour::session::NoLandingDeadline, told.completion());
+                    window, std::move(target), mode, contour::session::UserSwitch, told.completion());
             },
         .startDaemon = {},
     } };
@@ -3399,9 +4342,12 @@ contour::window::WorkspaceDirectory observeB(SwitchRig& rig)
 }
 
 /// Asks the switcher without waiting.
-void ask(SwitchRig const& rig, SwitchTarget target, Told& told, contour::session::SwitchLandBy landBy = {})
+void ask(SwitchRig const& rig,
+         SwitchTarget target,
+         Told& told,
+         contour::session::SwitchWaiter waiter = contour::session::UserSwitch)
 {
-    rig.switcher->request(rig.shown(), std::move(target), SwitchMode::Switch, landBy, told.completion());
+    rig.switcher->request(rig.shown(), std::move(target), SwitchMode::Switch, waiter, told.completion());
 }
 
 } // namespace
@@ -3546,7 +4492,7 @@ TEST_CASE("WindowSwitcher: an Open in New Window and a switch in place never end
         rig.switcher->request(rig.shown(),
                               to(daemonB(), "2"),
                               SwitchMode::Open,
-                              contour::session::NoLandingDeadline,
+                              contour::session::UserSwitch,
                               opening.completion());
         REQUIRE(waitUntil([&] { return rig.host.started == 1; }, 2000));
 
@@ -3587,7 +4533,7 @@ TEST_CASE("WindowSwitcher: a cancel ends the switch of its own mode alone", "[sw
     rig.switcher->request(rig.shown(),
                           to(daemonB(), "2"),
                           SwitchMode::Open,
-                          contour::session::NoLandingDeadline,
+                          contour::session::UserSwitch,
                           opening.completion());
     REQUIRE(waitUntil([&] { return rig.host.started == 1; }, 2000));
 
@@ -3609,7 +4555,11 @@ TEST_CASE("WindowSwitcher: a program's switch does not end a user's jump", "[swi
     REQUIRE(rig.lister->held.size() == 1);
 
     auto program = Told {};
-    ask(rig, to(daemonA(), "2"), program, rig.host.clock.now() + 10s);
+    ask(rig,
+        to(daemonA(), "2"),
+        program,
+        contour::session::SwitchWaiter { .landBy = rig.host.clock.now() + 10s,
+                                         .told = contour::session::SwitchTold::BeforeLeaving });
 
     REQUIRE(program.outcome.has_value());
     CHECK_FALSE(program.outcome->has_value());
@@ -3794,7 +4744,7 @@ TEST_CASE("ContourGuiApp: a quit while a link waits to give its daemon back dial
                                             .transport = std::move(transport) });
                 },
             .refreshTimer = [](std::chrono::milliseconds, std::function<void()> const&) {},
-            .discovery = std::make_shared<NoLocalDaemons>(),
+            .discovery = noLocalDaemons(),
             .settings =
                 [] {
                     return contour::remote::ListingSettings {

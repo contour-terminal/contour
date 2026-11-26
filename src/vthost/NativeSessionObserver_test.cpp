@@ -531,7 +531,8 @@ TEST_CASE("an observer's MarkSeen clears what it saw, and it is told so", "[vtho
                               }));
 }
 
-TEST_CASE("an observer is told a pane's program status, and not its bell", "[vthost][native][observer]")
+TEST_CASE("an observer is told a pane's program status, and its bell only as the pane's attention",
+          "[vthost][native][observer]")
 {
     auto f = ObserverFixture {};
     auto& host = f.flush.h.host;
@@ -547,7 +548,12 @@ TEST_CASE("an observer is told a pane's program status, and not its bell", "[vth
         auto const* status = std::get_if<proto::ProgramStatus>(&frame.pdu);
         return status != nullptr && status->session == f.inSecond.value && status->records.size() == 1;
     }));
-    // The bell is the attaching window's to ring; the observer learns it from the pane's attention alone.
+    // The bell is the attaching window's to ring; the observer learns it from the pane's attention alone, as
+    // every bell of a pane it does not mirror reaches it, never as a bell of its own.
+    CHECK(std::ranges::any_of(told, [&](proto::DecodedFrame const& frame) {
+        auto const* state = std::get_if<proto::PaneAttentionState>(&frame.pdu);
+        return state != nullptr && state->session == f.inSecond.value && state->bell == proto::PaneBell::Rang;
+    }));
     CHECK(std::ranges::none_of(told, [](proto::DecodedFrame const& frame) {
         return std::holds_alternative<proto::SessionBell>(frame.pdu);
     }));

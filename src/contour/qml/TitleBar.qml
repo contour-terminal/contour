@@ -42,6 +42,9 @@ Item {
     /// sidebar holds the tabs: `workspace › tab`), "chip+tabs" (the sidebar is hidden: the workspace chip
     /// leads the tabs) or "empty".
     property string centre: "tabs"
+    /// Whether a toast holds the band's centre (Main.qml's notice toast, hosted in the band): the title and
+    /// the breadcrumb centred there give way to it, so no part of them shows beside the pill.
+    property bool centreYielded: false
     /// Whether the bar is on screen, as UiStyleProvider::titleBand names it: "hidden", "shown", "reveal"
     /// (full screen: it overlays the top rows while the pointer is at the screen edge or on it) or "pinned"
     /// (full screen: it overlays them for as long as the remote connection is interrupted).
@@ -851,6 +854,13 @@ Item {
         visible: root.isBand && root.centre === "title"
         anchors.centerIn: parent
         spacing: chromeStyle.space.s3
+        // Gives way to a toast in the band's centre, fading as the toast does: no click target beside the pill,
+        // and nothing a screen reader reads out under it.
+        opacity: root.centreYielded ? 0 : 1
+        enabled: !root.centreYielded
+        Behavior on opacity {
+            NumberAnimation { duration: chromeStyle.motion.standard }
+        }
 
         Text {
             id: bandTitle
@@ -860,6 +870,7 @@ Item {
             text: root.stickyShown ? root.stickyText : titleRows.activeTitle
             Accessible.role: Accessible.StaticText
             Accessible.name: root.stickyShown ? root.stickyName : text
+            Accessible.ignored: root.centreYielded
             font: chromeStyle.type.bodyMedium
             color: chromeStyle.bandColors.tabText
             elide: Text.ElideMiddle
@@ -876,6 +887,7 @@ Item {
                  : chromeStyle.statusTextOn(chromeStyle.statusRunning, root.fill)
             Accessible.role: Accessible.Button
             Accessible.name: text
+            Accessible.ignored: root.centreYielded
             Accessible.onPressAction: if (root.controller) root.controller.jumpToActiveStickyHeader()
 
             TapHandler {
@@ -891,6 +903,12 @@ Item {
         id: breadcrumb
         visible: root.isBand && root.centre === "breadcrumb"
         anchors.centerIn: parent
+        opacity: root.centreYielded ? 0 : 1
+        enabled: !root.centreYielded
+        Accessible.ignored: root.centreYielded
+        Behavior on opacity {
+            NumberAnimation { duration: chromeStyle.motion.standard }
+        }
         room: root.titleRoom
         daemon: root.controller && root.controller.sidebar ? (root.controller.sidebar.breadcrumbDaemon ?? "") : ""
         workspace: root.controller && root.controller.sidebar ? root.controller.sidebar.currentWorkspaceTitle : ""

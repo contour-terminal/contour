@@ -161,6 +161,7 @@ struct FocusSidebar;
 struct FilterWorkspaces;
 struct ToggleSidebarNeedsMe;
 struct JumpToNextAttention;
+struct JumpBack;
 struct CancelSwitch;
 struct MarkSeen;
 struct RenameWorkspace;

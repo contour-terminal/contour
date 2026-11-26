@@ -6,6 +6,7 @@
 /// each outcome says. Qt-free, so that every outcome is a test case without a window.
 
 #include <contour/session/WindowSwitching.hpp>
+#include <contour/window/LocationHistory.hpp>
 #include <contour/window/SidebarSections.hpp>
 #include <contour/window/SidebarTree.hpp>
 
@@ -80,11 +81,24 @@ class SidebarJumps
     /// What runs once a jump ended well: told whether this window shows the target (Switched) or another
     /// window that does was raised (FocusedExisting).
     using JumpThen = std::function<void(vthost::proto::SwitchOutcome)>;
+    /// Told when a jump landed in this window -- it switched, rather than raising another window that shows
+    /// the target or opening one: where the window was, where it went, and why (LocationHistory::landed()).
+    using Landed =
+        std::function<void(std::optional<SidebarTarget> from, SidebarTarget const& to, HistoryCause)>;
+    /// Told when a jump back (HistoryCause::Back) failed or was cancelled: the place it went to is still one
+    /// to go back to (LocationHistory::restore()).
+    using Unreached = std::function<void(SidebarTarget const& place)>;
 
     /// @param switching What switches the window. Borrowed; it must outlive this.
     /// @param announce Says each step of a jump.
     /// @param changed Told whenever the jump under way starts or ends: the rows it marks change.
-    SidebarJumps(session::WindowSwitching& switching, Announce announce, std::function<void()> changed);
+    /// @param landed Told each jump that landed in this window.
+    /// @param unreached Told each jump back that failed or was cancelled; empty for nothing.
+    SidebarJumps(session::WindowSwitching& switching,
+                 Announce announce,
+                 std::function<void()> changed,
+                 Landed landed,
+                 Unreached unreached = {});
 
     /// Goes to what another daemon's row names.
     /// @param window The window jumping.
@@ -93,6 +107,7 @@ class SidebarJumps
     /// @param controlId The control id of the row's workspace (jumpControlIdOf()): all zero leaves the choice
     ///        to the daemon; StaleRun refuses the jump.
     /// @param from Where the window is now, for a later jump back; none for nowhere.
+    /// @param cause Why it jumps, as a landing here is recorded (Landed).
     /// @param then What runs once it landed, in this window or by raising another that shows the target; not
     ///        for a jump that failed, was cancelled or was replaced. Empty for nothing.
     void jumpTo(vtworkspace::WorkspaceId window,
@@ -100,6 +115,7 @@ class SidebarJumps
                 JumpMode mode,
                 std::expected<std::array<uint8_t, 16>, JumpRefusal> const& controlId,
                 std::optional<SidebarTarget> from,
+                HistoryCause cause,
                 JumpThen then = {});
 
     /// Makes a new workspace on another daemon, then shows it in @p window: the jump under way, pending on
@@ -121,15 +137,29 @@ class SidebarJumps
     ///        Open in New Window (its own row's Cancel).
     void cancel(vtworkspace::WorkspaceId window, JumpMode mode);
 
+    /// Lets the jump in this window under way go without a word: a switch of the window this sidebar did not
+    /// ask for (SwitchToWorkspace, the switcher, the location chip) replaces it, and the switching service
+    /// ends it for that newer request (spec §5.5, the newer wins). Its end says nothing and its then does not
+    /// run. Nothing while none is under way.
+    void release();
+
+    /// Ends the jump in this window under way without a word: a navigation in this window replaced it (spec
+    /// §5.5, the newer wins). The switching service is told to end it (session::WindowSwitching::cancel()),
+    /// nothing is said and its then does not run. An Open in New Window goes on, as it moves no window of
+    /// this one. Nothing while none is under way.
+    /// @param window The window jumping.
+    void supersede(vtworkspace::WorkspaceId window);
+
   private:
     /// A jump under way.
     struct PendingJump
     {
-        uint64_t serial = 0;                  ///< Which jump of the window this is.
-        SidebarTarget target;                 ///< Where it goes.
-        std::optional<SidebarTarget> from;    ///< Where the window was.
-        JumpThen then;                        ///< What runs once it landed; empty for nothing.
-        JumpCancel cancel = JumpCancel::None; ///< Whether the user asked it to end.
+        uint64_t serial = 0;                     ///< Which jump of the window this is.
+        SidebarTarget target;                    ///< Where it goes.
+        std::optional<SidebarTarget> from;       ///< Where the window was.
+        HistoryCause cause = HistoryCause::Jump; ///< Why it jumps, as its landing is recorded.
+        JumpThen then;                           ///< What runs once it landed; empty for nothing.
+        JumpCancel cancel = JumpCancel::None;    ///< Whether the user asked it to end.
     };
 
     /// Makes @p target's jump the one under way of @p mode, said to be connecting.
@@ -137,6 +167,7 @@ class SidebarJumps
     [[nodiscard]] session::SwitchCompletion start(SidebarTarget const& target,
                                                   std::optional<SidebarTarget> from,
                                                   session::SwitchMode mode,
+                                                  HistoryCause cause,
                                                   JumpThen then);
 
     /// Ends jump @p serial with @p outcome, if it is still the one under way of its mode.
@@ -157,6 +188,8 @@ class SidebarJumps
     session::WindowSwitching& _switching;
     Announce _announce;
     std::function<void()> _changed;
+    Landed _landed;
+    Unreached _unreached;
     /// The jump under way of each mode, by session::SwitchMode: in this window, and an Open.
     std::array<std::optional<PendingJump>, 2> _pending;
     uint64_t _nextSerial = 1;

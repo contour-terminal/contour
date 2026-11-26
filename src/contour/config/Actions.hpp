@@ -228,6 +228,7 @@ struct FocusSidebar{};        // show the workspace sidebar if needed and move k
 struct FilterWorkspaces{};    // show the workspace sidebar if needed and put the keyboard in its filter
 struct ToggleSidebarNeedsMe{}; // list only what needs the user in the sidebar, or everything again
 struct JumpToNextAttention{}; // show the next pane that needs you
+struct JumpBack{};            // go back to where the window was before its last jump or switch
 struct CancelSwitch{};        // end a sidebar jump still under way, leaving the window as it was
 struct MarkSeen{};            // mark the active pane's output as seen
 struct RenameWorkspace{};     // rename the current workspace inline
@@ -387,6 +388,7 @@ using ActionVariant = std::variant<CancelSelection,
                                    FilterWorkspaces,
                                    ToggleSidebarNeedsMe,
                                    JumpToNextAttention,
+                                   JumpBack,
                                    CancelSwitch,
                                    MarkSeen,
                                    RenameWorkspace,
@@ -585,6 +587,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     FilterWorkspaces,
                                                     ToggleSidebarNeedsMe,
                                                     JumpToNextAttention,
+                                                    JumpBack,
                                                     LaunchLayout,
                                                     SaveLayout,
                                                     AttachToHost,
@@ -960,6 +963,10 @@ namespace documentation
     };
     constexpr inline std::string_view JumpToNextAttention {
         "Shows the next pane that needs you: one that waits for input, or whose command failed."
+    };
+    constexpr inline std::string_view JumpBack {
+        "Goes back to where the window was before its last jump, workspace switch, sidebar activation or "
+        "switcher pick; each press goes one place further back. A run of JumpToNextAttention counts as one."
     };
     constexpr inline std::string_view MarkSeen { "Marks the output of the active pane as seen." };
     constexpr inline std::string_view RenameWorkspace { "Renames the current workspace inline." };

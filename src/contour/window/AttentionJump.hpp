@@ -9,18 +9,24 @@
 /// their defaults), so a mark from either source counts. For a pane whose flags a daemon keeps
 /// (FlagSource::Daemon) the directory alone speaks: what it flags is unseen, for every window alike.
 
+#include <contour/window/DaemonSection.hpp>
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/PaneSeen.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/SidebarTree.hpp>
 #include <contour/window/StatusUrgency.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace contour::window
@@ -167,6 +173,45 @@ template <typename Pane>
 /// unseen output are not asking, so a jump never lands on them.
 inline constexpr auto JumpClasses = std::array { Urgency::NeedsYou, Urgency::Failed, Urgency::DoneUnseen };
 
+namespace detail
+{
+    /// The candidate a jump goes to.
+    /// @param candidates Every pane with its urgency, in sidebar order.
+    /// @param current    The index of the pane the jump starts from; none starts at the top.
+    /// @return The first candidate after @p current, wrapping around, in the most urgent class of JumpClasses
+    ///         that any candidate is in; none when no candidate is in any of them.
+    template <typename Key>
+    [[nodiscard]] std::optional<Key> nextInJumpClasses(std::vector<std::pair<Key, Urgency>> const& candidates,
+                                                       std::optional<std::size_t> current)
+    {
+        auto const start = current ? std::next(candidates.begin(), static_cast<std::ptrdiff_t>(*current + 1))
+                                   : candidates.begin();
+        for (auto const wanted: JumpClasses)
+        {
+            auto const inClass = [wanted](auto const& candidate) {
+                return candidate.second == wanted;
+            };
+            if (auto const found = std::find_if(start, candidates.end(), inClass); found != candidates.end())
+                return found->first;
+            if (auto const found = std::find_if(candidates.begin(), start, inClass); found != start)
+                return found->first;
+        }
+        return std::nullopt;
+    }
+
+    /// @return The index of the first candidate @p matches accepts; none when it accepts none.
+    template <typename Key, typename Matches>
+    [[nodiscard]] std::optional<std::size_t> indexOf(std::vector<std::pair<Key, Urgency>> const& candidates,
+                                                     Matches matches)
+    {
+        auto const at =
+            std::ranges::find_if(candidates, [&](auto const& candidate) { return matches(candidate.first); });
+        if (at == candidates.end())
+            return std::nullopt;
+        return static_cast<std::size_t>(std::distance(candidates.begin(), at));
+    }
+} // namespace detail
+
 /// The pane a jump goes to.
 /// @param directory The workspaces, tabs and panes, in sidebar order (depth-first).
 /// @param attention This window's marks.
@@ -182,23 +227,50 @@ inline constexpr auto JumpClasses = std::array { Urgency::NeedsYou, Urgency::Fai
         for (auto const& tab: workspace.tabs)
             for (auto const& pane: tab.panes)
                 panes.emplace_back(pane.key, paneUrgency(pane, attention.of(pane.key)));
-    auto const start = [&] {
-        if (!current)
-            return panes.begin();
-        auto const at = std::ranges::find(panes, *current, &std::pair<PaneKey, Urgency>::first);
-        return at == panes.end() ? panes.begin() : std::next(at);
-    }();
-    for (auto const wanted: JumpClasses)
+    auto const at =
+        current ? detail::indexOf(panes, [&](PaneKey key) { return key == *current; }) : std::nullopt;
+    return detail::nextInJumpClasses(panes, at);
+}
+
+/// The pane a jump goes to across every listed daemon, in tree order.
+/// @param sections The window's sections (windowSections()), in tree order; a section that is not Connected,
+///                 the window's own excepted, contributes nothing.
+/// @param own      The window's own daemon; its panes are read with @p ownMarks (marksOf()).
+/// @param ownMarks This window's marks.
+/// @param current  Where the jump starts: the pending jump's target if one is pending, else the active pane.
+///                 It is found by its daemon and pane; one that names no listed pane starts at the top.
+/// @return As the single-directory overload, over all sections; a target names daemon, instance, workspace,
+///         tab and pane.
+[[nodiscard]] inline std::optional<SidebarTarget> nextAttention(std::span<DaemonSection const> sections,
+                                                                DaemonRef const& own,
+                                                                TabAttention const& ownMarks,
+                                                                std::optional<SidebarTarget> const& current)
+{
+    auto panes = std::vector<std::pair<SidebarTarget, Urgency>> {};
+    for (auto const& section: sections)
     {
-        auto const inClass = [wanted](auto const& pane) {
-            return pane.second == wanted;
-        };
-        if (auto const found = std::find_if(start, panes.end(), inClass); found != panes.end())
-            return found->first;
-        if (auto const found = std::find_if(panes.begin(), start, inClass); found != start)
-            return found->first;
+        auto const isOwn = section.daemon == own;
+        // A daemon this window does not reach now lists its last-known panes, which ask nothing of anyone.
+        if (!isOwn && section.state != DaemonLinkState::Connected)
+            continue;
+        for (auto const& workspace: section.directory.workspaces)
+            for (auto const& tab: workspace.tabs)
+                for (auto const& pane: tab.panes)
+                    panes.emplace_back(
+                        SidebarTarget { .daemon = section.daemon,
+                                        .instance = section.instance,
+                                        .workspace = workspace.id,
+                                        .tab = tab.id,
+                                        .pane = pane.key },
+                        paneUrgency(pane, isOwn ? ownMarks.of(pane.key) : SessionAttention {}));
     }
-    return std::nullopt;
+    auto const at = current && current->pane ? detail::indexOf(panes,
+                                                               [&](SidebarTarget const& candidate) {
+                                                                   return candidate.daemon == current->daemon
+                                                                          && candidate.pane == current->pane;
+                                                               })
+                                             : std::nullopt;
+    return detail::nextInJumpClasses(panes, at);
 }
 
 } // namespace contour::window

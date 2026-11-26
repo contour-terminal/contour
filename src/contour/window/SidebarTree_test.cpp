@@ -1282,10 +1282,11 @@ TEST_CASE("SidebarTree.daemon_row_rolls_up_most_urgent_glyph", "[sidebar]")
     foldedB.foldedDaemons = { daemonB() };
     for (auto const& state: { openedOn(daemonA()), openedOn(daemonB()), foldedB })
     {
-        auto const& row = rowAt(listingOf(sections, state).rows, "D host:b");
+        auto const listing = listingOf(sections, state);
+        auto const& row = rowAt(listing.rows, "D host:b");
         CHECK(row.urgency == Urgency::NeedsYou);
         CHECK(row.glyph == TabBadgeKind::Blocked);
-        CHECK(rowAt(listingOf(sections, state).rows, "D local:a").urgency == Urgency::Idle);
+        CHECK(rowAt(listing.rows, "D local:a").urgency == Urgency::Idle);
     }
 }
 
