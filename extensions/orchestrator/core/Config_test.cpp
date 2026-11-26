@@ -1521,3 +1521,12 @@ TEST_CASE("automation: every condition row is named once", "[config][automation]
     }
     CHECK(names.size() == AutomationConditionRows.size());
 }
+
+TEST_CASE("automation: two rules with the same condition and task are refused", "[config][automation]")
+{
+    auto const config = parseAutomation(R"({ "rules": [ { "when": "conflicts", "task": "fix_ci" },
+                                                       { "when": "conflicts", "task": "fix_ci", "model": "opus" } ] })");
+    REQUIRE_FALSE(config.has_value());
+    CHECK(config.error().key == "automation.rules[1].task");
+    CHECK(config.error().problem == ConfigProblem::Duplicate);
+}

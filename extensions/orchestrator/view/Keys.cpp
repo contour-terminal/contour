@@ -1039,7 +1039,10 @@ namespace
         auto items = bulkItems(*context.engine, dialog);
         if (items.empty())
             return std::nullopt;
-        auto const task = bulkChoices(*context.engine, dialog)[dialog.choice];
+        // The choices may have shrunk since the dialog opened, as agents started: bulkItems() then took the
+        // suggested task, and so does this.
+        auto const all = bulkChoices(*context.engine, dialog);
+        auto const task = dialog.choice < all.size() ? all[dialog.choice] : std::string {};
         close();
         return UiAction { RunOnItemsAction { .items = std::move(items), .task = task } };
     }

@@ -535,12 +535,16 @@ dialog's do. When two rules match one item, the first one wins. A configuration 
 nothing.
 
 - **The switch.** The Work view's filter bar shows `auto ⏸ paused` or `auto ▶ on` while rules are configured;
-  `tab` to it and `⏎`, a click, or the palette's "switch automation on or off" turns it. It starts as `enabled`
-  says, `false` by default, and keeps what you set across restarts.
+  `tab` to it and `⏎`, a click, or the palette's "switch automation on or off" turns it. Until you turn it, it is
+  what `enabled` says, `false` by default; once you have, it keeps what you set across restarts.
+- **After a poll.** The rules look at the items as the last complete poll listed them: never at a poll half
+  answered, and not at one that failed.
 - **One agent per item.** An item that has a run, whoever started it, is left alone.
 - **One attempt per state.** Once a rule started an agent on an item, it does not start another on it until the
   item changes: a new head commit (or, where the forge gives none, a new update time) for a merge request, a new
-  status for a ticket. A retried pipeline on the same commit does not count. This is remembered across restarts.
+  status for a ticket. A retried pipeline on the same commit does not count. GitHub's list gives no head commit,
+  so there a comment also changes the update time: whatever changes, a rule starts at most two agents on one item
+  while it stays listed. This is remembered across restarts.
 - **The cap.** At most `max_agents` automatic runs are active at once, and never more than the top-level
   `max_agents` and `max_agents_per_repo` allow. Your own runs do not count against it and are never held back.
   Items over the cap wait: their row shows `⚙ queued`.
@@ -550,9 +554,11 @@ nothing.
 - **Without a window.** The rules run in the daemon: they keep starting agents while no Contour window is
   attached, and the dashboard shows what happened when you open it. Pause the switch to stop them.
 - **Refusals.** A start that is refused (a worker whose hooks are missing, a base branch not read yet, ...) is
-  tried again after the next poll, and its problem line names the rule:
+  tried again after the next poll (a base branch not read yet, or no room, is no refusal), and its problem line
+  names the rule:
   `automation: pipeline_failed/fix-ci could not start on contour/!2375: ...`. Three refusals in a row pause that
-  rule, with a line saying so; switching automation off and on resumes it.
+  rule (three items refused in one poll count as three), with a line saying so; switching automation off and on
+  resumes it. Two rules with the same `when` and `task` are refused.
 - **Marked.** An automatic run's row starts with `⚙`, and its details say `started by rule pipeline_failed → fix
   CI` (or `a group start`).
 

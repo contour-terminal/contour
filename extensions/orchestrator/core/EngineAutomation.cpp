@@ -27,8 +27,10 @@ namespace orchestrator::engine::detail
 /// namespace.
 struct JsonAutomationState
 {
-    std::string on;                                                ///< `on` or `paused`.
+    std::optional<std::string> on =
+        std::nullopt; ///< `on` or `paused` once the user turned it; absent: never.
     std::map<std::string, std::string, std::less<>> attempts = {}; ///< AutomationMemory.
+    std::map<std::string, uint32_t, std::less<>> tries = {};       ///< AutomationAttempts.
     std::vector<std::string> paused = {};                          ///< The paused rules' keys.
 };
 
@@ -42,7 +44,7 @@ struct glz::meta<orchestrator::engine::detail::JsonAutomationState>
     // Glaze finds the table by this spelling, as the standard library finds `value_type`.
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr auto value =
-        glz::object("switch", &T::on, "attempts", &T::attempts, "paused", &T::paused);
+        glz::object("switch", &T::on, "attempts", &T::attempts, "tries", &T::tries, "paused", &T::paused);
 };
 
 namespace orchestrator
@@ -65,20 +67,20 @@ namespace
     /// What a rule is told when its worker's hooks are missing: nobody watches an automatic start.
     constexpr auto HooksMissingWhy = std::string_view { "its worker's hooks are missing" };
 
-    /// @return Whether @p refusal says only that there is no room now: the item waits, the rule is not
-    /// blamed.
-    [[nodiscard]] constexpr bool isCapacity(DispatchRefusal refusal) noexcept
+    /// @return Whether @p refusal says only that the item cannot start yet: no room now, or a base branch not
+    ///         read yet. The item waits for the next poll, and the rule is not blamed.
+    [[nodiscard]] constexpr bool isOnlyNotYet(DispatchRefusal refusal) noexcept
     {
         switch (refusal)
         {
             case DispatchRefusal::AgentLimit:
             case DispatchRefusal::RepoLimit:
-            case DispatchRefusal::AlreadyRunning: return true;
+            case DispatchRefusal::AlreadyRunning:
+            case DispatchRefusal::BaseUnknown: return true;
             case DispatchRefusal::NotConfigured:
             case DispatchRefusal::UnknownRepo:
             case DispatchRefusal::UnknownTask:
             case DispatchRefusal::UnknownModel:
-            case DispatchRefusal::BaseUnknown:
             case DispatchRefusal::BadPrompt:
             case DispatchRefusal::UnknownProfile:
             case DispatchRefusal::UnknownWorker:
@@ -134,26 +136,57 @@ void Engine::loadAutomation(std::string_view json)
             "automation: its stored state cannot be read; the switch starts as configured");
         return;
     }
-    _automation = read->on == SwitchOn ? AutomationSwitch::On : AutomationSwitch::Paused;
+    if (read->on)
+    {
+        _automationChosen = *read->on == SwitchOn ? AutomationSwitch::On : AutomationSwitch::Paused;
+        _automation = *_automationChosen;
+    }
     _automationMemory = AutomationMemory { read->attempts.begin(), read->attempts.end() };
-    _pausedRules = read->paused;
+    _automationAttempts = AutomationAttempts { read->tries.begin(), read->tries.end() };
+    // A rule no longer configured is no longer paused: nothing could resume it.
+    auto const configured = _config ? _config->automation().rules | std::views::transform(ruleKeyOf)
+                                          | std::ranges::to<std::vector>()
+                                    : std::vector<std::string> {};
+    _pausedRules =
+        read->paused
+        | std::views::filter([&](std::string const& rule) { return std::ranges::contains(configured, rule); })
+        | std::ranges::to<std::vector>();
 }
 
-void Engine::storeAutomation(std::vector<Effect>& out) const
+void Engine::storeAutomation(std::vector<Effect>& out)
 {
-    auto const state =
-        JsonAutomationState { .on = std::string { _automation == AutomationSwitch::On ? SwitchOn
-                                                                                      : SwitchPaused },
-                              .attempts = { _automationMemory.begin(), _automationMemory.end() },
-                              .paused = _pausedRules };
+    if (_automationPersist == AutomationPersist::Clean)
+        return;
+    _automationPersist = AutomationPersist::Clean;
+    auto const state = JsonAutomationState {
+        .on = _automationChosen ? std::optional { std::string {
+                                      *_automationChosen == AutomationSwitch::On ? SwitchOn : SwitchPaused } }
+                                : std::nullopt,
+        .attempts = { _automationMemory.begin(), _automationMemory.end() },
+        .tries = { _automationAttempts.begin(), _automationAttempts.end() },
+        .paused = _pausedRules,
+    };
     auto value = std::string {};
     if (glz::write_json(state, value))
         return;
-    out.emplace_back(StoreSet { .key = std::string { AutomationKey }, .value = std::move(value) });
+    auto const fits = value.size() <= MaxStoredRunBytes;
+    auto problem = fits ? std::string {}
+                        : std::string { "automation: what the rules remember is too large to store; it lasts "
+                                        "until the daemon restarts" };
+    if (problem != _automationStoreProblem)
+    {
+        _automationStoreProblem = std::move(problem);
+        ++_revision;
+    }
+    if (fits)
+        out.emplace_back(StoreSet { .key = std::string { AutomationKey }, .value = std::move(value) });
 }
 
 void Engine::setAutomation(AutomationSwitch to, std::vector<Effect>& out)
 {
+    static_cast<void>(out);
+    _automationChosen = to;
+    _automationPersist = AutomationPersist::Dirty;
     if (to == _automation)
         return;
     _automation = to;
@@ -164,7 +197,6 @@ void Engine::setAutomation(AutomationSwitch to, std::vector<Effect>& out)
         _ruleRecords.clear();
     }
     ++_revision;
-    storeAutomation(out);
 }
 
 void Engine::runOnItems(RunOnItems const& request)
@@ -189,11 +221,14 @@ void Engine::planAndStart(std::vector<Effect>& out)
                                            : RuleState::Active;
                             })
                             | std::ranges::to<std::vector>();
-    auto const unordered = workItems();
-    auto const items = orderOf(unordered, _repositoryNames, WorkSort::Importance)
-                       | std::views::transform([&](std::size_t index) { return unordered[index]; })
-                       | std::ranges::to<std::vector>();
-    auto busy = _automaticPending;
+    // The items as the last poll that ended listed them, each with the run on it now: a poll half answered
+    // would show a ticket whose merge request is not listed yet as having none.
+    auto items = _automationItems;
+    for (auto& item: items)
+        if (auto const* const run = activeRunOn(item.repo, item.item))
+            item.agentRun = run->id;
+    auto busy =
+        _automaticPending | std::views::transform(&PendingStart::item) | std::ranges::to<std::vector>();
     busy.insert(busy.end(), _refusedThisPoll.begin(), _refusedThisPoll.end());
     auto const bulkItems = _bulk | std::views::transform(&BulkItem::item) | std::ranges::to<std::vector>();
     auto const bulkTasks = _bulk | std::views::transform(&BulkItem::task) | std::ranges::to<std::vector>();
@@ -207,42 +242,42 @@ void Engine::planAndStart(std::vector<Effect>& out)
         std::min(room(automationCapOf(settings, _config->workers().size()), activeAutomaticRuns()),
                  room(_config->maxAgents(), activeRuns()));
 
+    // Every candidate, in order: the slots go to those whose repository has room, so a full one holds back
+    // none of the others.
     auto const plan = planAutomation(PlanInput { .items = items,
                                                  .rules = rules,
                                                  .ruleStates = ruleStates,
                                                  .memory = _automationMemory,
+                                                 .attempts = _automationAttempts,
                                                  .busyItems = busy,
                                                  .bulkItems = bulkItems,
                                                  .bulkTasks = bulkTasks,
                                                  .config = *_config,
-                                                 .freeSlots = freeSlots });
-    auto queued =
-        plan.queued
-        | std::views::transform([&](PlannedStart const& start) { return workItemKey(items[start.item]); })
-        | std::ranges::to<std::vector>();
-    // A repository at max_agents_per_repo keeps its items waiting, as a full cap does.
+                                                 .freeSlots = items.size() + bulkItems.size() });
+    auto inRepo = std::map<std::string, std::size_t, std::less<>> {};
+    for (auto const& run: _runs)
+        if (countsAsActive(run))
+            ++inRepo[run.repo];
+    for (auto const& waiting: _automaticPending)
+        ++inRepo[waiting.repo];
     auto starts = std::vector<PlannedStart> {};
-    auto const inRepo = [&](std::string_view repo) {
-        auto const active = std::ranges::count_if(
-            _runs, [&](Run const& run) { return countsAsActive(run) && run.repo == repo; });
-        auto const started = std::ranges::count_if(
-            starts, [&](PlannedStart const& start) { return items[start.item].repo == repo; });
-        auto const waiting = std::ranges::count_if(_automaticPending, [&](std::string const& key) {
-            return key.starts_with(std::format("{}/", repo));
-        });
-        return static_cast<std::size_t>(active + started + waiting);
-    };
+    auto queued = std::vector<std::string> {};
     for (auto const& start: plan.start)
-        if (inRepo(items[start.item].repo) < _config->maxAgentsPerRepo())
+    {
+        auto const& repo = items[start.item].repo;
+        if (starts.size() < freeSlots && inRepo[repo] < _config->maxAgentsPerRepo())
+        {
+            ++inRepo[repo];
             starts.push_back(start);
+        }
         else
             queued.push_back(workItemKey(items[start.item]));
-    // A group start's item the planner neither starts nor queues is gone, taken or takes no task: dropped.
+    }
+    // A group start's item the planner does not plan is gone, taken or takes no task: dropped.
     std::erase_if(_bulk, [&](BulkItem const& bulk) {
-        auto const planned = [&](PlannedStart const& start) {
-            return workItemKey(items[start.item]) == bulk.item;
-        };
-        return std::ranges::none_of(plan.start, planned) && std::ranges::none_of(plan.queued, planned)
+        return std::ranges::none_of(
+                   plan.start,
+                   [&](PlannedStart const& start) { return workItemKey(items[start.item]) == bulk.item; })
                && !std::ranges::contains(busy, bulk.item);
     });
     if (queued != _automationQueued)
@@ -263,21 +298,19 @@ void Engine::startAutomatic(WorkItem const& item, PlannedStart const& start, std
     auto const workerId = rule != nullptr && !rule->worker.empty()
                               ? rule->worker
                               : defaultWorker(*_config, _runs, start.task).id;
-    std::erase_if(_bulk, [&](BulkItem const& bulk) { return bulk.item == itemKey; });
     if (auto const* const worker = _config->findWorker(workerId);
         worker != nullptr && worker->agent == AgentKind::Claude
         && hooksFor(worker->envSet) == HooksState::Missing)
     {
         _refusedThisPoll.push_back(itemKey);
-        refuseAutomatic(ruleKey, itemKey, HooksMissingWhy, out);
+        refuseAutomatic(ruleKey, itemKey, HooksMissingWhy);
         return;
     }
-    if (rule != nullptr)
-    {
-        _automationMemory[memoryKeyOf(ruleKey, itemKey)] = stateSignatureOf(item);
-        storeAutomation(out);
-    }
-    _automaticPending.push_back(itemKey);
+    // What the rule remembers is written once the dispatch got through (onAutomaticDispatch()).
+    _automaticPending.push_back(PendingStart { .item = itemKey,
+                                               .repo = item.repo,
+                                               .ruleKey = rule != nullptr ? ruleKey : std::string {},
+                                               .signature = stateSignatureOf(item) });
     out.emplace_back(
         StartAutomatic { Dispatch { .repo = item.repo,
                                     .item = item.item,
@@ -299,27 +332,39 @@ void Engine::onAutomaticDispatch(Dispatch const& request,
                                  std::optional<DispatchRefusal> refusal,
                                  std::vector<Effect>& out)
 {
+    static_cast<void>(out);
     auto const itemKey = itemKeyOf(request);
-    std::erase(_automaticPending, itemKey);
+    auto const pending = std::ranges::find(_automaticPending, itemKey, &PendingStart::item);
+    auto const started = pending != _automaticPending.end() ? std::optional { *pending } : std::nullopt;
+    if (pending != _automaticPending.end())
+        _automaticPending.erase(pending);
     auto const ruleKey =
         request.origin == RunOrigin::Rule ? request.originRule : std::string { GroupStartKey };
+    auto const dropBulk = [&] {
+        std::erase_if(_bulk, [&](BulkItem const& bulk) { return bulk.item == itemKey; });
+    };
     if (!refusal)
     {
         _ruleRecords.erase(ruleKey);
+        dropBulk();
+        if (request.origin == RunOrigin::Rule && started)
+        {
+            auto const key = memoryKeyOf(ruleKey, itemKey);
+            _automationMemory[key] = started->signature;
+            ++_automationAttempts[key];
+            _automationPersist = AutomationPersist::Dirty;
+        }
         return;
     }
-    // Not started: tried again once the next poll ended, with the rule's memory of the item undone.
+    // Not started: tried again once the next poll ended.
     _refusedThisPoll.push_back(itemKey);
-    if (request.origin == RunOrigin::Rule && _automationMemory.erase(memoryKeyOf(ruleKey, itemKey)) > 0)
-        storeAutomation(out);
-    if (!isCapacity(*refusal))
-        refuseAutomatic(ruleKey, itemKey, dispatchRefusalText(*refusal), out);
+    if (isOnlyNotYet(*refusal))
+        return;
+    dropBulk();
+    refuseAutomatic(ruleKey, itemKey, dispatchRefusalText(*refusal));
 }
 
-void Engine::refuseAutomatic(std::string_view ruleKey,
-                             std::string_view itemKey,
-                             std::string_view why,
-                             std::vector<Effect>& out)
+void Engine::refuseAutomatic(std::string_view ruleKey, std::string_view itemKey, std::string_view why)
 {
     auto& record = _ruleRecords[std::string { ruleKey }];
     record.lastWhy = displayText(
@@ -329,18 +374,27 @@ void Engine::refuseAutomatic(std::string_view ruleKey,
         return;
     if (!std::ranges::contains(_pausedRules, ruleKey))
         _pausedRules.emplace_back(ruleKey);
-    storeAutomation(out);
+    _automationPersist = AutomationPersist::Dirty;
 }
 
-void Engine::settleAutomationAfterPoll(std::vector<Effect>& out)
+void Engine::settleAutomationAfterPoll()
 {
     _refusedThisPoll.clear();
-    auto const listed = workItems() | std::views::transform(workItemKey) | std::ranges::to<std::vector>();
-    auto const forgotten = std::erase_if(_automationMemory, [&](auto const& entry) {
+    // A poll that failed may have listed nothing, as after a restart: what it shows is no reason to start or
+    // to forget anything, and the items of the last good poll stay.
+    if (_pollResult == PollResult::Failed)
+        return;
+    auto const unordered = workItems();
+    _automationItems = orderOf(unordered, _repositoryNames, WorkSort::Importance)
+                       | std::views::transform([&](std::size_t index) { return unordered[index]; })
+                       | std::ranges::to<std::vector>();
+    auto const listed =
+        _automationItems | std::views::transform(workItemKey) | std::ranges::to<std::vector>();
+    auto const gone = [&](auto const& entry) {
         return !std::ranges::contains(listed, itemOfMemoryKey(entry.first));
-    });
-    if (forgotten > 0)
-        storeAutomation(out);
+    };
+    if (std::erase_if(_automationMemory, gone) + std::erase_if(_automationAttempts, gone) > 0)
+        _automationPersist = AutomationPersist::Dirty;
 }
 
 std::vector<std::string> Engine::automationProblems() const
@@ -356,6 +410,8 @@ std::vector<std::string> Engine::automationProblems() const
                                     ruleKey,
                                     MaxRuleRefusals),
                         MaxSummaryLineChars));
+    if (!_automationStoreProblem.empty())
+        lines.push_back(_automationStoreProblem);
     return lines;
 }
 

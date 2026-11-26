@@ -115,3 +115,20 @@ TEST_CASE("Bulk dialog: the palette entry opens it on the selected line's group"
     CHECK(interaction.bulk->group == WorkGroup::NeedsYou);
     CHECK(fixture.screen().contains("Run a task on Needs you"));
 }
+
+TEST_CASE("Bulk dialog: a choice the group no longer offers starts the suggested task",
+          "[orchestrator][view][bulk]")
+{
+    auto const engine = bootEngine(workWorld());
+    auto interaction = Interaction {};
+    interaction.bulk = openBulkDialog(engine, WorkGroup::NeedsYou, itemsIn(engine, WorkGroup::NeedsYou));
+    interaction.bulk->choice = 99;
+    interaction.overlay = Overlay::Bulk;
+    auto const started = applyResolvedKey(core::tui::KeyEvent { .key = core::tui::KeyCode::Enter },
+                                          interaction,
+                                          KeyContext { .engine = &engine });
+    REQUIRE(started.has_value());
+    auto const* const run = std::get_if<RunOnItemsAction>(&*started);
+    REQUIRE(run != nullptr);
+    CHECK(run->task.empty());
+}

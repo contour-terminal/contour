@@ -67,8 +67,12 @@ namespace
                 continue;
             if (!matchesCondition(item, rule.when))
                 continue;
-            auto const remembered = input.memory.find(memoryKeyOf(ruleKeyOf(rule), itemKey));
+            auto const key = memoryKeyOf(ruleKeyOf(rule), itemKey);
+            auto const remembered = input.memory.find(key);
             if (remembered != input.memory.end() && remembered->second == stateSignatureOf(item))
+                continue;
+            if (auto const tried = input.attempts.find(key);
+                tried != input.attempts.end() && tried->second >= MaxAutomaticAttempts)
                 continue;
             return PlannedStart { .item = index, .rule = position, .task = rule.task };
         }

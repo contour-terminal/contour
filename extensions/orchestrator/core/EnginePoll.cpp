@@ -1395,7 +1395,7 @@ void Engine::onListAnswered(std::vector<Effect>& out)
     _nextPollMs = engine::detail::later(
         _monoMs,
         engine::detail::pollInterval(static_cast<uint64_t>(_config->pollEvery().count()), _pollFailures));
-    settleAutomationAfterPoll(out);
+    settleAutomationAfterPoll();
     drainQueue(out);
 }
 

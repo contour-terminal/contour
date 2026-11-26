@@ -1533,6 +1533,9 @@ namespace
             auto rule = ruleOf(json, static_cast<std::size_t>(index), tables);
             if (!rule)
                 return std::unexpected(std::move(rule.error()));
+            // Two rules of one condition and task would share what they remember and whether they are paused.
+            if (std::ranges::contains(settings.rules | std::views::transform(ruleKeyOf), ruleKeyOf(*rule)))
+                return fail(std::format("automation.rules[{}].task", index), ConfigProblem::Duplicate);
             settings.rules.push_back(std::move(*rule));
         }
         return settings;

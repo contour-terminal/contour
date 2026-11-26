@@ -967,6 +967,7 @@ void Engine::endStep(std::vector<Effect>& out, uint64_t revision)
     readDueStats(out);
     retryDueRefLocks();
     planAndStart(out);
+    storeAutomation(out);
     drainQueue(out);
     forgetSettledPaneOpenings();
     refreshOrphans();

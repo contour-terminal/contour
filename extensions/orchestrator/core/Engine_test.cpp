@@ -6149,6 +6149,7 @@ TEST_CASE("automation: a poll forgets the items that left the list", "[orchestra
 {
     auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } });
     harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    harness.startNextAutomatic();
     REQUIRE(harness.automationState().has_value());
     CHECK(harness.automationState()->contains("contour/!1"));
     harness.answers["gh-prs"] = ok(prsOf({ { .number = 2 } }));
@@ -6218,6 +6219,151 @@ TEST_CASE("automation: an automatic run that asks, waits or failed is left for t
         CHECK(countOf<ClosePane>(harness.wake(24 * 60 * Minute)) == 0);
         CHECK_FALSE(holds<Ending>(harness.run(PrId)));
     }
+}
+
+// }}}
+
+// {{{ 18. automation: what the review found
+
+namespace
+{
+
+/// Runs the oldest automatic start to its end, removed.
+void runAutomaticToEnd(Harness& harness, uint64_t number)
+{
+    harness.startNextAutomatic();
+    auto const id = harness.engine().activeRunOn("contour", ChangeRequestRef { number })->id;
+    harness.finish("git-fetch", ok());
+    harness.finish("git-worktree-add", ok());
+    harness.finish("gh-pr-checkout", ok());
+    harness.feed(PaneOpenedFor { .run = id, .pane = "p1" });
+    harness.feed(EndRun { .run = id });
+    harness.endCleanly(id);
+}
+
+/// @return How many writes of automation's state @p effects hold.
+[[nodiscard]] std::size_t automationWrites(std::span<Effect const> effects)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(
+        all<StoreSet>(effects), [](StoreSet const& set) { return set.key == AutomationKey; }));
+}
+
+} // namespace
+
+TEST_CASE("automation: rules wait for the whole poll, so a ticket an MR claims is never started",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = Harness { contextFor({ .limits = R"("automation": { "enabled": true, "max_agents": 9,
+                                   "rules": [ { "when": "no_mr_yet", "task": "issue" } ] },)" }) };
+    // The issues answer before the pull requests: #605 looks unclaimed until #1847, which closes it, is
+    // listed.
+    harness.held.insert("poll/contour/prs");
+    harness.boot();
+    CHECK(harness.automaticStarts().empty());
+    harness.held.clear();
+    harness.boot();
+    REQUIRE_FALSE(harness.automaticStarts().empty());
+    CHECK(std::ranges::none_of(harness.automaticStarts(), [](StartAutomatic const& start) {
+        return start.request.item == ItemRef { IssueRef { 605 } };
+    }));
+}
+
+TEST_CASE("automation: a rule starts at most twice on one item, whatever changes",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } });
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    runAutomaticToEnd(harness, 1);
+    auto ended = std::size_t { 1 };
+    for (auto const updated: { "2026-11-13T13:00:00Z"sv, "2026-11-13T14:00:00Z"sv, "2026-11-13T15:00:00Z"sv })
+    {
+        harness.answers["gh-prs"] =
+            ok(prsOf({ { .number = 1, .conclusion = "FAILURE", .updatedAt = updated } }));
+        harness.wake(2 * Minute);
+        harness.boot();
+        if (harness.automaticStarts().size() > ended)
+        {
+            runAutomaticToEnd(harness, 1);
+            ++ended;
+        }
+    }
+    CHECK(harness.automaticStarts().size() == MaxAutomaticAttempts);
+}
+
+TEST_CASE("automation: a failed poll forgets nothing", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } });
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    harness.startNextAutomatic();
+    REQUIRE(harness.automationState()->contains("contour/!1"));
+    // A restart whose first poll fails knows no item: it forgets none.
+    auto restarted = Harness { [&] {
+        auto context = contextFor({ .limits = FixCiRule });
+        context.stored = harness.stored();
+        return context;
+    }() };
+    restarted.answers["gh-prs"] = failed(1, "HTTP 502");
+    restarted.boot();
+    CHECK(restarted.automationState().value_or(*harness.automationState()).contains("contour/!1"));
+}
+
+TEST_CASE("automation: enabled stays in charge until the user turns the switch",
+          "[orchestrator][engine][automation]")
+{
+    constexpr auto Enabled =
+        R"("automation": { "enabled": true, "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] },)"sv;
+    auto harness = automationHarness({ { .number = 1, .conclusion = "FAILURE" } }, Enabled);
+    REQUIRE(harness.automaticStarts().size() == 1);
+    harness.startNextAutomatic();
+    REQUIRE(harness.automationState().has_value());
+    CHECK_FALSE(harness.automationState()->contains("switch"));
+
+    auto restarted = Harness { [&] {
+        auto context = contextFor(
+            { .limits =
+                  R"("automation": { "enabled": false, "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] },)" });
+        context.stored = harness.stored();
+        return context;
+    }() };
+    CHECK(restarted.engine().automation() == AutomationSwitch::Paused);
+}
+
+TEST_CASE("automation: a full repository does not hold back another one's items",
+          "[orchestrator][engine][automation]")
+{
+    auto harness = Harness { contextFor(
+        { .limits = R"("max_agents_per_repo": 1,
+            "automation": { "max_agents": 1, "rules": [ { "when": "pipeline_failed", "task": "fix_ci" } ] },)",
+          .repos = R"([ { "name": "contour", "path": "~/projects/contour", "forge": "github" },
+                                                       { "name": "other", "path": "~/projects/other", "forge": "github" } ])",
+          .repoPaths = { ContourPath, OtherPath } }) };
+    harness.answers["poll/contour/prs"] =
+        ok(prsOf({ { .number = 1, .conclusion = "FAILURE" }, { .number = 3 } }));
+    harness.answers["poll/other/prs"] =
+        ok(prsOf({ { .number = 2, .conclusion = "FAILURE", .updatedAt = "2026-11-13T11:00:00Z" } }));
+    harness.boot();
+    harness.feed(prDispatch(3));
+    harness.feed(SetAutomation { .to = AutomationSwitch::On });
+    REQUIRE(harness.automaticStarts().size() == 1);
+    CHECK(harness.automaticStarts().front().request.repo == "other");
+}
+
+TEST_CASE("automation: a paused rule no longer configured is forgotten", "[orchestrator][engine][automation]")
+{
+    auto context = contextFor({ .limits = FixCiRule });
+    context.stored.push_back(
+        StoredEntry { .key = std::string { AutomationKey },
+                      .value = R"({"switch":"on","attempts":{},"paused":["conflicts/fix_ci"]})" });
+    auto harness = Harness { std::move(context) };
+    harness.boot();
+    CHECK_FALSE(mentions(harness.engine().problems(), "conflicts/fix_ci"));
+}
+
+TEST_CASE("automation: its state is written once per step", "[orchestrator][engine][automation]")
+{
+    auto harness = automationHarness(
+        { { .number = 1, .conclusion = "FAILURE" }, { .number = 2, .conclusion = "FAILURE" } });
+    CHECK(automationWrites(harness.feed(SetAutomation { .to = AutomationSwitch::On })) == 1);
 }
 
 // }}}

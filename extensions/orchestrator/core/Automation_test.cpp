@@ -98,6 +98,7 @@ struct Scenario
     std::vector<AutomationRule> rules;
     std::vector<RuleState> ruleStates = std::vector<RuleState>(rules.size(), RuleState::Active);
     AutomationMemory memory = {};
+    AutomationAttempts attempts = {};
     std::vector<std::string> busy = {};
     std::vector<std::string> bulkItems = {};
     std::vector<std::string> bulkTasks = {};
@@ -109,6 +110,7 @@ struct Scenario
                                           .rules = rules,
                                           .ruleStates = ruleStates,
                                           .memory = memory,
+                                          .attempts = attempts,
                                           .busyItems = busy,
                                           .bulkItems = bulkItems,
                                           .bulkTasks = bulkTasks,
@@ -234,4 +236,15 @@ TEST_CASE("automation: bulk items go first, ignore the memory and the rules, and
 
     scenario.bulkTasks = { "address_review", "address_review", "address_review" };
     CHECK(spelled(scenario.plan().start) == std::vector<std::string> { "1:address_review" });
+}
+
+TEST_CASE("automation: a rule that used its attempts on an item leaves it", "[automation]")
+{
+    auto scenario = Scenario { .items = { mrItem(1, CiState::Failing) },
+                               .rules = { ruleOf(AutomationCondition::PipelineFailed, "fix_ci") } };
+    scenario.memory[memoryKeyOf("pipeline_failed/fix_ci", "contour/!1")] = "sha:old";
+    scenario.attempts[memoryKeyOf("pipeline_failed/fix_ci", "contour/!1")] = MaxAutomaticAttempts;
+    CHECK(scenario.plan().start.empty());
+    scenario.attempts[memoryKeyOf("pipeline_failed/fix_ci", "contour/!1")] = MaxAutomaticAttempts - 1;
+    CHECK(scenario.plan().start.size() == 1);
 }

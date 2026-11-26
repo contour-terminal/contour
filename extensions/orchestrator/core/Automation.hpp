@@ -43,6 +43,13 @@ enum class RuleState : uint8_t
 /// What each rule last started on each item: by memoryKeyOf(), the item's stateSignatureOf() then.
 using AutomationMemory = std::map<std::string, std::string, std::less<>>;
 
+/// How many agents a rule started on each item since the item was listed: by memoryKeyOf().
+using AutomationAttempts = std::map<std::string, uint32_t, std::less<>>;
+
+/// The most agents a rule starts on one item while it stays listed, whatever its state does: a backstop for
+/// a state that changes without anyone making progress, such as a comment on a failing merge request.
+inline constexpr uint32_t MaxAutomaticAttempts = 2;
+
 /// @param ruleKey A rule's ruleKeyOf().
 /// @param itemKey An item's workItemKey().
 /// @return `<ruleKey>|<itemKey>`.
@@ -71,6 +78,7 @@ struct PlanInput
     std::span<AutomationRule const> rules;  ///< The rules; empty while the switch is paused.
     std::span<RuleState const> ruleStates;  ///< One per rule.
     AutomationMemory const& memory;         ///< What the rules last started.
+    AutomationAttempts const& attempts;     ///< How often each rule started on each item.
     std::span<std::string const> busyItems; ///< The items whose start is in flight, by workItemKey().
     std::span<std::string const> bulkItems; ///< The items a bulk start still waits to start, in order.
     std::span<std::string const> bulkTasks; ///< One per bulk item: its task's id; empty: the suggested one.
@@ -79,7 +87,8 @@ struct PlanInput
 };
 
 /// Bulk items first, in their order; then each item in order, with the first rule (in configuration order)
-/// that is Active, whose condition it meets and whose memory of it differs from its state. An item with a
+/// that is Active, whose condition it meets, whose memory of it differs from its state and that started fewer
+/// than MaxAutomaticAttempts agents on it. An item with a
 /// run, or busy, is left out; so is a bulk item that is not listed, no task is suggested for, or whose task
 /// does not apply to it. The first PlanInput::freeSlots go to AutomationPlan::start, the rest to queued.
 /// @param input What the planner reads.

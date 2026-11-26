@@ -883,8 +883,9 @@ class Engine
     void dispatch(Dispatch const& request, std::vector<Effect>& out);
     /// Takes in what automation's store entry holds; the configured default when @p json cannot be read.
     void loadAutomation(std::string_view json);
-    /// Stores the switch, the memory and the paused rules under AutomationKey.
-    void storeAutomation(std::vector<Effect>& out) const;
+    /// Stores the switch the user chose, the memory and the paused rules under AutomationKey, once per step
+    /// and only when they changed; a state too large to store is kept in memory, with a problem line.
+    void storeAutomation(std::vector<Effect>& out);
     void setAutomation(AutomationSwitch to, std::vector<Effect>& out);
     void runOnItems(RunOnItems const& request);
     /// Plans automation over the Work-view items and asks the driver to start what the free slots allow.
@@ -898,12 +899,10 @@ class Engine
                              std::vector<Effect>& out);
     /// Counts a refusal against @p ruleKey (the group start's are not counted), pausing it at
     /// MaxRuleRefusals.
-    void refuseAutomatic(std::string_view ruleKey,
-                         std::string_view itemKey,
-                         std::string_view why,
-                         std::vector<Effect>& out);
-    /// At a poll's end: forgets the items no longer listed and lets the refused ones be tried again.
-    void settleAutomationAfterPoll(std::vector<Effect>& out);
+    void refuseAutomatic(std::string_view ruleKey, std::string_view itemKey, std::string_view why);
+    /// At a poll's end: lets the refused items be tried again; unless the poll failed, takes its items in as
+    /// the ones the rules plan over, and forgets those no longer listed.
+    void settleAutomationAfterPoll();
     /// @return The problem lines of the rules refused or paused.
     [[nodiscard]] std::vector<std::string> automationProblems() const;
     [[nodiscard]] std::expected<Run, DispatchRefusal> prepare(Dispatch const& request) const;
@@ -1102,7 +1101,8 @@ class Engine
 
     AutomationSwitch _automation = AutomationSwitch::Paused; ///< automation(); stored under AutomationKey.
     AutomationMemory _automationMemory;                      ///< What each rule last started; stored.
-    std::vector<std::string> _pausedRules;                   ///< By ruleKeyOf(); stored.
+    AutomationAttempts _automationAttempts; ///< How often each rule started on each item; stored.
+    std::vector<std::string> _pausedRules;  ///< By ruleKeyOf(); stored.
     /// A rule's refusals in a row and why it was last refused, by ruleKeyOf(); the group start's under its
     /// own.
     struct RuleRecord
@@ -1111,7 +1111,27 @@ class Engine
         std::string lastWhy;   ///< The problem line of its last refusal; empty: none since its last start.
     };
     std::map<std::string, RuleRecord, std::less<>> _ruleRecords;
-    std::vector<std::string> _automaticPending; ///< The items whose StartAutomatic awaits its Dispatch.
+    /// A StartAutomatic whose Dispatch has not come back yet.
+    struct PendingStart
+    {
+        std::string item;    ///< Its workItemKey().
+        std::string repo;    ///< Its repository.
+        std::string ruleKey; ///< The rule's ruleKeyOf(); empty for a group start.
+        std::string
+            signature; ///< The item's stateSignatureOf() when it was planned: remembered once started.
+    };
+    std::vector<PendingStart> _automaticPending;
+    /// The switch as the user last set it; std::nullopt: never, and `enabled` decides.
+    std::optional<AutomationSwitch> _automationChosen;
+    /// Whether the stored state is behind.
+    enum class AutomationPersist : uint8_t
+    {
+        Clean = 0, ///< Stored as it is.
+        Dirty,     ///< Changed since: stored at the step's end.
+    };
+    AutomationPersist _automationPersist = AutomationPersist::Clean;
+    std::string _automationStoreProblem;        ///< The problem line while the state is too large to store.
+    std::vector<WorkItem> _automationItems;     ///< The last poll that ended's items, in Work-view order.
     std::vector<std::string> _refusedThisPoll;  ///< The items refused since the last poll ended.
     std::vector<std::string> _automationQueued; ///< The items waiting for a free slot, as last planned.
     /// One item a group start still waits to start.
