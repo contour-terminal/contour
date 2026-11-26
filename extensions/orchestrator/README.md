@@ -507,6 +507,61 @@ status. Keys are checked against the key pattern before they reach the command; 
 that lookup fails, those merge requests show without their ticket, with a problem line. Each Jira source with
 `in_progress_jql` adds its one query per poll.
 
+## Automation
+
+Rules start agents for you: each names a condition the Work view already shows and the task to start on every
+item that meets it. Agents started this way are ordinary agents, in their own tabs, on the dashboard as always.
+
+```yaml
+automation:
+    enabled: false   # the switch until you turn it yourself; the default
+    max_agents: 3    # automatic agents at once; default: the workers less one, at least 1
+    rules:
+        - { when: pipeline_failed, task: fix-ci, worker: claude-n8n, model: sonnet }
+        - { when: no_mr_yet, task: work-on-issue, permissions: auto }
+```
+
+| `when` | Matches |
+| --- | --- |
+| `pipeline_failed` | a merge request whose checks failed |
+| `conflicts` | a merge request that conflicts with its base |
+| `changes_requested` | a merge request a reviewer asked changes of |
+| `ready_to_merge` | a merge request in Ready to merge |
+| `no_mr_yet` | a ticket or issue in progress that no merge request names |
+
+A draft matches none of them. The task must apply to the items its condition matches (a `pr` task for the first
+four, an `issue` task for `no_mr_yet`); `worker`, `model` and `permissions` are optional and default as the start
+dialog's do. When two rules match one item, the first one wins. A configuration without `automation` starts
+nothing.
+
+- **The switch.** The Work view's filter bar shows `auto ⏸ paused` or `auto ▶ on` while rules are configured;
+  `tab` to it and `⏎`, a click, or the palette's "switch automation on or off" turns it. It starts as `enabled`
+  says, `false` by default, and keeps what you set across restarts.
+- **One agent per item.** An item that has a run, whoever started it, is left alone.
+- **One attempt per state.** Once a rule started an agent on an item, it does not start another on it until the
+  item changes: a new head commit (or, where the forge gives none, a new update time) for a merge request, a new
+  status for a ticket. A retried pipeline on the same commit does not count. This is remembered across restarts.
+- **The cap.** At most `max_agents` automatic runs are active at once, and never more than the top-level
+  `max_agents` and `max_agents_per_repo` allow. Your own runs do not count against it and are never held back.
+  Items over the cap wait: their row shows `⚙ queued`.
+- **Done ends it.** An automatic run whose agent is done ends by itself, as `e` would, and its worktree is
+  removed, unless it holds uncommitted or unpushed work, which keeps it and says why. A run that asks, waits or
+  failed waits for you, and keeps its place under the cap until it ends.
+- **Without a window.** The rules run in the daemon: they keep starting agents while no Contour window is
+  attached, and the dashboard shows what happened when you open it. Pause the switch to stop them.
+- **Refusals.** A start that is refused (a worker whose hooks are missing, a base branch not read yet, ...) is
+  tried again after the next poll, and its problem line names the rule:
+  `automation: pipeline_failed/fix-ci could not start on contour/!2375: ...`. Three refusals in a row pause that
+  rule, with a line saying so; switching automation off and on resumes it.
+- **Marked.** An automatic run's row starts with `⚙`, and its details say `started by rule pipeline_failed → fix
+  CI` (or `a group start`).
+
+**Run a task on a group.** In the Work view, the palette's "run a task on this group" opens a dialog on the
+selected line's group: `←`/`→` choose each item's suggested task or one task for all, the line says how many it
+starts (`Start fix CI on 4 merge requests`), and `⏎` starts them. Each runs on its task's worker and model. It
+works whether or not the switch is on, keeps to the same cap and queue, starts nothing on an item that has a run,
+and sets up no rule. Its runs end at done as the rules' do.
+
 ## Attention
 
 The dashboard tells you where to look without being asked:
