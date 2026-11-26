@@ -985,6 +985,19 @@ TEST_CASE("dispatch limits count active runs only", "[orchestrator][engine]")
     }
 }
 
+TEST_CASE("dispatch carries its origin into the run", "[orchestrator][engine]")
+{
+    auto harness = booted({});
+    auto request = prDispatch();
+    request.origin = RunOrigin::Rule;
+    request.originRule = "pipeline_failed/fix_ci";
+    harness.feed(request);
+    auto const* const run = harness.run(PrId);
+    REQUIRE(run != nullptr);
+    CHECK(run->origin == RunOrigin::Rule);
+    CHECK(run->originRule == "pipeline_failed/fix_ci");
+}
+
 TEST_CASE("preview equals what dispatch stores", "[orchestrator][engine]")
 {
     for (auto const& request: { prDispatch(2375), issueDispatch(2356) })

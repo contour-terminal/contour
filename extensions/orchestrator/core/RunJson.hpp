@@ -81,6 +81,8 @@ struct JsonRun
     std::optional<RunStats> stats; ///< Absent until read, and in a run stored before it existed.
     std::optional<std::vector<JsonChange>> history; ///< Absent in a run stored before it existed.
     std::optional<std::string> ledger;              ///< `written` once appended; absent before.
+    std::optional<std::string> origin; ///< `rule` or `bulk`; absent: the user's, or stored before origins.
+    std::optional<std::string> originRule; ///< The rule's key, written for a rule's run only.
 };
 
 } // namespace orchestrator::run::detail

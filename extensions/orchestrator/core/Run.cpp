@@ -142,6 +142,12 @@ namespace
         Spelling { Removal::Issued, "issued"sv },
     };
 
+    /// The store's names of the origins a run stores; the user's is stored as none.
+    constexpr auto OriginNames = std::array {
+        Spelling { RunOrigin::Rule, "rule"sv },
+        Spelling { RunOrigin::Bulk, "bulk"sv },
+    };
+
     constexpr auto SeenNames = std::array {
         Spelling { Seen::New, "new"sv },
         Spelling { Seen::Opened, "opened"sv },
@@ -1434,6 +1440,10 @@ std::string toJson(Run const& run)
     json.stats = run.stats;
     if (run.ledger == Ledger::Written)
         json.ledger = std::string { LedgerWritten };
+    if (run.origin != RunOrigin::User)
+        json.origin = std::string { spell(OriginNames, run.origin) };
+    if (!run.originRule.empty())
+        json.originRule = run.originRule;
     if (!run.history.empty())
     {
         auto history = std::vector<run::detail::JsonChange> {};
@@ -1507,6 +1517,14 @@ std::optional<Run> runFromJson(std::string_view text)
     };
     if (json.ledger && json.ledger != LedgerWritten)
         return std::nullopt;
+    if (json.origin)
+    {
+        auto const origin = parse(OriginNames, *json.origin);
+        if (!origin)
+            return std::nullopt;
+        run.origin = *origin;
+    }
+    run.originRule = std::move(json.originRule).value_or(std::string {});
     // A change naming no state is left out, and a history longer than kept is cut as recordChange() cuts it.
     for (auto& change: json.history.value_or(std::vector<run::detail::JsonChange> {}))
         if (std::ranges::contains(StateNames, change.state))

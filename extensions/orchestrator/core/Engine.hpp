@@ -202,6 +202,8 @@ struct Dispatch
     std::optional<std::string> nearTab; ///< The dashboard tab the form was confirmed in, if known.
     uint64_t wallMs = 0; ///< Now, in wall-clock milliseconds: what the run's names are stamped with.
     uint64_t monoMs = 0; ///< When it arrived, in monotonic milliseconds, read by the driver; 0: unknown.
+    RunOrigin origin = RunOrigin::User; ///< Who began it: the user, a rule, or a bulk start.
+    std::string originRule = {};        ///< ruleKeyOf() of the rule that began it; empty otherwise.
 };
 
 /// The user asked to check a kept worktree again.

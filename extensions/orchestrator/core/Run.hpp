@@ -213,6 +213,14 @@ struct RunTimes
 };
 
 /// One agent run, from dispatch to the Finished list.
+/// Who began a run.
+enum class RunOrigin : uint8_t
+{
+    User = 0, ///< The user: the start dialog, the `n` box, or "run again".
+    Rule,     ///< An automation rule (Run::originRule names it).
+    Bulk,     ///< "Run a task on this group".
+};
+
 struct Run
 {
     std::string id;              ///< runId(): a Name.
@@ -256,6 +264,8 @@ struct Run
     std::optional<RunStats> stats {}; ///< What its agent cost and did, as last read; kept once it finished.
     std::vector<StateChange> history {}; ///< When its state changed, oldest first; at most MaxHistory.
     Ledger ledger = Ledger::Pending;     ///< Whether it was appended to the file of finished runs.
+    RunOrigin origin = RunOrigin::User;  ///< Who began it: a rule's and a bulk start's runs end at Done.
+    std::string originRule {};           ///< ruleKeyOf() of the rule that began it, a Text; empty otherwise.
 };
 
 /// @param run A run.

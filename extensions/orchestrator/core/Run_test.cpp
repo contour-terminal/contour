@@ -2967,3 +2967,41 @@ TEST_CASE("the steps that fetch or add a worktree write the repository's shared 
     CHECK(sharedRefsOf(PrepareStep::Checkout) == SharedRefs::Written);
     CHECK(sharedRefsOf(PrepareStep::OpenPane) == SharedRefs::Untouched);
 }
+
+TEST_CASE("run origin round-trips, and a run stored before origins reads as the user's",
+          "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Running {});
+    auto const user = orchestrator::toJson(run);
+    CHECK_FALSE(user.contains(R"("origin":)"));
+    auto const readUser = orchestrator::runFromJson(user);
+    REQUIRE(readUser.has_value());
+    CHECK(readUser->origin == orchestrator::RunOrigin::User);
+    CHECK(readUser->originRule.empty());
+
+    run.origin = orchestrator::RunOrigin::Rule;
+    run.originRule = "pipeline_failed/fix_ci";
+    auto const rule = orchestrator::toJson(run);
+    CHECK(rule.contains(R"("origin":"rule")"));
+    auto const readRule = orchestrator::runFromJson(rule);
+    REQUIRE(readRule.has_value());
+    CHECK(readRule->origin == orchestrator::RunOrigin::Rule);
+    CHECK(readRule->originRule == "pipeline_failed/fix_ci");
+
+    run.origin = orchestrator::RunOrigin::Bulk;
+    run.originRule.clear();
+    auto const readBulk = orchestrator::runFromJson(orchestrator::toJson(run));
+    REQUIRE(readBulk.has_value());
+    CHECK(readBulk->origin == orchestrator::RunOrigin::Bulk);
+}
+
+TEST_CASE("a stored run with an origin no row spells is unreadable", "[orchestrator][run]")
+{
+    auto run = makeRun(Item::Pr, Running {});
+    run.origin = orchestrator::RunOrigin::Bulk;
+    auto json = orchestrator::toJson(run);
+    auto const at = json.find(R"("origin":"bulk")");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, std::string_view { R"("origin":"bulk")" }.size(), R"("origin":"cron")");
+    CHECK_FALSE(orchestrator::runFromJson(json).has_value());
+}

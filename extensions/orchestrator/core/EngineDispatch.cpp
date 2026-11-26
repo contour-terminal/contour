@@ -201,7 +201,9 @@ std::expected<DispatchPreview, DispatchRefusal> Engine::preview(Dispatch const& 
                      .startedWallMs = request.wallMs,
                      .attempt = 0,
                      .runningSinceMs = 0,
-                     .changedMonoMs = 0 };
+                     .changedMonoMs = 0,
+                     .origin = request.origin,
+                     .originRule = request.originRule };
     if (!isStorable(run))
         return std::unexpected { DispatchRefusal::BadPrompt };
     auto const* const pane = findPaneTemplate(agentPaneTemplateOf(run));
