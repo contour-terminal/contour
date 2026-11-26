@@ -49,6 +49,9 @@ class SectionsSubscription
     SectionsSubscription(SectionsSubscription const&) = delete;
     SectionsSubscription& operator=(SectionsSubscription const&) = delete;
 
+    /// @return Whether a subscription is held.
+    [[nodiscard]] bool holds() const noexcept { return static_cast<bool>(_unsubscribe); }
+
   private:
     /// Ends the subscription held, if any.
     void reset() noexcept;
@@ -96,6 +99,11 @@ class IDaemonSections
     /// @param daemon       The daemon.
     /// @param askingWindow The window whose row asked.
     virtual void connect(DaemonRef const& daemon, vtworkspace::WorkspaceId askingWindow) = 0;
+
+    /// Ends a connect() still connecting: the daemon reads Not connected, and nothing dials it again until
+    /// asked. Does nothing for a daemon not connecting.
+    /// @param daemon The daemon.
+    virtual void disconnect(DaemonRef const& daemon) = 0;
 
     /// Starts a local daemon that is not running.
     /// @param daemon The daemon.

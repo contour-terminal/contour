@@ -326,7 +326,9 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 | `ToggleSidebar` | `Ctrl+Shift+B` | `⌘\` | Shows the sidebar when hidden, hides it when shown. |
 | `FocusSidebar` | `Ctrl+Shift+D` | `⇧⌘E` | Moves keyboard focus into the sidebar, showing it first when hidden. |
 | `FilterWorkspaces` | none | none | Opens the sidebar's filter with the keyboard in it, showing the sidebar first when hidden. |
+| `ToggleSidebarNeedsMe` | none | none | Lists only the rows on the way to a pane that needs you (blocked, failed, or done and not seen), plus the tab shown; again lists everything. Shows the sidebar first when hidden. Also the sidebar's Needs-me control and View ▸ Show Only What Needs Me. |
 | `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
+| `CancelSwitch` | none | none | Ends a jump the sidebar started that is still under way, leaving the window where it was; nothing while none is. It does not end a daemon's connect, which the daemon row's Cancel ends. Not listed in the command palette. |
 | `MarkSeen` | none | none | Marks the active pane's output as seen. |
 | `RenameWorkspace` | none | none | Renames the current workspace inline. |
 | `SetWorkspaceColor` | none | none | Colours the current workspace: `color: '#RRGGBB'` applies that colour; without it, opens the colour picker on the workspace's row in the sidebar. |

@@ -22,6 +22,7 @@
 #include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/session/SidebarJump.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/AttentionJump.hpp>
@@ -41,6 +42,7 @@
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarMenuState.hpp>
+#include <contour/window/SidebarSections.hpp>
 #include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -74,6 +76,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <expected>
 #include <limits>
 #include <mutex>
 #include <ranges>
@@ -205,7 +208,85 @@ class WindowController::SidebarHost final: public ISidebarHost
         return session != nullptr ? session->tabHoverLines() : std::vector<std::string> {};
     }
 
+    [[nodiscard]] std::optional<OwnDaemon> ownDaemon() const override
+    {
+        auto const& manager = _window._manager;
+        auto const window = _window._displayed;
+        auto daemon = manager.daemonRefOf(window);
+        if (!daemon)
+            return std::nullopt;
+        return OwnDaemon { .daemon = std::move(*daemon),
+                           .instance = manager.daemonInstanceOf(window).value_or(DaemonInstance {}),
+                           .name = manager.daemonNameOf(window),
+                           .locality = manager.daemonLocalityOf(window),
+                           .state = chipLinkState(hostChipStateOf(manager.hostConnection(window))) };
+    }
+
+    [[nodiscard]] vtworkspace::WorkspaceId windowId() const override { return _window._displayed; }
+
+    void jumpTo(SidebarTarget target, JumpMode mode) override
+    {
+        // The workspace by its control id, as a switch names one; a workspace whose daemon stated none (or a
+        // daemon row, which names no workspace) leaves the choice to the daemon.
+        auto const listed = controlIdOf(target);
+        if (!listed)
+        {
+            errorLog()("Not jumping from the sidebar: its row names a run of {} that has ended.",
+                       target.daemon.value);
+            return;
+        }
+        auto const& controlId = *listed;
+        auto workspace =
+            controlId == std::array<uint8_t, 16> {}
+                ? session::WorkspaceTarget { session::AnyWorkspace {} }
+                : session::WorkspaceTarget { vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Workspace,
+                                                                    .uuid = { .bytes = controlId } } };
+        auto switchTarget = session::switchTargetOf(target.daemon, std::move(workspace));
+        if (!switchTarget)
+            return;
+        _window._manager.windowSwitching().request(
+            _window._displayed,
+            std::move(*switchTarget),
+            mode == JumpMode::NewWindow ? session::SwitchMode::Open : session::SwitchMode::Switch,
+            session::NoLandingDeadline,
+            [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+                if (!outcome)
+                    errorLog()("Jump from the sidebar failed: {}", outcome.error());
+            });
+    }
+
+    // A jump lands, or fails, through the switching service, which tells the sidebar nothing yet: no jump is
+    // pending here, and there is none to cancel.
+    [[nodiscard]] std::optional<SidebarTarget> pendingJump() const override { return std::nullopt; }
+
+    void cancelJump() override {}
+
+    void reconnect() override
+    {
+        if (auto const* const session = _window.activeSession())
+            _window._manager.reconnectHost(*session);
+    }
+
+    void raisePrompt() override { _window._promptHost->raise(); }
+
   private:
+    /// @return The control id of the workspace @p target names, from the directory of its daemon's section
+    ///         (jumpControlIdOf()); StaleRun for a row of a run that has ended.
+    [[nodiscard]] std::expected<std::array<uint8_t, 16>, JumpRefusal> controlIdOf(
+        SidebarTarget const& target) const
+    {
+        if (auto const own = ownDaemon(); own && own->daemon == target.daemon)
+        {
+            auto const* const source = _window._directorySource;
+            return jumpControlIdOf(
+                own->instance, source != nullptr ? source->directory() : WorkspaceDirectory {}, target);
+        }
+        auto const sections = _window._manager.app().daemonSections().sections();
+        auto const at = std::ranges::find(sections, target.daemon, &DaemonSection::daemon);
+        return at != sections.end() ? jumpControlIdOf(at->instance, at->directory, target)
+                                    : jumpControlIdOf(target.instance, WorkspaceDirectory {}, target);
+    }
+
     WindowController& _window;
 };
 
@@ -309,7 +390,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
 void WindowController::initSidebar()
 {
     _sidebarHost = std::make_unique<SidebarHost>(*this);
-    _sidebar = std::make_unique<SidebarModel>(*_sidebarHost, _attention, _wallClock, *_noticeAnnouncer);
+    _sidebar = std::make_unique<SidebarModel>(
+        *_sidebarHost, _manager.app().daemonSections(), _attention, _wallClock, *_noticeAnnouncer);
     connect(this, &WindowController::workspaceDirectoryChanged, _sidebar.get(), &SidebarModel::noteChanged);
     connect(this, &WindowController::workspaceDirectoryChanged, this, &WindowController::followMovedPane);
     connect(this, &WindowController::workspaceDirectoryChanged, this, &WindowController::refreshDaemonMarks);
@@ -772,6 +854,7 @@ command::MenuBarState WindowController::menuBarState() const
     state.tabBarVisibility = _tabBarVisibility;
     state.tabBarPosition = _tabBarPosition;
     state.sidebar = _sidebarVisibility;
+    state.sidebarScope = _sidebar->scope();
 
     if (auto* session = activeSession())
     {
@@ -2102,12 +2185,14 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
 {
     using window::ChromeCommand;
     using window::ChromeKeyOutcome;
-    // Escape in the tree clears a typed filter first, as it does in the filter field; the next one leaves.
-    if (_chromeArea == window::ChromeArea::Sidebar && command == ChromeCommand::Leave
-        && _sidebar->isFiltered())
-        command = ChromeCommand::ClearFilter;
+    // Escape in the tree ends a jump under way first, then clears a typed filter, as it does in the filter
+    // field; the next one leaves (spec §5). In the terminal it stays the shell's: no row reaches here.
+    if (_chromeArea == window::ChromeArea::Sidebar && command == ChromeCommand::Leave)
+        command = window::sidebarEscapeCommand(
+            _sidebar->isJumpPending() ? window::JumpUnderWay::Yes : window::JumpUnderWay::No,
+            _sidebar->isFiltered() ? window::FilterTyped::Yes : window::FilterTyped::No);
     if (_chromeArea == window::ChromeArea::Sidebar && command != ChromeCommand::None
-        && command != ChromeCommand::Leave)
+        && command != ChromeCommand::Leave && command != ChromeCommand::CancelPending)
     {
         // The tree is QML's: it moves its own row focus, expands, renames and filters.
         // Enter included: the tree names its row back (activateSidebarRow()), which only it knows.
@@ -2156,12 +2241,15 @@ window::ChromeKeyOutcome WindowController::runChromeCommand(window::ChromeComman
             return ChromeKeyOutcome::Handled;
         }
         case ChromeCommand::Leave: leaveChrome(); return ChromeKeyOutcome::Handled;
+        case ChromeCommand::CancelPending: _sidebar->cancelJump(); return ChromeKeyOutcome::Handled;
         case ChromeCommand::Collapse:
         case ChromeCommand::Expand:
         case ChromeCommand::Rename:
         case ChromeCommand::Filter:
         case ChromeCommand::ClearFilter:
-        case ChromeCommand::OpenMenu: return ChromeKeyOutcome::Unhandled; // the sidebar's, handled above
+        case ChromeCommand::OpenMenu:
+        case ChromeCommand::OpenInNewWindow:
+            return ChromeKeyOutcome::Unhandled; // the sidebar's, handled above
     }
     return ChromeKeyOutcome::Unhandled;
 }
@@ -2172,6 +2260,21 @@ void WindowController::activateSidebarRow(int row)
     // the tree does not have (an empty or filtered-out one) shows nothing, and the keyboard stays.
     if (_sidebar->activateRow(row) == window::sidebarrows::RowActivation::Shown)
         leaveChrome();
+}
+
+void WindowController::cancelSidebarJump()
+{
+    _sidebar->cancelJump();
+}
+
+int WindowController::activateSidebarFirstMatch(int mode)
+{
+    // As a row's activation, from the filter field, which may hold the keyboard without the chrome's hold
+    // (a click opened it): a row of the window's own shown here hands the terminal the keyboard either way.
+    auto const activation = _sidebar->activateFirstMatch(mode);
+    if (activation == window::sidebarrows::RowActivation::Shown)
+        focusActiveDisplay();
+    return static_cast<int>(activation);
 }
 
 void WindowController::closeTabAskingIfBusy(int row)
@@ -3460,6 +3563,19 @@ void WindowController::openSidebarFilter()
     emit sidebarFilterRequested();
 }
 
+void WindowController::toggleSidebarNeedsMe()
+{
+    // A hidden sidebar is shown, narrowed: asked from out of sight, the action asks for what needs the user,
+    // not for the other half of a toggle nobody saw.
+    if (_sidebarVisibility != config::SidebarVisibility::Shown)
+    {
+        toggleSidebar();
+        _sidebar->setScope(config::SidebarScope::NeedsMe);
+        return;
+    }
+    _sidebar->setScope(window::toggledScope(_sidebar->scope()));
+}
+
 void WindowController::toggleSidebar()
 {
     _sidebarVisibility = _sidebarVisibility == config::SidebarVisibility::Shown
@@ -3495,7 +3611,8 @@ void WindowController::newWorkspace() const
 QString WindowController::beginSidebarDrag(int row)
 {
     auto const& rows = _sidebar->rows();
-    if (row < 0 || std::cmp_greater_equal(row, rows.size()) || _directorySource == nullptr)
+    // Another daemon's rows name ids of that daemon's, which mean nothing to a drop here.
+    if (!_sidebar->isOwnRow(row) || _directorySource == nullptr)
         return {};
     auto const& shown = rows[static_cast<std::size_t>(row)];
     switch (shown.key.kind)
@@ -3539,6 +3656,8 @@ QString WindowController::beginSidebarDrag(int row)
                                             .workspace = 0,
                                             .sessions = { shown.key.pane.value } },
                                  nullptr);
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: break; // not dragged
     }
     return {};
 }
@@ -3558,6 +3677,9 @@ void WindowController::jumpToNextAttention()
 
 void WindowController::setDirectorySource(IWorkspaceDirectorySource* source)
 {
+    // A window loses its source as it closes: its sidebar stops following the other daemons then, so no
+    // notice queues a rebuild of a controller that is only deleted later.
+    _sidebar->followSections(source != nullptr ? SectionsFeed::Followed : SectionsFeed::Dropped);
     if (source == _directorySource)
         return;
     // What waited names the old source's ids, which mean nothing in the new one.
@@ -4100,6 +4222,8 @@ void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::
                 break;
             }
             case SidebarRowKind::Pane: shown = row.pane; break;
+            case SidebarRowKind::Daemon:
+            case SidebarRowKind::Hidden: return RowActionOutcome::Done; // no action runs on them
         }
         // The row the menu was opened over, not whichever one is current: when it cannot be shown the action
         // waits, and is never run against the active session or tab instead.
@@ -4120,6 +4244,8 @@ void WindowController::runSidebarActionShown(SidebarRowKey const& row, actions::
 
 void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF windowPosition)
 {
+    if (row.key.kind == SidebarRowKind::Daemon || row.key.kind == SidebarRowKind::Hidden)
+        return; // no menu, and nothing to pin
     auto const directory =
         _directorySource != nullptr ? _directorySource->directory() : WorkspaceDirectory {};
     auto const* const holder = findWorkspace(directory, row.key.workspace);
@@ -4169,6 +4295,8 @@ void WindowController::openSidebarContextMenu(SidebarRow const& row, QPointF win
                   .moves = moves });
             break;
         }
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: return; // refused above
     }
     // At the row, not the pointer: the menu key opens it with the pointer anywhere.
     presentSurface(MenuSurface::Sidebar, resolveMenu(entries), _sidebarMenuAnchor);
@@ -4203,6 +4331,8 @@ std::optional<SidebarNode> WindowController::sidebarNodeOf(SidebarRowKey const& 
                 return std::nullopt;
             return TabRef { .workspace = row.workspace, .tab = workspace->tabs.front().id };
         }
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: break; // names no node
     }
     return std::nullopt;
 }

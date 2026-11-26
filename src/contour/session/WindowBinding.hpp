@@ -4,6 +4,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
+#include <contour/window/DaemonSection.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
 
 #include <cstdint>
@@ -68,6 +69,10 @@ class WindowBinding
     ///         own workspaces a window can still switch between. None for a binding with no daemon behind it
     ///         -- a factory binding, as a tmux window's -- which offers no switching at all.
     [[nodiscard]] virtual std::optional<SwitchTarget> daemonTarget() const { return std::nullopt; }
+
+    /// @return The daemon the binding is attached to, as the sidebar names it (window::DaemonRef); none for a
+    ///         binding with no daemon behind it, whose window lists no daemons.
+    [[nodiscard]] virtual std::optional<window::DaemonRef> daemonRef() const { return std::nullopt; }
 
     /// @return Whether the daemon behind the binding runs on this machine. Local for a binding with no
     /// daemon.

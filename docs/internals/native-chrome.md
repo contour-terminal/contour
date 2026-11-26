@@ -422,7 +422,7 @@ forks: what differs is data.
 - **Tokens.** `SidebarTokens` (in `ChromeTokenGroups.hpp`, one per row in `ChromeTokenRows.hpp`) holds the
   extents: default, minimum and maximum width, row heights, indent, glyph edge, footer height, selection
   radius and accent-pill width. Horizontal values are pixels, or cells on the Terminal row. Colours come from
-  the `sidebar*` colour tokens. The default width is 220 px on macOS, 240 on Fluent and ContourLinux and 28
+  the `sidebar*` colour tokens. The default width is 220 px on macOS, 240 on Fluent, 260 on ContourLinux and 28
   cells on Terminal. New QML carries no size or colour literals.
 - **`SidebarLook` per row.** `LayoutTokens::sidebar` names the look: `SourceList` (macOS, an inset rounded
   selection), `NavigationPane` (Fluent, a subtle fill and an accent pill), `HeaderPane` (ContourLinux, a solid
@@ -458,8 +458,8 @@ forks: what differs is data.
     Qt's keys onto them) and `command/SidebarMenus.hpp` (the row menus).
   - `window/SidebarToggle.hpp`: where the toggle stands, and `sidebarRecoveryOf()`: with no toggle on screen
     the pane's context menu offers **Show Sidebar**.
-  - `window/PopupAnchor.hpp`: where a dropdown hangs below its control; the location chip and the
-    sidebar's daemon control open the switcher there, with `SwitcherScope::Everything`: the same rows
+  - `window/PopupAnchor.hpp`: where a dropdown hangs below its control; the location chip, a tmux
+    window's host chip at the sidebar's head and the sidebar's switcher control open the switcher there, with `SwitcherScope::Everything`: the same rows
     `ShowSwitcher` opens centred, and Escape closes it rather than narrowing it.
 - **Accessibility.** The tree is `Accessible.Tree`, a row a `TreeItem` named by its title; its kind, its fold
   and its status are the translated description (`accessibleDescriptionOf()`): Qt 6.11's `Accessible` has no

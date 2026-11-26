@@ -30,7 +30,11 @@ Item {
     /// What the slot sits on, where that is a tab's tint ({ fill, ink }, SidebarRow.tabPaint): the mark keeps
     /// its colour unless the tint would swallow it (window::sidebarMarkInk). Empty elsewhere.
     property var tint: ({})
+    /// An ink every mark takes in place of its hue, where it is not transparent: a sidebar row last known of a
+    /// daemon that is not connected, whose marks ask nothing now (SidebarRow.markInk).
+    property color faintInk: "transparent"
     readonly property color ink: !root.known ? "transparent"
+                               : root.faintInk.a > 0 ? root.faintInk
                                : root.tint.fill !== undefined
                                  ? chromeStyle.sidebarMarkInk(root.look.ink, root.tint.fill, root.tint.ink)
                                : root.look.ink

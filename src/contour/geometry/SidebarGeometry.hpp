@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <optional>
 
 namespace contour::geometry
@@ -59,6 +60,45 @@ struct SidebarMetrics
 {
     auto const units = scale.unitPixels > 0.0 ? static_cast<int>(std::lround(pixels / scale.unitPixels)) : 0;
     return clampSidebarUnits(units, tokens);
+}
+
+/// The sidebar's title row as its heading needs it, in logical pixels, from the sidebar's leading edge to its
+/// trailing one: what stands before the heading, the heading, and the controls after it.
+struct SidebarTitleRow
+{
+    double lead = 0.0; ///< Before the heading: the row's inset, and a toggle with its gap where one stands.
+    double heading = 0.0;     ///< The heading at its natural width, in the font it is set in.
+    double control = 0.0;     ///< One control after the heading.
+    double controlGap = 0.0;  ///< Between two of them.
+    std::size_t controls = 0; ///< How many stand after the heading.
+    double trail = 0.0;       ///< After the last control: the row's end margin, and the divider.
+
+    [[nodiscard]] constexpr bool operator==(SidebarTitleRow const&) const noexcept = default;
+};
+
+/// @param row The title row.
+/// @return The narrowest sidebar that holds @p row with its heading whole, in logical pixels.
+[[nodiscard]] constexpr double sidebarTitleRowWidth(SidebarTitleRow const& row) noexcept
+{
+    auto const gaps = row.controls > 0 ? row.controls - 1 : 0;
+    return row.lead + row.heading + (static_cast<double>(row.controls) * row.control)
+           + (static_cast<double>(gaps) * row.controlGap) + row.trail;
+}
+
+/// The sidebar's default width: the row's own, widened to what its title row needs to hold the heading
+/// whole -- a wide UI font sets the heading wider than the row's width was chosen against.
+/// @param tokens The row's sidebar tokens.
+/// @param scale What one unit of them is.
+/// @param titleRowPixels What the title row needs (sidebarTitleRowWidth), in logical pixels; 0 where it
+///                       has no heading.
+/// @return The default width in the row's units, within its bounds.
+[[nodiscard]] inline int sidebarDefaultUnits(config::SidebarTokens const& tokens,
+                                             SidebarScale scale,
+                                             double titleRowPixels) noexcept
+{
+    auto const needed =
+        scale.unitPixels > 0.0 ? static_cast<int>(std::ceil(titleRowPixels / scale.unitPixels)) : 0;
+    return clampSidebarUnits(std::max(tokens.width, needed), tokens);
 }
 
 /// The sidebar's width in logical pixels.

@@ -643,6 +643,8 @@ class MainWindowControllerMock: public QAbstractListModel
     [[nodiscard]] FakeDirectorySource& sidebarSource() noexcept { return _sidebarSource; }
     /// @return The fake window the sidebar asks things of.
     [[nodiscard]] FakeSidebarHost& sidebarHost() noexcept { return _sidebarHost; }
+    /// @return The other daemons the sidebar lists; a test sets them, then calls changed().
+    [[nodiscard]] FakeDaemonSections& sidebarSections() noexcept { return _sidebarSections; }
     /// When the sidebar's clock stands.
     static constexpr auto SidebarEpoch =
         std::chrono::system_clock::time_point { std::chrono::seconds { 1'000'000 } };
@@ -777,12 +779,26 @@ class MainWindowControllerMock: public QAbstractListModel
     [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _switcherAnchor.has_value(); }
     /// Mirrors WindowController::openSidebarFilter().
     Q_INVOKABLE void openSidebarFilter() { emit sidebarFilterRequested(); }
+    /// Mirrors WindowController::toggleSidebarNeedsMe(): a hidden sidebar is shown, narrowed; a shown one
+    /// flips its scope.
+    Q_INVOKABLE void toggleSidebarNeedsMe()
+    {
+        ++needsMeToggles;
+        if (_sidebarVisibility != config::SidebarVisibility::Shown)
+        {
+            toggleSidebar();
+            _sidebar.setScope(config::SidebarScope::NeedsMe);
+            return;
+        }
+        _sidebar.setScope(window::toggledScope(_sidebar.scope()));
+    }
+    int needsMeToggles = 0; ///< How often the Needs-me control or its action asked.
     /// Mirrors WindowController::beginSidebarDrag(): the payload a workspace, tab or pane row carries, as the
     /// sidebar's own host would name it (a tab by its panes' keys, a pane by its own); empty out of range.
     Q_INVOKABLE [[nodiscard]] QString beginSidebarDrag(int row) const
     {
         auto const& rows = _sidebar.rows();
-        if (row < 0 || static_cast<std::size_t>(row) >= rows.size())
+        if (!_sidebar.isOwnRow(row))
             return {};
         auto const& key = rows[static_cast<std::size_t>(row)].key;
         auto drag = window::NodeDrag {};
@@ -809,6 +825,8 @@ class MainWindowControllerMock: public QAbstractListModel
                 drag.payload = window::DropPayload::Pane;
                 drag.sessions = { key.pane.value };
                 return window::writeNodeDrag(drag);
+            case window::SidebarRowKind::Daemon:
+            case window::SidebarRowKind::Hidden: break; // not dragged
         }
         return {};
     }
@@ -944,10 +962,14 @@ class MainWindowControllerMock: public QAbstractListModel
     // The sidebar's window, in the order the model needs them built.
     FakeDirectorySource _sidebarSource;
     FakeSidebarHost _sidebarHost { &_sidebarSource };
+    FakeDaemonSections
+        _sidebarSections; ///< The other daemons the sidebar lists; none until a test sets them.
     window::TabAttention _sidebarAttention;
     core::platform::ManualWallClock _sidebarClock { SidebarEpoch };
     platform::NullAnnouncer _sidebarAnnouncer;
-    window::SidebarModel _sidebar { _sidebarHost, _sidebarAttention, _sidebarClock, _sidebarAnnouncer };
+    window::SidebarModel _sidebar {
+        _sidebarHost, _sidebarSections, _sidebarAttention, _sidebarClock, _sidebarAnnouncer
+    };
     config::SidebarVisibility _sidebarVisibility = config::SidebarVisibility::Hidden;
     int _sidebarUnits = 0;
     config::TabPlacement _tabPlacement = config::TabPlacement::Top;

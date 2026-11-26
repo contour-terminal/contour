@@ -738,6 +738,10 @@ class ContourGuiApp:
         return _askpassRouter;
     }
 
+    /// @return The daemons every window's sidebar lists besides its own (the presence service). Exists from
+    ///         construction; GUI thread only.
+    [[nodiscard]] window::IDaemonSections& daemonSections() noexcept { return *_daemonPresence; }
+
     /// The path the process was launched as (argv[0]), used to re-spawn contour for a new
     /// window/tab and to open config hyperlinks. Falls back to the app name when argv is not yet
     /// available (any call before run() records it — e.g. a FollowHyperlink/NewTerminal action that

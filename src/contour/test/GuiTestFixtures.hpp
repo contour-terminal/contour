@@ -267,6 +267,7 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     {
         return _target;
     }
+    [[nodiscard]] std::optional<contour::window::DaemonRef> daemonRef() const override { return ref; }
     [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
     [[nodiscard]] contour::window::DaemonLocality daemonLocality() const noexcept override
     {
@@ -295,6 +296,8 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     unsigned waitingElsewhere = 0;
     /// What daemonKey() reports: bindings sharing one count their daemon once.
     std::optional<uint64_t> key = std::nullopt;
+    /// What daemonRef() reports: how the sidebar names the daemon.
+    std::optional<contour::window::DaemonRef> ref = std::nullopt;
 
     /// One openSiblingWindow() call.
     struct OpenedWindow

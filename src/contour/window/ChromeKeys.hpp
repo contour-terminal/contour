@@ -67,6 +67,11 @@ enum class ChromeCommand : uint8_t
     Filter,        ///< Starts (or extends) the tree's type-to-filter with the typed character.
     ClearFilter,   ///< Clears the tree's type-to-filter; the keyboard stays in the tree.
     OpenMenu,      ///< Opens the focused row's context menu, as a right click on it does.
+    /// Opens what the focused row names in a window of its own, as its menu's "Open in New Window" does.
+    OpenInNewWindow,
+    /// Ends the jump under way from the sidebar: what Escape does there while one is pending, before it
+    /// clears the filter and before it leaves. The window carries it out, not the tree.
+    CancelPending,
 };
 
 /// Whether the focused chrome area answered a key's command, or left the key to whoever is next.
@@ -97,6 +102,7 @@ inline constexpr auto SidebarCommandNames = std::array {
     NamedChromeCommand { .name = "filter", .command = ChromeCommand::Filter },
     NamedChromeCommand { .name = "clearFilter", .command = ChromeCommand::ClearFilter },
     NamedChromeCommand { .name = "openMenu", .command = ChromeCommand::OpenMenu },
+    NamedChromeCommand { .name = "openInNewWindow", .command = ChromeCommand::OpenInNewWindow },
 };
 
 /// One key of one chrome area.
@@ -118,6 +124,10 @@ inline constexpr std::array ChromeKeyRows {
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Home, ChromeKeyModifier::None, ChromeCommand::FocusFirst },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::End, ChromeKeyModifier::None, ChromeCommand::FocusLast },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Return, ChromeKeyModifier::None, ChromeCommand::Activate },
+    // The keyboard's way to "Open in New Window" (spec §6). Its pointer way, a row menu entry, comes with the
+    // row menus of every daemon's rows.
+    ChromeKeyRow {
+        ChromeArea::Sidebar, ChromeKey::Return, ChromeKeyModifier::Shift, ChromeCommand::OpenInNewWindow },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::Escape, ChromeKeyModifier::None, ChromeCommand::Leave },
     ChromeKeyRow { ChromeArea::Sidebar, ChromeKey::F2, ChromeKeyModifier::None, ChromeCommand::Rename },
     // A row's context menu without a pointer: the Menu key, and Shift+F10 (Windows and KDE).
@@ -199,6 +209,34 @@ inline constexpr std::array ChromeConsumedKeys { ChromeKey::Left,   ChromeKey::R
                && chromeCommandFor(area, key, modifier) != ChromeCommand::None);
 }
 
+/// Whether a jump the sidebar started is still under way.
+enum class JumpUnderWay : uint8_t
+{
+    No = 0, ///< None is.
+    Yes,    ///< One connects.
+};
+
+/// Whether the sidebar's type-to-filter narrows its tree.
+enum class FilterTyped : uint8_t
+{
+    No = 0, ///< The filter is empty.
+    Yes,    ///< Some text narrows the tree.
+};
+
+/// What Escape in the focused sidebar does, by precedence (spec §5): a pending jump is cancelled first, then
+/// a typed filter is cleared, and only then does the keyboard leave the sidebar.
+/// @param jump   Whether a jump is under way.
+/// @param filter Whether a filter narrows the tree.
+/// @return CancelPending, ClearFilter or Leave.
+[[nodiscard]] constexpr ChromeCommand sidebarEscapeCommand(JumpUnderWay jump, FilterTyped filter) noexcept
+{
+    if (jump == JumpUnderWay::Yes)
+        return ChromeCommand::CancelPending;
+    if (filter == FilterTyped::Yes)
+        return ChromeCommand::ClearFilter;
+    return ChromeCommand::Leave;
+}
+
 /// The index focus lands on after a focus-moving command.
 /// @param command The command; anything but the four focus commands leaves the index alone.
 /// @param focused The focused item's index.
@@ -226,7 +264,9 @@ inline constexpr std::array ChromeConsumedKeys { ChromeKey::Left,   ChromeKey::R
         case ChromeCommand::Rename:
         case ChromeCommand::Filter:
         case ChromeCommand::ClearFilter:
-        case ChromeCommand::OpenMenu: break;
+        case ChromeCommand::OpenMenu:
+        case ChromeCommand::OpenInNewWindow:
+        case ChromeCommand::CancelPending: break;
     }
     return std::clamp(focused, 0, last);
 }

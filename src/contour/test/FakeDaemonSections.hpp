@@ -30,6 +30,14 @@ struct DaemonSectionsCall
         vtworkspace::WorkspaceId askingWindow;
         bool operator==(Connect const&) const = default;
     };
+    /// A call of IDaemonSections::disconnect().
+    struct Disconnect
+    {
+        window::DaemonRef daemon;
+
+        bool operator==(Disconnect const&) const = default;
+    };
+
     /// A call of IDaemonSections::start().
     struct Start
     {
@@ -104,6 +112,7 @@ struct DaemonSectionsCall
 
     /// Which verb, with its arguments.
     std::variant<Connect,
+                 Disconnect,
                  Start,
                  Remove,
                  SetListed,
@@ -124,6 +133,7 @@ class FakeDaemonSections final: public window::IDaemonSections
   public:
     std::vector<window::DaemonSection> listed; ///< What sections() returns.
     std::vector<DaemonSectionsCall> calls;     ///< Every verb asked, in order.
+    mutable int reads = 0;                     ///< How often sections() was asked.
 
     /// Tells every subscriber that the sections changed.
     void changed() const { _subscribers.notify(); }
@@ -131,14 +141,27 @@ class FakeDaemonSections final: public window::IDaemonSections
     /// @return How many subscriptions are held.
     [[nodiscard]] size_t subscriberCount() const noexcept { return _subscribers.size(); }
 
-    [[nodiscard]] std::vector<window::DaemonSection> sections() const override { return listed; }
+    [[nodiscard]] std::vector<window::DaemonSection> sections() const override
+    {
+        ++reads;
+        return listed;
+    }
 
     void connect(window::DaemonRef const& daemon, vtworkspace::WorkspaceId askingWindow) override
     {
         record(DaemonSectionsCall::Connect { .daemon = daemon, .askingWindow = askingWindow });
     }
+    void disconnect(window::DaemonRef const& daemon) override
+    {
+        record(DaemonSectionsCall::Disconnect { .daemon = daemon });
+    }
+
+    /// As the real presence: only a daemon of this machine is started; a host's is refused unrecorded.
     void start(window::DaemonRef const& daemon) override
     {
+        if (auto const parsed = window::parseDaemonRef(daemon);
+            !parsed || parsed->first != window::DaemonRefKind::Local)
+            return;
         record(DaemonSectionsCall::Start { .daemon = daemon });
     }
     void remove(window::DaemonRef const& daemon) override

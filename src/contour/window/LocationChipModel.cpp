@@ -25,7 +25,8 @@ namespace
     /// @return Where the chip shows for it.
     [[nodiscard]] LocationChipPlace placeOf(LocationChipInputs const& inputs) noexcept
     {
-        return locationChipPlace(inputs.band, inputs.centre, effectiveHostingOf(inputs), inputs.sidebar);
+        return locationChipPlace(
+            inputs.band, inputs.centre, effectiveHostingOf(inputs), inputs.sidebar, inputs.state);
     }
 
     /// @param widths What QML measured: a width per step key, and `available`.
@@ -103,6 +104,11 @@ QString LocationChipModel::place() const
 bool LocationChipModel::workspaceShown() const noexcept
 {
     return daemonHostingPolicy(effectiveHostingOf(_inputs)).segments == ChipSegments::DaemonAndWorkspace;
+}
+
+bool LocationChipModel::switcherControlShown() const noexcept
+{
+    return daemonHostingPolicy(effectiveHostingOf(_inputs)).sidebar == SidebarNaming::HeadingRow;
 }
 
 QString LocationChipModel::daemonName() const

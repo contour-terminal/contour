@@ -48,6 +48,11 @@ namespace
         return !isSidebarShown(state);
     }
 
+    bool isSidebarNeedsMe(MenuBarState const& state) noexcept
+    {
+        return state.sidebarScope == config::SidebarScope::NeedsMe;
+    }
+
     bool isMouseForwarded(MenuBarState const& state) noexcept
     {
         return state.mouseForwarding == vtbackend::MouseForwarding::Forwarded;
@@ -331,6 +336,8 @@ namespace
             // Named for what picking it does, as macOS apps do, rather than a checkmark on "Show Sidebar".
             inWindow(Table::command(ToggleSidebar {}, "Show Sidebar").shownWhen(isSidebarHidden)),
             inWindow(Table::command(ToggleSidebar {}, "Hide Sidebar").shownWhen(isSidebarShown)),
+            // A mode of the sidebar's list, so a checkmark: the row's name stays and its check flips.
+            windowCommand(ToggleSidebarNeedsMe {}, "Show Only What Needs Me").checkedWhen(isSidebarNeedsMe),
             Table::command(ToggleFullscreen {}),
             Table::separator(),
             Table::submenu("Scroll", rowsOf<scrollTemplate>),

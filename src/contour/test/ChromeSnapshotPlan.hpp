@@ -139,6 +139,17 @@ enum class SnapshotScript : uint8_t
     SidebarWorkspaceColorPicker, //!< sidebar-workspace-tint with the colour picker open over billing's row.
     SidebarTreeCompact,          //!< sidebar-tree under `row_spacing: compact` (sidebar-tree is comfortable).
     SidebarTabColorPicker,       //!< sidebar-tab-tint with the tab colour picker open over build's row.
+    SidebarTwoDaemons,           //!< sidebar-tree on `work` beside `starfive`: two section headings.
+    SidebarDaemonNeedsInput,     //!< The same with starfive's link waiting for the user.
+    SidebarDaemonNotRunning,     //!< The same with starfive found but not serving.
+    SidebarDaemonConnecting,     //!< The same with starfive connecting.
+    SidebarDaemonReconnecting,   //!< The same with starfive reconnecting, its workspaces last known.
+    SidebarDaemonTooOld,         //!< The same with starfive too old for this client.
+    SidebarPendingRow,           //!< The same with a jump under way to starfive's ci workspace.
+    SidebarNeedsMeEmpty,         //!< sidebar-tree under the Needs-me scope with nothing that needs the user.
+    /// sidebar-daemon-not-running at the sidebar's narrowest, starfive under a long name: the daemon row as
+    /// it gives way (its words gone, its name elided in the middle, its buttons icons).
+    SidebarDaemonNarrow,
 };
 
 /// What the workspace sidebar of a script shows.
@@ -150,6 +161,22 @@ enum class SnapshotSidebar : uint8_t
     Collapsed, //!< Shown, every workspace row folded.
     TopTabs,   //!< Shown, with the tabs on top.
     Hidden,    //!< Hidden: the chip in the band stands for it.
+};
+
+/// Which daemons the workspace sidebar lists as sections beside the window's own.
+enum class SnapshotSections : uint8_t
+{
+    None = 0,     //!< No daemon behind the window: its own workspaces alone, under no heading.
+    TwoDaemons,   //!< `work` (the window's, connected) and `starfive`, connected, with one workspace.
+    NeedsInput,   //!< The same, starfive's link waiting for the user.
+    NotRunning,   //!< The same, starfive found but not serving.
+    Connecting,   //!< The same, starfive connecting.
+    Reconnecting, //!< The same, starfive reconnecting: its workspace last known.
+    TooOld,       //!< The same, starfive too old for this client.
+    Pending,      //!< TwoDaemons, a jump under way to starfive's ci workspace.
+    NeedsMeEmpty, //!< `work` alone under the Needs-me scope, nothing needing the user.
+    /// NotRunning, starfive under a long name, the sidebar at its narrowest.
+    Narrow,
 };
 
 /// What a script colours in the workspace sidebar.
@@ -548,6 +575,7 @@ struct SnapshotScriptRow
     SnapshotButtons buttons = SnapshotButtons::Desktop;    ///< Where the desktop puts the buttons.
     SnapshotSidebar sidebar = SnapshotSidebar::None;       ///< What the workspace sidebar shows.
     SnapshotSidebarColor sidebarColor = SnapshotSidebarColor::None; ///< What the sidebar shows coloured.
+    SnapshotSections sections = SnapshotSections::None; ///< The daemons the sidebar lists as sections.
     /// How a coloured tab shows on its sidebar rows (`sidebar.tab_color`).
     config::SidebarTabColorStyle tabColorStyle = config::SidebarTabColorStyle::Tint;
     /// How a coloured workspace shows in the sidebar (`sidebar.workspace_color`).
@@ -2431,6 +2459,51 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenSidebarTabColorPicker,
                         .sidebar = SnapshotSidebar::Tree,
                         .sidebarColor = SnapshotSidebarColor::Tabs },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTwoDaemons,
+                        .name = "sidebar-two-daemons",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::TwoDaemons },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonNeedsInput,
+                        .name = "sidebar-daemon-needs-input",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NeedsInput },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonNotRunning,
+                        .name = "sidebar-daemon-not-running",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NotRunning },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonConnecting,
+                        .name = "sidebar-daemon-connecting",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Connecting },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonReconnecting,
+                        .name = "sidebar-daemon-reconnecting",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Reconnecting },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonTooOld,
+                        .name = "sidebar-daemon-too-old",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::TooOld },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarPendingRow,
+                        .name = "sidebar-pending-row",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Pending },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarNeedsMeEmpty,
+                        .name = "sidebar-needs-me-empty",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NeedsMeEmpty },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonNarrow,
+                        .name = "sidebar-daemon-narrow",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Narrow },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

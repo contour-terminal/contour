@@ -2400,6 +2400,11 @@ struct NativeGround
                         source.alphaPercent);
         case ColorSourceKind::PaletteWindowText: return ink;
         case ColorSourceKind::Fixed: return RGBColor(source.rgb);
+        case ColorSourceKind::Tone:
+            return mixColor(ground.color,
+                            RGBColor(ground.dark ? source.darkRgb : source.rgb),
+                            static_cast<float>(ground.dark ? source.darkAlphaPercent : source.alphaPercent)
+                                / 100.0f);
         default: break;
     }
     FAIL("a source kind the native Settings contrast test does not resolve: "
@@ -2506,8 +2511,8 @@ TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
     for (auto const& expected:
          { Expected { ChromeStyle::MacOS, 24, 16, SidebarLook::SourceList, 220, 160, 480 },
            Expected { ChromeStyle::Fluent, 32, 16, SidebarLook::NavigationPane, 240, 160, 480 },
-           Expected { ChromeStyle::ContourLinux, 32, 16, SidebarLook::HeaderPane, 240, 160, 480 },
-           Expected { ChromeStyle::Terminal, 1, 2, SidebarLook::CellTree, 28, 18, 60 } })
+           Expected { ChromeStyle::ContourLinux, 32, 16, SidebarLook::HeaderPane, 260, 160, 480 },
+           Expected { ChromeStyle::Terminal, 1, 2, SidebarLook::CellTree, 30, 18, 60 } })
     {
         CAPTURE(static_cast<int>(expected.style));
         auto const& row = ChromeTokenRows[static_cast<size_t>(expected.style)];
@@ -2522,6 +2527,20 @@ TEST_CASE("sidebar tokens per row", "[chrometokens][sidebar]")
     CHECK(ChromeTokenRows[static_cast<size_t>(ChromeStyle::MacOS)].sidebar.selectionRadius == 6);
     CHECK(ChromeTokenRows[static_cast<size_t>(ChromeStyle::Fluent)].sidebar.accentPillWidth == 3);
     CHECK(ChromeTokenRows[static_cast<size_t>(ChromeStyle::Fluent)].sidebar.selectionRadius == 4);
+}
+
+TEST_CASE("a daemon heading is a source list's section header on every native row", "[chrometokens][sidebar]")
+{
+    // The footnote's size, semibold: smaller than the workspace rows it heads, so it ranks by being a header.
+    using namespace contour::config;
+    for (auto const style: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        CAPTURE(static_cast<int>(style));
+        auto const& type = ChromeTokenRows[static_cast<size_t>(style)].type;
+        CHECK(type.sidebarSection == Catch::Approx(type.footnote));
+        CHECK(type.sidebarSection < type.body);
+        CHECK(type.sidebarSectionWeight == 600);
+    }
 }
 
 TEST_CASE("a two-line sidebar row per look and sidebar.row_spacing", "[chrometokens][sidebar]")
@@ -2558,7 +2577,7 @@ TEST_CASE("a two-line sidebar row per look and sidebar.row_spacing", "[chrometok
 TEST_CASE("the sidebar's colour roles are one family", "[chrometokens][sidebar]")
 {
     using namespace contour::config;
-    CHECK(SidebarColorRoleEnd - SidebarColorRoleBegin == 8);
+    CHECK(SidebarColorRoleEnd - SidebarColorRoleBegin == 9);
     CHECK(SidebarColorRoleEnd == ChromeColorRoleCount);
 }
 
@@ -2633,6 +2652,152 @@ TEST_CASE("sidebar selection ink reaches 4.5:1 on its fill on every row", "[chro
                           >= MinimumTextContrast);
                 }
             }
+    }
+}
+
+TEST_CASE("sidebar secondary ink keeps 4.5:1 on the sidebar fill, every row", "[chrometokens][sidebar]")
+{
+    // A last-known row is dimmed to this ink (spec §11), and its text must still read.
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    auto const preferences = std::array {
+        AccessibilityPreferences {},
+        AccessibilityPreferences { .motion = MotionPreference::Full,
+                                   .transparency = TransparencyPreference::Allowed,
+                                   .contrast = ContrastPreference::Increased },
+    };
+
+    SECTION("the native rows, over the kit's surfaces and a typical OS window")
+    {
+        auto const grounds = std::array {
+            NativeGround { .color = RGBColor(SurfaceColors[1].light), .dark = false },
+            NativeGround { .color = 0xECECEC_rgb, .dark = false },
+            NativeGround { .color = RGBColor(SurfaceColors[1].dark), .dark = true },
+            NativeGround { .color = 0x1E1E1E_rgb, .dark = true },
+        };
+        for (auto const style: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+            for (auto const& preference: preferences)
+            {
+                auto const row = resolveChromeTokens(style, preference);
+                auto const& fill = row.colors[static_cast<size_t>(SidebarFill)];
+                auto const& ink = row.colors[static_cast<size_t>(SidebarSecondaryInk)];
+                CAPTURE(static_cast<int>(style), static_cast<int>(preference.contrast));
+                for (auto const& ground: grounds)
+                {
+                    CAPTURE(ground.dark);
+                    // The sidebar is an opaque kit surface where the row names one; anything else is washed
+                    // over the window.
+                    auto const filled =
+                        fill.kind == ColorSourceKind::Surface
+                            ? RGBColor(ground.dark
+                                           ? SurfaceColors.at(static_cast<size_t>(fill.level - 1)).dark
+                                           : SurfaceColors.at(static_cast<size_t>(fill.level - 1)).light)
+                            : nativeInkOver(fill, ground);
+                    auto const text =
+                        nativeInkOver(ink, NativeGround { .color = filled, .dark = ground.dark });
+                    CHECK(contrastRatio(text, filled) >= MinimumTextContrast);
+                }
+            }
+    }
+
+    SECTION("the Terminal row, on every bundled scheme")
+    {
+        for (auto const& preference: preferences)
+        {
+            auto const row = resolveChromeTokens(ChromeStyle::Terminal, preference);
+            auto const& fill = row.colors[static_cast<size_t>(SidebarFill)];
+            auto const& ink = row.colors[static_cast<size_t>(SidebarSecondaryInk)];
+            REQUIRE(fill.kind == ColorSourceKind::Scheme);
+            REQUIRE((ink.kind == ColorSourceKind::Scheme || ink.kind == ColorSourceKind::SchemeOnBar));
+            for (auto const name: defaultColorPaletteNames())
+            {
+                INFO("scheme: " << name);
+                auto palette = ColorPalette {};
+                REQUIRE(defaultColorPalettes(name, palette));
+                auto const colors = chromeSchemeColorsOf(palette);
+                auto const inkColor = ink.kind == ColorSourceKind::SchemeOnBar
+                                          ? legibleOnBar(colors, ink.slot)
+                                          : slotIn(colors, ink.slot);
+                CHECK(contrastRatio(inkColor, slotIn(colors, fill.slot)) >= MinimumTextContrast);
+            }
+        }
+    }
+}
+
+TEST_CASE("a last-known sidebar row is dimmer than a live one yet reads at 3:1", "[chrometokens][sidebar]")
+{
+    // Spec §11: what was last known of a daemon that is not connected is drawn a measurable step dimmer than
+    // a live row's ink, so the two are told apart at a glance, and still reads as a mark on the sidebar.
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    // The live row's contrast over the last-known row's, both on the sidebar's fill: a step the eye sees, on
+    // either appearance.
+    constexpr auto MinimumDimGap = 1.6;
+    auto const preferences = std::array {
+        AccessibilityPreferences {},
+        AccessibilityPreferences { .motion = MotionPreference::Full,
+                                   .transparency = TransparencyPreference::Allowed,
+                                   .contrast = ContrastPreference::Increased },
+    };
+
+    SECTION("the native rows, over the kit's surfaces and a typical OS window")
+    {
+        auto const grounds = std::array {
+            NativeGround { .color = RGBColor(SurfaceColors[1].light), .dark = false },
+            NativeGround { .color = 0xECECEC_rgb, .dark = false },
+            NativeGround { .color = RGBColor(SurfaceColors[1].dark), .dark = true },
+            NativeGround { .color = 0x1E1E1E_rgb, .dark = true },
+        };
+        for (auto const style: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+            for (auto const& preference: preferences)
+            {
+                auto const row = resolveChromeTokens(style, preference);
+                auto const& fill = row.colors[static_cast<size_t>(SidebarFill)];
+                CAPTURE(static_cast<int>(style), static_cast<int>(preference.contrast));
+                for (auto const& ground: grounds)
+                {
+                    CAPTURE(ground.dark);
+                    auto const filled =
+                        fill.kind == ColorSourceKind::Surface
+                            ? RGBColor(ground.dark
+                                           ? SurfaceColors.at(static_cast<size_t>(fill.level - 1)).dark
+                                           : SurfaceColors.at(static_cast<size_t>(fill.level - 1)).light)
+                            : nativeInkOver(fill, ground);
+                    auto const on = NativeGround { .color = filled, .dark = ground.dark };
+                    auto const live = nativeInkOver(row.colors[static_cast<size_t>(TabText)], on);
+                    auto const lastKnown =
+                        nativeInkOver(row.colors[static_cast<size_t>(SidebarLastKnownInk)], on);
+                    CHECK(contrastRatio(lastKnown, filled) >= MinimumMarkContrast);
+                    CHECK(contrastRatio(live, filled) / contrastRatio(lastKnown, filled) >= MinimumDimGap);
+                }
+            }
+    }
+
+    SECTION("the Terminal row, on every bundled scheme")
+    {
+        for (auto const& preference: preferences)
+        {
+            auto const row = resolveChromeTokens(ChromeStyle::Terminal, preference);
+            auto const& fill = row.colors[static_cast<size_t>(SidebarFill)];
+            auto const& liveInk = row.colors[static_cast<size_t>(TabText)];
+            auto const& dimInk = row.colors[static_cast<size_t>(SidebarLastKnownInk)];
+            REQUIRE(fill.kind == ColorSourceKind::Scheme);
+            REQUIRE(liveInk.kind == ColorSourceKind::Scheme);
+            REQUIRE(dimInk.kind == ColorSourceKind::Scheme);
+            for (auto const name: defaultColorPaletteNames())
+            {
+                INFO("scheme: " << name);
+                auto palette = ColorPalette {};
+                REQUIRE(defaultColorPalettes(name, palette));
+                auto const colors = chromeSchemeColorsOf(palette);
+                auto const bar = slotIn(colors, fill.slot);
+                auto const live = mixColor(bar, slotIn(colors, liveInk.slot), liveInk.alphaPercent / 100.0f);
+                auto const lastKnown =
+                    mixColor(bar, slotIn(colors, dimInk.slot), dimInk.alphaPercent / 100.0f);
+                CHECK(contrastRatio(lastKnown, bar) >= MinimumMarkContrast);
+                CHECK(contrastRatio(live, bar) / contrastRatio(lastKnown, bar) >= MinimumDimGap);
+            }
+        }
     }
 }
 

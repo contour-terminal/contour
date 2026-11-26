@@ -247,6 +247,7 @@ set(_header_files
     session/ScrollbarVisibility.hpp
     session/SizeIndicator.hpp
     session/SwitchPermission.hpp
+    session/SidebarJump.hpp
     session/WindowSwitching.hpp
     window/ChromeFocus.hpp
     window/ChromeKeys.hpp
@@ -266,6 +267,8 @@ set(_header_files
     window/SidebarToggle.hpp
     window/PopupAnchor.hpp
     window/Utf16Offsets.hpp
+    window/SidebarDaemonRow.hpp
+    window/SidebarSections.hpp
     window/SidebarTree.hpp
     window/SidebarTabColor.hpp
     window/SidebarWorkspaceColor.hpp
@@ -545,7 +548,12 @@ if(CONTOUR_FRONTEND_GUI)
         qml/Breadcrumb.qml
         qml/Sidebar.qml
         qml/SidebarControlButton.qml
+        qml/SidebarNeedsMeButton.qml
+        qml/SidebarSwitcherButton.qml
         qml/SidebarRow.qml
+        qml/SidebarDaemonHeading.qml
+        qml/SidebarDaemonButton.qml
+        qml/SidebarPendingMark.qml
         qml/SidebarHoverCard.qml
         qml/SidebarNewWorkspaceDrop.qml
         qml/SidebarFooter.qml
@@ -1073,6 +1081,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/ExitCode_test.cpp
             session/MediaAccess_test.cpp
             session/WindowSwitching_test.cpp
+            session/SidebarJump_test.cpp
             session/ShellIntegrationCard_test.cpp
             session/WindowSwitchingActions_test.cpp
             display/CaretReportGate_test.cpp
@@ -1845,6 +1854,8 @@ if(CONTOUR_TESTING)
         window/AttentionJump_test.cpp
         window/SidebarTree.cpp
         window/SidebarTree_test.cpp
+        window/SidebarDaemonRow_test.cpp
+        window/SidebarSections_test.cpp
         window/SidebarTabColor_test.cpp
         window/SidebarWorkspaceColor_test.cpp
         window/SwitcherStatus.cpp

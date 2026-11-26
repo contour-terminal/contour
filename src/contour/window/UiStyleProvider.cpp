@@ -20,6 +20,7 @@
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SecureLockPlacement.hpp>
 #include <contour/window/SidebarControls.hpp>
+#include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/SidebarSelection.hpp>
 #include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/SidebarToggle.hpp>
@@ -51,6 +52,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -293,6 +295,111 @@ namespace
         return named != values.end() ? std::optional { *named } : std::nullopt;
     }
 
+    /// @return What one token unit of @p tokens is in logical pixels, with the chrome font's @p metrics.
+    [[nodiscard]] ChromeUnits chromeUnitsOf(config::UiStyleTokens const& tokens, ChromeMetrics const& metrics)
+    {
+        // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
+        // legacy one land on the same grid.
+        return ChromeUnits { .horizontal = metrics.widthQuantum,
+                             .vertical = tokens.unit == config::LengthUnit::Cell ? metrics.cellHeight : 1.0 };
+    }
+
+    /// @return The sidebar's heading, which its title row shows and its default width is sized against.
+    [[nodiscard]] QString sidebarHeadingText()
+    {
+        return UiStyleProvider::tr("Workspaces");
+    }
+
+    /// What @p row's sidebar title row needs to hold its heading whole, laid out as Sidebar.qml's title row
+    /// and TitleBar.qml's header part lay it out with the band at the top, and with every control either
+    /// stands beside the heading: a daemon's window adds the switcher.
+    /// @param row     The resolved token row.
+    /// @param tokens  The row's style tokens.
+    /// @param metrics The chrome font's metrics.
+    /// @param font    The chrome font.
+    /// @return The widest of the rows the look titles its sidebar in, in logical pixels; 0 where it names no
+    ///         heading.
+    [[nodiscard]] double sidebarTitleRowNeed(config::ChromeTokenRow const& row,
+                                             config::UiStyleTokens const& tokens,
+                                             ChromeMetrics const& metrics,
+                                             QFont const& font)
+    {
+        auto const traits = config::sidebarLookTraits(row.layout.sidebar);
+        if (traits.heading == config::SidebarHeading::Unnamed)
+            return 0.0;
+        // The extents QML reads, from the objects it reads them from.
+        auto const units = chromeUnitsOf(tokens, metrics);
+        auto const size = ChromeSizeTokens { row.size, units, nullptr };
+        auto const space = ChromeSpaceTokens { row.space, units, nullptr };
+        auto const type = ChromeTypeTokens { row.type, font, font, nullptr };
+        auto const snap = [&](double length) {
+            return metrics.widthQuantum * std::ceil(length / metrics.widthQuantum);
+        };
+        auto const headingIn = [](QFont const& face) {
+            return std::ceil(QFontMetricsF(face).horizontalAdvance(sidebarHeadingText()));
+        };
+        // After the heading: the switcher, the Needs-me control where the look keeps it in the title row, the
+        // filter, and the "+" where it is not the footer's.
+        auto const controls = std::size_t { 2 }
+                              + (traits.needsMe == config::SidebarNeedsMePlace::TitleRow ? 1 : 0)
+                              + (traits.add == config::SidebarAddPlace::TitleRow ? 1 : 0);
+
+        // Sidebar.qml's title row, while the band is @p band: its toggle leads it where the band leaves it
+        // there.
+        auto const sidebarRow = [&](BarPresence band) {
+            auto const cells = !traits.divider.empty();
+            auto const gap = cells ? std::max(space.s3(), metrics.cellWidth) : space.s3();
+            auto const rowHeight = row.sidebar.rowHeight * units.vertical;
+            auto const extent = snap(traits.span == config::SidebarSpan::BesideBand
+                                         ? size.toolbarButton()
+                                         : std::min(size.toolbarButton(), rowHeight));
+            auto const toggle =
+                sidebarToggleOf(SidebarToggleInputs { .span = traits.span,
+                                                      .visibility = config::SidebarVisibility::Shown,
+                                                      .band = band,
+                                                      .bandEdge = BarEdge::Top })
+                    .host
+                == SidebarToggleHost::SidebarTitleRow;
+            auto const divider = cells ? metrics.cellWidth : static_cast<double>(tokens.borderWidthPixels);
+            return geometry::sidebarTitleRowWidth({ .lead = toggle ? extent + space.s3() : space.s4(),
+                                                    .heading = headingIn(type.footnoteStrong()),
+                                                    .control = extent,
+                                                    .controlGap = cells ? gap : space.s2(),
+                                                    .controls = controls,
+                                                    .trail = divider + gap });
+        };
+        switch (traits.title)
+        {
+            case config::SidebarTitle::InSidebar: return sidebarRow(BarPresence::Shown);
+            case config::SidebarTitle::InHeaderBar: {
+                // TitleBar.qml's part above the sidebar, after the bar's inset and the sidebar's toggle; with
+                // the band off screen the title row is the sidebar's own.
+                auto const header = geometry::sidebarTitleRowWidth(
+                    { .lead = space.s4() + snap(size.toolbarButton()) + space.s3(),
+                      .heading = headingIn(type.bodyStrong()),
+                      .control = size.toolbarButton(),
+                      .controlGap = space.s3(),
+                      .controls = controls,
+                      .trail = space.s3() });
+                return std::max(header, sidebarRow(BarPresence::Hidden));
+            }
+        }
+        return 0.0;
+    }
+
+    /// @return @p row with its sidebar's default width widened to hold its title row's heading whole
+    ///         (geometry::sidebarDefaultUnits).
+    [[nodiscard]] config::ChromeTokenRow withSidebarHeadingRoom(config::ChromeTokenRow row,
+                                                                config::UiStyleTokens const& tokens,
+                                                                ChromeMetrics const& metrics,
+                                                                QFont const& font)
+    {
+        auto const scale = geometry::SidebarScale { .unit = tokens.unit, .unitPixels = metrics.widthQuantum };
+        row.sidebar.width = geometry::sidebarDefaultUnits(
+            row.sidebar, scale, sidebarTitleRowNeed(row, tokens, metrics, font));
+        return row;
+    }
+
     /// @param column The text of a header action's row to list.
     /// @return That text of every header action, indexed by config::PaneHeaderAction.
     [[nodiscard]] QStringList paneHeaderActionTexts(std::string_view PaneHeaderActionRow::* column)
@@ -335,15 +442,15 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _fonts { chromeFontsFor(_tokens, _inputs.font) },
     _metrics { chromeMetricsFor(_tokens, _inputs.font) },
     _glyphs { chromeGlyphsFor(_tokens) },
-    _groups { config::resolveChromeTokens(_inputs.row,
-                                          _inputs.accessibility,
-                                          _inputs.density,
-                                          _inputs.appearance.materials,
-                                          _inputs.tabStyle.material) },
-    // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
-    // legacy one land on the same grid.
-    _units { .horizontal = _metrics.widthQuantum,
-             .vertical = _tokens.unit == config::LengthUnit::Cell ? _metrics.cellHeight : 1.0 },
+    _groups { withSidebarHeadingRoom(config::resolveChromeTokens(_inputs.row,
+                                                                 _inputs.accessibility,
+                                                                 _inputs.density,
+                                                                 _inputs.appearance.materials,
+                                                                 _inputs.tabStyle.material),
+                                     _tokens,
+                                     _metrics,
+                                     _inputs.font) },
+    _units { chromeUnitsOf(_tokens, _metrics) },
     _size { _groups.size, _units, this },
     _space { _groups.space, _units, this },
     _radii { _groups.radii, _units, this },
@@ -492,6 +599,90 @@ QVariantMap UiStyleProvider::hostChipLook(int state) const
     return { { QStringLiteral("dot"), statusInk(static_cast<int>(look.dot)) },
              { QStringLiteral("status"), nameOf(look.status) },
              { QStringLiteral("accessibleState"), nameOf(look.accessibleState) } };
+}
+
+QVariantMap UiStyleProvider::daemonLinkLook(int state) const
+{
+    if (!inRange(state, DaemonLinkStateCount))
+        return {};
+    auto const look = linkLookOf(static_cast<DaemonLinkState>(state), _groups.layout.sidebar);
+    return { { QStringLiteral("glyph"), nameOf(look.glyph) },
+             { QStringLiteral("dot"), statusInk(static_cast<int>(look.dot)) },
+             { QStringLiteral("words"),
+               QCoreApplication::translate(std::string(DaemonLinkContext).c_str(),
+                                           std::string(look.words).c_str()) } };
+}
+
+QVariantMap UiStyleProvider::daemonRowButton(int button, int pending) const
+{
+    if (!inRange(button, DaemonRowButtonCount) || button == static_cast<int>(DaemonRowButton::None))
+        return {};
+    auto const& face = daemonRowButtonFace(static_cast<DaemonRowButton>(button));
+    auto const cells = _groups.layout.sidebar == config::SidebarLook::CellTree;
+    auto const words =
+        QCoreApplication::translate(std::string(DaemonRowContext).c_str(), std::string(face.words).c_str());
+    auto const plain = words.toStdString();
+    return { { QStringLiteral("words"), words },
+             { QStringLiteral("label"),
+               cells ? QString::fromStdString(std::vformat(CellButtonFormat, std::make_format_args(plain)))
+                     : words },
+             { QStringLiteral("icon"), cells ? QString {} : nameOf(face.icon) },
+             { QStringLiteral("glyph"), cells ? nameOf(face.glyph) : QString {} },
+             { QStringLiteral("command"),
+               nameOf(daemonRowButtonCommand(
+                   static_cast<DaemonRowButton>(button),
+                   pending == std::to_underlying(RowPending::Yes) ? RowPending::Yes : RowPending::No)) } };
+}
+
+int UiStyleProvider::daemonRowFit(qreal available,
+                                  qreal fixed,
+                                  qreal locality,
+                                  qreal name,
+                                  qreal elidedName,
+                                  qreal shortName,
+                                  qreal words,
+                                  qreal buttonText,
+                                  qreal buttonIcon,
+                                  qreal secondaryText,
+                                  qreal secondaryIcon)
+{
+    return static_cast<int>(daemonRowFitOf(DaemonRowRoom { .available = available,
+                                                           .fixed = fixed,
+                                                           .locality = locality,
+                                                           .name = name,
+                                                           .elidedName = elidedName,
+                                                           .shortName = shortName,
+                                                           .words = words,
+                                                           .buttonText = buttonText,
+                                                           .buttonIcon = buttonIcon,
+                                                           .secondaryText = secondaryText,
+                                                           .secondaryIcon = secondaryIcon }));
+}
+
+QVariantMap UiStyleProvider::daemonRowFitStep(int fit)
+{
+    auto const& step = window::daemonRowFitStep(
+        inRange(fit, DaemonRowFitCount) ? static_cast<DaemonRowFit>(fit) : DaemonRowFit::Full);
+    return { { QStringLiteral("wordsShown"), step.words == DaemonRowWords::Shown },
+             { QStringLiteral("iconButtons"), step.buttons != DaemonRowButtonForm::Words },
+             { QStringLiteral("secondaryShown"), step.secondary == DaemonRowSecondary::Shown },
+             { QStringLiteral("localityShown"), step.locality == DaemonRowLocalityIcon::Shown } };
+}
+
+QString UiStyleProvider::daemonRowToolTip(QString const& words, QString const& reason, int fit)
+{
+    return QString::fromStdString(window::daemonRowToolTipOf(
+        words.toStdString(),
+        reason.toStdString(),
+        inRange(fit, DaemonRowFitCount) ? static_cast<DaemonRowFit>(fit) : DaemonRowFit::Full));
+}
+
+QString UiStyleProvider::daemonRowNameText(QString const& name, int fit)
+{
+    if (!inRange(fit, DaemonRowFitCount))
+        return name;
+    return QString::fromStdString(
+        window::daemonRowNameText(name.toStdString(), static_cast<DaemonRowFit>(fit)));
 }
 
 QVariantMap UiStyleProvider::titleBand(int frame,
@@ -713,10 +904,22 @@ qreal UiStyleProvider::snappedSidebarWidth(qreal pixels) const
            * metrics.scale.unitPixels;
 }
 
+QString UiStyleProvider::sidebarHeading() const
+{
+    return sidebarHeadingText();
+}
+
 bool UiStyleProvider::sidebarTitleInHeaderBar(bool bandOnScreen) const
 {
     return bandOnScreen
            && config::sidebarLookTraits(_groups.layout.sidebar).title == config::SidebarTitle::InHeaderBar;
+}
+
+QVariantMap UiStyleProvider::sidebarControlFit(qreal available, qreal perControl, int shown)
+{
+    auto const fit = sidebarControlFitOf(available, perControl, static_cast<std::size_t>(std::max(shown, 0)));
+    return QVariantMap { { QStringLiteral("switcher"), fit != SidebarControlFit::NoSwitcher },
+                         { QStringLiteral("needsMe"), fit == SidebarControlFit::All } };
 }
 
 QVariantMap UiStyleProvider::sidebarControls() const
@@ -738,6 +941,24 @@ QVariantMap UiStyleProvider::sidebarControls() const
                                         face.drop == SidebarControlDrop::NewWorkspace } });
     }
     return controls;
+}
+
+QVariantMap UiStyleProvider::sidebarDaemonRowFace() const
+{
+    auto const& face = daemonRowFace(_groups.layout.sidebar);
+    // Indexed by window::DaemonLocality: Remote, then Local.
+    static_assert(std::to_underlying(DaemonLocality::Remote) == 0
+                  && std::to_underlying(DaemonLocality::Local) == 1);
+    return { { QStringLiteral("localityIcons"),
+               QStringList { nameOf(face.remoteIcon), nameOf(face.localIcon) } },
+             { QStringLiteral("pendingMark"), nameOf(face.pendingMark) },
+             { QStringLiteral("trailingDisclosure"), face.disclosure == DaemonRowDisclosure::Trailing },
+             { QStringLiteral("secondaryName"), face.nameInk == DaemonRowNameInk::Secondary },
+             { QStringLiteral("pendingWords"),
+               QCoreApplication::translate(
+                   std::string(DaemonLinkContext).c_str(),
+                   std::string(DaemonLinkLooks[static_cast<std::size_t>(DaemonLinkState::Connecting)].words)
+                       .c_str()) } };
 }
 
 QVariantMap UiStyleProvider::pickerAccessory() const

@@ -97,8 +97,19 @@ no expanded state of its own, so it is part of the name. A tab or pane that fail
 own names. **Ctrl+Shift+D** (**⇧⌘E** on macOS) moves keyboard focus into the tree, which then answers the
 arrow keys, Return, F2 and typing as the [sidebar guide](sidebar.md#keyboard) lists.
 
+When the sidebar lists several daemons, each heads its section with a daemon row named by the daemon. Its
+description says its link state in words, then its fold, then why the link failed when it did:
+`Daemon, connected, expanded` or `Daemon, failed, host key changed`. A row of a daemon whose link is down says
+`last known`, a workspace another window shows says `shown in another window`, and a row a jump is on its
+way to says `connecting`. The daemons you hid are one row, described as `2 hidden daemons`.
+A daemon row's **Connect**, **Start**, **Cancel** and **Remove** are buttons named by their words, even where a
+narrow sidebar shrinks them to their icons, and each has the press action.
+
 When a pane in a workspace other than the one you are looking at starts needing you, Contour announces it,
-Polite, once. Reduce Motion is honoured: rows fold and unfold at once.
+Polite, once; a pane of another daemon names it: `build in ci on starfive needs you`. A daemon newly listed,
+connected or restarted is not news: what its panes already ask is not announced. A jump to another daemon's
+row is announced as it goes: `Connecting to starfive…`, `Now on starfive › ci`, `Jump cancelled`, or
+`Could not reach starfive:` and the reason. Reduce Motion is honoured: rows fold and unfold at once.
 
 ## Things that are only announced
 
@@ -110,6 +121,7 @@ changed, so nothing is reported unless it is said explicitly. Contour announces:
 | The bell | Polite — it waits for your screen reader to finish its sentence |
 | A desktop notification (OSC 99, OSC 777 or OSC 9) | Polite |
 | A pane in another workspace starts needing you (see [the sidebar](#the-workspace-sidebar)) | Polite |
+| A jump to another daemon connecting, landing, cancelled or failing | Polite |
 | Read-only mode being switched on or off | Assertive — it interrupts, because it changes what typing does |
 
 Set `accessibility_announcements: false` in `contour.yml` to switch these off. They cost nothing while

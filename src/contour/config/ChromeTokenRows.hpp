@@ -420,6 +420,11 @@ namespace detail
         // and the primary label, not the accent (NSColor.unemphasizedSelectedContentBackgroundColor).
         fill(3),  // SidebarSelectionFillInactive
         label(1), // SidebarSelectionInkInactive
+        // A last-known row: under the rows' ink (label.2, which the secondary text shares) by a step the eye
+        // sees on either appearance -- the kit's tertiary label (45 / 50 %) is too close to it on a dark
+        // sidebar -- and still a mark at 3:1 on the sidebar's light surface, which leaves the light side
+        // little room below the tertiary.
+        tone(0x000000, 43, 0xFFFFFF, 38), // SidebarLastKnownInk
     };
 
     /// The Windows 11 row's colours: the native ones, with Fluent's own tooltip (#F9F9F9 / #2C2C2C).
@@ -453,6 +458,9 @@ namespace detail
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
     inline constexpr DimTokens PaneDim { .darkPercent = 15, .lightPercent = 10 };
+
+    /// The share of the bar's ink a Terminal row's last-known sidebar row is drawn at: faint, as SGR 2 is.
+    inline constexpr int TerminalLastKnownInkPercent = 70;
 
     /// The native rows' Minimal extents: no header, a hairline gap, a narrower hit area, no inset or radius.
     inline constexpr MinimalDensityTokens NativeMinimal {
@@ -656,7 +664,10 @@ namespace detail
     /// alpha), inset and rounded as libadwaita's sidebars draw it, and as the row's own command palette does
     /// (radii.control); keyboard focus adds the accent ring, never an accent fill (window::SidebarSelection).
     inline constexpr SidebarTokens LinuxSidebar {
-        .width = 240,
+        // Wide enough that the header bar's part above it says "Workspaces" whole beside its filter,
+        // new-workspace and (on a daemon's window) switcher buttons: libadwaita's 34 px buttons take more
+        // room than the other rows' (AdwNavigationSplitView's sidebar may be up to 280).
+        .width = 260,
         .minWidth = 160,
         .maxWidth = 480,
         .rowHeight = 32,
@@ -674,9 +685,11 @@ namespace detail
         .workspaceSwatchSize = 10
     };
 
-    /// The workspace sidebar on the Terminal row, in cells: a tree of whole rows.
+    /// The workspace sidebar on the Terminal row, in cells: a tree of whole rows. 30 cells by default, so a
+    /// daemon heading of an eight-letter name, its fold mark and its link's longest words ("Not connected",
+    /// "Reconnecting…") stand on one row.
     inline constexpr SidebarTokens TerminalSidebar {
-        .width = 28,
+        .width = 30,
         .minWidth = 18,
         .maxWidth = 60,
         .rowHeight = 1,
@@ -802,7 +815,11 @@ namespace detail
                   .paneHeaderWeight = 500,
                   .paneHeaderAction = 15,
                   .paletteInput = 17,
-                  .shortcut = 12 },
+                  .shortcut = 12,
+                  // A source list's section header ("Favorites"): the footnote's size, semibold, under its
+                  // items' body; it ranks by being a header, in the secondary ink, not by weight.
+                  .sidebarSection = 11,
+                  .sidebarSectionWeight = 600 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         // The band is Solid, not Glass (ruling S6): under AppKit's title-bar material the NSTitlebarView
@@ -942,7 +959,11 @@ namespace detail
                   .paneHeaderWeight = 600,
                   .paneHeaderAction = 15,
                   .paletteInput = 16,
-                  .shortcut = 12 },
+                  .shortcut = 12,
+                  // A source list's section header, as on every native row: the footnote's size, semibold,
+                  // under its items' Body; it ranks by being a header, in the secondary ink, not by weight.
+                  .sidebarSection = 12,
+                  .sidebarSectionWeight = 600 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Mica, .popover = Material::Solid },
@@ -1081,7 +1102,11 @@ namespace detail
                   .paneHeaderWeight = 600,
                   .paneHeaderAction = 15,
                   .paletteInput = 16,
-                  .shortcut = 12.5 },
+                  .shortcut = 12.5,
+                  // A source list's section header, as on every native row: the footnote's size, semibold,
+                  // under its items' body; it ranks by being a header, in the secondary ink, not by weight.
+                  .sidebarSection = 12.5,
+                  .sidebarSectionWeight = 600 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Solid, .popover = Material::Solid },
@@ -1247,7 +1272,10 @@ namespace detail
                   .paneHeaderWeight = 400,
                   .paneHeaderAction = 0,
                   .paletteInput = 0,
-                  .shortcut = 0 },
+                  .shortcut = 0,
+                  // A cell's bold: the name in the terminal's own font.
+                  .sidebarSection = 0,
+                  .sidebarSectionWeight = 700 },
         .motion = { .fastMs = 100,
                     .standardMs = 160,
                     .emphasizedMs = 220,
@@ -1407,8 +1435,15 @@ namespace detail
                     schemeColor(SchemeSlot::Secondary),        // SidebarDivider
                     detail::noColor(),                         // SidebarAccentPill
                     // A run of cells keeps its inverse selection whether or not the keyboard is in it.
-                    schemeColor(SchemeSlot::BarSelection),       // SidebarSelectionFillInactive
-                    schemeColor(SchemeSlot::BarSelectionText) }, // SidebarSelectionInkInactive
+                    schemeColor(SchemeSlot::BarSelection),     // SidebarSelectionFillInactive
+                    schemeColor(SchemeSlot::BarSelectionText), // SidebarSelectionInkInactive
+                    // A last-known row is faint, as SGR 2 draws a cell: the bar's ink at part strength, which
+                    // stays apart from the live rows' full ink on every scheme, where ANSI 8 often falls back
+                    // to that very ink.
+                    ChromeColorSource { .kind = ColorSourceKind::Scheme,
+                                        .slot = SchemeSlot::BarInk,
+                                        .alphaPercent =
+                                            TerminalLastKnownInkPercent } }, // SidebarLastKnownInk
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

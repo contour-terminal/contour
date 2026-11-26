@@ -7458,6 +7458,31 @@ namespace
 }
 } // namespace
 
+TEST_CASE("TerminalSessionManager: a window on a daemon names its daemon ref and instance",
+          "[manager][sidebar]")
+{
+    auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto factory = contour::test::MockPtySessionFactory {};
+    factory.reportedHostKind = contour::session::SessionHostKind::Daemon;
+    factory.reportedDaemonInstance = 42;
+    auto onWork = contour::test::DaemonNamedBinding { factory, chipLabelTarget("work"), "work" };
+    onWork.ref = contour::window::localDaemonRef("work");
+    contour::test::ScopedController const inProcess { manager };
+    contour::test::ScopedController const workWindow { manager };
+    manager.bindWindow(workWindow.id, onWork);
+
+    CHECK(manager.daemonRefOf(workWindow.id) == contour::window::localDaemonRef("work"));
+    CHECK(manager.daemonInstanceOf(workWindow.id) == contour::window::DaemonInstance { 42 });
+    // A window whose sessions run in-process is on no daemon.
+    CHECK(manager.daemonRefOf(inProcess.id) == std::nullopt);
+    CHECK(manager.daemonInstanceOf(inProcess.id) == std::nullopt);
+
+    // A daemon that has not said which run it is names none.
+    factory.reportedDaemonInstance.reset();
+    CHECK(manager.daemonInstanceOf(workWindow.id) == std::nullopt);
+}
+
 TEST_CASE("TerminalSessionManager: daemonNameOf names the daemon the chip shows", "[manager][chip]")
 {
     auto app = contour::test::TestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
@@ -7525,8 +7550,8 @@ TEST_CASE("TerminalSessionManager: the chip's place follows the window's band, h
     auto const placeOf = [](WindowController& window) {
         auto const band = window.titleBand();
         auto const sidebar = window.sidebarWidth() > 0 ? SidebarShown::Yes : SidebarShown::No;
-        auto const expected = locationChipPlaceName(
-            locationChipPlace(band.band, band.centre, window.chip()->inputs().hosting, sidebar));
+        auto const expected = locationChipPlaceName(locationChipPlace(
+            band.band, band.centre, window.chip()->inputs().hosting, sidebar, window.chip()->inputs().state));
         CHECK(window.chip()->place().toStdString() == expected);
         return window.chip()->place();
     };
@@ -7535,16 +7560,19 @@ TEST_CASE("TerminalSessionManager: the chip's place follows the window's band, h
     CHECK(placeOf(*daemon) == "band");
     CHECK(placeOf(*inProcess) == "none");
 
-    // A sidebar that appears while the tabs stay in the band moves the chip nowhere, and says nothing of it:
-    // the place is notified only when it changes.
+    // A sidebar that appears names the daemon in its heading row, so the daemon window's chip leaves the band
+    // (its link is up), and says so once; the in-process window's has nowhere to go and says nothing.
     auto placeChanges = QSignalSpy { daemon->chip(), &LocationChipModel::placeChanged };
+    auto inProcessChanges = QSignalSpy { inProcess->chip(), &LocationChipModel::placeChanged };
     daemon->toggleSidebar();
     inProcess->toggleSidebar();
     REQUIRE(daemon->sidebarWidth() > 0);
     CHECK(daemon->chip()->inputs().sidebar == SidebarShown::Yes);
-    CHECK(placeOf(*daemon).toStdString() == "band");
+    CHECK(daemon->chip()->inputs().state == HostChipState::Connected);
+    CHECK(placeOf(*daemon).toStdString() == "none");
     CHECK(placeOf(*inProcess).toStdString() == "none");
-    CHECK(placeChanges.count() == 0);
+    CHECK(placeChanges.count() == 1);
+    CHECK(inProcessChanges.count() == 0);
 
     manager.releaseBinding(onWork);
 }
@@ -7666,7 +7694,7 @@ TEST_CASE("TerminalSessionManager: hostingOf tells in-process, daemon and attach
     CHECK(attached->chip()->inputs().hosting == DaemonHosting::OtherHost);
     auto const placeFor = [](WindowController const& window, BarPresence band, BarCentre centre) {
         auto const& inputs = window.chip()->inputs();
-        return locationChipPlace(band, centre, inputs.hosting, inputs.sidebar);
+        return locationChipPlace(band, centre, inputs.hosting, inputs.sidebar, inputs.state);
     };
     CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Tabs) == LocationChipPlace::Band);
     CHECK(placeFor(*attached, BarPresence::Shown, BarCentre::Title) == LocationChipPlace::Band);

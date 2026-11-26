@@ -151,7 +151,12 @@ namespace
         ActionCategory { .name = "ToggleSidebar", .category = CommandCategory::View },
         ActionCategory { .name = "FocusSidebar", .category = CommandCategory::Window },
         ActionCategory { .name = "FilterWorkspaces", .category = CommandCategory::View },
+        ActionCategory { .name = "ToggleSidebarNeedsMe", .category = CommandCategory::View },
         ActionCategory { .name = "JumpToNextAttention", .category = CommandCategory::Window },
+        // Hidden while the sidebar's jumps report nothing pending (ISidebarHost::pendingJump()): it would end
+        // nothing.
+        ActionCategory {
+            .name = "CancelSwitch", .category = CommandCategory::Window, .palette = PaletteListing::Hidden },
         ActionCategory { .name = "MarkSeen", .category = CommandCategory::Window },
         ActionCategory { .name = "RenameWorkspace", .category = CommandCategory::Window },
         ActionCategory { .name = "MoveWorkspaceUp", .category = CommandCategory::Window },
@@ -222,7 +227,8 @@ namespace
     {
         for (auto const& binding: bindings)
             for (auto const& action: binding.binding)
-                target.push_back(makeCommand(action));
+                if (paletteListing(action) == PaletteListing::Listed)
+                    target.push_back(makeCommand(action));
     }
 } // namespace
 
@@ -234,6 +240,11 @@ std::span<ActionCategory const> actionCategories() noexcept
 CommandCategory commandCategory(actions::Action const& action) noexcept
 {
     return ActionCategories[action.index()].category;
+}
+
+PaletteListing paletteListing(actions::Action const& action) noexcept
+{
+    return ActionCategories[action.index()].palette;
 }
 
 std::vector<Command> collectCommands(std::span<CommandSource const* const> sources)
@@ -269,7 +280,8 @@ std::vector<Command> ActionCommandSource::commands() const
         // A parameterized action's prototype names no profile / no tab / no characters, so running it
         // would do nothing (or something arbitrary). Its concrete instances arrive via the other
         // sources, which know what argument to give it.
-        if (actions::isParameterized(entry.prototype))
+        if (actions::isParameterized(entry.prototype)
+            || paletteListing(entry.prototype) == PaletteListing::Hidden)
             continue;
         result.push_back(makeCommand(entry.prototype));
     }

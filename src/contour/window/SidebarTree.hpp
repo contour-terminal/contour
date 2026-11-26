@@ -8,11 +8,18 @@
 /// expansion, selection and the tree lines the Terminal look draws. Qt-free: every row's text is plain
 /// text, and a view must render it as such, never as markup.
 ///
+/// A window that lists several daemons passes their sections (DaemonSection): each opens with a Daemon row, a
+/// section heading at depth 0, and its workspaces follow it at depth 0 too, so the tree gains no column.
+/// Every key that names a workspace, tab or pane carries its daemon and that daemon's instance: ids are
+/// daemon-local and start over when a daemon restarts.
+///
 /// What a pane asks is decided by paneUrgency() (AttentionJump.hpp), in the one order of StatusUrgency.hpp;
 /// a parent row shows the most urgent of its panes, with that pane's glyph, reason and time. A Failed or
 /// DoneUnseen pane whose verdict is a finished command has a reason (`exit 1 · 18s`), and the time since it
 /// ended where its daemon stated that (DirectoryPane::finishedAt); without it, no time, as
 /// vthost::proto::FinishedCommand carries no timestamp to measure from.
+#include <contour/config/TabBarMode.hpp>
+#include <contour/window/DaemonSection.hpp>
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/StatusKinds.hpp>
 #include <contour/window/StatusUrgency.hpp>
@@ -23,12 +30,14 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <span>
 #include <string>
@@ -44,15 +53,19 @@ enum class SidebarRowKind : uint8_t
     Workspace = 0, ///< A workspace.
     Tab,           ///< A tab of a workspace.
     Pane,          ///< One pane of a tab with more than one.
+    Daemon,        ///< A daemon: the heading of its section, its workspaces beneath it.
+    Hidden,        ///< The daemons the user chose not to list, last.
 };
 
 /// Number of @c SidebarRowKind enumerators, derived from the last one.
-inline constexpr size_t SidebarRowKindCount = static_cast<size_t>(SidebarRowKind::Pane) + 1;
+inline constexpr size_t SidebarRowKindCount = static_cast<size_t>(SidebarRowKind::Hidden) + 1;
 
 /// Identifies a row across rebuilds, so a view keeps its selection and focus through a refresh.
 struct SidebarRowKey
 {
     SidebarRowKind kind = SidebarRowKind::Workspace; ///< What the row stands for.
+    DaemonRef daemon {};                             ///< The daemon of its section; empty for none.
+    DaemonInstance instance {};                      ///< That daemon's run, which its ids belong to.
     uint64_t workspace = 0;                          ///< The workspace's daemon id.
     uint64_t tab = 0;                                ///< The tab's id; 0 for a workspace row.
     PaneKey pane;                                    ///< The pane's key; zero for a workspace or tab row.
@@ -148,11 +161,100 @@ struct LeafCounts
     bool operator==(LeafCounts const&) const = default;
 };
 
+/// A workspace, named by its daemon and that daemon's run: a workspace id is unique only within one run of
+/// one daemon.
+struct WorkspaceKey
+{
+    DaemonRef daemon {};        ///< The daemon; empty for a window with no daemon.
+    DaemonInstance instance {}; ///< Its run.
+    uint64_t workspace = 0;     ///< The workspace's id on it.
+
+    auto operator<=>(WorkspaceKey const&) const = default;
+};
+
+/// A tab, named by its workspace.
+struct TabKey
+{
+    WorkspaceKey workspace {}; ///< The workspace holding it.
+    uint64_t tab = 0;          ///< The tab's id within it.
+
+    auto operator<=>(TabKey const&) const = default;
+};
+
+/// What a jump goes to, or what a window displays: a workspace on a daemon, and within it a tab and a pane
+/// where they are named.
+struct SidebarTarget
+{
+    DaemonRef daemon {};            ///< The daemon; empty for a window with no daemon.
+    DaemonInstance instance {};     ///< Its run.
+    uint64_t workspace = 0;         ///< The workspace's id on it.
+    std::optional<uint64_t> tab {}; ///< The tab within it, if one is named.
+    std::optional<PaneKey> pane {}; ///< The pane within that tab, if one is named.
+
+    bool operator==(SidebarTarget const&) const = default;
+};
+
+/// Where a jump to a row lands.
+enum class JumpMode : uint8_t
+{
+    Here = 0,  ///< In this window.
+    NewWindow, ///< In a window of its own.
+};
+
+/// Whether a row says what its daemon says now, or what it said last.
+enum class RowStaleness : uint8_t
+{
+    Live = 0, ///< Its daemon is connected, or there is nothing older to show.
+    /// Its daemon is not connected, whatever its link is doing: the row is what was last known of it, drawn
+    /// dimmer, with no running mark, and counted by neither the footer nor the summary.
+    LastKnown,
+};
+
+/// Who holds the link a daemon row's verbs (Connect, Start, Cancel) act on.
+enum class DaemonRowLink : uint8_t
+{
+    Observer = 0, ///< An observer link the sidebar's process keeps: the daemon sections connect it.
+    OwnWindow,    ///< This window's own link: it is sought again as the chip and a pane's footer do.
+    OtherWindow,  ///< Another window's link: that window's chip and footers act on it, not this row.
+};
+
+/// Whether another window of this process shows a workspace.
+enum class ShownElsewhere : uint8_t
+{
+    No = 0, ///< No other window shows it.
+    Yes,    ///< Another window shows it; activating it raises that window.
+};
+
+/// Whether a jump to a row is under way.
+enum class RowPending : uint8_t
+{
+    No = 0, ///< Nothing is under way.
+    Yes,    ///< The pending jump goes to this row, or, on a daemon row, into its section.
+};
+
+/// What a row's one trailing status slot shows.
+enum class StatusSlot : uint8_t
+{
+    None = 0, ///< Nothing.
+    Link,     ///< The daemon's link state: its section's daemon is not connected.
+    Urgency,  ///< The row's rolled-up urgency.
+    Pending,  ///< A jump to the row, or into its section, is under way.
+};
+
+/// A daemon the user chose not to list, as the Hidden row names it.
+struct HiddenDaemon
+{
+    DaemonRef daemon; ///< Which daemon.
+    std::string name; ///< What it is called.
+
+    bool operator==(HiddenDaemon const&) const = default;
+};
+
 /// One row of the sidebar.
 struct SidebarRow
 {
     SidebarRowKey key;                           ///< Identifies it across rebuilds.
-    uint8_t depth = 0;                           ///< 0 workspace, 1 tab, 2 pane.
+    uint8_t depth = 0;                           ///< 0 daemon, workspace or hidden, 1 tab, 2 pane.
     std::string title;                           ///< The name; plain text.
     std::string reason;                          ///< The second line; empty when there is nothing to say.
     std::string reasonLabel;                     ///< Its words (the proportional part).
@@ -169,7 +271,7 @@ struct SidebarRow
     Urgency urgency = Urgency::Idle;             ///< Rolled up over the panes beneath a parent row.
     TabBadgeKind glyph = TabBadgeKind::None;     ///< Which badge look draws it (chromeStyle.badgeLook).
     RowExpansion expansion = RowExpansion::None; ///< Whether its children are shown.
-    RowSelection selection = RowSelection::None; ///< Whether this window displays it (tab rows only).
+    RowSelection selection = RowSelection::None; ///< Whether this window displays it, or a fold hides that.
     /// Its real place among its siblings in the directory, whatever a filter or a fold hides: a workspace's
     /// among the workspaces, a tab's among its workspace's tabs, a pane's among its tab's panes. A drop
     /// resolves to these, never to an index among the rows shown.
@@ -188,6 +290,18 @@ struct SidebarRow
     /// A tab row's icon as the window's tab strip shows it (window::tabIconOf); none for a workspace or pane
     /// row, and for a tab the window does not hold, whose profile and program it does not know.
     std::optional<TabIcon> icon {};
+    /// A Daemon row: where its link stands. Every other row leaves it at its default.
+    DaemonLinkState linkState = DaemonLinkState::NotConnected;
+    std::string linkReason;                             ///< A Daemon row: why its link failed; plain text.
+    DaemonLocality locality = DaemonLocality::Remote;   ///< A Daemon row: whether it runs on this machine.
+    DaemonRowLink link = DaemonRowLink::Observer;       ///< A Daemon row: who holds its link.
+    RowStaleness staleness = RowStaleness::Live;        ///< Whether the row is what was last known.
+    ShownElsewhere shownElsewhere = ShownElsewhere::No; ///< A Workspace row: whether another window shows it.
+    /// Whether a pending jump goes to it (or into a Daemon row's section).
+    RowPending pending = RowPending::No;
+    StatusSlot slot = StatusSlot::None; ///< What its trailing status slot shows (statusSlotOf()).
+    std::string daemonName; ///< The name of its section's daemon; empty for a window with no daemon.
+    std::vector<HiddenDaemon> hidden; ///< A Hidden row: the daemons it names; empty on every other row.
 
     bool operator==(SidebarRow const&) const = default;
 };
@@ -204,11 +318,22 @@ struct TabRef
 /// What the sidebar itself remembers.
 struct SidebarState
 {
-    std::set<uint64_t> collapsedWorkspaces {}; ///< Workspace ids whose tabs are hidden.
-    std::set<TabRef> collapsedTabs {};         ///< Tabs whose panes are hidden.
+    /// The daemon the window opened on: its workspaces start unfolded, every other daemon's start folded.
+    DaemonRef openedOn {};
+    /// The workspaces the user folded or unfolded against their daemon's default: a workspace is folded iff
+    /// its daemon is not openedOn, or it is toggled, but not both. A workspace that appears later follows its
+    /// daemon's default, and so does every workspace of a daemon's new run.
+    std::set<WorkspaceKey> toggled {};
+    std::set<TabKey> collapsedTabs {};                      ///< Tabs whose panes are hidden.
+    std::set<DaemonRef> foldedDaemons {};                   ///< Daemons whose rows hide their workspaces.
+    config::SidebarScope scope = config::SidebarScope::All; ///< Which rows are listed.
     /// A case-insensitive (ASCII) substring a row must hold in its title, reason or git text, or have a
-    /// descendant that does. While it is set, every ancestor of a match is expanded. Empty: no filter.
+    /// descendant that does; a daemon row's name counts too. While it is set, every ancestor of a match is
+    /// expanded. Empty: no filter.
     std::string filter {};
+
+    /// @return Whether @p daemon's workspaces start folded: every daemon's but openedOn's.
+    [[nodiscard]] bool foldsByDefault(DaemonRef const& daemon) const { return daemon != openedOn; }
 };
 
 /// The sidebar's footer: `N need you · M working`.
@@ -231,11 +356,39 @@ inline constexpr std::size_t MaxFullReasonLength = 2000;
 /// the filter hides, which the footer and the summary count over.
 struct SidebarListing
 {
-    std::vector<SidebarRow> rows;       ///< The rows drawn, depth-first (sidebarRows()).
-    std::vector<SidebarRow> workspaces; ///< Every workspace's row, in order, filtered or not.
+    std::vector<SidebarRow> rows; ///< The rows drawn, depth-first (sidebarRows()).
+    std::vector<SidebarRow>
+        workspaces; ///< Every workspace's row of every section, in order, filtered or not.
 };
 
-/// Flattens @p directory into the rows the sidebar draws and the workspace rows a count needs, in one pass.
+/// The sections a window lists, and which one is its own.
+struct SidebarSources
+{
+    std::span<DaemonSection const> sections; ///< In the order they are listed.
+    DaemonRef own;                           ///< The window's own daemon; its section's panes use ownMarks.
+    /// The window's own seen-state, for its own section's panes; null reads as nothing seen. Every other
+    /// section's panes are read as their daemon states them.
+    TabAttention const* ownMarks = nullptr;
+    std::span<HiddenDaemon const>
+        hidden; ///< The daemons the user chose not to list; none lists no Hidden row.
+};
+
+/// Flattens @p sources into the rows the sidebar draws, section after section, each headed by its Daemon row.
+/// @param sources The sections, the window's own daemon and its seen-state, and the hidden daemons.
+/// @param state What is folded, the scope and the filter.
+/// @param now The wall clock the times are measured against.
+/// @param displayed What this window shows, if anything: its tab is Selected.
+/// @param pending Where a jump under way goes: its row and its daemon's row are Pending, and the Needs-me
+///                scope keeps it.
+/// @return The listing; its workspaces span every section.
+[[nodiscard]] SidebarListing sidebarListing(SidebarSources const& sources,
+                                            SidebarState const& state,
+                                            std::chrono::system_clock::time_point now,
+                                            std::optional<SidebarTarget> displayed,
+                                            std::optional<SidebarTarget> pending);
+
+/// Flattens @p directory into the rows the sidebar draws and the workspace rows a count needs, in one pass: a
+/// window with no daemon, one section with an empty DaemonRef and no Daemon row.
 /// @param directory The workspaces, tabs and panes.
 /// @param attention This window's seen-state.
 /// @param state What is collapsed, and the filter.
@@ -265,7 +418,7 @@ struct SidebarListing
 /// @param rows Rows from sidebarRows() built with an empty filter, or SidebarListing::workspaces, for a count
 ///             of everything.
 /// @return The panes that need the user and that work, counted over the leaves under each workspace row
-///         (LeafCounts), not over the rolled-up urgencies.
+///         (LeafCounts), not over the rolled-up urgencies; last-known workspaces are not counted.
 [[nodiscard]] SidebarFooter sidebarFooter(std::span<SidebarRow const> rows);
 
 /// The footer's counts in the status glyphs @p look's rows draw for them (`! 1 · ◑ 2`), for a footer too
@@ -286,13 +439,127 @@ struct SidebarSummary
     bool operator==(SidebarSummary const&) const = default;
 };
 
+/// How much of where the window is its breadcrumb says.
+enum class BreadcrumbDepth : uint8_t
+{
+    WorkspaceTab = 0,   ///< `workspace › tab`: one daemon, or none, so the daemon goes without saying.
+    DaemonWorkspaceTab, ///< `daemon › workspace › tab`: several daemons listed beside each other.
+};
+
+/// @param sections How many daemon sections the sidebar lists (0 for a window with no daemon).
+/// @return `daemon › workspace › tab` only with more than one section.
+[[nodiscard]] constexpr BreadcrumbDepth breadcrumbDepthOf(std::size_t sections) noexcept
+{
+    return sections > 1 ? BreadcrumbDepth::DaemonWorkspaceTab : BreadcrumbDepth::WorkspaceTab;
+}
+
 /// The summary over @p rows.
 /// @param rows Rows from sidebarRows() built with an empty filter, or SidebarListing::workspaces, so no
 ///             workspace row is left out.
 /// @param current The workspace the window shows; none leaves the name empty and counts every workspace.
-/// @return The summary.
+/// @return The summary, over the workspace rows of every section; a last-known workspace still names the
+///         current one, but asks nothing of the others' roll-up.
 [[nodiscard]] SidebarSummary sidebarSummary(std::span<SidebarRow const> rows,
-                                            std::optional<uint64_t> current);
+                                            std::optional<WorkspaceKey> current);
+
+/// @param urgency A pane's urgency.
+/// @return Whether it asks for the user: NeedsYou, Failed or DoneUnseen (the classes an attention jump
+///         visits), which is what the Needs-me scope keeps.
+[[nodiscard]] bool needsMe(Urgency urgency) noexcept;
+
+/// @param rows The rows as listed.
+/// @return How many of them need the user (needsMe() of their rolled-up urgency).
+[[nodiscard]] std::size_t rowsNeedingMe(std::span<SidebarRow const> rows) noexcept;
+
+/// @param scope The scope in force.
+/// @return The other one: what a second press of the Needs-me control, or of its action, brings back.
+[[nodiscard]] constexpr config::SidebarScope toggledScope(config::SidebarScope scope) noexcept
+{
+    return scope == config::SidebarScope::NeedsMe ? config::SidebarScope::All : config::SidebarScope::NeedsMe;
+}
+
+/// @param state What the sidebar remembers.
+/// @return Whether neither a filter nor the Needs-me scope narrows the tree: the filter's Return then has no
+///         match to go to.
+[[nodiscard]] bool isUnnarrowed(SidebarState const& state) noexcept;
+
+/// The row the filter's Return goes to: the first tab or pane row that itself matches (the filter's text in
+/// its own title, reason or git text; under the Needs-me scope, its own urgency, and on a tab row only while
+/// its panes are not listed beneath it), not an ancestor listed for a match beneath it; else the first
+/// workspace row that itself matches; else the first tab or pane row; else the first workspace row.
+/// @param rows The rows as listed under @p state.
+/// @param state What the sidebar remembers: its filter and scope.
+/// @return The row's index; none for a tree with neither tab, pane nor workspace rows.
+[[nodiscard]] std::optional<std::size_t> firstMatchOf(std::span<SidebarRow const> rows,
+                                                      SidebarState const& state);
+
+/// What the tree says where it lists nothing the user asked for.
+enum class SidebarEmptyState : uint8_t
+{
+    None = 0,        ///< Nothing: the rows speak for themselves.
+    NothingNeedsYou, ///< "Nothing needs you", and a way back to every row ("Show all").
+};
+
+/// @param scope   The scope in force.
+/// @param needing How many of the listed rows need the user (rowsNeedingMe()). The Needs-me scope keeps the
+///                displayed tab's path and a pending jump's besides, so an empty list is not the test.
+/// @return NothingNeedsYou under the Needs-me scope while no row needs the user; None otherwise, and always
+///         under All, whose empty tree has nothing to undo.
+[[nodiscard]] constexpr SidebarEmptyState sidebarEmptyStateOf(config::SidebarScope scope,
+                                                              std::size_t needing) noexcept
+{
+    return scope == config::SidebarScope::NeedsMe && needing == 0 ? SidebarEmptyState::NothingNeedsYou
+                                                                  : SidebarEmptyState::None;
+}
+
+/// What a row's status slot shows while its link is in one state and no jump is under way.
+struct LinkSlotRow
+{
+    DaemonLinkState state; ///< The link state.
+    StatusSlot slot;       ///< Link while the daemon is not connected; Urgency once it is.
+    RowStaleness tree;     ///< What a section whose link is in this state lists of a directory it has.
+};
+
+/// The slot and the staleness of every link state, indexed by @c DaemonLinkState.
+inline constexpr auto LinkSlotRows = std::array {
+    LinkSlotRow {
+        .state = DaemonLinkState::NotConnected, .slot = StatusSlot::Link, .tree = RowStaleness::LastKnown },
+    LinkSlotRow {
+        .state = DaemonLinkState::Connecting, .slot = StatusSlot::Link, .tree = RowStaleness::LastKnown },
+    LinkSlotRow {
+        .state = DaemonLinkState::Connected, .slot = StatusSlot::Urgency, .tree = RowStaleness::Live },
+    LinkSlotRow {
+        .state = DaemonLinkState::Reconnecting, .slot = StatusSlot::Link, .tree = RowStaleness::LastKnown },
+    LinkSlotRow {
+        .state = DaemonLinkState::NeedsInput, .slot = StatusSlot::Link, .tree = RowStaleness::LastKnown },
+    LinkSlotRow {
+        .state = DaemonLinkState::NotRunning, .slot = StatusSlot::Link, .tree = RowStaleness::LastKnown },
+    LinkSlotRow {
+        .state = DaemonLinkState::TooOld, .slot = StatusSlot::Link, .tree = RowStaleness::LastKnown },
+    LinkSlotRow {
+        .state = DaemonLinkState::Failed, .slot = StatusSlot::Link, .tree = RowStaleness::LastKnown },
+};
+
+static_assert(LinkSlotRows.size() == DaemonLinkStateCount, "LinkSlotRows must list every DaemonLinkState");
+static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, LinkSlotRows.size()),
+                                  [](size_t i) { return LinkSlotRows[i].state == DaemonLinkState(i); }),
+              "LinkSlotRows must list the states in enumerator order");
+
+/// What a row's one trailing status slot shows.
+/// @param state Where the link of the row's daemon stands; Connected for a row with no daemon.
+/// @param pending Whether a jump to the row, or into a Daemon row's section, is under way.
+/// @param rolledUp The row's rolled-up urgency.
+/// @return Pending while a jump is under way; else Link while the daemon is not connected; else Urgency when
+///         the row asks for something, None when it is idle.
+[[nodiscard]] constexpr StatusSlot statusSlotOf(DaemonLinkState state,
+                                                RowPending pending,
+                                                Urgency rolledUp) noexcept
+{
+    if (pending == RowPending::Yes)
+        return StatusSlot::Pending;
+    auto const slot = LinkSlotRows[static_cast<size_t>(state)].slot;
+    return slot == StatusSlot::Urgency && rolledUp == Urgency::Idle ? StatusSlot::None : slot;
+}
 
 /// Whether the workspace chip marks that another workspace asks for the user.
 enum class ChipMarker : uint8_t
@@ -349,7 +616,8 @@ enum class SecondLine : uint8_t
 /// The index of the row @p row hangs under.
 /// @param rows The rows as shown.
 /// @param row A row's index.
-/// @return The nearest row above it of a lesser depth; -1 for a workspace row or an index out of range.
+/// @return The nearest row above it of a lesser depth; for a workspace row, its section's Daemon row; -1 for
+///         a Daemon or Hidden row, a workspace row with no Daemon row above it, or an index out of range.
 [[nodiscard]] int parentRowOf(std::span<SidebarRow const> rows, int row) noexcept;
 
 /// The Terminal look's connectors of a row as text: two cells per column of @p lines that the row's depth
@@ -381,7 +649,7 @@ struct RailCells
 /// the cell, becomes `├`. The tree's own text (treeLinesText()) is left as it is.
 /// @param row The row.
 /// @return The cells. A workspace row's first is `│` when it folds nothing, so has no disclosure to draw it,
-///         and empty otherwise.
+///         and empty otherwise. A Daemon or Hidden row belongs to no workspace's rail: none.
 [[nodiscard]] RailCells workspaceRailCellsOf(SidebarRow const& row);
 
 /// The cells of the Terminal look's progress meter.

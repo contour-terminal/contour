@@ -113,10 +113,7 @@ void DaemonPresence::shutdown()
     _lifecycle = Lifecycle::ShutDown;
     _listed.clear();
     for (auto& observer: _observers | std::views::values)
-    {
-        observer.receiver.reset();
-        retire(std::move(observer.controller));
-    }
+        detach(observer);
     _observers.clear();
     // Each was asked to stop above, so their detaches run side by side: waited for here, one after another.
     for (auto const& controller: std::exchange(_retired, {}))
@@ -313,6 +310,22 @@ void DaemonPresence::connect(window::DaemonRef const& daemon, vtworkspace::Works
     notify();
 }
 
+void DaemonPresence::disconnect(window::DaemonRef const& daemon)
+{
+    auto const found = _observers.find(daemon);
+    if (found == _observers.end() || !found->second.controller
+        || found->second.controller->connectionState() != ConnectionState::Connecting)
+        return;
+    // The observer stays, holding nothing: the section reads Not connected, and neither a redial nor a
+    // refresh dials it again; connect() does.
+    auto& observer = found->second;
+    detach(observer);
+    observer.recorder.reset();
+    observer.redial = RedialState::Idle;
+    observer.liveness = LocalLiveness::Unknown;
+    notify();
+}
+
 void DaemonPresence::start(window::DaemonRef const& daemon)
 {
     auto const parsed = window::parseDaemonRef(daemon);
@@ -486,8 +499,7 @@ void DaemonPresence::startObserver(window::DaemonRef const& daemon, Observer& ob
 
 void DaemonPresence::refuse(Observer& observer, DialRefusal refusal)
 {
-    observer.receiver.reset();
-    retire(std::move(observer.controller));
+    detach(observer);
     observer.refusal = std::move(refusal);
     observer.liveness = LocalLiveness::Unknown;
 }
@@ -502,8 +514,7 @@ void DaemonPresence::launch(window::DaemonRef const& daemon,
                             Observer& observer,
                             std::shared_ptr<vthost::ITransportFactory> transport)
 {
-    observer.receiver.reset();
-    retire(std::move(observer.controller));
+    detach(observer);
     if (_lifecycle == Lifecycle::ShutDown)
         return;
     observer.recorder = std::make_shared<FailureRecordingTransport>(std::move(transport));
@@ -598,6 +609,12 @@ void DaemonPresence::redial(window::DaemonRef const& daemon, NativeController co
     notify();
 }
 
+void DaemonPresence::detach(Observer& observer)
+{
+    observer.receiver.reset();
+    retire(std::move(observer.controller));
+}
+
 void DaemonPresence::retire(std::unique_ptr<NativeController> controller)
 {
     if (!controller)
@@ -683,6 +700,10 @@ void DaemonPresence::recountObservedWaiting()
 void DaemonPresence::notify()
 {
     recountObservedWaiting();
+    // Once shut down, the application is going: a sidebar told now would rebuild after the windows' world
+    // is gone.
+    if (_lifecycle == Lifecycle::ShutDown)
+        return;
     _subscribers.notify();
 }
 

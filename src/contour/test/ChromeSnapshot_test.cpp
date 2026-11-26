@@ -1364,6 +1364,43 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                       == QStringLiteral("build"));
                 break;
             }
+            case SnapshotScript::SidebarTwoDaemons:
+            case SnapshotScript::SidebarDaemonNeedsInput:
+            case SnapshotScript::SidebarDaemonNotRunning:
+            case SnapshotScript::SidebarDaemonConnecting:
+            case SnapshotScript::SidebarDaemonReconnecting:
+            case SnapshotScript::SidebarDaemonTooOld:
+            case SnapshotScript::SidebarPendingRow:
+            case SnapshotScript::SidebarNeedsMeEmpty:
+            case SnapshotScript::SidebarDaemonNarrow: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                // The tree names the window's daemon in its heading row; no chip names it in the sidebar's
+                // head or the band, and the switcher is a control of the title row.
+                auto titles = QStringList {};
+                for (auto const* listed: contour::test::itemsNamed(content, QStringLiteral("sidebarRow")))
+                    if (listed->isVisible())
+                        titles << listed->property("title").toString();
+                CHECK(titles.contains(QStringLiteral("work")));
+                auto const other = row.sections == SnapshotSections::Narrow
+                                       ? QStringLiteral("build-farm-eu-west-2")
+                                       : QStringLiteral("starfive");
+                CHECK(titles.contains(other) == (row.sections != SnapshotSections::NeedsMeEmpty));
+                CHECK(contour::test::itemsNamed(content, QStringLiteral("sidebarDaemonChip")).empty());
+                CHECK(contour::test::itemsNamed(content, QStringLiteral("headerSidebarDaemonChip")).empty());
+                auto const switchers =
+                    contour::test::itemsNamed(content, QStringLiteral("sidebarSwitcherButton")).size()
+                    + contour::test::itemsNamed(content, QStringLiteral("headerSidebarSwitcherButton"))
+                          .size();
+                CHECK(switchers >= 1U);
+                if (row.sections == SnapshotSections::NeedsMeEmpty)
+                {
+                    auto const empty =
+                        contour::test::itemsNamed(content, QStringLiteral("sidebarEmptyState"));
+                    REQUIRE(empty.size() == 1);
+                    CHECK(empty.front()->isVisible());
+                }
+                break;
+            }
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());
@@ -1448,7 +1485,8 @@ TEST_CASE("The sidebar scripts on the rows this process draws (offscreen)",
         scene.show();
         CHECK(scene.diagnostics().isEmpty());
         auto const divider = checkSidebarScript(scene, variant);
-        if (!divider)
+        // The narrow script shows the sidebar at its narrowest on purpose.
+        if (!divider || scriptRow(variant.script).sections == SnapshotSections::Narrow)
             continue;
         // The divider column is where the sidebar ends: the same on every script of a row and edition, and on
         // the Terminal row a whole number of cells from the window's edge.

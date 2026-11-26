@@ -984,6 +984,23 @@ std::string TerminalSessionManager::daemonNameOf(vtworkspace::WorkspaceId window
                                                                  : std::string {};
 }
 
+std::optional<window::DaemonRef> TerminalSessionManager::daemonRefOf(vtworkspace::WorkspaceId window) const
+{
+    auto const* const binding = bindingOf(window);
+    return binding != nullptr ? binding->daemonRef() : std::nullopt;
+}
+
+std::optional<window::DaemonInstance> TerminalSessionManager::daemonInstanceOf(
+    vtworkspace::WorkspaceId window) const
+{
+    if (bindingOf(window) == nullptr)
+        return std::nullopt;
+    auto const& factory = factoryFor(window);
+    if (factory.hostKind() != SessionHostKind::Daemon)
+        return std::nullopt;
+    return factory.daemonInstance().transform([](uint64_t run) { return window::DaemonInstance { run }; });
+}
+
 window::DaemonHosting TerminalSessionManager::hostingOf(vtworkspace::WorkspaceId window) const
 {
     if (isInProcessWindow(window))

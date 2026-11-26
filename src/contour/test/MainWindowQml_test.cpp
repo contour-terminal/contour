@@ -41,6 +41,7 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PickerAccessory.hpp>
 #include <contour/window/SidebarControls.hpp>
+#include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
@@ -2003,26 +2004,29 @@ namespace
     }
     for (auto const& row: contour::window::HeaderBarItems)
         add(row.iconName);
+    // An icon bundled by URL: "qrc:/contour/…" → ":/contour/…".
+    auto const addUrl = [&icons](std::string_view url) {
+        auto const path = QString::fromUtf8(url.data(), static_cast<qsizetype>(url.size())).mid(3);
+        if (!path.isEmpty() && !icons.contains(path))
+            icons.append(path);
+    };
     // The sidebar's own buttons name their bundled copies by URL (qrc:/contour/icons/<name>.svg).
     for (auto const& row: contour::window::SidebarControlRows)
         for (auto const& face: row.faces)
-            if (auto const url = QString::fromUtf8(face.bundledIcon.data(),
-                                                   static_cast<qsizetype>(face.bundledIcon.size()));
-                !url.isEmpty() && !icons.contains(url.mid(3)))
-                icons.append(url.mid(3)); // "qrc:/contour/…" → ":/contour/…"
+            addUrl(face.bundledIcon);
     // The sidebar's disclosure chevron, which its look traits name by URL as well.
-    if (auto const chevron =
-            QString::fromUtf8(contour::config::SidebarChevronIcon.data(),
-                              static_cast<qsizetype>(contour::config::SidebarChevronIcon.size()));
-        !icons.contains(chevron.mid(3)))
-        icons.append(chevron.mid(3));
+    addUrl(contour::config::SidebarChevronIcon);
     // A picker row's "open in new window" button, the same way.
     for (auto const& row: contour::window::PickerAccessoryRows)
-        if (auto const url =
-                QString::fromUtf8(row.openInNewWindow.bundledIcon.data(),
-                                  static_cast<qsizetype>(row.openInNewWindow.bundledIcon.size()));
-            !url.isEmpty() && !icons.contains(url.mid(3)))
-            icons.append(url.mid(3));
+        addUrl(row.openInNewWindow.bundledIcon);
+    // A daemon row's locality icons and its buttons' icon-only forms, by URL too.
+    for (auto const& face: contour::window::DaemonRowFaces)
+    {
+        addUrl(face.localIcon);
+        addUrl(face.remoteIcon);
+    }
+    for (auto const& face: contour::window::DaemonRowButtonFaces)
+        addUrl(face.icon);
     // The secure-input lock names its icon in SecureInputLock.qml, not in a table.
     add("lock-symbolic");
     return icons;

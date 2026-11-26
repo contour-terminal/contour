@@ -656,6 +656,13 @@ class WindowController:
     /// What Enter in the tree and the row's accessibility press action both do.
     /// @param row The row.
     Q_INVOKABLE void activateSidebarRow(int row);
+    /// Activates the first row the sidebar's filter left (SidebarModel::activateFirstMatch()), and, when it
+    /// showed a row of this window's own, hands the keyboard to the terminal: Return in the filter field, and
+    /// Shift+Return for a window of its own.
+    /// @param mode A JumpMode's underlying value (SidebarRows.JumpMode).
+    /// @return What it did, a SidebarRows.RowActivation's underlying value: Unfiltered asks the tree to take
+    ///         the keyboard, as nothing narrows it and there is no match to go to.
+    Q_INVOKABLE int activateSidebarFirstMatch(int mode);
 
     /// Gives keyboard focus to the active pane's display and ends the chrome's hold on it: what is due when a
     /// popup over this window closes, which leaves no window holding the keyboard.
@@ -1410,6 +1417,14 @@ class WindowController:
     /// Opens the sidebar's filter field with the keyboard in it, showing the sidebar first when it is hidden
     /// (sidebarFilterRequested()): what every filter button and the FilterWorkspaces action do.
     Q_INVOKABLE void openSidebarFilter();
+
+    /// Narrows the sidebar to what needs the user, or lists everything again (SidebarModel::setScope()): what
+    /// the sidebar's Needs-me control and the ToggleSidebarNeedsMe action do. A hidden sidebar is shown, and
+    /// narrowed. The scope is the window's, kept in memory.
+    Q_INVOKABLE void toggleSidebarNeedsMe();
+    /// Ends a jump the sidebar started that is still under way, leaving the window as it was
+    /// (SidebarModel::cancelJump()): the CancelSwitch action. Nothing while none is under way.
+    Q_INVOKABLE void cancelSidebarJump();
 
     /// @return The other workspaces' roll-up, an Urgency's underlying value.
     [[nodiscard]] int otherWorkspacesUrgency() const noexcept { return _sidebar->otherWorkspacesUrgency(); }

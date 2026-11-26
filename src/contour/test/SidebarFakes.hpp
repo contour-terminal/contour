@@ -129,6 +129,25 @@ struct FakeSidebarHost final: window::ISidebarHost
         auto const found = lines.find(row);
         return found != lines.end() ? found->second : std::vector<std::string> {};
     }
+
+    std::optional<window::OwnDaemon> own;                                  ///< What ownDaemon() answers.
+    vtworkspace::WorkspaceId window { 1 };                                 ///< What windowId() answers.
+    std::vector<std::pair<window::SidebarTarget, window::JumpMode>> jumps; ///< Every jumpTo(), in order.
+    std::optional<window::SidebarTarget> pending;                          ///< What pendingJump() answers.
+    int cancels = 0;                                                       ///< How often cancelJump() ran.
+    int reconnects = 0;                                                    ///< How often reconnect() ran.
+    int promptRaises = 0;                                                  ///< How often raisePrompt() ran.
+
+    [[nodiscard]] std::optional<window::OwnDaemon> ownDaemon() const override { return own; }
+    [[nodiscard]] vtworkspace::WorkspaceId windowId() const override { return window; }
+    void jumpTo(window::SidebarTarget target, window::JumpMode mode) override
+    {
+        jumps.emplace_back(std::move(target), mode);
+    }
+    [[nodiscard]] std::optional<window::SidebarTarget> pendingJump() const override { return pending; }
+    void cancelJump() override { ++cancels; }
+    void reconnect() override { ++reconnects; }
+    void raisePrompt() override { ++promptRaises; }
 };
 
 /// @param key The pane's key value; also its tab's id, by workspaceOf().

@@ -1967,6 +1967,13 @@ class ChromeSnapshotScene
                                                            .durationMs = 18000,
                                                            .commandLine = "make deploy" };
         deploy.finishedSerial = 1;
+        if (script.sections == SnapshotSections::NeedsMeEmpty)
+        {
+            // Nothing that needs the user: the agent works, the finished tab was looked at, nothing failed.
+            claude.status = { sidebarRecord(vtbackend::ProgramState::Working, {}, 30s) };
+            notes.status = {};
+            deploy.finished.reset();
+        }
 
         auto billing = directoryWorkspaceOf(1, "billing", { claude, build, notes, deploy });
         auto split = window::DirectoryTab {};
@@ -2028,16 +2035,104 @@ class ChromeSnapshotScene
             _controller.sidebarModel().collapse(0);
             _controller.sidebarModel().collapse(1);
         }
+        listSections(script.sections);
         // Hidden keeps the sidebar placement: the chip then leads the strip that took the tabs back.
         _controller.setTabPlacement(sidebar == SnapshotSidebar::TopTabs ? config::TabPlacement::Top
                                                                         : config::TabPlacement::Sidebar);
     }
 
-    /// Shows the sidebar at the width its look asks for, once the window is loaded; Hidden and None leave it
-    /// off.
-    /// @param sidebar What the script shows of the sidebar.
-    void showSidebar(SnapshotSidebar sidebar)
+    /// Puts the window on a daemon, `work`, and lists the sections @p sections names beside it: `starfive`,
+    /// in the link state the script draws, with one workspace (`ci`, a build that works). A daemon that is
+    /// not running is one of this machine's, which Start and Remove are for. Nothing for None.
+    /// @param sections What the script lists.
+    void listSections(SnapshotSections sections)
     {
+        if (sections == SnapshotSections::None)
+            return;
+        _controller.setDaemon(QStringLiteral("work"));
+        _controller.sidebarHost().own = window::OwnDaemon { .daemon = window::localDaemonRef("work"),
+                                                            .instance = window::DaemonInstance { 1 },
+                                                            .name = "work",
+                                                            .locality = window::DaemonLocality::Local,
+                                                            .state = window::DaemonLinkState::Connected };
+        auto const starfiveState = [&] {
+            switch (sections)
+            {
+                case SnapshotSections::NeedsInput: return window::DaemonLinkState::NeedsInput;
+                case SnapshotSections::NotRunning:
+                case SnapshotSections::Narrow: return window::DaemonLinkState::NotRunning;
+                case SnapshotSections::Connecting: return window::DaemonLinkState::Connecting;
+                case SnapshotSections::Reconnecting: return window::DaemonLinkState::Reconnecting;
+                case SnapshotSections::TooOld: return window::DaemonLinkState::TooOld;
+                case SnapshotSections::None:
+                case SnapshotSections::TwoDaemons:
+                case SnapshotSections::Pending:
+                case SnapshotSections::NeedsMeEmpty: break;
+            }
+            return window::DaemonLinkState::Connected;
+        }();
+        auto const local = starfiveState == window::DaemonLinkState::NotRunning;
+        auto const starfiveRef =
+            local ? window::localDaemonRef("starfive") : window::hostDaemonRef("starfive");
+        auto starfive = window::DaemonSection {};
+        starfive.daemon = starfiveRef;
+        starfive.instance = window::DaemonInstance { 9 };
+        starfive.name = sections == SnapshotSections::Narrow ? "build-farm-eu-west-2" : "starfive";
+        starfive.locality = local ? window::DaemonLocality::Local : window::DaemonLocality::Remote;
+        starfive.state = starfiveState;
+        starfive.feed = window::SectionFeed::Observer;
+        auto build = directoryPaneOf(50, "build");
+        build.status = { sidebarRecord(vtbackend::ProgramState::Working, {}, std::chrono::seconds { 75 }) };
+        starfive.directory.workspaces = { directoryWorkspaceOf(5, "ci", { build }) };
+        // The presence lists the window's own daemon too, first: the window's live section takes its place.
+        auto work = window::DaemonSection {};
+        work.daemon = window::localDaemonRef("work");
+        work.instance = window::DaemonInstance { 1 };
+        work.name = "work";
+        work.locality = window::DaemonLocality::Local;
+        work.state = window::DaemonLinkState::Connected;
+        work.feed = window::SectionFeed::Observer;
+        _controller.sidebarSections().listed = { std::move(work) };
+        if (sections != SnapshotSections::NeedsMeEmpty)
+            _controller.sidebarSections().listed.push_back(std::move(starfive));
+        if (sections == SnapshotSections::Pending)
+            _controller.sidebarHost().pending =
+                window::SidebarTarget { .daemon = window::hostDaemonRef("starfive"),
+                                        .instance = window::DaemonInstance { 9 },
+                                        .workspace = 5,
+                                        .tab = 50,
+                                        .pane = {} };
+        _controller.sidebarModel().refreshNow();
+        // starfive opens folded, as every daemon the window did not open on; unfolded here so its rows show.
+        auto const& rows = _controller.sidebarModel().rows();
+        auto const heading = std::ranges::find_if(rows, [&](auto const& row) {
+            return row.key.kind == window::SidebarRowKind::Daemon && row.key.daemon == starfiveRef;
+        });
+        if (heading != rows.end() && heading->expansion == window::RowExpansion::Collapsed)
+            _controller.sidebarModel().expand(static_cast<int>(std::distance(rows.begin(), heading)));
+        // docs and infra folded, so starfive's section stands inside the window on every row, the Terminal's
+        // cells too; billing keeps the displayed tab in view.
+        if (sections != SnapshotSections::NeedsMeEmpty)
+            for (auto const* title: { "docs", "infra" })
+            {
+                auto const& listed = _controller.sidebarModel().rows();
+                auto const workspace = std::ranges::find_if(listed, [&](auto const& row) {
+                    return row.key.kind == window::SidebarRowKind::Workspace && row.title == title;
+                });
+                if (workspace != listed.end())
+                    _controller.sidebarModel().collapse(
+                        static_cast<int>(std::distance(listed.begin(), workspace)));
+            }
+        if (sections == SnapshotSections::NeedsMeEmpty)
+            _controller.sidebarModel().setScope(config::SidebarScope::NeedsMe);
+    }
+
+    /// Shows the sidebar at the width its look asks for, once the window is loaded (at its narrowest for
+    /// SnapshotSections::Narrow); Hidden and None leave it off.
+    /// @param row The script.
+    void showSidebar(SnapshotScriptRow const& row)
+    {
+        auto const sidebar = row.sidebar;
         if (sidebar == SnapshotSidebar::None || sidebar == SnapshotSidebar::Hidden)
             return;
         auto const* style =
@@ -2045,7 +2140,9 @@ class ChromeSnapshotScene
         REQUIRE(style != nullptr);
         auto const* look = style->property("sidebar").value<QObject*>();
         REQUIRE(look != nullptr);
-        _controller.showSidebar(static_cast<int>(look->property("width").toReal()));
+        auto const width =
+            row.sections == SnapshotSections::Narrow ? look->property("minWidth") : look->property("width");
+        _controller.showSidebar(static_cast<int>(width.toReal()));
         _incubation.settle();
     }
 
@@ -2078,7 +2175,7 @@ class ChromeSnapshotScene
         listWorkspaces(scriptRow(_variant.script));
         auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
         REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
-        showSidebar(scriptRow(_variant.script).sidebar);
+        showSidebar(scriptRow(_variant.script));
         _incubation.settle();
         return root;
     }

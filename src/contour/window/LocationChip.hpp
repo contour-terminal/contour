@@ -447,7 +447,7 @@ enum class LocationChipPlace : uint8_t
 {
     None = 0, ///< Nowhere.
     Band,     ///< In the title band.
-    Sidebar,  ///< In the workspace sidebar's header.
+    Sidebar,  ///< In the workspace sidebar's header: a host that is no daemon (a tmux attach) only.
 };
 
 /// Whether the workspace sidebar is on screen.
@@ -462,16 +462,23 @@ enum class SidebarShown : uint8_t
 /// @param hosting What serves the window (its row in DaemonHostingPolicies says whether the chip names a
 ///                daemon).
 /// @param sidebar Whether the workspace sidebar shows.
+/// @param state   What the window's own link to its daemon looks like.
 /// @return Where the chip shows: a chip that names a daemon (or a host) follows the band's centre, a window
-///         with none (in-process) shows the chip only in the band's workspace-chip centre. The sidebar's
-///         head holds the daemon only while the sidebar shows: with it hidden the band holds the chip, so
-///         the daemon is named somewhere. With no band, the chip heads the sidebar when that shows.
+///         with none (in-process) shows the chip only in the band's workspace-chip centre. A daemon's window
+///         with its sidebar shown names the daemon in the tree's heading row instead, so the chip shows
+///         nowhere -- unless its own link is not connected, when the chip returns to the band to say so (the
+///         tree's heading says it too where there is no band). A host that is no daemon (a tmux attach) has
+///         no heading row: its chip heads the sidebar while that shows, as with no band.
 [[nodiscard]] constexpr LocationChipPlace locationChipPlace(BarPresence band,
                                                             BarCentre centre,
                                                             DaemonHosting hosting,
-                                                            SidebarShown sidebar) noexcept
+                                                            SidebarShown sidebar,
+                                                            HostChipState state) noexcept
 {
     auto const names = daemonHostingPolicy(hosting).naming == ChipNaming::NamesDaemon;
+    if (hosting == DaemonHosting::Daemon && sidebar == SidebarShown::Yes)
+        return state != HostChipState::Connected && band != BarPresence::Hidden ? LocationChipPlace::Band
+                                                                                : LocationChipPlace::None;
     if (band == BarPresence::Hidden)
         return names && sidebar == SidebarShown::Yes ? LocationChipPlace::Sidebar : LocationChipPlace::None;
     switch (centre)

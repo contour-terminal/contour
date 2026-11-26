@@ -80,11 +80,12 @@ Item {
     readonly property Item driftSlot: driftSlotItem
     /// The tab strip, while the middle holds the tabs; null otherwise.
     readonly property Item tabStrip: tabStripLoader.item
-    /// The band's toolbar items that are on screen, in visual order: the daemon control of a header bar's
-    /// sidebar part or the location chip, the drift chip, then the new-tab button. What the toolbar's
-    /// keyboard focus walks (WindowController.focusedToolbarIndex).
+    /// The band's toolbar items that are on screen, in visual order: a header bar's sidebar part's host chip (a
+    /// tmux window's), switcher and Needs-me control, or the location chip, the drift chip, then the new-tab
+    /// button. What the toolbar's keyboard focus walks (WindowController.focusedToolbarIndex).
     readonly property var toolbarItems: {
-        const items = [headerDaemonChipSlot.item, workspaceChipSlot.item, driftSlotItem.chip, newTabSlot.item]
+        const items = [headerDaemonChipSlot.item, headerSwitcherButton, headerNeedsMeButton, workspaceChipSlot.item,
+                       driftSlotItem.chip, newTabSlot.item]
         return items.filter((item) => item !== null && item.visible)
     }
     /// Whether the window's keyboard focus is in the toolbar: an item that also holds active focus rings.
@@ -487,21 +488,29 @@ Item {
             }
         }
 
-        // The header bar's part above the sidebar: its title, the sidebar's filter button and the button that
-        // adds a workspace -- themed symbolic icons, as the bar's own items are -- as wide as the sidebar below,
+        // The header bar's part above the sidebar: its title, the sidebar's Needs-me and filter buttons and the
+        // button that adds a workspace -- themed symbolic icons, as the bar's own items are -- as wide as the sidebar below,
         // less what precedes it in the bar. Its empty places are the title bar's.
         Item {
             id: sidebarPart
             objectName: "headerSidebarPart"
             readonly property bool shown: root.isHeader && root.sidebarWidth > 0
+            // The width the sidebar below leaves the part, less what precedes it in the bar.
+            readonly property real room: root.sidebarWidth - barRow.anchors.leftMargin
+                                         - leadingSlot.Layout.preferredWidth
+                                         - leadingSeparator.Layout.preferredWidth - leadingSeparator.Layout.leftMargin
+                                         - leadingSeparator.Layout.rightMargin - sidebarToggleSlot.Layout.preferredWidth
+                                         - sidebarToggleSlot.Layout.rightMargin
+            // Which controls give way to a narrow sidebar (UiStyleProvider.sidebarControlFit): the Needs-me
+            // control first, then the switcher.
+            readonly property var fit: chromeStyle.sidebarControlFit(
+                sidebarPart.room, // each control counted with its gap, the last one's the part's end margin
+                chromeStyle.size.toolbarButton + chromeStyle.space.s3,
+                [headerSwitcherButton.wanted, !chromeStyle.sidebar.needsMeInFilterRow, true, true]
+                    .filter((wants) => wants).length)
             visible: sidebarPart.shown
             Layout.fillHeight: true
-            Layout.preferredWidth: !sidebarPart.shown ? 0
-                : Math.max(sidebarPartRow.implicitWidth,
-                           root.sidebarWidth - barRow.anchors.leftMargin - leadingSlot.Layout.preferredWidth
-                           - leadingSeparator.Layout.preferredWidth - leadingSeparator.Layout.leftMargin
-                           - leadingSeparator.Layout.rightMargin - sidebarToggleSlot.Layout.preferredWidth
-                           - sidebarToggleSlot.Layout.rightMargin)
+            Layout.preferredWidth: !sidebarPart.shown ? 0 : Math.max(sidebarPartRow.implicitWidth, sidebarPart.room)
 
             TitleBarGestures {
                 objectName: "headerSidebarGestures"
@@ -516,7 +525,7 @@ Item {
                 anchors.right: sidebarPartRow.left
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
-                text: qsTr("Workspaces")
+                text: chromeStyle.sidebarHeading
                 font: chromeStyle.type.bodyStrong
                 color: chromeStyle.bandColors.tabText
                 elide: Text.ElideRight
@@ -524,7 +533,8 @@ Item {
                 Accessible.name: text
             }
 
-            // The daemon control, in the heading's place while the sidebar shows: the band holds no chip then.
+            // A tmux window's host control, in the heading's place while the sidebar shows: the band holds no chip
+            // then. A daemon's window names its daemon in the tree's heading row instead (chip.place).
             Loader {
                 id: headerDaemonChipSlot
                 active: root.daemonChipInHeader
@@ -546,6 +556,24 @@ Item {
                 anchors.rightMargin: chromeStyle.space.s3
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: chromeStyle.space.s3
+
+                SidebarSwitcherButton {
+                    id: headerSwitcherButton
+                    objectName: "headerSidebarSwitcherButton"
+                    controller: root.controller
+                    visible: sidebarPart.shown && wanted && (sidebarPart.fit.switcher ?? true)
+                    glyphColor: root.headerInk
+                }
+
+                SidebarNeedsMeButton {
+                    id: headerNeedsMeButton
+                    objectName: "headerSidebarNeedsMeButton"
+                    controller: root.controller
+                    // Beside the filter field instead where the look keeps it there (Sidebar.qml).
+                    visible: sidebarPart.shown && !chromeStyle.sidebar.needsMeInFilterRow
+                             && (sidebarPart.fit.needsMe ?? true)
+                    glyphColor: root.headerInk
+                }
 
                 SidebarControlButton {
                     objectName: "headerSidebarFilterButton"
@@ -864,6 +892,7 @@ Item {
         visible: root.isBand && root.centre === "breadcrumb"
         anchors.centerIn: parent
         room: root.titleRoom
+        daemon: root.controller && root.controller.sidebar ? (root.controller.sidebar.breadcrumbDaemon ?? "") : ""
         workspace: root.controller && root.controller.sidebar ? root.controller.sidebar.currentWorkspaceTitle : ""
         tab: titleRows.activeTitle
     }

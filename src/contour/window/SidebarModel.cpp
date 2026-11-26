@@ -2,11 +2,14 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/window/AttentionJump.hpp>
 #include <contour/window/ChromeKeys.hpp>
+#include <contour/window/DaemonLinkLook.hpp>
 #include <contour/window/DisclosureWords.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/QtString.hpp>
+#include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
 #include <contour/window/SidebarModel.hpp>
+#include <contour/window/SidebarSections.hpp>
 #include <contour/window/TabIconVariant.hpp>
 
 #include <core/Overloaded.hpp>
@@ -85,6 +88,15 @@ namespace
         RoleName { SidebarModel::RailTextRole, "railText" },
         RoleName { SidebarModel::RailTextContinuedRole, "railTextContinued" },
         RoleName { SidebarModel::IconRole, "icon" },
+        RoleName { SidebarModel::LinkStateRole, "linkState" },
+        RoleName { SidebarModel::LinkReasonRole, "linkReason" },
+        RoleName { SidebarModel::LocalityRole, "locality" },
+        RoleName { SidebarModel::StalenessRole, "staleness" },
+        RoleName { SidebarModel::ShownElsewhereRole, "shownElsewhere" },
+        RoleName { SidebarModel::PendingRole, "pending" },
+        RoleName { SidebarModel::StatusSlotRole, "statusSlot" },
+        RoleName { SidebarModel::DaemonNameRole, "daemonName" },
+        RoleName { SidebarModel::DaemonButtonsRole, "daemonButtons" },
     };
 
     [[nodiscard]] QString qs(std::string const& text)
@@ -100,6 +112,8 @@ namespace
             case SidebarRowKind::Workspace: return SidebarModel::tr("Workspace");
             case SidebarRowKind::Tab: return SidebarModel::tr("Tab");
             case SidebarRowKind::Pane: return SidebarModel::tr("Pane");
+            case SidebarRowKind::Daemon: return SidebarModel::tr("Daemon");
+            case SidebarRowKind::Hidden: return SidebarModel::tr("Hidden daemons");
         }
         return {};
     }
@@ -123,6 +137,8 @@ namespace
         CountWords { .one = QT_TR_NOOP("%n pane needs you"), .other = QT_TR_NOOP("%n panes need you") };
     constexpr auto PanesWorking =
         CountWords { .one = QT_TR_NOOP("%n pane working"), .other = QT_TR_NOOP("%n panes working") };
+    constexpr auto HiddenDaemons =
+        CountWords { .one = QT_TR_NOOP("%n hidden daemon"), .other = QT_TR_NOOP("%n hidden daemons") };
     constexpr auto FooterNeedYou =
         CountWords { .one = QT_TR_NOOP("%n needs you"), .other = QT_TR_NOOP("%n need you") };
     constexpr auto FooterWorking =
@@ -145,6 +161,14 @@ namespace
             case Urgency::NeedsYou: return SidebarModel::tr("needs you");
         }
         return {};
+    }
+
+    /// @return What @p state says of a daemon's link, as a screen reader says it, translated.
+    [[nodiscard]] QString linkWords(DaemonLinkState state)
+    {
+        return QCoreApplication::translate(
+            std::string(DaemonLinkContext).c_str(),
+            std::string(DaemonLinkLooks[static_cast<std::size_t>(state)].accessibleWords).c_str());
     }
 
     /// The roles in which @p before and @p after differ: every one data() serves from what changed.
@@ -192,6 +216,16 @@ namespace
         note(before.workspaceColor == after.workspaceColor, { SidebarModel::WorkspaceColorRole });
         note(workspaceRailCellsOf(before) == workspaceRailCellsOf(after),
              { SidebarModel::RailTextRole, SidebarModel::RailTextContinuedRole });
+        note(before.linkState == after.linkState, { SidebarModel::LinkStateRole });
+        note(before.linkReason == after.linkReason, { SidebarModel::LinkReasonRole });
+        note(before.locality == after.locality, { SidebarModel::LocalityRole });
+        note(before.staleness == after.staleness, { SidebarModel::StalenessRole });
+        note(before.shownElsewhere == after.shownElsewhere, { SidebarModel::ShownElsewhereRole });
+        note(before.pending == after.pending, { SidebarModel::PendingRole });
+        note(before.slot == after.slot, { SidebarModel::StatusSlotRole });
+        note(before.daemonName == after.daemonName, { SidebarModel::DaemonNameRole });
+        note(daemonRowFactsOf(before) == daemonRowFactsOf(after) && before.pending == after.pending,
+             { SidebarModel::DaemonButtonsRole });
         // The spoken name is the title; the description folds in the kind and the status, not a running time.
         if (accessibleNameOf(before) != accessibleNameOf(after))
             for (auto const role: { static_cast<int>(SidebarModel::AccessibleNameRole),
@@ -213,6 +247,8 @@ namespace
                                                   SidebarRowKey const& key)
     {
         auto keys = std::vector<PaneKey> {};
+        if (key.kind == SidebarRowKind::Daemon || key.kind == SidebarRowKind::Hidden)
+            return keys; // names no workspace
         for (auto const& workspace: directory.workspaces)
         {
             if (workspace.id != key.workspace)
@@ -227,6 +263,27 @@ namespace
             }
         }
         return keys;
+    }
+
+    /// @return What a row of a workspace, tab or pane names, as a jump goes there; a daemon row names its
+    ///         daemon's default workspace (workspace 0, which no workspace is).
+    [[nodiscard]] SidebarTarget targetOf(SidebarRowKey const& key)
+    {
+        auto target = SidebarTarget {
+            .daemon = key.daemon, .instance = key.instance, .workspace = key.workspace, .tab = {}, .pane = {}
+        };
+        if (key.kind == SidebarRowKind::Tab || key.kind == SidebarRowKind::Pane)
+            target.tab = key.tab;
+        if (key.kind == SidebarRowKind::Pane)
+            target.pane = key.pane;
+        return target;
+    }
+
+    /// @return The jump mode @p mode names, as QML passes it; Here for anything else.
+    [[nodiscard]] JumpMode jumpModeOf(int mode) noexcept
+    {
+        return mode == static_cast<int>(std::to_underlying(JumpMode::NewWindow)) ? JumpMode::NewWindow
+                                                                                 : JumpMode::Here;
     }
 
     /// @param disclosure Whether a row's children show.
@@ -257,12 +314,21 @@ void registerSidebarQmlTypes()
 
 QString accessibleNameOf(SidebarRow const& row)
 {
+    // The Hidden row shows no title of its own; it is named for what it is.
+    if (row.key.kind == SidebarRowKind::Hidden && row.title.empty())
+        return kindWord(row.key.kind);
     return qs(row.title);
 }
 
 QString accessibleDescriptionOf(SidebarRow const& row)
 {
+    if (row.key.kind == SidebarRowKind::Hidden)
+        return counted(HiddenDaemons, static_cast<uint32_t>(row.hidden.size()));
+    auto const daemon = row.key.kind == SidebarRowKind::Daemon;
     auto parts = QStringList { kindWord(row.key.kind) };
+    // A daemon row says its link first: the words of its state, never its dot or its mark.
+    if (daemon)
+        parts.push_back(linkWords(row.linkState));
     // The fold is a state a tree item would carry; Qt Quick's Accessible has none for it, so it is said here.
     switch (row.expansion)
     {
@@ -270,12 +336,22 @@ QString accessibleDescriptionOf(SidebarRow const& row)
         case RowExpansion::Collapsed: parts.push_back(disclosureText(Disclosure::Collapsed)); break;
         case RowExpansion::Expanded: parts.push_back(disclosureText(Disclosure::Expanded)); break;
     }
+    if (daemon && !row.linkReason.empty())
+        parts.push_back(qs(row.linkReason));
+    if (row.staleness == RowStaleness::LastKnown)
+        parts.push_back(SidebarModel::tr("last known"));
+    if (row.shownElsewhere == ShownElsewhere::Yes)
+        parts.push_back(SidebarModel::tr("shown in another window"));
+    // A daemon row already connecting says so in its link words.
+    if (row.pending == RowPending::Yes && !(daemon && row.linkState == DaemonLinkState::Connecting))
+        parts.push_back(SidebarModel::tr("connecting"));
     if (row.leaves.needYou > 0)
         parts.push_back(counted(PanesNeedYou, row.leaves.needYou));
     else if (row.leaves.working > 0)
         parts.push_back(counted(PanesWorking, row.leaves.working));
-    // A row's own working or needing pane is counted above; what else it says, it says in words.
-    else if (row.urgency != Urgency::Working && row.urgency != Urgency::NeedsYou)
+    // A row's own working or needing pane is counted above; what else it says, it says in words. A daemon
+    // row's words are its link's: its panes' are only counted.
+    else if (!daemon && row.urgency != Urgency::Working && row.urgency != Urgency::NeedsYou)
         if (auto words = urgencyWords(row.urgency); !words.isEmpty())
             parts.push_back(std::move(words));
     if (row.selection == RowSelection::ContainsSelected)
@@ -304,15 +380,18 @@ QString footerCompactTextOf(SidebarFooter const& footer)
 }
 
 SidebarModel::SidebarModel(ISidebarHost& host,
+                           IDaemonSections& sections,
                            TabAttention const& attention,
                            core::platform::IWallClock const& clock,
                            platform::Announcer& announcer,
                            QObject* parent):
     QAbstractListModel(parent),
     _host { host },
+    _sections { sections },
     _attention { attention },
     _clock { clock },
-    _announcer { announcer }
+    _announcer { announcer },
+    _sectionsChanged { sections.onChanged([this] { noteChanged(); }) }
 {
     _timer.setInterval(TickInterval);
     _timer.setTimerType(Qt::CoarseTimer);
@@ -338,6 +417,38 @@ SidebarRow const* SidebarModel::rowAt(int row) const noexcept
     if (row < 0 || static_cast<std::size_t>(row) >= _rows.size())
         return nullptr;
     return &_rows[static_cast<std::size_t>(row)];
+}
+
+SidebarRow const* SidebarModel::daemonRowAt(int row) const noexcept
+{
+    auto const* const shown = rowAt(row);
+    return shown != nullptr && shown->key.kind == SidebarRowKind::Daemon ? shown : nullptr;
+}
+
+bool SidebarModel::isOwn(SidebarRowKey const& key) const noexcept
+{
+    return !_own || key.daemon == _own->daemon;
+}
+
+SidebarRow const* SidebarModel::ownRowAt(int row) const noexcept
+{
+    auto const* const shown = rowAt(row);
+    return shown != nullptr && isOwn(shown->key) ? shown : nullptr;
+}
+
+bool SidebarModel::isOwnRow(int row) const noexcept
+{
+    return ownRowAt(row) != nullptr;
+}
+
+SidebarRowKey SidebarModel::ownWorkspaceKey(uint64_t workspace) const
+{
+    return SidebarRowKey { .kind = SidebarRowKind::Workspace,
+                           .daemon = _own ? _own->daemon : DaemonRef {},
+                           .instance = _own ? _own->instance : DaemonInstance {},
+                           .workspace = workspace,
+                           .tab = 0,
+                           .pane = {} };
 }
 
 QVariantMap sidebarCommandMap()
@@ -439,6 +550,21 @@ QVariant SidebarModel::data(QModelIndex const& index, int role) const
         case RailTextRole: return qs(workspaceRailCellsOf(*row).first);
         case RailTextContinuedRole: return qs(workspaceRailCellsOf(*row).second);
         case IconRole: return row->icon ? tabIconVariant(*row->icon) : QVariantMap {};
+        case LinkStateRole: return static_cast<int>(row->linkState);
+        case LinkReasonRole: return qs(row->linkReason);
+        case LocalityRole: return static_cast<int>(row->locality);
+        case StalenessRole: return static_cast<int>(row->staleness);
+        case ShownElsewhereRole: return static_cast<int>(row->shownElsewhere);
+        case PendingRole: return static_cast<int>(row->pending);
+        case StatusSlotRole: return static_cast<int>(row->slot);
+        case DaemonNameRole: return qs(row->daemonName);
+        case DaemonButtonsRole: {
+            auto buttons = QVariantList {};
+            if (row->key.kind == SidebarRowKind::Daemon)
+                for (auto const button: daemonRowButtons(daemonRowFactsOf(*row), row->pending))
+                    buttons.push_back(static_cast<int>(button));
+            return buttons;
+        }
         default: break;
     }
     return {};
@@ -463,6 +589,25 @@ void SidebarModel::updateTimer()
         _timer.stop();
 }
 
+void SidebarModel::followSections(SectionsFeed feed)
+{
+    if (feed == sectionsFeed())
+        return;
+    switch (feed)
+    {
+        case SectionsFeed::Dropped:
+            _sectionsChanged = SectionsSubscription {};
+            _timer.stop();
+            if (_rowsState == RowsState::Stale)
+                _rowsState = RowsState::Current;
+            break;
+        case SectionsFeed::Followed:
+            _sectionsChanged = _sections.onChanged([this] { noteChanged(); });
+            noteChanged();
+            break;
+    }
+}
+
 void SidebarModel::noteChanged()
 {
     if (std::exchange(_rowsState, RowsState::Stale) == RowsState::Stale)
@@ -479,33 +624,87 @@ WorkspaceDirectory SidebarModel::directory() const
 SidebarModel::Rebuilt SidebarModel::build(WorkspaceDirectory const& directory) const
 {
     auto const displayed = _host.displayedTab(directory);
-    auto listing = sidebarListing(directory, _attention, _state, _clock.now(), displayed);
-    // A tab's icon is the window's to say: the directory knows neither its profile nor what runs in it.
-    for (auto& row: listing.rows)
-        if (row.key.kind == SidebarRowKind::Tab)
-            if (auto const listed = findTab(directory, row.key.workspace, row.key.tab))
-                row.icon = _host.tabIcon(*listed->tab);
     // A window that follows no selection shows the workspace of the tab it displays.
     auto current = directory.selected;
     if (!current && displayed)
         current = displayed->workspace;
+
+    // A window on a daemon lists every daemon listed, its own section fed by its own link; a window with no
+    // daemon lists its own workspaces alone.
+    auto sections = std::vector<DaemonSection> {};
+    auto listing = SidebarListing {};
+    if (_own)
+    {
+        auto listed = _sections.sections();
+        auto own = DaemonSection { .daemon = _own->daemon,
+                                   .instance = _own->instance,
+                                   .name = _own->name,
+                                   .locality = _own->locality,
+                                   .state = _own->state,
+                                   .reason = {},
+                                   .directory = directory,
+                                   .shownElsewhere = {},
+                                   .feed = SectionFeed::WindowLink };
+        if (auto const at = std::ranges::find(listed, own.daemon, &DaemonSection::daemon); at != listed.end())
+            own.shownElsewhere = at->shownElsewhere;
+        sections = windowSections(std::move(listed), std::move(own), current);
+        auto const shown = displayed ? std::optional { SidebarTarget { .daemon = _own->daemon,
+                                                                       .instance = _own->instance,
+                                                                       .workspace = displayed->workspace,
+                                                                       .tab = displayed->tab,
+                                                                       .pane = {} } }
+                                     : std::nullopt;
+        listing = sidebarListing(
+            SidebarSources {
+                .sections = sections, .own = _own->daemon, .ownMarks = &_attention, .hidden = {} },
+            _state,
+            _clock.now(),
+            shown,
+            _host.pendingJump());
+    }
+    else
+        listing = sidebarListing(directory, _attention, _state, _clock.now(), displayed);
+
+    // A tab's icon is the window's to say: the directory knows neither its profile nor what runs in it.
+    for (auto& row: listing.rows)
+        if (row.key.kind == SidebarRowKind::Tab && isOwn(row.key))
+            if (auto const listed = findTab(directory, row.key.workspace, row.key.tab))
+                row.icon = _host.tabIcon(*listed->tab);
     // The footer and the summary count every pane and workspace, whatever the filter hides.
     auto footer = sidebarFooter(listing.workspaces);
-    auto summary = sidebarSummary(listing.workspaces, current);
+    auto summary = sidebarSummary(
+        listing.workspaces,
+        current ? std::optional { WorkspaceKey { .daemon = _own ? _own->daemon : DaemonRef {},
+                                                 .instance = _own ? _own->instance : DaemonInstance {},
+                                                 .workspace = *current } }
+                : std::nullopt);
+    // The switcher lists the window's own daemon's workspaces from here; the other daemons it lists itself.
+    std::erase_if(listing.workspaces, [this](SidebarRow const& row) { return !isOwn(row.key); });
     return Rebuilt { .rows = std::move(listing.rows),
                      .workspaces = std::move(listing.workspaces),
                      .footer = footer,
                      .summary = std::move(summary),
                      .displayed = displayed,
-                     .currentWorkspace = current };
+                     .currentWorkspace = current,
+                     .sections = std::move(sections) };
 }
 
 void SidebarModel::refreshNow()
 {
+    // A dropped sidebar's window is closing: a rebuild queued before the drop reads nothing more.
+    if (sectionsFeed() == SectionsFeed::Dropped)
+    {
+        _rowsState = RowsState::Current;
+        return;
+    }
     auto const unbuilt = std::exchange(_rowsState, RowsState::Current) == RowsState::Unbuilt;
+    _own = _host.ownDaemon();
+    // The daemon the window opened on keeps its workspaces unfolded; every other daemon's start folded.
+    if (_own && _state.openedOn.value.empty())
+        _state.openedOn = _own->daemon;
     auto const current = directory();
     auto built = build(current);
-    announceNewNeeds(current);
+    announceNewNeeds(built.sections, current);
     if (unbuilt)
         resetRows(std::move(built.rows));
     else
@@ -521,18 +720,27 @@ void SidebarModel::refreshNow()
             _rows, [](SidebarRow const& row) { return row.selection != RowSelection::None; });
         return at == _rows.end() ? -1 : static_cast<int>(std::distance(_rows.begin(), at));
     }();
-    if (std::exchange(_currentIndex, index) != index)
+    auto const key = index >= 0 ? std::optional { _rows[static_cast<std::size_t>(index)].key } : std::nullopt;
+    auto const indexMoved = std::exchange(_currentIndex, index) != index;
+    auto const rowMoved = std::exchange(_currentKey, key) != key;
+    if (rowMoved || indexMoved)
         emit currentIndexChanged();
-    auto const workspaceIndex = built.currentWorkspace ? rowIndexOf({ .kind = SidebarRowKind::Workspace,
-                                                                      .workspace = *built.currentWorkspace,
-                                                                      .tab = 0,
-                                                                      .pane = {} })
-                                                       : -1;
-    auto const summaryMoved = std::exchange(_summary, built.summary) != built.summary;
+    if (rowMoved && key)
+        emit currentRowChanged();
+    auto const workspaceIndex =
+        built.currentWorkspace ? rowIndexOf(ownWorkspaceKey(*built.currentWorkspace)) : -1;
+    auto const daemonTitle = _own ? _own->name : std::string {};
+    auto const countMoved = std::exchange(_sectionCount, built.sections.size()) != built.sections.size();
+    auto const titleMoved = std::exchange(_daemonTitle, daemonTitle) != daemonTitle;
+    auto const sectionsMoved = countMoved || titleMoved;
+    auto const summaryMoved = std::exchange(_summary, built.summary) != built.summary || sectionsMoved;
     if (std::exchange(_currentWorkspaceIndex, workspaceIndex) != workspaceIndex || summaryMoved)
         emit summaryChanged();
     if (workspacesMoved)
         emit workspaceRowsChanged();
+    auto const empty = sidebarEmptyStateOf(_state.scope, rowsNeedingMe(_rows));
+    if (std::exchange(_emptyState, empty) != empty)
+        emit emptyStateChanged();
     updateTimer();
 }
 
@@ -626,35 +834,116 @@ void SidebarModel::apply(std::vector<SidebarRow> next)
     flush(static_cast<int>(next.size()) - 1);
 }
 
-void SidebarModel::announceNewNeeds(WorkspaceDirectory const& directory)
+void SidebarModel::announceNewNeeds(std::span<DaemonSection const> sections, WorkspaceDirectory const& own)
 {
-    // The first build, and the first after the window's source was swapped or attached, only learn what
-    // already was: a window opening or switching daemons is not news. No source was read before the first
-    // build, so it is one whose source differs; and one with no source lists nothing.
+    // A swapped or attached source is a new baseline: a window switching daemons is not news. No source was
+    // read before the first build, so it is one whose source differs; and one with no source lists nothing.
     auto const* const source = _host.directorySource();
-    auto const baseline = source != _source;
+    auto const swapped = source != _source;
     _source = source;
-    auto urgencies = std::map<PaneKey, Urgency> {};
-    for (auto const& workspace: directory.workspaces)
-        for (auto const& tab: workspace.tabs)
-            for (auto const& pane: tab.panes)
-            {
-                auto const urgency = paneUrgency(pane, _attention.of(pane.key));
-                urgencies.insert_or_assign(pane.key, urgency);
-                auto const before = _paneUrgency.find(pane.key);
-                auto const rose = urgency == Urgency::NeedsYou
-                                  && (before == _paneUrgency.end() || before->second != Urgency::NeedsYou);
-                // The first build only learns what already was: a window opening is not news.
-                if (baseline || !rose || _activity != WindowActivity::Active
-                    || directory.selected == workspace.id)
-                    continue;
-                auto const& title = !pane.title.empty() ? pane.title : tab.name;
-                _announcer.announce(
-                    tr("%1 in %2 needs you")
-                        .arg(qs(title), workspace.name.empty() ? tr("a workspace") : qs(workspace.name)),
-                    QAccessible::AnnouncementPoliteness::Polite);
-            }
+    auto urgencies = std::map<SidebarRowKey, Urgency> {};
+    auto runs = std::set<SectionRun> {};
+    auto const visit = [&](DaemonRef const& daemon,
+                           DaemonInstance instance,
+                           std::string const& name,
+                           WorkspaceDirectory const& directory) {
+        // A section first listed, or listed under a new run of its daemon, only learns what already was: a
+        // daemon listed, connected or restarted is not news.
+        auto run = SectionRun { daemon, instance };
+        auto const baseline = swapped || !_sectionRuns.contains(run);
+        runs.insert(std::move(run));
+        // The window's own panes are read against its own seen-state; another daemon's as it states them.
+        auto const ownSection = isOwn(SidebarRowKey { .kind = SidebarRowKind::Pane,
+                                                      .daemon = daemon,
+                                                      .instance = instance,
+                                                      .workspace = 0,
+                                                      .tab = 0,
+                                                      .pane = {} });
+        for (auto const& workspace: directory.workspaces)
+            for (auto const& tab: workspace.tabs)
+                for (auto const& pane: tab.panes)
+                {
+                    auto const key = SidebarRowKey { .kind = SidebarRowKind::Pane,
+                                                     .daemon = daemon,
+                                                     .instance = instance,
+                                                     .workspace = workspace.id,
+                                                     .tab = tab.id,
+                                                     .pane = pane.key };
+                    auto const urgency =
+                        paneUrgency(pane, ownSection ? _attention.of(pane.key) : SessionAttention {});
+                    urgencies.insert_or_assign(key, urgency);
+                    auto const before = _paneUrgency.find(key);
+                    auto const rose =
+                        urgency == Urgency::NeedsYou
+                        && (before == _paneUrgency.end() || before->second != Urgency::NeedsYou);
+                    // A baseline, a window without the user's attention and the workspace it shows say
+                    // nothing.
+                    if (baseline || !rose || _activity != WindowActivity::Active
+                        || (ownSection && directory.selected == workspace.id))
+                        continue;
+                    auto const title = qs(!pane.title.empty() ? pane.title : tab.name);
+                    auto const where = workspace.name.empty() ? tr("a workspace") : qs(workspace.name);
+                    // Another daemon's need says whose it is.
+                    _announcer.announce(ownSection
+                                            ? tr("%1 in %2 needs you").arg(title, where)
+                                            : tr("%1 in %2 on %3 needs you").arg(title, where, qs(name)),
+                                        QAccessible::AnnouncementPoliteness::Polite);
+                }
+    };
+    if (sections.empty())
+        visit(DaemonRef {}, DaemonInstance {}, std::string {}, own);
+    for (auto const& section: sections)
+        visit(section.daemon, section.instance, section.name, section.directory);
     _paneUrgency = std::move(urgencies);
+    _sectionRuns = std::move(runs);
+}
+
+SidebarModel::JumpPlace SidebarModel::placeOf(SidebarTarget const& target) const
+{
+    auto place = JumpPlace {};
+    auto const named = [&](std::string const& name, WorkspaceDirectory const& directory) {
+        place.daemon = qs(name);
+        if (auto const workspace =
+                std::ranges::find(directory.workspaces, target.workspace, &DirectoryWorkspace::id);
+            workspace != directory.workspaces.end())
+            place.workspace = qs(workspace->name);
+    };
+    if (!_own || target.daemon == _own->daemon)
+        named(_own ? _own->name : std::string {}, directory());
+    else
+    {
+        auto const listed = _sections.sections();
+        if (auto const section = std::ranges::find(listed, target.daemon, &DaemonSection::daemon);
+            section != listed.end())
+            named(section->name, section->directory);
+    }
+    // A daemon the window has no name for is called what its reference calls it.
+    if (place.daemon.isEmpty())
+    {
+        auto const parsed = parseDaemonRef(target.daemon);
+        place.daemon = parsed ? qs(std::string { parsed->second }) : qs(target.daemon.value);
+    }
+    return place;
+}
+
+void SidebarModel::noteJump(JumpEvent event, SidebarTarget const& target, std::string const& reason)
+{
+    auto const place = placeOf(target);
+    auto const message = [&] {
+        switch (event)
+        {
+            case JumpEvent::Connecting: return tr("Connecting to %1…").arg(place.daemon);
+            case JumpEvent::Landed:
+                return place.workspace.isEmpty() ? tr("Now on %1").arg(place.daemon)
+                                                 : tr("Now on %1 › %2").arg(place.daemon, place.workspace);
+            case JumpEvent::Cancelled: return tr("Jump cancelled");
+            case JumpEvent::Failed:
+                return reason.empty() ? tr("Could not reach %1").arg(place.daemon)
+                                      : tr("Could not reach %1: %2").arg(place.daemon, qs(reason));
+        }
+        return QString {};
+    }();
+    _announcer.announce(message, QAccessible::AnnouncementPoliteness::Polite);
 }
 
 void SidebarModel::activate(int row)
@@ -664,9 +953,40 @@ void SidebarModel::activate(int row)
 
 sidebarrows::RowActivation SidebarModel::activateRow(int row)
 {
+    return activateRow(row, JumpMode::Here);
+}
+
+sidebarrows::RowActivation SidebarModel::activateRow(int row, JumpMode mode)
+{
     auto const* const shown = rowAt(row);
     if (shown == nullptr)
         return sidebarrows::RowActivation::Nothing;
+    switch (shown->key.kind)
+    {
+        case SidebarRowKind::Daemon: {
+            auto const tree =
+                shown->expansion == RowExpansion::None ? LastKnownTree::Absent : LastKnownTree::Present;
+            switch (daemonRowActivation(daemonRowFactsOf(*shown), tree))
+            {
+                case DaemonRowAction::Nothing: break;
+                case DaemonRowAction::ToggleFold: toggle(row); break;
+                case DaemonRowAction::Connect: connectDaemon(row); break;
+                case DaemonRowAction::Start: startDaemon(row); break;
+            }
+            // The keyboard stays on the daemon row, whatever it did.
+            return sidebarrows::RowActivation::Nothing;
+        }
+        case SidebarRowKind::Hidden: return sidebarrows::RowActivation::Nothing;
+        case SidebarRowKind::Workspace:
+        case SidebarRowKind::Tab:
+        case SidebarRowKind::Pane: break;
+    }
+    // Another daemon's row, and any row opened beside, is jumped to; the keyboard stays where it was.
+    if (mode == JumpMode::NewWindow || !isOwn(shown->key))
+    {
+        _host.jumpTo(targetOf(shown->key), mode);
+        return sidebarrows::RowActivation::Nothing;
+    }
     switch (shown->key.kind)
     {
         case SidebarRowKind::Workspace: _host.showWorkspace(shown->key.workspace); break;
@@ -677,9 +997,92 @@ sidebarrows::RowActivation SidebarModel::activateRow(int row)
             if (auto const panes = panesUnder(directory(), shown->key); !panes.empty())
                 _host.showPane(panes.front());
             break;
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: break;
     }
     noteChanged();
     return sidebarrows::RowActivation::Shown;
+}
+
+sidebarrows::RowActivation SidebarModel::activateFirstMatch(int mode)
+{
+    if (isUnnarrowed(_state))
+        return sidebarrows::RowActivation::Unfiltered;
+    auto const first = firstMatchOf(_rows, _state);
+    if (!first)
+        return sidebarrows::RowActivation::Nothing;
+    return activateRow(static_cast<int>(*first), jumpModeOf(mode));
+}
+
+bool SidebarModel::isJumpPending() const
+{
+    return _host.pendingJump().has_value();
+}
+
+void SidebarModel::cancelJump()
+{
+    _host.cancelJump();
+}
+
+void SidebarModel::connectDaemon(int row)
+{
+    auto const* const shown = daemonRowAt(row);
+    if (shown == nullptr)
+        return;
+    switch (connectRouteOf(daemonRowFactsOf(*shown)))
+    {
+        case ConnectRoute::None: break;
+        case ConnectRoute::Sections: _sections.connect(shown->key.daemon, _host.windowId()); break;
+        case ConnectRoute::Reconnect: _host.reconnect(); break;
+        case ConnectRoute::Prompt: _host.raisePrompt(); break;
+    }
+}
+
+void SidebarModel::startDaemon(int row)
+{
+    if (auto const* const shown = daemonRowAt(row))
+        _sections.start(shown->key.daemon);
+}
+
+void SidebarModel::removeDaemon(int row)
+{
+    if (auto const* const shown = daemonRowAt(row))
+        _sections.remove(shown->key.daemon);
+}
+
+void SidebarModel::cancelPending(int row)
+{
+    auto const* const shown = daemonRowAt(row);
+    if (shown == nullptr)
+        return;
+    switch (cancelRouteOf(shown->key.daemon, _host.pendingJump(), shown->linkState))
+    {
+        case CancelRoute::None: break;
+        case CancelRoute::Jump: _host.cancelJump(); break;
+        case CancelRoute::Connect: _sections.disconnect(shown->key.daemon); break;
+    }
+}
+
+void SidebarModel::pressDaemonButton(int row, int button)
+{
+    if (button < 0 || std::cmp_greater_equal(button, DaemonRowButtonCount))
+        return;
+    switch (static_cast<DaemonRowButton>(button))
+    {
+        case DaemonRowButton::None: break;
+        case DaemonRowButton::Connect: connectDaemon(row); break;
+        case DaemonRowButton::Start: startDaemon(row); break;
+        case DaemonRowButton::Cancel: cancelPending(row); break;
+        case DaemonRowButton::Remove: removeDaemon(row); break;
+    }
+}
+
+void SidebarModel::openInNewWindow(int row)
+{
+    auto const* const shown = rowAt(row);
+    if (shown == nullptr || shown->key.kind == SidebarRowKind::Hidden)
+        return;
+    _host.jumpTo(targetOf(shown->key), JumpMode::NewWindow);
 }
 
 void SidebarModel::setExpansion(int row, RowExpansion wanted)
@@ -691,21 +1094,36 @@ void SidebarModel::setExpansion(int row, RowExpansion wanted)
     auto const collapsing = wanted == RowExpansion::Collapsed;
     switch (key.kind)
     {
-        case SidebarRowKind::Workspace:
-            if (collapsing)
-                _state.collapsedWorkspaces.insert(key.workspace);
+        case SidebarRowKind::Workspace: {
+            // A workspace is toggled where it folds against its daemon's default.
+            auto const workspace =
+                WorkspaceKey { .daemon = key.daemon, .instance = key.instance, .workspace = key.workspace };
+            auto const foldedByDefault = _state.foldsByDefault(key.daemon);
+            if (collapsing != foldedByDefault)
+                _state.toggled.insert(workspace);
             else
-                _state.collapsedWorkspaces.erase(key.workspace);
+                _state.toggled.erase(workspace);
             break;
+        }
         case SidebarRowKind::Tab: {
-            auto const tab = TabRef { .workspace = key.workspace, .tab = key.tab };
+            auto const tab = TabKey {
+                .workspace = { .daemon = key.daemon, .instance = key.instance, .workspace = key.workspace },
+                .tab = key.tab
+            };
             if (collapsing)
                 _state.collapsedTabs.insert(tab);
             else
                 _state.collapsedTabs.erase(tab);
             break;
         }
-        case SidebarRowKind::Pane: return;
+        case SidebarRowKind::Daemon:
+            if (collapsing)
+                _state.foldedDaemons.insert(key.daemon);
+            else
+                _state.foldedDaemons.erase(key.daemon);
+            break;
+        case SidebarRowKind::Pane:
+        case SidebarRowKind::Hidden: return;
     }
     refreshNow();
 }
@@ -730,7 +1148,8 @@ void SidebarModel::collapse(int row)
 
 void SidebarModel::rename(int row, QString const& name)
 {
-    auto const* const shown = rowAt(row);
+    auto const* const shown = ownRowAt(row);
+    // Another daemon's rows are not the window's to rename.
     if (shown == nullptr)
         return;
     switch (shown->key.kind)
@@ -742,13 +1161,15 @@ void SidebarModel::rename(int row, QString const& name)
             _host.renameTab(TabRef { .workspace = shown->key.workspace, .tab = shown->key.tab },
                             name.toStdString());
             break;
-        case SidebarRowKind::Pane: break;
+        case SidebarRowKind::Pane:
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: break;
     }
 }
 
 void SidebarModel::markSeen(int row)
 {
-    auto const* const shown = rowAt(row);
+    auto const* const shown = ownRowAt(row);
     if (shown == nullptr)
         return;
     for (auto const pane: panesUnder(directory(), shown->key))
@@ -758,15 +1179,17 @@ void SidebarModel::markSeen(int row)
 
 QStringList SidebarModel::hoverLines(int row) const
 {
-    auto const* const shown = rowAt(row);
-    if (shown == nullptr || shown->key.kind == SidebarRowKind::Workspace)
+    auto const* const shown = ownRowAt(row);
+    if (shown == nullptr
+        || (shown->key.kind != SidebarRowKind::Tab && shown->key.kind != SidebarRowKind::Pane))
         return {};
     return toQStringList(_host.hoverLines(shown->key));
 }
 
 void SidebarModel::openContextMenu(int row, QPointF windowPosition)
 {
-    if (auto const* const shown = rowAt(row))
+    // The window's menus act on its own rows; another daemon's have none yet.
+    if (auto const* const shown = ownRowAt(row))
         _host.openContextMenu(*shown, windowPosition);
 }
 
@@ -777,6 +1200,22 @@ void SidebarModel::setFilter(QString const& text)
         return;
     _state.filter = std::move(filter);
     refreshNow();
+}
+
+void SidebarModel::setScope(config::SidebarScope scope)
+{
+    if (scope == _state.scope)
+        return;
+    _state.scope = scope;
+    refreshNow();
+    emit scopeChanged();
+}
+
+void SidebarModel::setScope(int scope)
+{
+    setScope(scope >= 0 && static_cast<std::size_t>(scope) < config::SidebarScopeCount
+                 ? static_cast<config::SidebarScope>(scope)
+                 : config::SidebarScope::All);
 }
 
 std::optional<SidebarModel::Dragged> SidebarModel::draggedOf(QString const& payload) const
@@ -857,13 +1296,17 @@ void SidebarModel::apply(Dragged const& dragged, SidebarDrop const& drop)
 
 void SidebarModel::drop(int row, double y, QString const& payload)
 {
+    // A drop on another daemon's row would name ids of that daemon's: nothing moves there.
+    if (auto const* const shown = rowAt(row); shown != nullptr && !isOwn(shown->key))
+        return;
     if (auto const dragged = draggedOf(payload))
         apply(*dragged, resolveSidebarDrop(_rows, row, y, dragged->dragged));
 }
 
 int SidebarModel::dropIndicator(int row, double y, QString const& payload) const
 {
-    auto const dragged = draggedOf(payload);
+    auto const* const shown = rowAt(row);
+    auto const dragged = shown == nullptr || isOwn(shown->key) ? draggedOf(payload) : std::nullopt;
     return std::to_underlying(dragged ? sidebarDropIndicator(_rows, row, y, dragged->dragged)
                                       : DropIndicator::Refused);
 }

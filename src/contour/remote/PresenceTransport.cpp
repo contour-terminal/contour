@@ -67,7 +67,6 @@ namespace
         /// Whether anyone may be asked: Batch also dials a tls host only when its daemon can be verified
         /// without a question.
         cli::SshPrompts prompts;
-        cli::RemoteStart remoteStart; ///< Whether an ssh host's relay may start the daemon there.
         /// Whether a tls host is dialled only once its daemon can be verified without a question.
         UnaskedTrust trust = UnaskedTrust::Unchecked;
     };
@@ -107,7 +106,8 @@ namespace
         if (policy.trust == UnaskedTrust::Required)
             if (auto const verifiable = verifiableUnasked(name, *host, deps.knownDaemons); !verifiable)
                 return std::unexpected { verifiable.error() };
-        return deps.openHost(name, *host, policy.route, policy.prompts, policy.remoteStart)
+        // Never started by a dial, an interactive one either: starting a daemon is the Start button's.
+        return deps.openHost(name, *host, policy.route, policy.prompts, cli::RemoteStart::Never)
             .transform([](cli::HostTransport transport) { return std::move(transport.factory); })
             .transform_error([](std::string reason) {
                 return DialRefusal { .state = DaemonLinkState::Failed, .reason = std::move(reason) };
@@ -205,7 +205,6 @@ Dialled observerTransport(window::DaemonRef const& daemon, PresenceTransportDeps
     return dial(daemon,
                 DialPolicy { .route = askpass::AnyWindow,
                              .prompts = cli::SshPrompts::Batch,
-                             .remoteStart = cli::RemoteStart::Never,
                              .trust = UnaskedTrust::Required },
                 deps);
 }
@@ -217,7 +216,6 @@ Dialled interactiveTransport(window::DaemonRef const& daemon,
     auto asking = dial(daemon,
                        DialPolicy { .route = deps.routeOf(askingWindow),
                                     .prompts = cli::SshPrompts::Askpass,
-                                    .remoteStart = cli::RemoteStart::Never,
                                     .trust = UnaskedTrust::Unchecked },
                        deps);
     if (!asking)
@@ -227,7 +225,6 @@ Dialled interactiveTransport(window::DaemonRef const& daemon,
     return dial(daemon,
                 DialPolicy { .route = askpass::AnyWindow,
                              .prompts = cli::SshPrompts::Batch,
-                             .remoteStart = cli::RemoteStart::Never,
                              .trust = UnaskedTrust::Unchecked },
                 deps)
         .transform([&](std::shared_ptr<vthost::ITransportFactory> unasked)

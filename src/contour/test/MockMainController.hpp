@@ -333,6 +333,15 @@ class MockMainController: public MainWindowControllerMock
         if (sidebarModel().activateRow(row) == window::sidebarrows::RowActivation::Shown)
             leaveChrome();
     }
+    /// Mirrors WindowController::activateSidebarFirstMatch(): the filter's first row, and the terminal gets
+    /// the keyboard when it showed one of the window's own.
+    Q_INVOKABLE int activateSidebarFirstMatch(int mode)
+    {
+        auto const activation = sidebarModel().activateFirstMatch(mode);
+        if (activation == window::sidebarrows::RowActivation::Shown)
+            leaveChrome();
+        return static_cast<int>(activation);
+    }
     /// Records what the window reports it shows: how Main.qml tells the controller what there is to visit.
     /// Where Main.qml placed the sidebar's toggle; the mock has no pane menu to offer it in.
     Q_INVOKABLE void setSidebarToggleHost(QString const& host) { reportedSidebarToggleHost = host; }
@@ -346,6 +355,9 @@ class MockMainController: public MainWindowControllerMock
     Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers, QString const& text = {})
     {
         chromeKeys.emplace_back(qtKey, qtModifiers);
+        // As the controller: in the terminal every key is the shell's, Escape during a pending jump too.
+        if (mirrorsChromeKeys && _chromeArea == window::ChromeArea::Terminal)
+            return false;
         if (mirrorsChromeKeys && _chromeArea == window::ChromeArea::Sidebar)
             return sidebarKey(qtKey, qtModifiers, text);
         if (mirrorsChromeKeys && _chromeArea == window::ChromeArea::Tabs)
@@ -912,12 +924,17 @@ class MockMainController: public MainWindowControllerMock
             key = window::ChromeKey::Printable;
         auto const modifier = window::chromeModifierOf(Qt::KeyboardModifiers { qtModifiers });
         auto command = window::chromeCommandFor(window::ChromeArea::Sidebar, key, modifier);
-        if (command == window::ChromeCommand::Leave && sidebarModel().isFiltered())
-            command = window::ChromeCommand::ClearFilter;
+        // As WindowController::runChromeCommand(): a pending jump first, then the filter, then leaving.
+        if (command == window::ChromeCommand::Leave)
+            command = window::sidebarEscapeCommand(
+                sidebarModel().isJumpPending() ? window::JumpUnderWay::Yes : window::JumpUnderWay::No,
+                sidebarModel().isFiltered() ? window::FilterTyped::Yes : window::FilterTyped::No);
         if (command == window::ChromeCommand::None)
             return false;
         if (command == window::ChromeCommand::Leave)
             leaveChrome();
+        else if (command == window::ChromeCommand::CancelPending)
+            sidebarModel().cancelJump();
         else
             emit sidebarCommandRequested(static_cast<int>(command), text);
         return true;

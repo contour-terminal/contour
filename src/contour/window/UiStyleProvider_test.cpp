@@ -3457,6 +3457,40 @@ TEST_CASE(
     }
 }
 
+TEST_CASE("UiStyleProvider widens the sidebar's default width to hold its heading in a wide font",
+          "[contour][uistyle][sidebar]")
+{
+    using contour::config::ChromeStyle;
+    // A face that sets each letter twice as wide as the application's: wider than any UI face ships.
+    auto wide = QGuiApplication::font();
+    wide.setLetterSpacing(QFont::PercentageSpacing, 200.0);
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        CAPTURE(static_cast<int>(style));
+        auto const look = contour::config::uiStyleTokens(style);
+        auto const row = contour::config::ChromeTokenRows[static_cast<size_t>(style)].sidebar;
+        for (auto const& font: { QGuiApplication::font(), wide })
+        {
+            auto const provider = contour::window::UiStyleProvider(style, font);
+            auto const metrics = provider.sidebarMetrics();
+            auto const* sidebar = groupOf(provider, "sidebar");
+            REQUIRE(sidebar != nullptr);
+            // The token QML reads and the width a window starts at are one.
+            CHECK(sidebar->property("width").toReal() == metrics.tokens.width * metrics.scale.unitPixels);
+            CHECK(metrics.tokens.width >= row.width);
+            CHECK(metrics.tokens.width <= row.maxWidth);
+        }
+        auto const widened = contour::window::UiStyleProvider(style, wide).sidebarMetrics().tokens.width;
+        // macOS names no heading, so nothing widens it; a native row's widens past its own width. (On the
+        // Terminal row the cell widens with the letters, so the row's width in cells may hold the heading.)
+        if (style == ChromeStyle::MacOS)
+            CHECK(widened == row.width);
+        if (look.unit == contour::config::LengthUnit::Pixel && style != ChromeStyle::MacOS)
+            CHECK(widened > row.width);
+    }
+}
+
 TEST_CASE("UiStyleProvider snaps and bounds a dragged sidebar width, and says where its title row is",
           "[contour][uistyle][sidebar]")
 {

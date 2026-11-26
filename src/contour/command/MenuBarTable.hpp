@@ -99,10 +99,12 @@ struct MenuBarState
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always; ///< Mode in force.
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;          ///< Placement in force.
     config::SidebarVisibility sidebar = config::SidebarVisibility::Hidden; ///< Whether the sidebar shows.
-    std::string activeProfile {};                                          ///< The active pane's profile.
-    std::vector<std::string> profileNames {};                              ///< Configured profiles, sorted.
-    std::vector<std::string> hostNames {};                                 ///< Saved hosts, sorted.
-    std::vector<std::string> layoutNames {};                               ///< Saved layouts, sorted.
+    /// Which rows the sidebar lists: all, or only what needs the user (the View menu's checked row).
+    config::SidebarScope sidebarScope = config::SidebarScope::All;
+    std::string activeProfile {};                             ///< The active pane's profile.
+    std::vector<std::string> profileNames {};                 ///< Configured profiles, sorted.
+    std::vector<std::string> hostNames {};                    ///< Saved hosts, sorted.
+    std::vector<std::string> layoutNames {};                  ///< Saved layouts, sorted.
     DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether the window has a daemon to switch.
     /// The palette's "Switch to daemon" commands for this window (the SwitchToDaemon ones of
     /// DaemonCommandSource): every other local daemon and saved host. One source, so the menu and the palette
@@ -151,6 +153,9 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption {
         .action = "JumpToNextAttention",
         .reason = "reached from the palette and key bindings; it needs the attention ledger" },
+    MenuReachabilityExemption {
+        .action = "CancelSwitch",
+        .reason = "reached from key bindings and the Cancel of the daemon row the jump goes into" },
     MenuReachabilityExemption { .action = "MarkSeen",
                                 .reason =
                                     "reached from the palette, key bindings and the sidebar's row menus" },

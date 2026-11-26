@@ -46,12 +46,15 @@ struct LinkLook
     std::string_view accessibleWords; ///< The state words assistive technology announces.
 };
 
+/// The translation context a link state's words are collected and translated in.
+inline constexpr auto DaemonLinkContext = std::string_view { "DaemonLink" };
+
 /// The looks, indexed by @c DaemonLinkState. Their glyphs are the Terminal row's; @c DaemonLinkGlyphRows
 /// overrides them per row.
 inline constexpr std::array<LinkLook, DaemonLinkStateCount> DaemonLinkLooks {
     LinkLook { .state = DaemonLinkState::NotConnected,
                .dot = config::StatusColorRole::Warning,
-               .glyph = "○",
+               .glyph = "–",
                .words = QT_TRANSLATE_NOOP("DaemonLink", "Not connected"),
                .accessibleWords = QT_TRANSLATE_NOOP("DaemonLink", "not connected") },
     LinkLook { .state = DaemonLinkState::Connecting,

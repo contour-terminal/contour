@@ -914,3 +914,49 @@ TEST_CASE("snapshot plan: the sidebar tree is drawn at each row spacing", "[snap
     CHECK(compact.sidebarColor == comfortable.sidebarColor);
     CHECK(compact.action == comfortable.action);
 }
+
+TEST_CASE("snapshot plan: the daemon sections' scripts are listed and named", "[snapshot][sidebar]")
+{
+    using namespace contour::test::snapshot;
+    struct Expected
+    {
+        SnapshotScript script;
+        std::string_view name;
+        SnapshotSections sections;
+    };
+    constexpr auto Scripts = std::array {
+        Expected { SnapshotScript::SidebarTwoDaemons, "sidebar-two-daemons", SnapshotSections::TwoDaemons },
+        Expected { SnapshotScript::SidebarDaemonNeedsInput,
+                   "sidebar-daemon-needs-input",
+                   SnapshotSections::NeedsInput },
+        Expected { SnapshotScript::SidebarDaemonNotRunning,
+                   "sidebar-daemon-not-running",
+                   SnapshotSections::NotRunning },
+        Expected { SnapshotScript::SidebarDaemonConnecting,
+                   "sidebar-daemon-connecting",
+                   SnapshotSections::Connecting },
+        Expected { SnapshotScript::SidebarDaemonReconnecting,
+                   "sidebar-daemon-reconnecting",
+                   SnapshotSections::Reconnecting },
+        Expected { SnapshotScript::SidebarDaemonTooOld, "sidebar-daemon-too-old", SnapshotSections::TooOld },
+        Expected { SnapshotScript::SidebarPendingRow, "sidebar-pending-row", SnapshotSections::Pending },
+        Expected {
+            SnapshotScript::SidebarNeedsMeEmpty, "sidebar-needs-me-empty", SnapshotSections::NeedsMeEmpty },
+        Expected { SnapshotScript::SidebarDaemonNarrow, "sidebar-daemon-narrow", SnapshotSections::Narrow },
+    };
+    for (auto const& expected: Scripts)
+    {
+        auto const& row = scriptRow(expected.script);
+        INFO(row.name);
+        CHECK(row.name == expected.name);
+        CHECK(row.sections == expected.sections);
+        // Drawn over sidebar-tree's workspaces, the sidebar shown.
+        CHECK(row.sidebar == SnapshotSidebar::Tree);
+        CHECK(row.tabCount == scriptRow(SnapshotScript::SidebarTree).tabCount);
+    }
+    // Every script that lists sections is one of these.
+    CHECK(std::ranges::count_if(
+              SnapshotScripts,
+              [](SnapshotScriptRow const& row) { return row.sections != SnapshotSections::None; })
+          == static_cast<std::ptrdiff_t>(Scripts.size()));
+}

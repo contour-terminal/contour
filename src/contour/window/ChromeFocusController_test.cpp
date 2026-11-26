@@ -362,6 +362,40 @@ TEST_CASE("Escape and leaveChrome return focus to the terminal", "[windowcontrol
     CHECK_FALSE(f.chromeKey(Qt::Key_Escape));
 }
 
+TEST_CASE("Escape in the terminal stays the shell's whatever the sidebar holds",
+          "[windowcontroller][chromefocus][sidebar]")
+{
+    // The sidebar's Escape ends a jump under way, then clears its filter, then leaves (spec §5.6) -- only
+    // while the keyboard is in the sidebar. In the terminal Escape is the shell's: the controller answers
+    // nothing, and the sidebar keeps what it held.
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.sidebar().setFilter(QStringLiteral("billing"));
+    REQUIRE(controller.sidebar().isFiltered());
+    REQUIRE(f.area() == ChromeArea::Terminal);
+    CHECK_FALSE(f.chromeKey(Qt::Key_Escape));
+    CHECK(controller.sidebar().isFiltered());
+    CHECK(f.area() == ChromeArea::Terminal);
+
+    // In the sidebar the same key is the sidebar's (it clears the filter there, which the tree's QML does).
+    controller.focusSidebar();
+    REQUIRE(f.area() == ChromeArea::Sidebar);
+    CHECK(f.chromeKey(Qt::Key_Escape));
+}
+
+TEST_CASE("a closing window's sidebar stops following the other daemons", "[windowcontroller][sidebar]")
+{
+    // The manager drops a closed window's directory source before it deletes the controller later: from then
+    // on no presence notice may queue a rebuild of that controller's sidebar, which would read a manager the
+    // application may be tearing down.
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    REQUIRE(controller.sidebar().sectionsFeed() == contour::window::SectionsFeed::Followed);
+    controller.setDirectorySource(nullptr);
+    CHECK(controller.sidebar().sectionsFeed() == contour::window::SectionsFeed::Dropped);
+    CHECK_FALSE(controller.sidebar().isRebuildPending());
+}
+
 TEST_CASE("focusActiveDisplay ends the chrome's hold on the keyboard", "[windowcontroller][chromefocus]")
 {
     // What closing a popup over the window does: the keyboard goes back to the terminal whatever held it.

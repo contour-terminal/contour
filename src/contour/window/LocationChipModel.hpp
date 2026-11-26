@@ -53,6 +53,10 @@ class LocationChipModel: public QObject
     /// Whether the chip names the workspace too: false for a host that is no daemon (a tmux attach), whose
     /// chip is the host alone, with its dot and state (DaemonHostingPolicies).
     Q_PROPERTY(bool workspaceShown READ workspaceShown NOTIFY surfaceChanged)
+    /// Whether the sidebar's title row carries the switcher control: a daemon's window, whose tree names the
+    /// daemon in a heading row (DaemonHostingPolicy::sidebar). A tmux window's chip opens the switcher
+    /// instead.
+    Q_PROPERTY(bool switcherControlShown READ switcherControlShown NOTIFY surfaceChanged)
     /// Whether the status dot (on the Terminal row, its glyph) shows: the model's call, hidden without a
     /// daemon.
     Q_PROPERTY(bool dotShown READ dotShown NOTIFY surfaceChanged)
@@ -102,6 +106,7 @@ class LocationChipModel: public QObject
     [[nodiscard]] QString place() const;
     [[nodiscard]] QString daemonName() const;
     [[nodiscard]] bool workspaceShown() const noexcept;
+    [[nodiscard]] bool switcherControlShown() const noexcept;
     [[nodiscard]] bool dotShown() const noexcept { return _dotShown; }
     [[nodiscard]] int connectionState() const noexcept;
     [[nodiscard]] QString stateGlyph() const;

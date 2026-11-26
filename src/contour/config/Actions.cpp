@@ -449,7 +449,10 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry {
             "FilterWorkspaces", Action { FilterWorkspaces {} }, documentation::FilterWorkspaces },
         ActionCatalogEntry {
+            "ToggleSidebarNeedsMe", Action { ToggleSidebarNeedsMe {} }, documentation::ToggleSidebarNeedsMe },
+        ActionCatalogEntry {
             "JumpToNextAttention", Action { JumpToNextAttention {} }, documentation::JumpToNextAttention },
+        ActionCatalogEntry { "CancelSwitch", Action { CancelSwitch {} }, documentation::CancelSwitch },
         ActionCatalogEntry { "MarkSeen", Action { MarkSeen {} }, documentation::MarkSeen },
         ActionCatalogEntry {
             "RenameWorkspace", Action { RenameWorkspace {} }, documentation::RenameWorkspace },

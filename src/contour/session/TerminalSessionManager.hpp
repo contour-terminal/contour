@@ -1682,6 +1682,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] std::string daemonNameOf(vtworkspace::WorkspaceId window) const;
 
     /// @param window A window of this manager.
+    /// @return The daemon @p window is on, as the sidebar names it (WindowBinding::daemonRef); none for a
+    ///         window with no daemon behind it.
+    [[nodiscard]] std::optional<window::DaemonRef> daemonRefOf(vtworkspace::WorkspaceId window) const;
+
+    /// @param window A window of this manager.
+    /// @return The run of the daemon @p window is on (SessionFactory::daemonInstance); none for a window with
+    ///         no daemon behind it, or one whose daemon has not said yet.
+    [[nodiscard]] std::optional<window::DaemonInstance> daemonInstanceOf(
+        vtworkspace::WorkspaceId window) const;
+
+    /// @param window A window of this manager.
     /// @return What serves @p window's sessions: no binding is InProcess, a binding with a daemon (a
     ///         daemonTargetOf() value) is a Daemon, any other binding (a tmux attach) is OtherHost. The one
     ///         rule the location chip and the switcher share.

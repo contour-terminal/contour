@@ -7361,6 +7361,16 @@ bool TerminalSession::operator()(actions::FilterWorkspaces)
     return onWindowOf(*_manager, *this, &window::WindowController::openSidebarFilter);
 }
 
+bool TerminalSession::operator()(actions::ToggleSidebarNeedsMe)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::toggleSidebarNeedsMe);
+}
+
+bool TerminalSession::operator()(actions::CancelSwitch)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::cancelSidebarJump);
+}
+
 bool TerminalSession::operator()(actions::JumpToNextAttention)
 {
     return onWindowOf(*_manager, *this, &window::WindowController::jumpToNextAttention);

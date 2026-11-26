@@ -173,3 +173,41 @@ TEST_CASE("the sidebar's filter accepts a space", "[chromekeys]")
     CHECK(chromeCommandFor(ChromeArea::Sidebar, ChromeKey::Space, None) == ChromeCommand::Filter);
     CHECK(chromeCommandFor(ChromeArea::Tabs, ChromeKey::Space, None) == ChromeCommand::Activate);
 }
+
+TEST_CASE("Shift+Return in the sidebar opens in a new window", "[chromekeys]")
+{
+    constexpr auto Sidebar = ChromeArea::Sidebar;
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Return, Shift) == ChromeCommand::OpenInNewWindow);
+    CHECK(chromeConsumes(Sidebar, ChromeKey::Return, Shift));
+    // Return alone still activates the row, and the other areas know no Shift+Return.
+    CHECK(chromeCommandFor(Sidebar, ChromeKey::Return, None) == ChromeCommand::Activate);
+    CHECK(chromeCommandFor(ChromeArea::Tabs, ChromeKey::Return, Shift) == ChromeCommand::None);
+    CHECK(chromeCommandFor(ChromeArea::Toolbar, ChromeKey::Return, Shift) == ChromeCommand::None);
+}
+
+TEST_CASE("every sidebar command has a QML name", "[chromekeys]")
+{
+    // The tree carries out every command a sidebar key maps to but leaving, which the window does itself.
+    for (auto const& row: ChromeKeyRows)
+    {
+        if (row.area != ChromeArea::Sidebar || row.command == ChromeCommand::Leave)
+            continue;
+        INFO("command " << static_cast<int>(row.command));
+        CHECK(std::ranges::contains(SidebarCommandNames, row.command, &NamedChromeCommand::command));
+    }
+    // One name per command, and no name twice.
+    for (auto const& [name, command]: SidebarCommandNames)
+    {
+        INFO(name);
+        CHECK(std::ranges::count(SidebarCommandNames, name, &NamedChromeCommand::name) == 1);
+        CHECK(std::ranges::count(SidebarCommandNames, command, &NamedChromeCommand::command) == 1);
+    }
+}
+
+TEST_CASE("Escape in the sidebar cancels a pending jump, then clears the filter, then leaves", "[chromekeys]")
+{
+    CHECK(sidebarEscapeCommand(JumpUnderWay::Yes, FilterTyped::Yes) == ChromeCommand::CancelPending);
+    CHECK(sidebarEscapeCommand(JumpUnderWay::Yes, FilterTyped::No) == ChromeCommand::CancelPending);
+    CHECK(sidebarEscapeCommand(JumpUnderWay::No, FilterTyped::Yes) == ChromeCommand::ClearFilter);
+    CHECK(sidebarEscapeCommand(JumpUnderWay::No, FilterTyped::No) == ChromeCommand::Leave);
+}

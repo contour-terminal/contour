@@ -208,6 +208,10 @@ class PromptHost final: public QObject, public askpass::IAskpassPromptSink
     /// @param answer What was typed, for a secret; the button's answer otherwise. Not kept.
     Q_INVOKABLE void answerPrompt(int promptId, int outcome, QString const& answer);
 
+    /// Asks the window to bring the prompt shown to the front and give it the keyboard (raiseRequested()).
+    /// Nothing while none is open: there is nothing to answer here.
+    void raise();
+
     /// @copydoc askpass::IAskpassPromptSink::ask
     void ask(askpass::AskpassPromptId promptId,
              askpass::AskpassPromptKind kind,
@@ -220,6 +224,8 @@ class PromptHost final: public QObject, public askpass::IAskpassPromptSink
 
   signals:
     void pendingPromptChanged();
+    /// The prompt shown is to come to the front, with the keyboard in it (raise()).
+    void raiseRequested();
 
   private:
     struct Open

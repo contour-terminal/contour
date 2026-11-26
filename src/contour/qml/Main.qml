@@ -576,9 +576,10 @@ ThemedWindow
     // at the content's corner for want of a band. Their order is the controller's focusedToolbarIndex.
     readonly property var toolbarItems: {
         const items = titleBar.toolbarItems.slice()
-        const sidebarChip = sidebarSlot.item ? sidebarSlot.item.daemonChip : null
-        if (sidebarChip !== null && sidebarChip.visible)
-            items.unshift(sidebarChip)
+        // The sidebar's own title row comes first, at the window's leading end: a tmux window's host chip, the
+        // switcher and the Needs-me control.
+        if (sidebarSlot.item)
+            items.unshift(...sidebarSlot.item.toolbarControls)
         if (driftChip.visible && !driftChip.inBand)
             items.push(driftChip)
         return items
@@ -829,6 +830,14 @@ ThemedWindow
         target: askpassDialog.host
         ignoreUnknownSignals: true
         function onPendingPromptChanged() { askpassDialog.present(askpassDialog.host.pendingPrompt) }
+        // The sidebar's Connect on this window's own daemon while its link waits for the user: the prompt it
+        // waits on comes to the front, with the keyboard in it.
+        function onRaiseRequested() {
+            appWindow.raise();
+            appWindow.requestActivate();
+            askpassDialog.present(askpassDialog.host.pendingPrompt);
+            askpassDialog.takeFocus();
+        }
     }
 
     Connections {

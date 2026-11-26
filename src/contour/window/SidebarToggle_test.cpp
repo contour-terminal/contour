@@ -7,6 +7,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstddef>
+#include <ranges>
 #include <string>
 
 using namespace contour::window;
@@ -119,22 +121,89 @@ TEST_CASE("SidebarControls: one glyph means one thing in a bar", "[sidebar][side
             CHECK(face.bundledIcon != item.bundledIcon);
         }
     }
-    // Each look's controls look different from one another.
+    // Each look's controls look different from one another, and share no icon or glyph.
     for (auto const& row: SidebarControlRows)
-    {
-        CHECK(row.faces[0] != row.faces[1]);
-        CHECK(row.faces[1] != row.faces[2]);
-        CHECK(row.faces[0] != row.faces[2]);
-    }
+        for (auto const a: std::views::iota(size_t { 0 }, SidebarControlCount))
+            for (auto const b: std::views::iota(a + 1, SidebarControlCount))
+            {
+                INFO("look " << static_cast<int>(row.look) << ", controls " << a << " and " << b);
+                auto const& first = row.faces[a];
+                auto const& second = row.faces[b];
+                CHECK(first != second);
+                if (!first.bundledIcon.empty())
+                    CHECK(first.bundledIcon != second.bundledIcon);
+                if (!first.iconName.empty())
+                    CHECK(first.iconName != second.iconName);
+                if (!first.glyph.empty())
+                    CHECK(first.glyph != second.glyph);
+            }
     CHECK(sidebarControlName(SidebarControl::NewWorkspace) == "newWorkspace");
+    CHECK(sidebarControlName(SidebarControl::NeedsMe) == "needsMe");
+    CHECK(sidebarControlName(SidebarControl::Switcher) == "switcher");
+}
+
+TEST_CASE("the switcher and needs-me controls have a face on every look, none shared with another control in "
+          "the row",
+          "[sidebar][sidebarcontrols]")
+{
+    for (auto const& row: SidebarControlRows)
+        for (auto const control: { SidebarControl::Switcher, SidebarControl::NeedsMe })
+        {
+            INFO("look " << static_cast<int>(row.look) << ", control " << sidebarControlName(control));
+            auto const& face = row.faces[static_cast<size_t>(control)];
+            CHECK((!face.bundledIcon.empty() || !face.glyph.empty()));
+            // Never a text glyph beside the icons of a look that draws icons.
+            CHECK((face.glyph.empty() || row.look == contour::config::SidebarLook::CellTree));
+            for (auto const other: std::views::iota(size_t { 0 }, SidebarControlCount))
+            {
+                if (other == static_cast<size_t>(control))
+                    continue;
+                auto const& rival = row.faces[other];
+                CHECK(face != rival);
+                if (!face.bundledIcon.empty())
+                    CHECK(face.bundledIcon != rival.bundledIcon);
+                if (!face.glyph.empty())
+                    CHECK(face.glyph != rival.glyph);
+            }
+            // Nor any of the header bar's own items.
+            for (auto const& item: HeaderBarItems)
+            {
+                if (!face.iconName.empty())
+                    CHECK(face.iconName != item.iconName);
+                if (!face.bundledIcon.empty())
+                    CHECK(face.bundledIcon != item.bundledIcon);
+            }
+        }
+}
+
+TEST_CASE("narrow sidebars drop needs-me, then the switcher", "[sidebar][sidebarcontrols]")
+{
+    constexpr auto Each = 30.0;
+    constexpr auto Shown = size_t { 5 };
+    CHECK(sidebarControlFitOf(Each * Shown, Each, Shown) == SidebarControlFit::All);
+    CHECK(sidebarControlFitOf((Each * Shown) - 1, Each, Shown) == SidebarControlFit::NoNeedsMe);
+    CHECK(sidebarControlFitOf(Each * (Shown - 1), Each, Shown) == SidebarControlFit::NoNeedsMe);
+    CHECK(sidebarControlFitOf((Each * (Shown - 1)) - 1, Each, Shown) == SidebarControlFit::NoSwitcher);
+    CHECK(sidebarControlFitOf(0, Each, Shown) == SidebarControlFit::NoSwitcher);
+    // At the narrowest sidebar (160 px) with the toolbar button's 28 px: the four fit, the fifth goes.
+    CHECK(sidebarControlFitOf(160, 34, 5) == SidebarControlFit::NoNeedsMe);
+    CHECK(sidebarControlFitOf(160, 34, 4) == SidebarControlFit::All);
+}
+
+TEST_CASE("SidebarControls: the needs-me control never draws the rows' waiting mark",
+          "[sidebar][sidebarcontrols]")
+{
+    // `!` already means "waiting" on a row of the tree beside it.
+    for (auto const& row: SidebarControlRows)
+        CHECK(row.faces[static_cast<size_t>(SidebarControl::NeedsMe)].glyph != "!");
 }
 
 TEST_CASE("SidebarControls: only the new-workspace control takes a dropped pane or tab, on every look",
           "[sidebar][sidebarcontrols]")
 {
     for (auto const& row: SidebarControlRows)
-        for (auto const control:
-             { SidebarControl::Toggle, SidebarControl::NewWorkspace, SidebarControl::Filter })
+        for (auto const control: std::views::iota(size_t { 0 }, SidebarControlCount)
+                                     | std::views::transform([](size_t i) { return SidebarControl(i); }))
             CHECK((row.faces[static_cast<size_t>(control)].drop == SidebarControlDrop::NewWorkspace)
                   == (control == SidebarControl::NewWorkspace));
 }
@@ -145,9 +214,29 @@ TEST_CASE("SidebarControls: each control runs an action of the catalog, whatever
     CHECK(sidebarControlCommand(SidebarControl::Toggle) == "ToggleSidebar");
     CHECK(sidebarControlCommand(SidebarControl::NewWorkspace) == "NewWorkspace");
     CHECK(sidebarControlCommand(SidebarControl::Filter) == "FilterWorkspaces");
+    CHECK(sidebarControlCommand(SidebarControl::Switcher) == "ShowSwitcher");
+    CHECK(sidebarControlCommand(SidebarControl::NeedsMe) == "ToggleSidebarNeedsMe");
     for (auto const command: SidebarControlCommands)
     {
         INFO(command);
         CHECK(contour::actions::fromString(std::string { command }).has_value());
+    }
+}
+
+TEST_CASE("the switcher control is a swap on every look", "[sidebar][controls]")
+{
+    // One metaphor for "go to another daemon or workspace": two opposed arrows, never a jump, redo or share
+    // arrow, nor a ">" that echoes the sidebar's toggle.
+    using contour::config::SidebarLook;
+    for (auto const index: std::views::iota(std::size_t { 0 }, contour::window::SidebarControlRows.size()))
+    {
+        auto const look = static_cast<SidebarLook>(index);
+        INFO("look " << index);
+        auto const& face =
+            contour::window::sidebarControlFace(look, contour::window::SidebarControl::Switcher);
+        if (look == SidebarLook::CellTree)
+            CHECK(face.glyph == "⇄");
+        else
+            CHECK(face.bundledIcon == "qrc:/contour/icons/view-swap-symbolic.svg");
     }
 }

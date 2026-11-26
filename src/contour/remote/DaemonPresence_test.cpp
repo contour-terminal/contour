@@ -114,11 +114,18 @@ class HangingUpTransport final: public vthost::ITransportFactory
     }
 };
 
+/// Whether the daemon a StoppableTransport reaches answers its dials.
+enum class DaemonServing : uint8_t
+{
+    Stopped = 0, ///< Every dial finds it absent.
+    Serving,     ///< Every dial reaches it.
+};
+
 /// Whether the daemon a StoppableTransport reaches serves, and how often it was dialled.
 struct StoppableDaemon
 {
-    std::atomic<bool> serving = true; ///< Set by the test; read by each dial.
-    std::atomic<int> dials = 0;       ///< Every dial, served or not.
+    std::atomic<DaemonServing> serving = DaemonServing::Serving; ///< Set by the test; read by each dial.
+    std::atomic<int> dials = 0;                                  ///< Every dial, served or not.
 };
 
 /// Reaches a daemon while it serves; finds it absent once stopped.
@@ -136,7 +143,7 @@ class StoppableTransport final: public vthost::ITransportFactory
     connect(core::net::EventLoop& loop) override
     {
         ++_daemon->dials;
-        if (_daemon->serving)
+        if (_daemon->serving == DaemonServing::Serving)
             return _live->connect(loop);
         return failedWith(vthost::TransportErrorKind::DaemonAbsent);
     }
@@ -562,6 +569,36 @@ TEST_CASE("DaemonPresence: an unreachable daemon is redialed with backoff", "[pr
     CHECK(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
 }
 
+TEST_CASE("DaemonPresence: disconnect stops a connect still connecting", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.observerDial = [](DaemonRef const&) -> Dialled {
+        return std::unexpected { DialRefusal { .state = DaemonLinkState::NeedsInput,
+                                               .reason = "needs a password" } };
+    };
+    rig.presence->refresh();
+    REQUIRE(rig.isIn(Starfive, DaemonLinkState::NeedsInput));
+
+    rig.presence->connect(Starfive, WorkspaceId { 3 });
+    REQUIRE(rig.isIn(Starfive, DaemonLinkState::Connecting));
+    rig.presence->disconnect(Starfive);
+
+    CHECK(rig.isIn(Starfive, DaemonLinkState::NotConnected));
+    // Nothing dials it again by itself: not the connect that was cancelled, nor a redial, nor a refresh.
+    CHECK_FALSE(waitUntil([&] { return !rig.isIn(Starfive, DaemonLinkState::NotConnected); }, 200));
+    rig.presence->refresh();
+    rig.fireTimers();
+    CHECK(rig.isIn(Starfive, DaemonLinkState::NotConnected));
+    CHECK(rig.observersMade == 1);
+
+    // Disconnecting what does not connect does nothing.
+    rig.presence->connect(Starfive, WorkspaceId { 3 });
+    REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
+    rig.presence->disconnect(Starfive);
+    CHECK(rig.isIn(Starfive, DaemonLinkState::Connected));
+}
+
 TEST_CASE("DaemonPresence: an observer reconnects after a live upgrade with flags intact", "[presence]")
 {
     auto control = vthost::testing::FakeDaemonControl {};
@@ -701,7 +738,7 @@ TEST_CASE("DaemonPresence: an observer whose daemon stopped reads Not running an
     REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::Connected); }));
 
     // The daemon on the host stops: its relay says none is running (--no-start) on every login since.
-    starfive->serving = false;
+    starfive->serving = DaemonServing::Stopped;
     daemon.dropConnections();
 
     REQUIRE(waitUntil([&] { return rig.isIn(Starfive, DaemonLinkState::NotRunning); }, 2000));
@@ -726,7 +763,7 @@ TEST_CASE("DaemonPresence: a local daemon that stopped and started again is obse
     rig.presence->refresh();
     REQUIRE(waitUntil([&] { return rig.isIn(work, DaemonLinkState::Connected); }));
 
-    served->serving = false;
+    served->serving = DaemonServing::Stopped;
     rig.discovery->running = { "default" };
     daemon.dropConnections();
     REQUIRE(waitUntil([&] { return rig.isIn(work, DaemonLinkState::NotRunning); }, 2000));
@@ -736,7 +773,7 @@ TEST_CASE("DaemonPresence: a local daemon that stopped and started again is obse
     CHECK_FALSE(waitUntil([&] { return served->dials.load() != dials; }, 200));
 
     // Started again from the command line: the next look finds it, and observes it without asking.
-    served->serving = true;
+    served->serving = DaemonServing::Serving;
     rig.discovery->running = { "default", "work" };
     rig.presence->refresh();
     REQUIRE(waitUntil([&] { return rig.isIn(work, DaemonLinkState::Connected); }, 2000));
@@ -762,9 +799,9 @@ TEST_CASE("DaemonPresence: a local daemon restarted before the next discovery is
 
     // Stopped, and started again from the command line before the discovery its observer's giving up asks
     // for looks: no discovery ever misses it.
-    served->serving = false;
+    served->serving = DaemonServing::Stopped;
     rig.discovery->discovering = [served] {
-        served->serving = true;
+        served->serving = DaemonServing::Serving;
     };
     daemon.dropConnections();
 
@@ -781,9 +818,9 @@ TEST_CASE("DaemonPresence: a local daemon started outside Contour is observed on
     auto rig = PresenceRig { daemon };
     rig.settings.hosts.clear();
     auto const work = contour::window::localDaemonRef("work");
-    auto serving = false;
+    auto serving = DaemonServing::Stopped;
     rig.observerDial = [&](DaemonRef const& ref) -> Dialled {
-        if (ref == work && !serving)
+        if (ref == work && serving == DaemonServing::Stopped)
             return std::unexpected { DialRefusal { .state = DaemonLinkState::NotRunning,
                                                    .reason = "not running" } };
         return makeTestTlsTransport(daemon.endpoint());
@@ -802,7 +839,7 @@ TEST_CASE("DaemonPresence: a local daemon started outside Contour is observed on
     CHECK(rig.observerDials == 1);
 
     // Started from the command line: the next discovery finds it, and it is observed without anyone asking.
-    serving = true;
+    serving = DaemonServing::Serving;
     rig.discovery->running = { "default", "work" };
     rig.presence->refresh();
     REQUIRE(waitUntil([&] { return rig.isIn(work, DaemonLinkState::Connected); }));
@@ -1008,8 +1045,17 @@ TEST_CASE("DaemonPresence: a daemon a window is on is not alerted twice", "[pres
 {
     using vthost::proto::AttachIntentKind;
     auto daemon = DaemonFixture {};
+    auto observed = DaemonFixture {};
     auto const ids = seedWorkspaces(daemon, 2);
+    auto const observedSession = observed.seedSession({});
     auto rig = PresenceRig { daemon };
+    auto const riscv = contour::window::hostDaemonRef("riscv");
+    rig.settings.hosts.emplace_back("riscv", contour::window::SidebarListingChoice::Listed);
+    auto observerDialled = std::vector<DaemonRef> {};
+    rig.observerDial = [&](DaemonRef const& ref) -> Dialled {
+        observerDialled.push_back(ref);
+        return makeTestTlsTransport(observed.endpoint());
+    };
     rig.presence->processFocusChanged(contour::window::WindowFocusState::Focused);
     auto const window = makeNativeController(
         daemon.endpoint(),
@@ -1019,6 +1065,11 @@ TEST_CASE("DaemonPresence: a daemon a window is on is not alerted twice", "[pres
     rig.links.push_back(windowOn(Starfive, window.get()));
     rig.presence->refresh();
     REQUIRE(waitUntil([&] { return window->raiseRole() == vthost::proto::RaiseRole::Raise; }));
+    // The daemon no window is on is observed, and raises: the alert path this test relies on is live.
+    REQUIRE(waitUntil([&] { return rig.isIn(riscv, DaemonLinkState::Connected); }));
+    REQUIRE(rig.observers.size() == 1);
+    REQUIRE(waitUntil([&] { return raises(rig.observers.front()); }));
+    CHECK(std::ranges::find(observerDialled, Starfive) == observerDialled.end());
     auto const elsewhere = daemon.onDaemon([&] {
         return daemon.host->model().workspace(WorkspaceId { ids[1] })->tabAt(0)->rootPane()->session();
     });
@@ -1031,9 +1082,16 @@ TEST_CASE("DaemonPresence: a daemon a window is on is not alerted twice", "[pres
         std::ranges::move(window->takeRaised(), std::back_inserter(raised));
         return !raised.empty();
     }));
-    CHECK(rig.observersMade == 0);
-    CHECK_FALSE(waitUntil([&] { return rig.rings != 0; }, 40));
-    CHECK(rig.notifier.raised.empty());
+
+    // The observed daemon rings after it: exactly its alert arrives, none for the window's daemon.
+    ringIn(observed, observedSession);
+
+    REQUIRE(waitUntil([&] { return rig.rings == 1 && !rig.notifier.raised.empty(); }, 1000));
+    CHECK_FALSE(waitUntil([&] { return rig.rings > 1 || rig.notifier.raised.size() > 1; }, 40));
+    CHECK(rig.rings == 1);
+    REQUIRE(rig.notifier.raised.size() == 1);
+    CHECK(rig.notifier.raised.front().title.contains("riscv"));
+    CHECK_FALSE(rig.notifier.raised.front().title.contains("starfive"));
 }
 
 TEST_CASE("DaemonPresence: a hide keeps what another process chose meanwhile", "[presence]")
@@ -1125,6 +1183,21 @@ TEST_CASE("DaemonPresence: links are named alike only for one run of one daemon"
     CHECK(merged[2].daemon == contour::window::linkDaemonRef(6)); // another run
     CHECK(merged[3].daemon == contour::window::linkDaemonRef(7)); // runs not known yet stay apart
     CHECK(merged[4].daemon == contour::window::linkDaemonRef(8));
+}
+
+TEST_CASE("DaemonPresence: a sidebar is told nothing once the presence shut down", "[presence]")
+{
+    auto daemon = DaemonFixture {};
+    auto rig = PresenceRig { daemon };
+    rig.presence->refresh();
+    auto told = 0;
+    auto const subscription = rig.presence->onChanged([&told] { ++told; });
+
+    // The application is going: its windows' sidebars must not queue a rebuild that outlives it.
+    rig.presence->shutdown();
+    rig.presence->refresh();
+    rig.presence->linkSetChanged();
+    CHECK(told == 0);
 }
 
 TEST_CASE("DaemonPresence: shutdown stops every observer, and starts none after", "[presence]")

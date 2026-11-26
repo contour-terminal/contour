@@ -1,13 +1,16 @@
 // vim:syntax=qml
 // The title band's quiet breadcrumb while the sidebar holds the tabs: `workspace › tab`, the workspace the
-// window shows (SidebarModel.currentWorkspaceTitle) and the active tab's label. The tab gives way first when
-// the band is narrow; a screen reader hears it as one line.
+// window shows (SidebarModel.currentWorkspaceTitle) and the active tab's label -- led by the window's daemon,
+// `daemon › workspace › tab`, while the sidebar lists several daemons (SidebarModel.breadcrumbDaemon). The
+// tab gives way first when the band is narrow, then the daemon; a screen reader hears it as one line.
 import QtQuick
 
 Row {
     id: root
     objectName: "breadcrumb"
 
+    /// The window's daemon's name while several daemons are listed; empty otherwise, and then not shown.
+    property string daemon
     /// The shown workspace's name.
     property string workspace
     /// The active tab's label.
@@ -22,7 +25,36 @@ Row {
              ? Math.max(chromeStyle.space.s3, chromeStyle.cellWidth) : chromeStyle.space.s3
 
     Accessible.role: Accessible.StaticText
-    Accessible.name: root.workspace !== "" ? qsTr("%1, %2").arg(root.workspace).arg(root.tab) : root.tab
+    Accessible.name: {
+        const place = root.workspace !== "" ? qsTr("%1, %2").arg(root.workspace).arg(root.tab) : root.tab
+        return root.daemon !== "" ? qsTr("%1, %2").arg(root.daemon).arg(place) : place
+    }
+
+    Text {
+        id: daemonText
+        objectName: "breadcrumbDaemon"
+        visible: root.daemon !== ""
+        width: Math.min(implicitWidth, Math.max(0, root.room - (workspaceText.visible
+                                                                ? workspaceText.width + separator.width
+                                                                  + root.spacing + root.spacing : 0)))
+        textFormat: Text.PlainText
+        text: root.daemon
+        font: chromeStyle.type.bodyMedium
+        color: root.ink
+        elide: Text.ElideMiddle
+        Accessible.ignored: true
+    }
+
+    Text {
+        id: daemonSeparator
+        objectName: "breadcrumbDaemonSeparator"
+        visible: daemonText.visible
+        textFormat: Text.PlainText
+        text: chromeStyle.breadcrumbGlyph
+        font: chromeStyle.type.bodyMedium
+        color: root.ink
+        Accessible.ignored: true
+    }
 
     Text {
         id: workspaceText
@@ -52,6 +84,9 @@ Row {
         objectName: "breadcrumbTab"
         width: Math.min(implicitWidth, Math.max(0, root.room - (workspaceText.visible
                                                                 ? workspaceText.width + separator.width
+                                                                  + root.spacing + root.spacing : 0)
+                                                             - (daemonText.visible
+                                                                ? daemonText.width + daemonSeparator.width
                                                                   + root.spacing + root.spacing : 0)))
         textFormat: Text.PlainText
         text: root.tab

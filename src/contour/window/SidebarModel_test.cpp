@@ -57,11 +57,12 @@ ProgramStatusRecord recordOf(ProgramState state, std::chrono::seconds age = 30s)
     return record;
 }
 
-/// A model over a fake window, source, clock and announcer.
+/// A model over a fake window, source, daemons, clock and announcer.
 struct SidebarUnderTest
 {
     FakeSource source;
     FakeHost host;
+    contour::test::FakeDaemonSections sections;
     TabAttention attention;
     core::platform::ManualWallClock clock { Epoch };
     contour::test::RecordingAnnouncer announcer;
@@ -73,11 +74,91 @@ struct SidebarUnderTest
         if (!source.listed.workspaces.empty())
             source.listed.selected = source.listed.workspaces.front().id;
         host.source = &source;
-        model.emplace(host, attention, clock, announcer);
+        model.emplace(host, sections, attention, clock, announcer);
+    }
+
+    /// A window on @p own, its workspaces @p workspaces, the presence listing @p others besides it.
+    SidebarUnderTest(OwnDaemon own,
+                     std::vector<DirectoryWorkspace> workspaces,
+                     std::vector<DaemonSection> others)
+    {
+        source.listed.workspaces = std::move(workspaces);
+        if (!source.listed.workspaces.empty())
+            source.listed.selected = source.listed.workspaces.front().id;
+        host.source = &source;
+        host.own = std::move(own);
+        sections.listed = std::move(others);
+        model.emplace(host, sections, attention, clock, announcer);
     }
 
     SidebarModel& sidebar() { return *model; }
 };
+
+DaemonRef const Home = localDaemonRef("default");
+DaemonRef const Starfive = hostDaemonRef("starfive");
+constexpr auto HomeRun = DaemonInstance { 1 };
+constexpr auto StarfiveRun = DaemonInstance { 9 };
+
+/// The window's own daemon, connected.
+OwnDaemon ownHome()
+{
+    return OwnDaemon { .daemon = Home,
+                       .instance = HomeRun,
+                       .name = "default",
+                       .locality = DaemonLocality::Local,
+                       .state = DaemonLinkState::Connected };
+}
+
+/// A section the presence lists.
+DaemonSection sectionOf(DaemonRef daemon,
+                        DaemonInstance instance,
+                        std::string name,
+                        DaemonLinkState state,
+                        std::vector<DirectoryWorkspace> workspaces,
+                        DaemonLocality locality = DaemonLocality::Remote)
+{
+    auto section = DaemonSection {};
+    section.daemon = std::move(daemon);
+    section.instance = instance;
+    section.name = std::move(name);
+    section.state = state;
+    section.locality = locality;
+    section.directory.workspaces = std::move(workspaces);
+    section.feed = SectionFeed::Observer;
+    return section;
+}
+
+/// Starfive in @p state, with its workspace 5 holding tab 50 (`build`).
+DaemonSection starfiveIn(DaemonLinkState state)
+{
+    return sectionOf(Starfive,
+                     StarfiveRun,
+                     "starfive",
+                     state,
+                     { directoryWorkspaceOf(5, "ci", { directoryPaneOf(50, "build") }) });
+}
+
+/// The key of a row of @p daemon's.
+SidebarRowKey keyOf(SidebarRowKind kind,
+                    DaemonRef daemon,
+                    DaemonInstance instance,
+                    uint64_t workspace = 0,
+                    uint64_t tab = 0,
+                    PaneKey pane = {})
+{
+    return SidebarRowKey { .kind = kind,
+                           .daemon = std::move(daemon),
+                           .instance = instance,
+                           .workspace = workspace,
+                           .tab = tab,
+                           .pane = pane };
+}
+
+/// @return How many rows of @p kind the model lists.
+long rowsOfKind(SidebarModel const& model, SidebarRowKind kind)
+{
+    return std::ranges::count(model.rows(), kind, [](SidebarRow const& row) { return row.key.kind; });
+}
 
 } // namespace
 
@@ -655,6 +736,63 @@ TEST_CASE("SidebarModel: the filter narrows the rows and leaves the footer", "[c
     CHECK(t.sidebar().rowCount() == 4);
 }
 
+TEST_CASE("Needs me narrows and restores", "[contour][sidebar]")
+{
+    auto t =
+        SidebarUnderTest { ownHome(),
+                           { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10), directoryPaneOf(11) }),
+                             directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }),
+                             directoryWorkspaceOf(3, "notes", { directoryPaneOf(30) }) },
+                           { starfiveIn(DaemonLinkState::Connected) } };
+    t.source.listed.workspaces[1].tabs[0].panes[0].status = { recordOf(ProgramState::Blocked) };
+    t.host.displayed = TabRef { .workspace = 1, .tab = 10 };
+    // A fold of the user's that the way back must keep.
+    t.sidebar().refreshNow();
+    auto const notes = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Home, HomeRun, 3));
+    REQUIRE(notes >= 0);
+    t.sidebar().collapse(notes);
+    t.sidebar().refreshNow();
+    auto const all = t.sidebar().rows();
+    CHECK(t.sidebar().emptyState() == SidebarEmptyState::None);
+
+    auto scopeChanges = QSignalSpy { &t.sidebar(), &SidebarModel::scopeChanged };
+    t.sidebar().setScope(contour::config::SidebarScope::NeedsMe);
+    CHECK(scopeChanges.count() == 1);
+    CHECK(t.sidebar().scopeValue() == static_cast<int>(contour::config::SidebarScope::NeedsMe));
+    // The daemon, the path to the blocked pane and the displayed tab's path; nothing else.
+    auto const keys = [&] {
+        auto listed = std::vector<SidebarRowKey> {};
+        for (auto const& row: t.sidebar().rows())
+            listed.push_back(row.key);
+        return listed;
+    };
+    CHECK(keys()
+          == std::vector<SidebarRowKey> { keyOf(SidebarRowKind::Daemon, Home, HomeRun),
+                                          keyOf(SidebarRowKind::Workspace, Home, HomeRun, 1),
+                                          keyOf(SidebarRowKind::Tab, Home, HomeRun, 1, 10),
+                                          keyOf(SidebarRowKind::Workspace, Home, HomeRun, 2),
+                                          keyOf(SidebarRowKind::Tab, Home, HomeRun, 2, 20) });
+    CHECK(t.sidebar().emptyState() == SidebarEmptyState::None);
+
+    // Once nothing needs the user, the tree says so, the displayed tab's path still listed above it.
+    auto emptyChanges = QSignalSpy { &t.sidebar(), &SidebarModel::emptyStateChanged };
+    t.source.listed.workspaces[1].tabs[0].panes[0].status = { recordOf(ProgramState::Idle) };
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().emptyState() == SidebarEmptyState::NothingNeedsYou);
+    CHECK(emptyChanges.count() == 1);
+    CHECK(t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Tab, Home, HomeRun, 1, 10)) >= 0);
+
+    // The way back lists what was there, folds and all.
+    t.source.listed.workspaces[1].tabs[0].panes[0].status = { recordOf(ProgramState::Blocked) };
+    t.sidebar().setScope(static_cast<int>(contour::config::SidebarScope::All));
+    CHECK(t.sidebar().rows() == all);
+    CHECK(t.sidebar().emptyState() == SidebarEmptyState::None);
+    CHECK(scopeChanges.count() == 2);
+    // A value QML cannot mean is every row.
+    t.sidebar().setScope(static_cast<int>(contour::config::SidebarScopeCount));
+    CHECK(t.sidebar().scope() == contour::config::SidebarScope::All);
+}
+
 TEST_CASE("SidebarModel: a context menu is the window's to open", "[contour][sidebar]")
 {
     auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
@@ -786,13 +924,17 @@ struct Walk
                     if (shown.expansion != RowExpansion::None)
                     {
                         auto const collapsed = shown.expansion == RowExpansion::Collapsed;
-                        auto const tab = TabRef { .workspace = shown.key.workspace, .tab = shown.key.tab };
+                        auto const workspace = WorkspaceKey { .daemon = shown.key.daemon,
+                                                              .instance = shown.key.instance,
+                                                              .workspace = shown.key.workspace };
+                        auto const tab = TabKey { .workspace = workspace, .tab = shown.key.tab };
+                        // The window's one daemonless section starts unfolded: a fold is a toggle.
                         if (shown.key.kind == SidebarRowKind::Workspace)
                         {
                             if (collapsed)
-                                expectedState.collapsedWorkspaces.erase(shown.key.workspace);
+                                expectedState.toggled.erase(workspace);
                             else
-                                expectedState.collapsedWorkspaces.insert(shown.key.workspace);
+                                expectedState.toggled.insert(workspace);
                         }
                         else if (collapsed)
                             expectedState.collapsedTabs.erase(tab);
@@ -1216,4 +1358,666 @@ TEST_CASE("SidebarModel: every row serves the cells of its workspace's rail", "[
     }
     // The split tab is the workspace's last: its panes still carry the rail.
     CHECK(t.sidebar().index(2).data(SidebarModel::RailTextRole).toString() == QStringLiteral("│"));
+}
+
+TEST_CASE("SidebarModel: activating another daemon's tab asks the host to jump there", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    // Another daemon's workspaces start folded: the user unfolds Starfive's.
+    t.sidebar().expand(t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Starfive, StarfiveRun, 5)));
+    auto const tab = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Tab, Starfive, StarfiveRun, 5, 50));
+    REQUIRE(tab >= 0);
+
+    // The keyboard stays where the jump was made from.
+    CHECK(t.sidebar().activateRow(tab) == sidebarrows::RowActivation::Nothing);
+    REQUIRE(t.host.jumps.size() == 1);
+    CHECK(t.host.jumps[0].first
+          == SidebarTarget {
+              .daemon = Starfive, .instance = StarfiveRun, .workspace = 5, .tab = 50, .pane = std::nullopt });
+    CHECK(t.host.jumps[0].second == JumpMode::Here);
+    CHECK(t.host.shown.empty());
+    CHECK(t.host.shownWorkspaces.empty());
+
+    // The window's own verbs do not reach another daemon's rows.
+    t.sidebar().rename(tab, QStringLiteral("renamed"));
+    t.sidebar().markSeen(tab);
+    CHECK(t.host.renamedTabs.empty());
+    CHECK(t.host.seen.empty());
+}
+
+TEST_CASE("SidebarModel: activating a connected daemon row folds it and keeps the keyboard",
+          "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    REQUIRE(daemon >= 0);
+    auto const before = t.sidebar().rowCount();
+    REQUIRE(t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Starfive, StarfiveRun, 5)) >= 0);
+
+    CHECK(t.sidebar().activateRow(daemon) == sidebarrows::RowActivation::Nothing);
+    CHECK(t.sidebar().rowCount() == before - 1);
+    CHECK(t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Starfive, StarfiveRun, 5)) == -1);
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::ExpansionRole).toInt()
+          == static_cast<int>(RowExpansion::Collapsed));
+    CHECK(t.sections.calls.empty());
+    CHECK(t.host.jumps.empty());
+
+    // And unfolds it again.
+    CHECK(t.sidebar().activateRow(daemon) == sidebarrows::RowActivation::Nothing);
+    CHECK(t.sidebar().rowCount() == before);
+}
+
+TEST_CASE("SidebarModel: activating a daemon that needs you connects it from this window",
+          "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::NeedsInput) } };
+    t.host.window = vtworkspace::WorkspaceId { 7 };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    REQUIRE(daemon >= 0);
+
+    CHECK(t.sidebar().activateRow(daemon) == sidebarrows::RowActivation::Nothing);
+    using Call = contour::test::DaemonSectionsCall;
+    CHECK(
+        t.sections.calls
+        == std::vector { Call {
+            .verb = Call::Connect { .daemon = Starfive, .askingWindow = vtworkspace::WorkspaceId { 7 } } } });
+    // Its buttons say the same.
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::DaemonButtonsRole).toList()
+          == QVariantList { static_cast<int>(sidebarrows::DaemonRowButton::Connect),
+                            static_cast<int>(sidebarrows::DaemonRowButton::None) });
+}
+
+TEST_CASE("SidebarModel: activating a stopped daemon starts it", "[contour][sidebar]")
+{
+    auto const work = localDaemonRef("work");
+    auto t = SidebarUnderTest {
+        ownHome(),
+        { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+        { sectionOf(
+            work, DaemonInstance { 3 }, "work", DaemonLinkState::NotRunning, {}, DaemonLocality::Local) }
+    };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, work, DaemonInstance { 3 }));
+    REQUIRE(daemon >= 0);
+
+    CHECK(t.sidebar().activateRow(daemon) == sidebarrows::RowActivation::Nothing);
+    using Call = contour::test::DaemonSectionsCall;
+    CHECK(t.sections.calls == std::vector { Call { .verb = Call::Start { .daemon = work } } });
+
+    // Its Remove button unlists it; Cancel has nothing to end.
+    t.sidebar().removeDaemon(daemon);
+    t.sidebar().cancelPending(daemon);
+    CHECK(t.sections.calls
+          == std::vector { Call { .verb = Call::Start { .daemon = work } },
+                           Call { .verb = Call::Remove { .daemon = work } } });
+}
+
+TEST_CASE("SidebarModel: own daemon listed once", "[contour][sidebar]")
+{
+    // The presence lists the window's own daemon too, as its observer last saw it.
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { sectionOf(Home,
+                                            HomeRun,
+                                            "default",
+                                            DaemonLinkState::Reconnecting,
+                                            { directoryWorkspaceOf(99, "stale", {}) }),
+                                  starfiveIn(DaemonLinkState::Connected) } };
+
+    CHECK(rowsOfKind(t.sidebar(), SidebarRowKind::Daemon) == 2);
+    auto const home = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Home, HomeRun));
+    REQUIRE(home == 0);
+    // Its rows are the window's own, from the window's own link: live, not the presence's last word.
+    CHECK(t.sidebar().index(home).data(SidebarModel::LinkStateRole).toInt()
+          == static_cast<int>(DaemonLinkState::Connected));
+    CHECK(t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Home, HomeRun, 1)) >= 0);
+    CHECK(t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Home, HomeRun, 99)) == -1);
+}
+
+TEST_CASE("SidebarModel: activateFirstMatch goes to the first matching tab; NewWindow opens it beside",
+          "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10, "shell") }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    auto const starfiveTab = SidebarTarget {
+        .daemon = Starfive, .instance = StarfiveRun, .workspace = 5, .tab = 50, .pane = std::nullopt
+    };
+
+    t.sidebar().setFilter(QStringLiteral("build"));
+    t.sidebar().activateFirstMatch(static_cast<int>(JumpMode::Here));
+    t.sidebar().activateFirstMatch(static_cast<int>(JumpMode::NewWindow));
+    CHECK(t.host.jumps
+          == std::vector { std::pair { starfiveTab, JumpMode::Here },
+                           std::pair { starfiveTab, JumpMode::NewWindow } });
+
+    // The window's own tab is shown here, and opened beside as a jump.
+    t.sidebar().setFilter(QStringLiteral("shell"));
+    t.sidebar().activateFirstMatch(static_cast<int>(JumpMode::Here));
+    CHECK(t.host.shown == std::vector { PaneKey { 10 } });
+    t.sidebar().activateFirstMatch(static_cast<int>(JumpMode::NewWindow));
+    REQUIRE(t.host.jumps.size() == 3);
+    CHECK(t.host.jumps[2]
+          == std::pair {
+              SidebarTarget {
+                  .daemon = Home, .instance = HomeRun, .workspace = 1, .tab = 10, .pane = std::nullopt },
+              JumpMode::NewWindow });
+
+    // A filter that leaves only workspace rows goes to the first of them.
+    t.sidebar().setFilter(QStringLiteral("ci"));
+    t.sidebar().activateFirstMatch(static_cast<int>(JumpMode::Here));
+    REQUIRE(t.host.jumps.size() == 4);
+    CHECK(t.host.jumps[3].first
+          == SidebarTarget { .daemon = Starfive,
+                             .instance = StarfiveRun,
+                             .workspace = 5,
+                             .tab = std::nullopt,
+                             .pane = std::nullopt });
+}
+
+TEST_CASE("SidebarModel: a presence change rebuilds once", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    auto const reads = t.sections.reads;
+    t.sections.listed = { starfiveIn(DaemonLinkState::Reconnecting) };
+    t.sections.changed();
+    t.sections.changed();
+    t.sections.changed();
+    CHECK(t.sidebar().isRebuildPending());
+    letEventLoopRun();
+
+    CHECK(t.sections.reads == reads + 1);
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::LinkStateRole).toInt()
+          == static_cast<int>(DaemonLinkState::Reconnecting));
+}
+
+TEST_CASE("SidebarModel: after a jump the selected row is reported for scrolling into view",
+          "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest {
+        ownHome(),
+        { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+        // The presence lists the window's own daemon too, in tree order.
+        { sectionOf(Home, HomeRun, "default", DaemonLinkState::Connected, {}, DaemonLocality::Local),
+          starfiveIn(DaemonLinkState::Connected) }
+    };
+    t.host.displayed = TabRef { .workspace = 1, .tab = 10 };
+    t.sidebar().refreshNow();
+    t.sidebar().expand(t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Starfive, StarfiveRun, 5)));
+    REQUIRE(t.sidebar().currentIndex()
+            == t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Tab, Home, HomeRun, 1, 10)));
+    auto moved = QSignalSpy { &t.sidebar(), &SidebarModel::currentIndexChanged };
+
+    // The jump lands: the window is on Starfive now, showing its tab; its old daemon is observed.
+    t.host.own = OwnDaemon { .daemon = Starfive,
+                             .instance = StarfiveRun,
+                             .name = "starfive",
+                             .locality = DaemonLocality::Remote,
+                             .state = DaemonLinkState::Connected };
+    t.source.listed.workspaces = { directoryWorkspaceOf(5, "ci", { directoryPaneOf(50, "build") }) };
+    t.source.listed.selected = 5;
+    t.host.displayed = TabRef { .workspace = 5, .tab = 50 };
+    t.sections.listed = { sectionOf(Home,
+                                    HomeRun,
+                                    "default",
+                                    DaemonLinkState::Connected,
+                                    { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                    DaemonLocality::Local),
+                          starfiveIn(DaemonLinkState::Connected) };
+    t.sections.changed();
+    letEventLoopRun();
+
+    CHECK(moved.count() == 1);
+    CHECK(t.sidebar().currentIndex()
+          == t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Tab, Starfive, StarfiveRun, 5, 50)));
+    CHECK(t.sidebar().currentIndex() >= 0);
+}
+
+TEST_CASE("SidebarModel: a selection that moves to another row at the same index is reported",
+          "[contour][sidebar]")
+{
+    auto t =
+        SidebarUnderTest { ownHome(), { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) }, {} };
+    t.host.displayed = TabRef { .workspace = 1, .tab = 10 };
+    t.sidebar().refreshNow();
+    auto const before = t.sidebar().currentIndex();
+    REQUIRE(before >= 0);
+    auto moved = QSignalSpy { &t.sidebar(), &SidebarModel::currentIndexChanged };
+
+    // Another workspace takes billing's place: its tab's row has billing's tab's index.
+    t.source.listed.workspaces = { directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) };
+    t.source.listed.selected = 2;
+    t.host.displayed = TabRef { .workspace = 2, .tab = 20 };
+    t.sidebar().refreshNow();
+
+    REQUIRE(t.sidebar().currentIndex() == before);
+    CHECK(t.sidebar().currentIndex()
+          == t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Tab, Home, HomeRun, 2, 20)));
+    CHECK(moved.count() == 1);
+}
+
+TEST_CASE("SidebarModel: Escape's precedence reads the pending jump, and cancelJump ends it",
+          "[contour][sidebar]")
+{
+    auto t =
+        SidebarUnderTest { ownHome(), { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) }, {} };
+    t.sidebar().refreshNow();
+    CHECK_FALSE(t.sidebar().isJumpPending());
+    t.host.pending = SidebarTarget {
+        .daemon = Starfive, .instance = StarfiveRun, .workspace = 5, .tab = std::nullopt, .pane = {}
+    };
+    CHECK(t.sidebar().isJumpPending());
+    t.sidebar().cancelJump();
+    CHECK(t.host.cancels == 1);
+}
+
+TEST_CASE("SidebarModel: a window without a daemon lists no daemon rows", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) } };
+    t.sections.listed = { sectionOf(Home,
+                                    HomeRun,
+                                    "default",
+                                    DaemonLinkState::Connected,
+                                    { directoryWorkspaceOf(7, "elsewhere", { directoryPaneOf(70) }) }),
+                          starfiveIn(DaemonLinkState::Connected) };
+    t.sections.changed();
+    letEventLoopRun();
+
+    CHECK(rowsOfKind(t.sidebar(), SidebarRowKind::Daemon) == 0);
+    CHECK(t.sidebar().rowCount() == 2); // billing and its tab
+    CHECK(t.sidebar().rows().front().title == "billing");
+}
+
+TEST_CASE("SidebarModel: the switcher's workspace rows stay the window's own daemon's", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }),
+                                  directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+
+    auto const workspaces = t.sidebar().workspaceRows();
+    REQUIRE(workspaces.size() == 2);
+    CHECK(std::ranges::all_of(workspaces, [](SidebarRow const& row) { return row.key.daemon == Home; }));
+    CHECK(t.sidebar().workspaceRowIndex(2)
+          == t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Home, HomeRun, 2)));
+    CHECK(t.sidebar().workspaceRowIndex(2) >= 0);
+    // Starfive's workspace 5 is not the window's: no row of its own named by that id.
+    CHECK(t.sidebar().workspaceRowIndex(5) == -1);
+}
+
+TEST_CASE("SidebarModel: destroying the model unsubscribes", "[contour][sidebar]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    CHECK(t.sections.subscriberCount() == 1);
+    t.model.reset();
+    CHECK(t.sections.subscriberCount() == 0);
+    t.sections.changed(); // reaches nothing
+}
+
+TEST_CASE("SidebarModel: descriptions name the daemon and its link state", "[contour][sidebar][a11y]")
+{
+    struct Case
+    {
+        DaemonLinkState state;
+        std::string reason;
+        QString description;
+    };
+    // Written out, not read from DaemonLinkLooks, so a changed look shows up here as a changed sentence.
+    auto const cases = std::array {
+        Case { .state = DaemonLinkState::NotConnected, .reason = {}, .description = "Daemon, not connected" },
+        Case { .state = DaemonLinkState::Connecting, .reason = {}, .description = "Daemon, connecting" },
+        Case { .state = DaemonLinkState::Connected, .reason = {}, .description = "Daemon, connected" },
+        Case { .state = DaemonLinkState::Reconnecting, .reason = {}, .description = "Daemon, reconnecting" },
+        Case { .state = DaemonLinkState::NeedsInput, .reason = {}, .description = "Daemon, needs you" },
+        Case { .state = DaemonLinkState::NotRunning, .reason = {}, .description = "Daemon, not running" },
+        Case { .state = DaemonLinkState::TooOld, .reason = {}, .description = "Daemon, daemon too old" },
+        Case { .state = DaemonLinkState::Failed,
+               .reason = "host key changed",
+               .description = "Daemon, failed, host key changed" },
+    };
+    static_assert(cases.size() == DaemonLinkStateCount);
+    for (auto const& [state, reason, description]: cases)
+    {
+        INFO(description.toStdString());
+        auto section = sectionOf(Starfive, StarfiveRun, "starfive", state, {});
+        section.reason = reason;
+        auto t = SidebarUnderTest { ownHome(),
+                                    { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                    { std::move(section) } };
+        auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+        REQUIRE(daemon >= 0);
+        // Named by its daemon; its state in words, never by its dot or its mark.
+        CHECK(t.sidebar().index(daemon).data(SidebarModel::AccessibleNameRole).toString() == "starfive");
+        CHECK(t.sidebar().index(daemon).data(SidebarModel::AccessibleDescriptionRole).toString()
+              == description);
+    }
+
+    // A daemon with a tree says its fold, and counts what its panes ask, as a workspace does.
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    auto const home = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Home, HomeRun));
+    auto const starfive = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    CHECK(t.sidebar().index(home).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Daemon, connected, expanded");
+    t.sidebar().toggle(starfive);
+    CHECK(t.sidebar().index(starfive).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Daemon, connected, collapsed");
+    t.sections.listed[0].directory.workspaces[0].tabs[0].panes[0].status = { recordOf(
+        ProgramState::Blocked) };
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(starfive).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Daemon, connected, collapsed, 1 pane needs you");
+
+    // The daemons the user hid are one row, counted in their plural form.
+    auto hidden = SidebarRow {};
+    hidden.key.kind = SidebarRowKind::Hidden;
+    hidden.hidden = { HiddenDaemon { .daemon = Starfive, .name = "starfive" } };
+    CHECK(accessibleNameOf(hidden) == "Hidden daemons");
+    CHECK(accessibleDescriptionOf(hidden) == "1 hidden daemon");
+    hidden.hidden.push_back(HiddenDaemon { .daemon = hostDaemonRef("pi"), .name = "pi" });
+    CHECK(accessibleDescriptionOf(hidden) == "2 hidden daemons");
+}
+
+TEST_CASE("SidebarModel: a last-known row says so", "[contour][sidebar][a11y]")
+{
+    auto section = starfiveIn(DaemonLinkState::Reconnecting);
+    section.shownElsewhere = { 5 };
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { std::move(section) } };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    auto const workspace = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Workspace, Starfive, StarfiveRun, 5));
+    REQUIRE(daemon >= 0);
+    REQUIRE(workspace >= 0);
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Daemon, reconnecting, expanded, last known");
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Workspace, collapsed, last known, shown in another window");
+
+    // Back live, the rows say what they are now; a jump on its way to one says it is connecting.
+    t.sections.listed[0].state = DaemonLinkState::Connected;
+    t.host.pending = SidebarTarget {
+        .daemon = Starfive, .instance = StarfiveRun, .workspace = 5, .tab = std::nullopt, .pane = {}
+    };
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(workspace).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Workspace, collapsed, shown in another window, connecting");
+    // A daemon row whose own link is connecting says so once; what it lists is what was last known.
+    t.sections.listed[0].state = DaemonLinkState::Connecting;
+    t.sidebar().refreshNow();
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::AccessibleDescriptionRole).toString()
+          == "Daemon, connecting, expanded, last known");
+}
+
+TEST_CASE("SidebarModel: a new need on another daemon is announced with its name", "[contour][sidebar][a11y]")
+{
+    auto t =
+        SidebarUnderTest { ownHome(), { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) }, {} };
+    t.sidebar().setActivity(WindowActivity::Active);
+    auto const blocked = [](DaemonSection& section, std::size_t tab) {
+        section.directory.workspaces[0].tabs[tab].panes[0].status = { recordOf(ProgramState::Blocked) };
+    };
+    auto const starfiveRun = [](DaemonInstance run) {
+        return sectionOf(
+            Starfive,
+            run,
+            "starfive",
+            DaemonLinkState::Connected,
+            { directoryWorkspaceOf(5, "ci", { directoryPaneOf(50, "build"), directoryPaneOf(51, "test") }) });
+    };
+
+    // A daemon listed with a pane that already needs the user is not news.
+    t.sections.listed = { starfiveRun(StarfiveRun) };
+    blocked(t.sections.listed[0], 0);
+    t.sidebar().refreshNow();
+    CHECK(t.announcer.said.empty());
+
+    // A pane on it that begins to need the user is, once, and says which daemon.
+    blocked(t.sections.listed[0], 1);
+    t.sidebar().refreshNow();
+    t.sidebar().refreshNow();
+    REQUIRE(t.announcer.said.size() == 1);
+    CHECK(t.announcer.said.front().message == "test in ci on starfive needs you");
+    CHECK(t.announcer.said.front().politeness == QAccessible::AnnouncementPoliteness::Polite);
+
+    // Restarted, it is a new baseline: what its new run lists already is not news.
+    t.sections.listed = { starfiveRun(DaemonInstance { 10 }) };
+    blocked(t.sections.listed[0], 0);
+    t.sidebar().refreshNow();
+    CHECK(t.announcer.said.size() == 1);
+    blocked(t.sections.listed[0], 1);
+    t.sidebar().refreshNow();
+    CHECK(t.announcer.said.size() == 2);
+
+    // The window's own daemon's needs still say no daemon.
+    t.source.listed.workspaces.push_back(directoryWorkspaceOf(2, "docs", { directoryPaneOf(20) }));
+    t.sidebar().refreshNow();
+    t.source.listed.workspaces[1].tabs[0].panes[0].status = { recordOf(ProgramState::Blocked) };
+    t.sidebar().refreshNow();
+    REQUIRE(t.announcer.said.size() == 3);
+    CHECK(t.announcer.said.back().message == "shell in docs needs you");
+}
+
+TEST_CASE("SidebarModel: a jump's landing, cancel and failure are announced politely",
+          "[contour][sidebar][a11y]")
+{
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    auto const ci = SidebarTarget { .daemon = Starfive, .instance = StarfiveRun, .workspace = 5 };
+
+    t.sidebar().noteJump(JumpEvent::Connecting, ci, {});
+    t.sidebar().noteJump(JumpEvent::Landed, ci, {});
+    t.sidebar().noteJump(JumpEvent::Cancelled, ci, {});
+    t.sidebar().noteJump(JumpEvent::Failed, ci, "host key changed");
+    // A daemon's default workspace is none the sidebar names; a daemon it does not list is called by its
+    // reference; the window's own is found in its own directory.
+    t.sidebar().noteJump(
+        JumpEvent::Landed, SidebarTarget { .daemon = Starfive, .instance = StarfiveRun }, {});
+    t.sidebar().noteJump(JumpEvent::Failed, SidebarTarget { .daemon = hostDaemonRef("pi") }, {});
+    t.sidebar().noteJump(
+        JumpEvent::Landed, SidebarTarget { .daemon = Home, .instance = HomeRun, .workspace = 1 }, {});
+
+    auto const said = t.announcer.said
+                      | std::views::transform([](auto const& entry) { return entry.message.toStdString(); });
+    CHECK(std::ranges::equal(said,
+                             std::array<std::string, 7> { "Connecting to starfive…",
+                                                          "Now on starfive › ci",
+                                                          "Jump cancelled",
+                                                          "Could not reach starfive: host key changed",
+                                                          "Now on starfive",
+                                                          "Could not reach pi",
+                                                          "Now on default › billing" }));
+    CHECK(std::ranges::all_of(t.announcer.said, [](auto const& entry) {
+        return entry.politeness == QAccessible::AnnouncementPoliteness::Polite;
+    }));
+}
+
+TEST_CASE("SidebarModel: a host that is not running offers neither Start nor Remove", "[contour][sidebar]")
+{
+    // A host's relay reports its daemon absent: nothing here starts it, and Remove is this machine's verb.
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::NotRunning) } };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    REQUIRE(daemon >= 0);
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::DaemonButtonsRole).toList()
+          == QVariantList { static_cast<int>(sidebarrows::DaemonRowButton::None),
+                            static_cast<int>(sidebarrows::DaemonRowButton::None) });
+    // Return folds what was last known of it, and starts nothing.
+    std::ignore = t.sidebar().activateRow(daemon);
+    CHECK(t.sections.calls.empty());
+}
+
+TEST_CASE("SidebarModel: Connect on the window's own section seeks its link again", "[contour][sidebar]")
+{
+    // The chip's Disconnected reads Failed on the window's own heading: its Connect is the chip's
+    // Reconnect, for the daemon sections leave a link a window holds to that window.
+    auto own = ownHome();
+    own.state = DaemonLinkState::Failed;
+    auto t = SidebarUnderTest { own, { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) }, {} };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Home, HomeRun));
+    REQUIRE(daemon >= 0);
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::DaemonButtonsRole).toList()
+          == QVariantList { static_cast<int>(sidebarrows::DaemonRowButton::Connect),
+                            static_cast<int>(sidebarrows::DaemonRowButton::None) });
+    t.sidebar().pressDaemonButton(daemon, static_cast<int>(sidebarrows::DaemonRowButton::Connect));
+    CHECK(t.host.reconnects == 1);
+    CHECK(t.sections.calls.empty());
+
+    CHECK(t.host.promptRaises == 0);
+}
+
+TEST_CASE("SidebarModel: Connect on the window's own link that needs you raises its prompt",
+          "[contour][sidebar]")
+{
+    // The link already waits for the user: seeking it again would only be refused, and say so in every
+    // pane's footer ("the connection is already being sought"). Its Connect, and activating the row, bring
+    // the prompt it waits on to the front instead.
+    auto own = ownHome();
+    own.state = DaemonLinkState::NeedsInput;
+    auto t = SidebarUnderTest { own, { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) }, {} };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Home, HomeRun));
+    REQUIRE(daemon >= 0);
+    t.sidebar().pressDaemonButton(daemon, static_cast<int>(sidebarrows::DaemonRowButton::Connect));
+    CHECK(t.host.promptRaises == 1);
+    std::ignore = t.sidebar().activateRow(daemon);
+    CHECK(t.host.promptRaises == 2);
+    CHECK(t.host.reconnects == 0);
+    CHECK(t.sections.calls.empty());
+}
+
+TEST_CASE("SidebarModel: a daemon another window is on offers no Connect", "[contour][sidebar]")
+{
+    // Another window of this process holds starfive's link: that window's chip seeks it again.
+    auto starfive = starfiveIn(DaemonLinkState::Failed);
+    starfive.feed = SectionFeed::WindowLink;
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfive } };
+    auto const daemon = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    REQUIRE(daemon >= 0);
+    CHECK(t.sidebar().index(daemon).data(SidebarModel::DaemonButtonsRole).toList()
+          == QVariantList { static_cast<int>(sidebarrows::DaemonRowButton::None),
+                            static_cast<int>(sidebarrows::DaemonRowButton::None) });
+    t.sidebar().connectDaemon(daemon);
+    CHECK(t.sections.calls.empty());
+    CHECK(t.host.reconnects == 0);
+}
+
+TEST_CASE("SidebarModel: a daemon row's buttons map to their verbs here", "[contour][sidebar]")
+{
+    auto const work = localDaemonRef("work");
+    auto t = SidebarUnderTest {
+        ownHome(),
+        { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+        { sectionOf(
+              work, DaemonInstance { 3 }, "work", DaemonLinkState::NotRunning, {}, DaemonLocality::Local),
+          starfiveIn(DaemonLinkState::NotConnected) }
+    };
+    auto const stopped = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, work, DaemonInstance { 3 }));
+    auto const host = t.sidebar().rowIndexOf(keyOf(SidebarRowKind::Daemon, Starfive, StarfiveRun));
+    using Button = sidebarrows::DaemonRowButton;
+    t.sidebar().pressDaemonButton(stopped, static_cast<int>(Button::Start));
+    t.sidebar().pressDaemonButton(stopped, static_cast<int>(Button::Remove));
+    t.sidebar().pressDaemonButton(host, static_cast<int>(Button::Connect));
+    // None, and a value out of range, do nothing.
+    t.sidebar().pressDaemonButton(host, static_cast<int>(Button::None));
+    t.sidebar().pressDaemonButton(host, 99);
+    using Call = contour::test::DaemonSectionsCall;
+    CHECK(t.sections.calls
+          == std::vector {
+              Call { .verb = Call::Start { .daemon = work } },
+              Call { .verb = Call::Remove { .daemon = work } },
+              Call { .verb = Call::Connect { .daemon = Starfive, .askingWindow = t.host.window } } });
+    t.host.pending = SidebarTarget {
+        .daemon = Starfive, .instance = StarfiveRun, .workspace = 5, .tab = std::nullopt, .pane = {}
+    };
+    t.sidebar().pressDaemonButton(host, static_cast<int>(Button::Cancel));
+    CHECK(t.host.cancels == 1);
+}
+
+TEST_CASE("SidebarModel: the selection is reported for scrolling only when it is another row",
+          "[contour][sidebar]")
+{
+    // The window shows build on its own daemon, listed first; starfive's section below it grows.
+    auto t = SidebarUnderTest {
+        ownHome(),
+        { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+        { sectionOf(Home, HomeRun, "default", DaemonLinkState::Connected, {}, DaemonLocality::Local),
+          starfiveIn(DaemonLinkState::Connected) }
+    };
+    t.host.displayed = TabRef { .workspace = 1, .tab = 10 };
+    t.sidebar().refreshNow();
+    auto other = QSignalSpy { &t.sidebar(), &SidebarModel::currentRowChanged };
+
+    // A row above the selection appears: its index moves, the row does not.
+    t.source.listed.workspaces.insert(t.source.listed.workspaces.begin(),
+                                      directoryWorkspaceOf(2, "api", { directoryPaneOf(20) }));
+    t.sidebar().refreshNow();
+    CHECK(other.count() == 0);
+
+    // The window lands on another tab: that one is brought into view.
+    t.host.displayed = TabRef { .workspace = 2, .tab = 20 };
+    t.sidebar().refreshNow();
+    CHECK(other.count() == 1);
+}
+
+TEST_CASE("SidebarModel: the filter's Return with nothing typed goes nowhere", "[contour][sidebar]")
+{
+    // With no filter and every row listed there is no match: nothing is activated, and the tree takes the
+    // keyboard, as before rows on other daemons were listed.
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    CHECK(t.sidebar().activateFirstMatch(static_cast<int>(JumpMode::Here))
+          == sidebarrows::RowActivation::Unfiltered);
+    CHECK(t.host.jumps.empty());
+    CHECK(t.host.shown.empty());
+    CHECK(t.host.shownWorkspaces.empty());
+}
+
+TEST_CASE("SidebarModel: a pane that matches beneath a tab that does not is where Return goes",
+          "[contour][sidebar]")
+{
+    // One tab, "t", of two panes: the tab is listed as the ancestor of "logs", which it is not.
+    auto workspace = directoryWorkspaceOf(1, "billing", { directoryPaneOf(10, "shell") });
+    workspace.tabs.front().name = "t";
+    workspace.tabs.front().panes.push_back(directoryPaneOf(11, "logs"));
+    auto t = SidebarUnderTest { ownHome(), { workspace }, {} };
+    t.sidebar().setFilter(QStringLiteral("logs"));
+    CHECK(t.sidebar().activateFirstMatch(static_cast<int>(JumpMode::Here))
+          == sidebarrows::RowActivation::Shown);
+    CHECK(t.host.shown == std::vector { PaneKey { 11 } });
+}
+
+TEST_CASE("SidebarModel: a dropped sidebar queues no rebuild", "[contour][sidebar]")
+{
+    // A window that closes drops its sidebar's subscription: a notice after that rebuilds nothing.
+    auto t = SidebarUnderTest { ownHome(),
+                                { directoryWorkspaceOf(1, "billing", { directoryPaneOf(10) }) },
+                                { starfiveIn(DaemonLinkState::Connected) } };
+    REQUIRE(t.sidebar().sectionsFeed() == SectionsFeed::Followed);
+    REQUIRE(t.sections.subscriberCount() == 1);
+    t.sidebar().followSections(SectionsFeed::Dropped);
+    CHECK(t.sidebar().sectionsFeed() == SectionsFeed::Dropped);
+    CHECK(t.sections.subscriberCount() == 0);
+    t.sections.changed();
+    CHECK_FALSE(t.sidebar().isRebuildPending());
+
+    // Following again catches up on what changed meanwhile.
+    t.sidebar().followSections(SectionsFeed::Followed);
+    CHECK(t.sections.subscriberCount() == 1);
+    CHECK(t.sidebar().isRebuildPending());
 }

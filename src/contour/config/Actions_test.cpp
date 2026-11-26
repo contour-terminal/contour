@@ -96,6 +96,26 @@ TEST_CASE("actions::fromString round-trips the new pane actions", "[actions][par
     CHECK_FALSE(actions::fromString("NoSuchPaneAction").has_value());
 }
 
+TEST_CASE("CancelSwitch round-trips by name", "[actions][parse][sidebar]")
+{
+    auto const parsed = actions::fromString("CancelSwitch");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::CancelSwitch>(*parsed));
+    CHECK(actions::name(*parsed) == "CancelSwitch");
+    CHECK_FALSE(actions::isParameterized(*parsed));
+}
+
+TEST_CASE("ToggleSidebarNeedsMe round-trips by name", "[actions][parse][sidebar]")
+{
+    auto const parsed = actions::fromString("ToggleSidebarNeedsMe");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::ToggleSidebarNeedsMe>(*parsed));
+    CHECK(actions::name(*parsed) == "ToggleSidebarNeedsMe");
+    CHECK_FALSE(actions::isParameterized(*parsed));
+    // A toggle: a held key would only flip it back and forth.
+    CHECK(actions::isNonRepeatable(*parsed));
+}
+
 TEST_CASE("actions::fromString names the window's Minimize and Zoom", "[actions][parse]")
 {
     CHECK(std::holds_alternative<actions::MinimizeWindow>(*actions::fromString("MinimizeWindow")));

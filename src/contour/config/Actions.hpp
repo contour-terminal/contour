@@ -226,7 +226,9 @@ struct FocusToolbar{};        // move keyboard focus to the window's toolbar
 struct ToggleSidebar{};       // show the workspace sidebar when it is hidden, hide it when it is shown
 struct FocusSidebar{};        // show the workspace sidebar if needed and move keyboard focus into it
 struct FilterWorkspaces{};    // show the workspace sidebar if needed and put the keyboard in its filter
+struct ToggleSidebarNeedsMe{}; // list only what needs the user in the sidebar, or everything again
 struct JumpToNextAttention{}; // show the next pane that needs you
+struct CancelSwitch{};        // end a sidebar jump still under way, leaving the window as it was
 struct MarkSeen{};            // mark the active pane's output as seen
 struct RenameWorkspace{};     // rename the current workspace inline
 struct MoveWorkspaceUp{};     // move the current workspace one place up in the list
@@ -377,7 +379,9 @@ using ActionVariant = std::variant<CancelSelection,
                                    ToggleSidebar,
                                    FocusSidebar,
                                    FilterWorkspaces,
+                                   ToggleSidebarNeedsMe,
                                    JumpToNextAttention,
+                                   CancelSwitch,
                                    MarkSeen,
                                    RenameWorkspace,
                                    MoveWorkspaceUp,
@@ -567,6 +571,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     MoveToNewWorkspace,
                                                     ToggleSidebar,
                                                     FilterWorkspaces,
+                                                    ToggleSidebarNeedsMe,
                                                     JumpToNextAttention,
                                                     LaunchLayout,
                                                     SaveLayout,
@@ -927,6 +932,15 @@ namespace documentation
     constexpr inline std::string_view FilterWorkspaces {
         "Opens the workspace sidebar's filter with the keyboard in it, showing the sidebar first when it is "
         "hidden."
+    };
+    constexpr inline std::string_view ToggleSidebarNeedsMe {
+        "Lists only what needs you in the workspace sidebar, showing the sidebar first when it is hidden; "
+        "again "
+        "lists everything."
+    };
+    constexpr inline std::string_view CancelSwitch {
+        "Ends a jump the sidebar started that is still under way, leaving the window where it was; nothing "
+        "while none is. Not listed in the command palette."
     };
     constexpr inline std::string_view JumpToNextAttention {
         "Shows the next pane that needs you: one that waits for input, or whose command failed."

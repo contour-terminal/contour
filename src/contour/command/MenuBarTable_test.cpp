@@ -335,6 +335,28 @@ TEST_CASE("menuBar.sidebarRowIsNamedForWhatItDoes", "[menubar]")
     CHECK(find(find(bar, "View")->children, "Hide Sidebar")->check == RowCheck::None);
 }
 
+TEST_CASE("the View menu's Needs Me row is checked while the scope is on", "[menubar][sidebar]")
+{
+    auto state = fullState();
+    auto const rowOf = [&](config::SidebarScope scope) {
+        state.sidebarScope = scope;
+        auto const bar = buildMenuBar(state);
+        auto const* view = find(bar, "View");
+        REQUIRE(view != nullptr);
+        auto const* row = find(view->children, "Show Only What Needs Me");
+        REQUIRE(row != nullptr);
+        CHECK(std::holds_alternative<actions::ToggleSidebarNeedsMe>(row->action));
+        CHECK(row->availability == RowAvailability::Enabled);
+        return row->check;
+    };
+
+    CHECK(rowOf(config::SidebarScope::NeedsMe) == RowCheck::Checked);
+    CHECK(rowOf(config::SidebarScope::All) == RowCheck::Unchecked);
+    // It acts on a window's sidebar: none, nothing to narrow.
+    CHECK(find(buildMenuBar(MenuBarState {}), "Show Only What Needs Me")->availability
+          == RowAvailability::Disabled);
+}
+
 TEST_CASE("menuBar.windowRowsNeedAWindow", "[menubar]")
 {
     auto const bare = buildMenuBar(MenuBarState {});

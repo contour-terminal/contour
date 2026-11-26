@@ -31,6 +31,9 @@ Item {
     property bool checkable: false
     /// Whether what it toggles is on.
     property bool checked: false
+    /// Whether a checked button wears the pressed fill while it is checked, as a toggle in a header bar does.
+    /// Off for a toggle whose surface shows its state already (the sidebar's toggle).
+    property bool drawsChecked: false
     /// What assistive technology announces the button as.
     property string accessibleName
     /// What else the button does, such as what its secondary click opens; empty for nothing more.
@@ -108,6 +111,7 @@ Item {
         anchors.fill: parent
         radius: chromeStyle.radii.control
         color: primary.pressed || secondary.pressed ? root.colors.controlPressedFill
+             : root.drawsChecked && root.checked ? root.colors.controlPressedFill
              : hover.hovered || root.activeFocus ? root.hoverFill
              : "transparent"
     }

@@ -93,11 +93,12 @@ The footer shows the key, so you find it again.
 | `MoveWorkspaceDown` / `MoveWorkspaceUp`: move the current workspace in the list | ⌃⇧⌘↓ / ⌃⇧⌘↑ | Ctrl+Shift+Alt+PageDown / PageUp |
 | `NewWorkspace`: create a workspace and show it | ⇧⌘N | Ctrl+Shift+Alt+N |
 | `FilterWorkspaces`: open the filter, showing the sidebar first when hidden | none | none |
+| `ToggleSidebarNeedsMe`: list only what needs you, or everything again | none | none |
 
 These are bound in the `native2026` defaults only, except `CycleWorkspace`, `MoveWorkspaceDown`/`Up` and
 `NewWorkspace`, which every defaults edition binds, one level up from the tab and window chords (Ctrl+PageUp/PageDown,
 Ctrl+Shift+PageUp/PageDown, Ctrl+Shift+N). `FilterWorkspaces`
-has no default chord; bind one in `input_mapping`. Each control's tooltip names the chord its action is bound to at the time, so a
+and `ToggleSidebarNeedsMe` have no default chord; bind one in `input_mapping`. Each control's tooltip names the chord its action is bound to at the time, so a
 binding you add shows there at once.
 
 By pointer, the **sidebar toggle** at the start of the title band (beside the traffic lights on macOS, at the
@@ -105,7 +106,13 @@ header bar's start on Linux, in the sidebar's own top row while a macOS sidebar 
 from the same spot both ways. The title bar's menu has **Show Sidebar** / **Hide Sidebar**, and so has the View
 menu on macOS. When no title band is on screen (full screen, or `tab_bar: never` with the title bar hidden) and
 the sidebar is hidden, the terminal's own right-click menu offers **Show Sidebar**, so the sidebar can always
-be brought back the way it went. The width you drag it to and whether you left it shown are
+be brought back the way it went.
+
+**Needs me.** The sidebar's Needs-me control (beside the filter button; on Linux, whose header bar above the
+sidebar has no room for it, beside the filter field, which stays open while the tree is narrowed), the `ToggleSidebarNeedsMe` action and **View ▸ Show Only What Needs Me** narrow the tree to the rows on
+the way to a pane that needs you (blocked, failed, or done and not seen), plus the tab the window shows and a jump
+under way. A second press of the same control lists everything again, folds as they were. With nothing to show the
+tree says **Nothing needs you** and offers **Show all**. The width you drag it to and whether you left it shown are
 remembered per user and win over the configured start state.
 
 ## Keyboard
@@ -118,10 +125,11 @@ With the focus in the sidebar (**⌘⇧E** or **Ctrl+Shift+D**):
 | Home / End | Move to the first or last row |
 | ← | Collapse the row; on a collapsed or leaf row, move to its parent |
 | → | Expand the row; on an expanded row, move to its first child |
-| Return | Show what the row names: the workspace, the tab, the pane |
+| Return | Show what the row names: the workspace, the tab, the pane; on a daemon row, fold it or connect |
+| Shift+Return | Open what the row names in a new window |
 | F2 | Rename the workspace or tab row |
 | Menu, Shift+F10 | Open the row's menu, as a right click does |
-| Escape | While a filter is typed, clear it; otherwise leave the sidebar and give the focus back to the terminal |
+| Escape | While a jump is under way, cancel it; else, while a filter is typed, clear it; otherwise leave the sidebar and give the focus back to the terminal |
 | Any printable key | Start filtering |
 
 **Type to filter.** The filter button in the sidebar's top row (a funnel; in the header bar on Linux) opens
@@ -232,8 +240,13 @@ Clicking the chip, or pressing Space or Return on it, opens the switcher below i
 typing filtering at once. The chip's tooltip, "Switch workspace or daemon", names whatever chord is bound.
 The chip stays highlighted while the popup is open, and clicking it again closes it; Escape closes the popup.
 
-With the sidebar shown, the band has no chip. The daemon heads the sidebar instead, `local ▾` with the same dot for
-a remote daemon, and opens the same switcher below itself with the same tooltip.
+With the sidebar shown, the band has no chip. The tree names the daemon in its heading row instead, and the
+sidebar's title row (on Linux the header bar's part above the sidebar) carries a **switcher** button that opens
+the same switcher below itself, with the same tooltip and chord. While the window's own connection is not up, the
+chip comes back to the band with its dot and state, even with the sidebar shown. With several daemons listed, the
+band's breadcrumb reads `daemon › workspace › tab`. A window attached to tmux has no daemon to head the tree: its
+host chip, `tmuxhost ▾`, heads the sidebar as before. On a narrow sidebar the Needs-me button gives way first, then
+the switcher; both are in the chrome's keyboard walk (Ctrl+F6).
 
 - Type to filter the workspaces; Return switches this window to the selected one, Shift+Return opens it in a
   new window. The row under the pointer shows a button that does the same.
@@ -246,6 +259,29 @@ a remote daemon, and opens the same switcher below itself with the same tooltip.
 
 The switcher keeps the sidebar's times running while it is open, so a working workspace's time moves on even
 with the sidebar hidden.
+
+Each daemon heads its section with a **daemon row**: its name in the platform's section-heading type (smaller
+than its workspaces, semibold, in the secondary ink, as a source list heads a section), standing where its
+workspaces' names stand (bold at the first column on the Terminal row, its fold mark after the name, so
+it is never taken for a workspace), the computer or server icon of a local or remote daemon after the name on the
+other rows, and one status at its end: the most urgent mark beneath it while it is connected, else its link's
+mark and words, with **Connect**, **Start** (and **Remove**) or **Cancel** as the link offers. Start and Remove
+are for daemons of this machine; a host that is not running offers neither. Connect on the window's own daemon
+reconnects it, as the location chip does; while its link waits for you, it brings the prompt it waits on to the
+front instead. A blank line sets each section apart. Clicking the row, Return, ← and → fold it. On a narrow
+sidebar the locality icon goes first, then Remove, then the button shrinks to its icon (a one-cell mark on the
+Terminal row: `→` Connect, `▶` Start, `⎋` Cancel), then the link's words move into the mark's tooltip, and last
+the name elides in the middle, never to fewer than six of its letters; Connect, Start or Cancel always stays. While a jump into a section is under way its row shows `⧗`, pulsing gently unless you reduce
+motion; **Cancel**, the `CancelSwitch` action or Escape in the sidebar ends it (Cancel on a daemon still
+connecting, with no jump under way, ends that connect). Whenever a daemon is not
+connected, its rows are what was last known of it: drawn in a dimmer ink, with no running mark, and counted
+neither in the footer nor on the workspace chip.
+
+In the tree and in its filter field, Escape first cancels a jump under way, then clears the filter, then gives
+the keyboard back to the terminal; in the terminal it stays the shell's. Return in the filter field goes to the
+first row that itself matches (a pane under a tab that does not, rather than the tab), Shift+Return opens that
+row in a new window, and Shift+Return on any row of the tree does the same; with nothing typed, Return moves into
+the tree.
 
 ## Tab placement
 
@@ -307,7 +343,7 @@ It is also in the Settings window, under **Appearance › Tab bar**.
 configuration is reloaded keeps the styles it opened with, and a window opened after it uses the new ones.
 
 See [Key mapping](configuration/key-mapping.md#workspace-sidebar) for the actions and their default chords.
-The default width is 220 px on macOS, 240 px on Fluent and ContourLinux, and 28 cells under
+The default width is 220 px on macOS, 240 px on Fluent, 260 px on ContourLinux, and 28 cells under
 `ui_style: terminal`.
 
 ### Defaults

@@ -4692,8 +4692,12 @@ TEST_CASE("a PaneSummary updates the directory without a mirror", "[attach][cont
         daemon.host->terminal(second.session)->writeToScreen("\033]2;building\033\\output\r\n");
         return 0;
     });
-    REQUIRE(waitUntil([&] { return paneOf(controller, second.id).title == "building"; }));
-    CHECK(paneOf(controller, second.id).activity == vthost::proto::OutputActivity::Output);
+    // Both, not one after the other: the title comes in a PaneSummary, the activity in the daemon's
+    // PaneAttentionState, and the directory can be read between the two.
+    REQUIRE(waitUntil([&] {
+        auto const pane = paneOf(controller, second.id);
+        return pane.title == "building" && pane.activity == vthost::proto::OutputActivity::Output;
+    }));
     CHECK(controller.pendingCount() == 1); // the selected workspace's session alone: second is no mirror
     controller.stop();
 }

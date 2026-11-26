@@ -223,6 +223,7 @@ class DaemonPresence final: public window::IDaemonSections
     // window::IDaemonSections
     [[nodiscard]] std::vector<window::DaemonSection> sections() const override;
     void connect(window::DaemonRef const& daemon, vtworkspace::WorkspaceId askingWindow) override;
+    void disconnect(window::DaemonRef const& daemon) override;
     void start(window::DaemonRef const& daemon) override;
     void remove(window::DaemonRef const& daemon) override;
     void setListed(window::DaemonRef const& daemon, window::SidebarListingChoice choice) override;
@@ -324,6 +325,8 @@ class DaemonPresence final: public window::IDaemonSections
     void redial(window::DaemonRef const& daemon, NativeController const* controller);
     /// Schedules @p observer's next redial, unless one is, or no window is visible.
     void scheduleRedial(window::DaemonRef const& daemon, Observer& observer);
+    /// Stops listening to @p observer's controller, and retires it (retire()).
+    void detach(Observer& observer);
     /// Stops @p controller without waiting, and keeps it until it is stopped and binds no pane.
     void retire(std::unique_ptr<NativeController> controller);
     /// Destroys the retired controllers that are stopped and bind no pane.

@@ -182,6 +182,11 @@ std::optional<session::SwitchTarget> DaemonLink::daemonTarget() const
     return switchTargetOf(address());
 }
 
+std::optional<window::DaemonRef> DaemonLink::daemonRef() const
+{
+    return daemonRefOf(address(), id());
+}
+
 NativeController::ResumeFallback DaemonLink::resumeFallback() const
 {
     return anyController().resumeFallback();

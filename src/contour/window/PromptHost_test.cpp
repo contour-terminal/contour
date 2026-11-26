@@ -175,3 +175,24 @@ TEST_CASE("a window that closes cancels its prompts, and one that comes later ge
     REQUIRE(replied.replies.size() == 1);
     CHECK(replied.replies.front().outcome == AskpassOutcome::Cancelled);
 }
+
+TEST_CASE("a window's host raises the prompt it holds, and only then", "[askpass][prompthost]")
+{
+    auto replied = Replied {};
+    auto router = std::make_shared<AskpassPromptRouter>();
+    auto host = PromptHost { router, 1 };
+    auto spy = QSignalSpy { &host, &PromptHost::raiseRequested };
+
+    // Nothing is open: nothing to bring to the front.
+    host.raise();
+    CHECK(spy.count() == 0);
+
+    router->ask(1, 5, AskpassPromptKind::Secret, "ssh://me@host", "me@host's password: ", replied.reply());
+    host.raise();
+    CHECK(spy.count() == 1);
+
+    // Answered, it is gone again.
+    host.answerPrompt(5, static_cast<int>(AskpassOutcome::Answered), QStringLiteral("secret"));
+    host.raise();
+    CHECK(spy.count() == 1);
+}

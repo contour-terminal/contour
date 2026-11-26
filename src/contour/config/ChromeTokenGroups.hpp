@@ -347,6 +347,9 @@ enum class ChromeColorRole : uint8_t
     /// rather than the accent; the active fill on the rows whose platform keeps the accent.
     SidebarSelectionFillInactive,
     SidebarSelectionInkInactive, //!< The selected row's label and glyph on that fill.
+    /// A row last known of a daemon that is not connected: its name and marks, a step dimmer than a live
+    /// row's ink (spec §11), yet 3:1 on the sidebar's fill.
+    SidebarLastKnownInk,
 };
 
 /// Where a chrome colour comes from.
@@ -450,8 +453,7 @@ inline constexpr std::array SchemeMarkChains {
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount =
-    static_cast<size_t>(ChromeColorRole::SidebarSelectionInkInactive) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::SidebarLastKnownInk) + 1;
 
 // Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
 // family added between two others then shifts no count.
@@ -491,8 +493,7 @@ inline constexpr size_t SettingsColorRoleEnd = static_cast<size_t>(ChromeColorRo
 /// The first workspace sidebar colour role.
 inline constexpr size_t SidebarColorRoleBegin = static_cast<size_t>(ChromeColorRole::SidebarFill);
 /// One past the last workspace sidebar colour role.
-inline constexpr size_t SidebarColorRoleEnd =
-    static_cast<size_t>(ChromeColorRole::SidebarSelectionInkInactive) + 1;
+inline constexpr size_t SidebarColorRoleEnd = static_cast<size_t>(ChromeColorRole::SidebarLastKnownInk) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -769,6 +770,10 @@ struct TypeTokens
     double paletteInput = 0.0; ///< The command palette's query.
     double shortcut = 0.0;     ///< A command palette row's shortcut.
 
+    /// A sidebar section's heading (a daemon row's name), as the platform heads a source list's section.
+    double sidebarSection = 0.0;
+    int sidebarSectionWeight = 400; ///< Its weight, on the CSS 100-900 scale.
+
     [[nodiscard]] bool operator==(TypeTokens const&) const = default;
 };
 
@@ -1017,6 +1022,14 @@ enum class SidebarHeading : uint8_t
     Named,       //!< The row says "Workspaces".
 };
 
+/// Where the sidebar's Needs-me toggle stands. "Needs me" is a scope of the filter, so a look whose title
+/// row would crowd its heading keeps the toggle beside the filter field instead.
+enum class SidebarNeedsMePlace : uint8_t
+{
+    TitleRow = 0, //!< Among the title row's buttons.
+    FilterRow,    //!< Beside the filter field: shown while the filter is open or the scope narrows the tree.
+};
+
 /// How a workspace row's disclosure (its fold) is drawn.
 enum class SidebarDisclosure : uint8_t
 {
@@ -1040,6 +1053,7 @@ struct SidebarLookTraits
     SidebarAddPlace add = SidebarAddPlace::TitleRow;        ///< Where its new-workspace button stands.
     SidebarHeading heading = SidebarHeading::Named;         ///< Whether its title row says "Workspaces".
     SidebarDisclosure disclosure = SidebarDisclosure::CellGlyph; ///< How a workspace row's fold is drawn.
+    SidebarNeedsMePlace needsMe = SidebarNeedsMePlace::TitleRow; ///< Where its Needs-me toggle stands.
 };
 
 /// The traits of each SidebarLook, in enumerator order.
@@ -1067,7 +1081,10 @@ inline constexpr auto SidebarLookRows = std::array {
                         .feedback = SidebarRowFeedback::HoverAndPressed,
                         .add = SidebarAddPlace::TitleRow,
                         .heading = SidebarHeading::Named,
-                        .disclosure = SidebarDisclosure::Chevron },
+                        .disclosure = SidebarDisclosure::Chevron,
+                        // The header bar's part also holds the filter and new-workspace buttons and, on a
+                        // daemon's window, the switcher: a fourth icon would elide "Workspaces".
+                        .needsMe = SidebarNeedsMePlace::FilterRow },
     SidebarLookTraits { .look = SidebarLook::CellTree,
                         .span = SidebarSpan::UnderBand,
                         .title = SidebarTitle::InSidebar,

@@ -1,8 +1,8 @@
 // vim:syntax=qml
 // The workspace sidebar: every workspace the window can show, their tabs and the panes of the split ones, as
-// one tree (WindowController.sidebar, a SidebarModel), with a title row (its toggle, its heading, its filter
-// button and, where the row keeps it there, its new-workspace button), a type-to-filter field, the footer's
-// counts and a divider the user drags to resize it.
+// one tree (WindowController.sidebar, a SidebarModel), with a title row (its toggle, its heading, its Needs-me
+// and filter buttons and, where the row keeps it there, its new-workspace button), a type-to-filter field, the
+// Needs-me scope's empty state, the footer's counts and a divider the user drags to resize it.
 //
 // The model decides what every row says and the C++ side every rule: the order statuses rank in, what the
 // keys of the focused tree mean (WindowController.chromeKey, which hands the tree's own commands back through
@@ -14,6 +14,7 @@
 // one-cell column of `│` that never moves).
 import QtQuick
 import QtQuick.Controls
+import Contour.Terminal
 
 Rectangle {
     id: root
@@ -32,8 +33,8 @@ Rectangle {
     /// Whether the header bar above draws the title row (UiStyleProvider.sidebarTitleInHeaderBar): then the
     /// sidebar draws none of its own.
     property bool titleInHeaderBar: false
-    /// Where the location chip shows (WindowController.chip.place, Main.qml's to pass): "sidebar" puts
-    /// the daemon control at the head of the title row, where the heading would be.
+    /// Where the location chip shows (WindowController.chip.place, Main.qml's to pass): "sidebar" puts a tmux
+    /// window's host control at the head of the title row, where the heading would be.
     property string chipPlace: "none"
     /// The sidebar's toggle as UiStyleProvider::sidebarToggle answers it (Main.qml): `host` "sidebar" puts it
     /// at the title row's leading end, at the spot the band holds it while the sidebar is hidden, and `label`
@@ -55,14 +56,23 @@ Rectangle {
     /// The dividing column's width: one cell on the cell tree, a hairline elsewhere.
     readonly property real dividerWidth: chromeStyle.sidebar.dividerGlyph !== "" ? chromeStyle.cellWidth
                                                                                 : chromeStyle.borderWidth
-    /// The daemon control heading the title row, while it shows there; null otherwise. A toolbar item: the
-    /// chrome's keyboard walk visits it (Main.qml).
-    readonly property Item daemonChip: daemonChipSlot.item
-    /// Whether the daemon control heads the title row, in the heading's place: the one answer the heading's
-    /// visibility and the control's loading both follow.
+    /// The title row's toolbar items on screen, in visual order: a tmux window's host chip heading it, the
+    /// switcher and the Needs-me control. The chrome's keyboard walk (Ctrl+F6) visits them (Main.qml).
+    readonly property var toolbarControls: [daemonChipSlot.item, switcherButton, needsMeButton]
+        .filter((item) => item !== null && item.visible && titleRow.visible)
+    /// Whether the host control heads the title row, in the heading's place: the one answer the heading's
+    /// visibility and the control's loading both follow. Only a host that is no daemon (a tmux attach) puts
+    /// it here; a daemon's window names its daemon in the tree's heading row.
     readonly property bool daemonChipShown: root.chipPlace === "sidebar" && !!root.controller && titleRow.visible
     /// The tree (a ListView), for the tests.
     readonly property alias tree: tree
+    /// Whether the user opened the filter field (a typed key, the filter button or its action).
+    property bool filterOpen: false
+    /// Whether the Needs-me toggle stands beside the filter field (chromeStyle.sidebar.needsMeInFilterRow):
+    /// "Needs me" is a scope of the filter, and that look's title row has no room for a fourth button.
+    readonly property bool needsMeInFilterRow: chromeStyle.sidebar.needsMeInFilterRow
+    /// Whether the Needs-me scope narrows the tree (a config::SidebarScope other than All).
+    readonly property bool narrowed: !!root.model && root.model.scope !== SidebarRows.SidebarScope.All
 
     color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.sidebarFill
     clip: true
@@ -90,22 +100,32 @@ Rectangle {
         case root.commands.expand: tree.currentIndex = root.model.expandOrChild(current); break
         case root.commands.rename: root.renameRow(current); break
         case root.commands.filter:
-            filterField.visible = true
+            root.filterOpen = true
             filterField.text += text
             filterField.forceActiveFocus()
             break
         case root.commands.clearFilter:
             filterField.text = ""
-            filterField.visible = false
+            root.filterOpen = false
             break
         case root.commands.openMenu: root.openRowMenu(current); break
+        case root.commands.openInNewWindow: if (root.model) root.model.openInNewWindow(current); break
         }
         tree.positionViewAtIndex(tree.currentIndex, ListView.Contain)
     }
 
+    /// What Return (with @p modifiers) in the filter field does: activates the first row it left.
+    function acceptFilter(modifiers) {
+        const mode = (modifiers & Qt.ShiftModifier) ? SidebarRows.JumpMode.NewWindow : SidebarRows.JumpMode.Here
+        // With nothing typed and every row listed there is no match: the tree takes the keyboard, as Down does.
+        if (root.controller && root.controller.activateSidebarFirstMatch
+                && root.controller.activateSidebarFirstMatch(mode) === SidebarRows.RowActivation.Unfiltered)
+            tree.forceActiveFocus()
+    }
+
     /// Opens the filter field and puts the keyboard in it: the filter button, and the header bar's.
     function openFilter() {
-        filterField.visible = true
+        root.filterOpen = true
         filterField.forceActiveFocus()
     }
 
@@ -181,6 +201,17 @@ Rectangle {
             root.window.restoreTerminalFocus()
     }
 
+    // After a jump or a switch the selected row may be anywhere: it is brought into view once it is another
+    // row (SidebarModel::currentRowChanged), not each time a growing section above it shifts its index, which
+    // would snap back a view the user scrolls.
+    Connections {
+        target: root.model
+        function onCurrentRowChanged() {
+            if (root.model.currentIndex >= 0)
+                tree.positionViewAtIndex(root.model.currentIndex, ListView.Contain)
+        }
+    }
+
     Connections {
         target: root.controller
         ignoreUnknownSignals: true // a lightweight mock controller may carry no sidebar commands
@@ -236,10 +267,11 @@ Rectangle {
     }
 
     // The title row, unless the header bar draws it above the sidebar: the sidebar's toggle where the band
-    // leaves it here, the heading ("Workspaces", where the row names its list), the filter button and, where
-    // the row keeps it here rather than in the footer, the "+" that makes a workspace. Beside the band it is
-    // the band's height, the OS's controls over its leading end. Its empty places are the title bar's: a drag
-    // moves the window, a double-click maximises it, as the band does (TitleBarGestures.qml).
+    // leaves it here, the heading ("Workspaces", where the row names its list), the Needs-me and filter
+    // buttons and, where the row keeps it here rather than in the footer, the "+" that makes a workspace.
+    // Beside the band it is the band's height, the OS's controls over its leading end. Its empty places are
+    // the title bar's: a drag moves the window, a double-click maximises it, as the band does
+    // (TitleBarGestures.qml).
     Item {
         id: titleRow
         objectName: "sidebarTitleRow"
@@ -256,6 +288,9 @@ Rectangle {
         readonly property real gap: chromeStyle.sidebar.dividerGlyph !== ""
                                     ? Math.max(chromeStyle.space.s3, chromeStyle.cellWidth) : chromeStyle.space.s3
         readonly property real buttonExtent: Math.min(chromeStyle.size.toolbarButton, titleRow.height)
+        // Between the row's buttons: the smaller step, so four buttons, the toggle and the OS's controls share
+        // the default width; a cell on the Terminal row, as at the row's ends.
+        readonly property real buttonGap: chromeStyle.sidebar.dividerGlyph !== "" ? titleRow.gap : chromeStyle.space.s2
 
         TitleBarGestures {
             objectName: "sidebarTitleGestures"
@@ -289,7 +324,7 @@ Rectangle {
             anchors.right: titleButtons.left
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: qsTr("Workspaces")
+            text: chromeStyle.sidebarHeading
             font: chromeStyle.type.footnoteStrong
             color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.sidebarSecondaryInk
             elide: Text.ElideRight
@@ -297,8 +332,9 @@ Rectangle {
             Accessible.name: text
         }
 
-        // The daemon control, heading the row in the heading's place (or, on a row with no heading, right after
-        // the toggle): the band holds no chip while the sidebar shows, so the daemon is named here alone.
+        // A tmux window's host control, heading the row in the heading's place (or, on a row with no heading,
+        // right after the toggle): the band holds no chip while the sidebar shows, so the host is named here
+        // alone. A daemon's window names its daemon in the tree's heading row instead (chip.place).
         Loader {
             id: daemonChipSlot
             active: root.daemonChipShown
@@ -319,10 +355,38 @@ Rectangle {
 
         Row {
             id: titleButtons
+            // Which controls give way to a narrow sidebar (UiStyleProvider.sidebarControlFit): the Needs-me
+            // control first, then the switcher. The room is the row's, less its leading toggle and inset.
+            readonly property var fit: chromeStyle.sidebarControlFit(
+                // Each control is counted with the gap before it; the first one's stands for the row's end margin.
+                titleRow.width - root.dividerWidth - titleRow.gap + titleRow.buttonGap
+                    - chromeStyle.snapToCells(root.controlsInset)
+                    - (toggleButton.visible ? toggleButton.width + titleRow.gap : 0),
+                chromeStyle.snapToCells(titleRow.buttonExtent) + titleRow.buttonGap,
+                [switcherButton.wanted, !root.needsMeInFilterRow, true, newWorkspaceButton.visible]
+                    .filter((wants) => wants).length)
             anchors.right: parent.right
             anchors.rightMargin: root.dividerWidth + titleRow.gap
             anchors.verticalCenter: parent.verticalCenter
-            spacing: titleRow.gap
+            spacing: titleRow.buttonGap
+
+            SidebarSwitcherButton {
+                id: switcherButton
+                objectName: "sidebarSwitcherButton"
+                controller: root.controller
+                visible: wanted && (titleButtons.fit.switcher ?? true)
+                extent: titleRow.buttonExtent
+                implicitWidth: chromeStyle.snapToCells(extent)
+            }
+
+            SidebarNeedsMeButton {
+                id: needsMeButton
+                objectName: "sidebarNeedsMeButton"
+                controller: root.controller
+                visible: !root.needsMeInFilterRow && (titleButtons.fit.needsMe ?? true)
+                extent: titleRow.buttonExtent
+                implicitWidth: chromeStyle.snapToCells(extent)
+            }
 
             SidebarControlButton {
                 objectName: "sidebarFilterButton"
@@ -354,28 +418,39 @@ Rectangle {
     }
 
     // Type-to-filter: opened by a typed key in the tree, it narrows the rows (SidebarModel.setFilter); Escape
-    // clears it and gives the tree the keyboard back.
+    // clears it and gives the tree the keyboard back. Where the look keeps the Needs-me toggle beside it, the
+    // row also stands while that scope narrows the tree, so the toggle that narrowed it is there to undo it.
     TextField {
         id: filterField
         objectName: "sidebarFilterField"
-        visible: false
+        visible: root.filterOpen || (root.needsMeInFilterRow && root.narrowed)
         anchors.left: parent.left
-        anchors.right: parent.right
+        anchors.right: filterNeedsMeButton.visible ? filterNeedsMeButton.left : parent.right
         anchors.top: titleRow.bottom
         anchors.leftMargin: chromeStyle.space.s3
-        anchors.rightMargin: root.dividerWidth + chromeStyle.space.s3
+        anchors.rightMargin: filterNeedsMeButton.visible ? chromeStyle.space.s2
+                                                         : root.dividerWidth + chromeStyle.space.s3
         height: visible ? implicitHeight : 0
         font: chromeStyle.type.body
         Accessible.role: Accessible.EditableText
         Accessible.name: qsTr("Filter workspaces")
         onTextChanged: if (root.model) root.model.setFilter(text)
+        // A jump under way is what Escape ends first, as in the tree (window::sidebarEscapeCommand()); the
+        // next one clears the filter and gives the keyboard back.
         Keys.onEscapePressed: {
+            if (root.model && root.model.isJumpPending()) {
+                root.model.cancelJump()
+                return
+            }
             filterField.text = ""
-            filterField.visible = false
+            root.filterOpen = false
             root.returnFocus()
         }
         Keys.onDownPressed: tree.forceActiveFocus()
-        onAccepted: tree.forceActiveFocus()
+        // Return goes to the first row the filter left, Shift+Return opens it in a window of its own; a row of
+        // the window's own then hands the terminal the keyboard (WindowController.activateSidebarFirstMatch).
+        Keys.onReturnPressed: (event) => root.acceptFilter(event.modifiers)
+        Keys.onEnterPressed: (event) => root.acceptFilter(event.modifiers)
 
         // The hint, drawn here rather than left to the style as placeholderText, as the command palette's is:
         // every style draws that from where the caret stands, so the caret stood on its first letter.
@@ -392,6 +467,19 @@ Rectangle {
             elide: Text.ElideRight
             Accessible.ignored: true
         }
+    }
+
+    // The Needs-me toggle of a look that keeps it beside the filter field (root.needsMeInFilterRow).
+    SidebarNeedsMeButton {
+        id: filterNeedsMeButton
+        objectName: "sidebarFilterNeedsMeButton"
+        controller: root.controller
+        visible: root.needsMeInFilterRow && filterField.visible
+        anchors.right: parent.right
+        anchors.rightMargin: root.dividerWidth + chromeStyle.space.s3
+        anchors.verticalCenter: filterField.verticalCenter
+        extent: Math.min(chromeStyle.size.toolbarButton, filterField.implicitHeight)
+        implicitWidth: chromeStyle.snapToCells(extent)
     }
 
     ListView {
@@ -430,6 +518,75 @@ Rectangle {
             enabled: chromeStyle.motion.animates
             NumberAnimation { property: "y"; duration: chromeStyle.motion.fast }
             NumberAnimation { property: "opacity"; to: 1; duration: chromeStyle.motion.fast }
+        }
+
+        // Under the Needs-me scope with nothing that needs the user: says so below what the scope still keeps
+        // (the shown tab's path), with the way back to every row.
+        footer: Column {
+            objectName: "sidebarEmptyState"
+            readonly property bool shown: !!root.model && root.model.emptyState !== 0
+            visible: shown
+            width: tree.width
+            height: shown ? implicitHeight : 0
+            topPadding: chromeStyle.space.s4
+            bottomPadding: chromeStyle.space.s4
+            spacing: chromeStyle.space.s2
+
+            Text {
+                objectName: "sidebarEmptyStateText"
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                textFormat: Text.PlainText
+                text: qsTr("Nothing needs you")
+                font: chromeStyle.type.footnote
+                color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.sidebarSecondaryInk
+                elide: Text.ElideRight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+            }
+
+            // The way back, as a quiet text button: hover and press wear the row's fills.
+            Item {
+                id: showAll
+                objectName: "sidebarEmptyStateShowAll"
+                anchors.horizontalCenter: parent.horizontalCenter
+                implicitWidth: showAllText.implicitWidth + chromeStyle.space.s3 + chromeStyle.space.s3
+                implicitHeight: showAllText.implicitHeight + chromeStyle.space.s2
+                Accessible.role: Accessible.Button
+                Accessible.name: showAllText.text
+                Accessible.onPressAction: showAll.activate()
+
+                function activate() {
+                    if (root.model)
+                        root.model.setScope(SidebarRows.SidebarScope.All)
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: chromeStyle.radii.control
+                    color: chromeStyle.paletteRevision < 0 ? "transparent"
+                         : showAllTap.pressed ? chromeStyle.colors.controlPressedFill
+                         : showAllHover.hovered ? chromeStyle.colors.tabHoverFill
+                         : "transparent"
+                }
+
+                Text {
+                    id: showAllText
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: qsTr("Show all")
+                    font: chromeStyle.type.footnoteStrong
+                    color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.colors.tabText
+                    Accessible.ignored: true
+                }
+
+                HoverHandler { id: showAllHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler {
+                    id: showAllTap
+                    gesturePolicy: TapHandler.ReleaseWithinBounds
+                    onTapped: showAll.activate()
+                }
+            }
         }
 
         delegate: SidebarRow {
