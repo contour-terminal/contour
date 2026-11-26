@@ -89,13 +89,16 @@ TEST_CASE("NewWorkspace selects what it creates", "[vthost][attach-plan]")
           == AttachPlan { .select = std::nullopt, .creation = AttachCreation::NewWorkspace });
 }
 
-TEST_CASE("Select selects the named workspace when it exists, else what a launch would",
-          "[vthost][attach-plan]")
+TEST_CASE("Select selects the named workspace when it exists, else nothing", "[vthost][attach-plan]")
 {
     CHECK(planAttach({ .kind = AttachIntentKind::Select, .workspace = 3 }, twoWorkspaces())
           == AttachPlan { .select = 3, .creation = AttachCreation::None });
-    CHECK(planAttach({ .kind = AttachIntentKind::Select, .workspace = 99 }, twoWorkspaces()).select
-          == Select { 1 });
+    // Neither a launch's pick nor anything created: the client says the workspace is gone.
+    CHECK(planAttach({ .kind = AttachIntentKind::Select, .workspace = 99 }, twoWorkspaces())
+          == AttachPlan { .select = std::nullopt, .creation = AttachCreation::None });
+    auto empty = AttachContext { .primaryWorkspace = 1, .workspaces = { { 1, 0 } } };
+    CHECK(planAttach({ .kind = AttachIntentKind::Select, .workspace = 2 }, empty)
+          == AttachPlan { .select = std::nullopt, .creation = AttachCreation::None });
 }
 
 TEST_CASE("Resume selects the survivor", "[vthost][attach-plan]")
@@ -160,8 +163,9 @@ TEST_CASE("ids of another run of the daemon name none of its workspaces", "[vtho
     CHECK(planAttach(ofRun(AttachIntentKind::Select, 8), context).select == Select { 2 });
     CHECK(planAttach(ofRun(AttachIntentKind::Select, 0), context).select == Select { 2 });
     CHECK(planAttach(ofRun(AttachIntentKind::Resume, 8), context).select == Select { 2 });
-    // Another run's: a launch, which takes the first hidden workspace.
-    CHECK(planAttach(ofRun(AttachIntentKind::Select, 7), context).select == Select { 1 });
+    // Another run's: a Resume launches, which takes the first hidden workspace; a Select selects nothing.
+    CHECK(planAttach(ofRun(AttachIntentKind::Select, 7), context)
+          == AttachPlan { .select = std::nullopt, .creation = AttachCreation::None });
     CHECK(planAttach(ofRun(AttachIntentKind::Resume, 7), context).select == Select { 1 });
     // A daemon that states no run of its own takes the ids as they are.
     auto unstated = context;

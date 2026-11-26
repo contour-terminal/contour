@@ -5582,21 +5582,24 @@ TEST_CASE("a second client sees every workspace's layout, and mirrors only the w
     CHECK(h.host.visibility(second->id().value) == vthost::WorkspaceVisibility::Hidden);
 }
 
-TEST_CASE("a Select naming an unknown workspace selects what a launch would",
+TEST_CASE("a Select naming an unknown workspace selects nothing and creates nothing",
           "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.workspaceId().value;
+    auto const workspaces = h.host.model().workspaceCount();
+    auto const sessions = h.host.sessionCount();
 
     auto const received = h.exchangeUntil(
         { intentHello(proto::AttachIntentKind::Select, { 999 }), proto::FetchImage { .imageId = 4242 } },
-        [](auto const& got) { return imageGoneArrived(got) && snapshotRunCount(got) >= 1; });
+        imageGoneArrived);
 
     auto const* hello = serverHelloOf(received);
     REQUIRE(hello != nullptr);
-    CHECK(hello->selectedWorkspace == first);
-    CHECK(snapshotSessions(received) == sessionsOf(h.host, first));
+    CHECK(hello->selectedWorkspace == 0);
+    CHECK(snapshotSessions(received).empty());
+    CHECK(h.host.model().workspaceCount() == workspaces);
+    CHECK(h.host.sessionCount() == sessions);
 }
 
 TEST_CASE("a client without the AttachIntent capability attaches as a launch",
@@ -8803,19 +8806,23 @@ TEST_CASE("the only workspace, kept empty when its last session ended, is select
     CHECK(h.session->selectedWorkspace() == own.value);
 }
 
-TEST_CASE("an attach selecting a workspace whose last session ended selects as a launch does",
+TEST_CASE("an attach selecting a workspace whose last session ended selects nothing",
           "[vthost][native][daemon-follow]")
 {
     auto h = NativeHarness {};
     REQUIRE(h.host.createTab() != nullptr);
-    auto const first = h.host.workspaceId().value;
     auto const ended = h.host.createWorkspace()->id();
     h.host.closeSession(h.host.model().workspace(ended)->tabAt(0)->rootPane()->session());
     REQUIRE(h.host.model().workspace(ended) == nullptr); // removed with its last session
+    auto const sessions = h.host.sessionCount();
 
-    std::ignore = h.exchangeUntil({ daemonFollowHello(proto::AttachIntentKind::Select, ended.value) },
-                                  [](auto const& got) { return snapshotRunCount(got) >= 1; });
-    CHECK(h.session->selectedWorkspace() == first);
+    auto const received = h.exchangeUntil(
+        { daemonFollowHello(proto::AttachIntentKind::Select, ended.value) },
+        [](auto const& got) { return serverHelloOf(got) != nullptr && !layoutWorkspaces(got).empty(); });
+    // Neither another window's workspace nor a new one: the client says the workspace is gone.
+    CHECK(h.session->selectedWorkspace() == 0);
+    CHECK(snapshotSessions(received).empty());
+    CHECK(h.host.sessionCount() == sessions);
 }
 
 TEST_CASE("a workspace made empty for its first tab has not ended", "[vthost][native][daemon-follow]")
