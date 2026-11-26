@@ -31,9 +31,10 @@ inline constexpr auto GeometryDumpVariable = std::string_view { "CONTOUR_TEST_GE
 
 /// The properties a dump reports of an item that has them: what a test tells one row, tab or button from
 /// another by. One row per property, so a test that needs another adds it here.
-inline constexpr auto GeometryDumpProperties = std::array<char const*, 15> {
-    "title",     "tabTitle", "kind", "index",       "tabIndex",     "depth",  "expansion",       "selected",
-    "tabActive", "checked",  "text", "activeFocus", "containsDrag", "opened", "keyboardFocused",
+inline constexpr auto GeometryDumpProperties = std::array<char const*, 18> {
+    "title",           "tabTitle",  "kind",      "index",     "tabIndex",    "depth",        "expansion",
+    "selected",        "tabActive", "checked",   "text",      "activeFocus", "containsDrag", "opened",
+    "keyboardFocused", "glyph",     "linkState", "selection",
 };
 
 /// Describes, as one line of JSON, every visible item of @p windows that has an object name, and every

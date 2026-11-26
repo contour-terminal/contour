@@ -499,7 +499,12 @@ forks: what differs is data.
   (`window/GeometryDump.hpp`); no pixel position is written into a case. The cases are opt-in: without
   `CONTOUR_E2E_DISPLAY=1` (set only by CI's e2e-display step), or without Xvfb or xdotool, they skip, saying
   so, so a plain `ctest` never starts X servers and GUI clients on a developer's machine. `CONTOUR_E2E_KEEP=1` keeps a case's logs and dumps, `CONTOUR_E2E_DEBUG=TAGS` turns on the
-  client's logging. Every process is killed by the PID it was started with.
+  client's logging. Every process is killed by the PID it was started with. The `multi_daemon_*` cases start
+  two more local daemons in the same private runtime directory, so the sidebar lists three; one that needs a
+  jump held under way stops the target daemon's server (SIGSTOP) until it lets it go.
+  `multi_daemon_jump_latency` times the jump to an observed local daemon, click to the other daemon's pane on
+  screen, off the X server's pixels, and logs the median and 95th percentile against the 100 ms goal
+  (`CONTOUR_E2E_LATENCY_JUMPS` sets the count, `CONTOUR_E2E_LATENCY_FILE` keeps the samples).
 - **Pixel tests for in-grid visuals.** Anything drawn in or over the grid (rails, chips, the cursor, hint
   labels) gets a `[display]` test that grabs a real frame and samples pixels
   (`test/DisplayPixels.hpp`, `display/CommandBlockRendering_test.cpp`,

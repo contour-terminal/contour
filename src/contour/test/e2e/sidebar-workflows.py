@@ -8,6 +8,10 @@ can -- and asserts what happened through the control API (`contour api call work
 draws is asserted off the X server's own pixels, in the one place the control API cannot see: that every terminal
 pane a case ends showing draws its terminal (expect_panes_draw), told by colours only the terminal uses.
 
+A multi-daemon case (`multi_daemon_*`) starts two more local daemons in the same private runtime directory before the
+client, each with a workspace of its own, so the window's sidebar lists three daemons; a jump it wants held under way
+stops the target daemon's server (SIGSTOP, by the PID of the recorded daemon's child) until it releases it.
+
 Where things are on screen comes from the window itself: CONTOUR_TEST_GEOMETRY_FILE makes the GUI write every
 named item's screen rectangle there (window::GeometryDump), so no pixel position is hard-coded here.
 
@@ -65,12 +69,16 @@ def deadline_loop(seconds, what, probe, interval=0.1):
 class Desktop:
     """One private X server, window manager, daemon and client; torn down by PID in any case."""
 
-    def __init__(self, contour, tab_placement="sidebar", in_process=False):
+    def __init__(self, contour, tab_placement="sidebar", in_process=False, others=()):
         self.contour = contour
+        # The labels of the local daemons started beside the window's own, each with one workspace of its own
+        # (OTHERS): the sidebar lists every local daemon that runs, so they head sections of their own.
+        self.others = tuple(others)
         # No daemon: the window's sessions live in the GUI process, which serves no control API, so a case
         # reads everything it asserts from the geometry dump.
         self.in_process = in_process
         self.procs = []  # (name, Popen), in start order
+        self.held = set()  # the PIDs of the daemon servers a case stopped (hold), resumed at the latest by stop()
         self.root = tempfile.mkdtemp(prefix="xdg", dir="/tmp")  # short: it holds the daemon's socket
         self.display = None
         self.drags = 0
@@ -85,9 +93,11 @@ class Desktop:
                                        daemon_mode="in_process" if in_process else "auto",
                                        background=hex_colour(TERMINAL_BACKGROUND),
                                        foreground=hex_colour(TERMINAL_FOREGROUND)))
+            if self.others:
+                config.write(MULTI_DAEMON_BINDINGS)
 
     # {{{ environment
-    def env(self, gui=False):
+    def env(self, gui=False, daemon=LABEL):
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": os.path.join(self.root, "home"),
@@ -105,9 +115,10 @@ class Desktop:
                      "QT_LOGGING_RULES"):
             if name in os.environ:
                 env[name] = os.environ[name]
-        # The control verbs reach the private daemon through it. An in-process window is given none to find.
+        # The control verbs reach the private daemon through it (or, with `daemon`, one of the others). An
+        # in-process window is given none to find.
         if not self.in_process:
-            env["CONTOUR_DAEMON"] = os.path.join(self.root, "run", "contour", LABEL)
+            env["CONTOUR_DAEMON"] = self.socket(daemon)
         if gui:
             if self.bus:
                 env["DBUS_SESSION_BUS_ADDRESS"] = self.bus
@@ -169,9 +180,29 @@ class Desktop:
         self.bus = self.spawn_reporting("bus", ["dbus-daemon", f"--config-file={config}", "--nofork",
                                                 "--print-address={fd}"], "its address")
 
+    def socket(self, label):
+        """The control socket of the daemon labelled so, in the private runtime directory discovery lists."""
+        return os.path.join(self.root, "run", "contour", label)
+
+    def start_other(self, label):
+        """Starts the local daemon `label` beside the window's own, and gives it one workspace whose tab is named
+        `<label>-t` (`<label>-ws` the workspace): what its section in the sidebar lists."""
+        self.spawn(f"daemon-{label}", [self.contour, "daemon", "--name", label], self.env(daemon=label))
+        deadline_loop(30, f"the daemon {label}", lambda: self.cli_ok("ls", daemon=label))
+        workspace = self.cli("workspace", "new", daemon=label)
+        # A daemon no client attached to yet holds one empty workspace; the new one is what the section lists.
+        for empty in self.workspaces(daemon=label):
+            if empty["id"] != workspace and not empty["tabs"]:
+                self.cli("workspace", "close", empty["id"], daemon=label)
+        self.cli("rename", workspace, f"{label}-ws", daemon=label)
+        tab = next(w for w in self.workspaces(daemon=label) if w["id"] == workspace)["tabs"][0]
+        self.cli("rename", tab["id"], f"{label}-t", daemon=label)
+
     def start(self):
         self.start_bus()
         self.start_xvfb()
+        for label in self.others:
+            self.start_other(label)
         self.spawn("wm", [sys.executable, "-I", os.path.join(HERE, "minimal-wm.py")], self.env(gui=True))
         deadline_loop(15, "the window manager", lambda: self.wm_ready())
         debug = ["--log", os.environ["CONTOUR_E2E_DEBUG"]] if os.environ.get("CONTOUR_E2E_DEBUG") else []
@@ -199,6 +230,12 @@ class Desktop:
             return ""
 
     def stop(self):
+        # A daemon a case held stopped (hold()) runs again, so it can take its SIGTERM.
+        for pid in self.held:
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
         # Client first, so it does not reconnect, then the daemon, the window manager and the server.
         for name, proc in reversed(self.procs):
             if proc.poll() is None:
@@ -225,30 +262,31 @@ class Desktop:
     # }}}
 
     # {{{ commands
-    def run(self, argv, gui=False, check=True, timeout=30):
-        result = subprocess.run(argv, env=self.env(gui=gui), capture_output=True, text=True, timeout=timeout,
-                                stdin=subprocess.DEVNULL)
+    def run(self, argv, gui=False, check=True, timeout=30, daemon=LABEL):
+        result = subprocess.run(argv, env=self.env(gui=gui, daemon=daemon), capture_output=True, text=True,
+                                timeout=timeout, stdin=subprocess.DEVNULL)
         if check and result.returncode != 0:
             raise Failure(f"{' '.join(argv)} exited {result.returncode}: {result.stderr.strip()}")
         return result
 
-    def cli(self, *args, check=True):
-        return self.run([self.contour, *args], check=check).stdout.strip()
+    def cli(self, *args, check=True, daemon=LABEL):
+        return self.run([self.contour, *args], check=check, daemon=daemon).stdout.strip()
 
-    def cli_ok(self, *args):
-        if not self.alive("daemon"):
-            raise Failure("the daemon exited:\n" + self.read_log("daemon"))
+    def cli_ok(self, *args, daemon=LABEL):
+        process = "daemon" if daemon == LABEL else f"daemon-{daemon}"
+        if not self.alive(process):
+            raise Failure(f"the daemon {daemon} exited:\n" + self.read_log(process))
         try:
-            return self.run([self.contour, *args], check=False).returncode == 0
+            return self.run([self.contour, *args], check=False, daemon=daemon).returncode == 0
         except subprocess.TimeoutExpired:
             return False
 
-    def api(self, method, request=None):
-        out = self.run([self.contour, "api", "call", method, json.dumps(request or {})]).stdout
+    def api(self, method, request=None, daemon=LABEL):
+        out = self.run([self.contour, "api", "call", method, json.dumps(request or {})], daemon=daemon).stdout
         return json.loads(out)
 
-    def workspaces(self):
-        return self.api("workspace.list")["workspaces"]
+    def workspaces(self, daemon=LABEL):
+        return self.api("workspace.list", daemon=daemon)["workspaces"]
 
     def xdotool(self, *args):
         return self.run(["xdotool", *[str(a) for a in args]], gui=True).stdout.strip()
@@ -263,6 +301,31 @@ class Desktop:
 
     def pid(self, name):
         return next(p.pid for n, p in self.procs if n == name)
+
+    def server_pid(self, label):
+        """The PID of the process that serves the daemon `label`: `contour daemon` keeps its server as a child
+        (`daemon keeper-serve`), which the PID this harness recorded is the parent of."""
+        keeper = self.pid("daemon" if label == LABEL else f"daemon-{label}")
+        with open(f"/proc/{keeper}/task/{keeper}/children") as f:
+            children = [int(c) for c in f.read().split()]
+        for child in children:
+            with open(f"/proc/{child}/cmdline", "rb") as f:
+                if b"keeper-serve" in f.read():
+                    return child
+        raise Failure(f"the daemon {label} (pid {keeper}) has no server child")
+
+    def hold(self, label):
+        """Stops the daemon `label`'s server (SIGSTOP), so a jump to it stays under way until release()."""
+        pid = self.server_pid(label)
+        os.kill(pid, signal.SIGSTOP)
+        self.held.add(pid)
+        log(f"held {label} (pid {pid})")
+
+    def release(self, label):
+        pid = self.server_pid(label)
+        os.kill(pid, signal.SIGCONT)
+        self.held.discard(pid)
+        log(f"released {label} (pid {pid})")
     # }}}
 
     # {{{ geometry
@@ -446,6 +509,19 @@ color_schemes:
     default:
       background: '{background}'
       foreground: '{foreground}'
+"""
+
+# The local daemons a multi-daemon case starts beside the window's own (Desktop.others).
+OTHERS = ("e2e-one", "e2e-two")
+
+# What a multi-daemon case binds: `input_mapping` replaces the built-in bindings, so every chord these cases press
+# is stated here, CycleDaemon's included (it has no default chord).
+MULTI_DAEMON_BINDINGS = """\
+input_mapping:
+  - { mods: [Control, Shift], key: D, action: FocusSidebar }
+  - { mods: [Control, Shift], key: J, action: JumpToNextAttention }
+  - { mods: [Control, Shift, Alt], key: J, action: JumpBack }
+  - { mods: [Control, Shift, Alt], key: RightArrow, action: CycleDaemon, direction: next }
 """
 
 # The terminal's colours, which nothing else on the screen has: a pane that draws shows the background over
@@ -877,6 +953,457 @@ def case_ctrl_d_quits_clean(d):
            "the client reported leaks:\n" + log_text)
     expect(client.returncode == 0, f"the client exited {client.returncode}:\n" + log_text)
 
+
+# {{{ several daemons
+DAEMON = 3  # window::SidebarRowKind::Daemon
+DONE, BELL = 2, 6  # window::TabBadgeKind
+CONNECTED = 2  # window::DaemonLinkState::Connected
+SELECTED, CONTAINS_SELECTED = 1, 2  # window::RowSelection
+HOME_WORKSPACE, HOME_TAB = "Workspace 1", "Terminal"  # what the window's own daemon's first rows are called
+
+
+def other_workspace(label):
+    return f"{label}-ws"
+
+
+def other_tab(label):
+    return f"{label}-t"
+
+
+def sections(d, dump=None):
+    """[(daemon row title, [row, ...]), ...]: the sidebar's rows in screen order, under the daemon row heading
+    each section."""
+    rows = sorted(d.items("sidebarRow", dump=dump), key=lambda item: item["y"])
+    found = []
+    for item in rows:
+        if item["props"].get("kind") == DAEMON:
+            found.append((item["props"].get("title"), []))
+        elif found:
+            found[-1][1].append(item)
+    return found
+
+
+def window_on(d):
+    """(daemon, title) of the row the window shows: which daemon the window is on, and what of it -- the tab, or
+    the folded workspace holding it (window::RowSelection, Selected or ContainsSelected)."""
+    for daemon, rows in sections(d):
+        for item in rows:
+            if item["props"].get("selection") in (SELECTED, CONTAINS_SELECTED):
+                return daemon, item["props"].get("title")
+    return None
+
+
+def daemon_shown(d):
+    """The daemon the window is on, by its row."""
+    return (window_on(d) or (None, None))[0]
+
+
+def shown_on(d, label):
+    """The names of the workspaces the daemon `label` says a window shows."""
+    return [w["name"] for w in d.workspaces(daemon=label) if w.get("visibility") == "shown"]
+
+
+def expect_on(d, label, title, seconds=15):
+    """Waits until the window shows the tab `title` of the daemon `label` -- its row, or its workspace's while
+    that is folded -- and that daemon says it shows that workspace; then that every pane draws."""
+    workspace = HOME_WORKSPACE if label == LABEL else other_workspace(label)
+    try:
+        deadline_loop(seconds, f"the window to show {title} of {label}",
+                      lambda: window_on(d) in ((label, title), (label, workspace)), interval=0.1)
+    except Failure as failure:
+        rows = [(daemon, [(r["props"].get("title"), r["props"].get("kind"), r["props"].get("selection"))
+                          for r in rows]) for daemon, rows in sections(d)]
+        raise Failure(f"{failure}; it shows {window_on(d)}, the rows are {rows}") from failure
+    if label != LABEL:
+        deadline_loop(seconds, f"{label} to say it shows {workspace}", lambda: workspace in shown_on(d, label))
+    expect_panes_draw(d)
+
+
+def daemon_row(d, label, **props):
+    return d.wait_item("sidebarRow", title=label, kind=DAEMON, **props)
+
+
+def cancel_button(d, label):
+    """The button on `label`'s daemon row while a jump into its section is under way: Cancel."""
+    def found():
+        heading = d.find("sidebarRow", required=False, title=label, kind=DAEMON)
+        if not heading:
+            return None
+        return next((b for b in d.items("sidebarDaemonButton")
+                     if heading["y"] <= Desktop.centre(b)[1] < heading["y"] + heading["height"]), None)
+    return deadline_loop(10, f"Cancel on {label}'s row", found)
+
+
+def other_pane(d, label):
+    return d.workspaces(daemon=label)[0]["tabs"][0]["panes"][0]["id"]
+
+
+def ring(d, label):
+    """Rings the bell in the daemon `label`'s pane, out of the window's sight."""
+    d.cli("send", "--pane", other_pane(d, label), "--enter", "printf '\\a'", daemon=label)
+
+
+# A command as a shell with Contour's integration marks it (OSC 133): started, run, finished with status 0.
+FINISHED_COMMAND = "printf '\\033]133;C\\007'; sleep 1; printf '\\033]133;D;0\\007'"
+
+
+def jump_by_click(d, label):
+    """Clicks `label`'s workspace row: a jump to that daemon."""
+    d.click(Desktop.centre(row(d, other_workspace(label), WORKSPACE)))
+
+
+def focus_terminal(d):
+    if not d.find("terminalPane", required=False, activeFocus=True):
+        d.click(Desktop.centre(d.wait_item("terminalPane")))
+    d.wait_item("terminalPane", activeFocus=True)
+
+
+def case_multi_daemon_three_listed(d):
+    """The window lists its own daemon first, then the two other local daemons running, each heading a section
+    with its workspace, all connected."""
+    found = deadline_loop(20, "three daemon sections", lambda: len(sections(d)) == 3 and sections(d))
+    expect([label for label, _ in found] == [LABEL, *OTHERS], f"the sections are {[l for l, _ in found]}")
+    for label in OTHERS:
+        daemon_row(d, label, linkState=CONNECTED)
+        row(d, other_workspace(label), WORKSPACE)
+    expect(window_on(d) == (LABEL, HOME_TAB), f"the window shows {window_on(d)}")
+
+
+def case_multi_daemon_bell_on_other_row(d):
+    """A bell rung on another daemon, which no window is on, shows on that daemon's row and its workspace's,
+    and on no other daemon's."""
+    for label in OTHERS:
+        daemon_row(d, label, linkState=CONNECTED)
+    ring(d, OTHERS[0])
+    daemon_row(d, OTHERS[0], glyph=BELL)
+    row(d, other_workspace(OTHERS[0]), WORKSPACE, glyph=BELL)
+    expect(daemon_row(d, OTHERS[1])["props"].get("glyph") != BELL, "the bell shows on the other daemon too")
+
+
+def case_multi_daemon_watched_command_stays_seen(d):
+    """A command that finishes in the pane the window shows on another daemon is seen there: it marks neither
+    its rows nor, once the window went back home, that daemon's row. The same command in a pane no window
+    shows does mark its daemon's row Done -- which proves the command is one the sidebar sees finish."""
+    jump_by_click(d, OTHERS[0])
+    expect_on(d, OTHERS[0], other_tab(OTHERS[0]))
+    focus_terminal(d)
+    d.type(FINISHED_COMMAND + "\n")
+    d.cli("send", "--pane", other_pane(d, OTHERS[1]), "--enter", FINISHED_COMMAND, daemon=OTHERS[1])
+    daemon_row(d, OTHERS[1], glyph=DONE)
+    time.sleep(1)
+    for label, rows in sections(d):
+        if label == OTHERS[0]:
+            expect(all(r["props"].get("glyph") != DONE for r in rows), f"the watched command marked {label}'s rows")
+    d.click(Desktop.centre(row(d, HOME_TAB, TAB)))
+    expect_on(d, LABEL, HOME_TAB)
+    time.sleep(1.5)  # long enough for a Done the daemon wrongly held to reach the row
+    expect(daemon_row(d, OTHERS[0])["props"].get("glyph") != DONE, "the watched command turned unseen")
+    expect(row(d, other_workspace(OTHERS[0]), WORKSPACE)["props"].get("glyph") != DONE,
+           "the watched command's workspace turned unseen")
+
+
+def case_multi_daemon_filter_return_jumps(d):
+    """In the sidebar, typing another daemon's tab name filters the tree to it, and Return jumps there."""
+    focus_terminal(d)
+    d.key("ctrl+shift+d")
+    deadline_loop(5, "a sidebar row to take the keyboard",
+                  lambda: d.find("sidebarRow", required=False, keyboardFocused=True))
+    d.type(other_tab(OTHERS[1]))
+    row(d, other_tab(OTHERS[1]), TAB)
+    d.key("Return")
+    expect_on(d, OTHERS[1], other_tab(OTHERS[1]))
+
+
+def case_multi_daemon_escape_in_terminal_during_jump(d):
+    """While a jump to another daemon is under way, Escape typed in the terminal is the shell's: it reaches the
+    program there and leaves the jump going, which lands once the daemon answers."""
+    home_pane = d.workspaces()[0]["tabs"][0]["panes"][0]["id"]
+    focus_terminal(d)
+    d.type("cat -v\n")
+    d.hold(OTHERS[0])
+    jump_by_click(d, OTHERS[0])
+    cancel_button(d, OTHERS[0])
+    focus_terminal(d)
+    d.key("Escape")
+    d.type("esc-reached\n")
+    deadline_loop(10, "the Escape to reach cat", lambda: "^[esc-reached" in d.cli("pane", "capture", "--pane",
+                                                                                   home_pane))
+    cancel_button(d, OTHERS[0])  # still under way
+    d.release(OTHERS[0])
+    expect_on(d, OTHERS[0], other_tab(OTHERS[0]))
+
+
+def case_multi_daemon_second_click_wins(d):
+    """A second row clicked while a jump to another daemon is under way wins: the window lands on the second
+    row, and the first daemon, once it answers, is not shown."""
+    d.hold(OTHERS[0])
+    jump_by_click(d, OTHERS[0])
+    cancel_button(d, OTHERS[0])
+    jump_by_click(d, OTHERS[1])
+    expect_on(d, OTHERS[1], other_tab(OTHERS[1]))
+    d.release(OTHERS[0])
+    time.sleep(2)  # long enough for the first jump, had it been kept, to land
+    expect(daemon_shown(d) == OTHERS[1], f"the window went on to {window_on(d)}")
+    expect(shown_on(d, OTHERS[0]) == [], f"{OTHERS[0]} shows {shown_on(d, OTHERS[0])}")
+
+
+def case_multi_daemon_cancel_restores(d):
+    """Cancel on the row of a daemon a jump is going to ends the jump: the window stays where it was, and the
+    daemon, once it answers, is not shown."""
+    d.hold(OTHERS[0])
+    jump_by_click(d, OTHERS[0])
+    d.click(Desktop.centre(cancel_button(d, OTHERS[0])))
+    d.wait_gone("sidebarDaemonButton")
+    d.release(OTHERS[0])
+    time.sleep(2)
+    expect(window_on(d) == (LABEL, HOME_TAB), f"the window shows {window_on(d)}")
+    expect(shown_on(d, LABEL) != [], f"{LABEL} shows nothing")
+    expect(shown_on(d, OTHERS[0]) == [], f"{OTHERS[0]} shows {shown_on(d, OTHERS[0])}")
+    daemon_row(d, OTHERS[0], linkState=CONNECTED)
+    expect_panes_draw(d)
+
+
+def case_multi_daemon_open_in_new_window(d):
+    """Open in New Window on another daemon's workspace row opens a second window on that daemon, and leaves
+    the first where it was."""
+    d.click(Desktop.centre(row(d, other_workspace(OTHERS[0]), WORKSPACE)), button=3)
+    d.click(Desktop.centre(d.wait_item("", text="Open in New Window")))
+    deadline_loop(30, "a second window", lambda: len(d.geometry()["windows"]) == 2, interval=0.25)
+    deadline_loop(15, f"{OTHERS[0]} to show its workspace",
+                  lambda: shown_on(d, OTHERS[0]) == [other_workspace(OTHERS[0])])
+    expect(shown_on(d, LABEL) != [], f"the first window left {LABEL}")
+
+
+def case_multi_daemon_jump_back_after_triage(d):
+    """Next Needing Me twice walks the bells rung on two other daemons, in the tree's order; one Jump Back then
+    returns to where the run started."""
+    for label in OTHERS:
+        ring(d, label)
+        daemon_row(d, label, glyph=BELL)
+    focus_terminal(d)
+    d.key("ctrl+shift+j")
+    expect_on(d, OTHERS[0], other_tab(OTHERS[0]))
+    focus_terminal(d)
+    d.key("ctrl+shift+j")
+    expect_on(d, OTHERS[1], other_tab(OTHERS[1]))
+    focus_terminal(d)
+    d.key("ctrl+shift+alt+j")
+    expect_on(d, LABEL, HOME_TAB)
+
+
+def case_multi_daemon_cycle_daemon(d):
+    """CycleDaemon walks the listed daemons in the tree's order, and wraps around to the window's own."""
+    for label in OTHERS:
+        daemon_row(d, label, linkState=CONNECTED)
+    for label, title in ((OTHERS[0], other_tab(OTHERS[0])), (OTHERS[1], other_tab(OTHERS[1])), (LABEL, HOME_TAB)):
+        focus_terminal(d)
+        d.key("ctrl+shift+alt+Right")
+        expect_on(d, label, title)
+
+
+def focus_row(d, title, kind):
+    """Moves the keyboard in the sidebar (focused already) onto the row `title`, by the arrows alone."""
+    for _ in range(12):
+        d.quiet(still=0.3)
+        target = d.find("sidebarRow", required=False, title=title, kind=kind)
+        focused = d.find("sidebarRow", required=False, keyboardFocused=True)
+        if target and target["props"].get("keyboardFocused"):
+            return
+        d.key("Down" if not focused or not target or focused["y"] < target["y"] else "Up")
+    raise Failure(f"the arrows never reached {title}'s row")
+
+
+def focus_sidebar(d):
+    focus_terminal(d)
+    d.key("ctrl+shift+d")
+    deadline_loop(5, "a sidebar row to take the keyboard",
+                  lambda: d.find("sidebarRow", required=False, keyboardFocused=True))
+
+
+def case_multi_daemon_keyboard_jump_cancel_and_back(d):
+    """By the keyboard alone: Return on another daemon's workspace row jumps; Escape while it is under way
+    cancels it and the window stays; Return again lands; Jump Back returns home."""
+    for label in OTHERS:
+        daemon_row(d, label, linkState=CONNECTED)
+    focus_sidebar(d)
+    focus_row(d, other_workspace(OTHERS[0]), WORKSPACE)
+    d.hold(OTHERS[0])
+    d.key("Return")
+    cancel_button(d, OTHERS[0])
+    d.key("Escape")
+    d.wait_gone("sidebarDaemonButton")
+    d.release(OTHERS[0])
+    time.sleep(2)
+    expect(window_on(d) == (LABEL, HOME_TAB), f"Escape did not keep the window home: {window_on(d)}")
+    expect(shown_on(d, OTHERS[0]) == [], f"{OTHERS[0]} shows {shown_on(d, OTHERS[0])}")
+    focus_sidebar(d)
+    focus_row(d, other_workspace(OTHERS[0]), WORKSPACE)
+    d.key("Return")
+    expect_on(d, OTHERS[0], other_tab(OTHERS[0]))
+    focus_terminal(d)
+    d.key("ctrl+shift+alt+j")
+    expect_on(d, LABEL, HOME_TAB)
+
+
+def case_multi_daemon_keyboard_second_return_wins(d):
+    """By the keyboard alone: Return on a second daemon's row while a jump to the first is under way wins."""
+    for label in OTHERS:
+        daemon_row(d, label, linkState=CONNECTED)
+    focus_sidebar(d)
+    focus_row(d, other_workspace(OTHERS[0]), WORKSPACE)
+    d.hold(OTHERS[0])
+    d.key("Return")
+    cancel_button(d, OTHERS[0])
+    focus_row(d, other_workspace(OTHERS[1]), WORKSPACE)
+    d.key("Return")
+    expect_on(d, OTHERS[1], other_tab(OTHERS[1]))
+    d.release(OTHERS[0])
+    time.sleep(2)
+    expect(daemon_shown(d) == OTHERS[1], f"the window went on to {window_on(d)}")
+
+
+def case_multi_daemon_keyboard_open_in_new_window(d):
+    """By the keyboard alone: Shift+Return on another daemon's workspace row opens it in a second window."""
+    daemon_row(d, OTHERS[0], linkState=CONNECTED)
+    focus_sidebar(d)
+    focus_row(d, other_workspace(OTHERS[0]), WORKSPACE)
+    d.key("shift+Return")
+    deadline_loop(30, "a second window", lambda: len(d.geometry()["windows"]) == 2, interval=0.25)
+    deadline_loop(15, f"{OTHERS[0]} to show its workspace",
+                  lambda: shown_on(d, OTHERS[0]) == [other_workspace(OTHERS[0])])
+
+
+class XProbe:
+    """One connection to the X server, held for a measurement: a click through XTest, timed as the server takes
+    its release, and the colour of a few pixels read off the root window -- each a round trip of a millisecond
+    or so, where an xdotool process and a whole-pane grab would cost tens of them."""
+
+    def __init__(self, display):
+        self.x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+        self.xtst = ctypes.CDLL(ctypes.util.find_library("Xtst") or "libXtst.so.6")
+        self.x11.XOpenDisplay.restype = ctypes.c_void_p
+        self.x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        self.x11.XGetImage.restype = ctypes.POINTER(XImage)
+        self.x11.XGetImage.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+                                       ctypes.c_uint, ctypes.c_ulong, ctypes.c_int]
+        self.x11.XDestroyImage.argtypes = [ctypes.POINTER(XImage)]
+        self.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        self.xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                                   ctypes.c_ulong]
+        self.xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.display = self.x11.XOpenDisplay(display.encode())
+        if not self.display:
+            raise Failure(f"cannot open the X display {display}")
+        self.root = self.x11.XDefaultRootWindow(self.display)
+
+    def close(self):
+        self.x11.XCloseDisplay(self.display)
+
+    def click(self, point):
+        """Moves the pointer to `point` and clicks there. @return When the server had taken the release."""
+        self.xtst.XTestFakeMotionEvent(self.display, -1, point[0], point[1], 0)
+        self.x11.XSync(self.display, 0)
+        time.sleep(0.15)
+        self.xtst.XTestFakeButtonEvent(self.display, 1, 1, 0)
+        self.x11.XSync(self.display, 0)
+        time.sleep(0.05)
+        self.xtst.XTestFakeButtonEvent(self.display, 1, 0, 0)
+        self.x11.XSync(self.display, 0)
+        return time.monotonic()
+
+    def colour(self, point, size=4):
+        """The mean colour of the size x size pixels at `point`."""
+        image = self.x11.XGetImage(self.display, self.root, point[0], point[1], size, size,
+                                   ctypes.c_ulong(-1).value, 2)
+        if not image:
+            raise Failure(f"cannot read the screen at {point}")
+        try:
+            im = image.contents
+            data = ctypes.string_at(im.data, im.bytes_per_line * im.height)
+            pixels = [data[row * im.bytes_per_line + col * 4: row * im.bytes_per_line + col * 4 + 3]
+                      for row in range(size) for col in range(size)]
+            return tuple(sum(p[channel] for p in pixels) // len(pixels) for channel in (2, 1, 0))
+        finally:
+            self.x11.XDestroyImage(image)
+
+
+# What each daemon's pane is painted with for the latency measurement (its whole screen, erased in it), so a
+# landing is told from the pixels alone: the window shows the other daemon's pane once its colour is there.
+LATENCY_COLOURS = {LABEL: (0x1E, 0xA0, 0x46), OTHERS[0]: (0xC8, 0x28, 0x28)}
+# How many jumps the measurement times each way.
+LATENCY_JUMPS = int(os.environ.get("CONTOUR_E2E_LATENCY_JUMPS", "20"))
+# The goal a jump to an observed local daemon is held to (docs/superpowers/specs, the multi-daemon sidebar).
+LATENCY_GOAL_MS = 100
+
+
+def paint(d, label, pane):
+    """Erases the pane's screen in its LATENCY_COLOURS colour, the colour staying for what is printed after."""
+    r, g, b = LATENCY_COLOURS[label]
+    d.cli("send", "--pane", pane, "--enter", f"printf '\\033[48;2;{r};{g};{b}m\\033[2J\\033[H'", daemon=label)
+
+
+def percentile(samples, fraction):
+    ordered = sorted(samples)
+    return ordered[min(len(ordered) - 1, int(round(fraction * (len(ordered) - 1))))]
+
+
+def case_multi_daemon_jump_latency(d):
+    """Times the jump to an observed local daemon, both ways: a click on the other daemon's workspace row (and
+    then on the window's own tab row) until the window draws that daemon's pane, read off the X server's
+    pixels. Reports the median and 95th percentile against the 100 ms goal; fails only when a jump does not land
+    within 5 s, since what a jump costs on Xvfb with software rendering in a debug build is no verdict on the
+    goal. CONTOUR_E2E_LATENCY_FILE names a file the samples are appended to (direction, milliseconds)."""
+    home_pane = d.workspaces()[0]["tabs"][0]["panes"][0]["id"]
+    paint(d, LABEL, home_pane)
+    paint(d, OTHERS[0], other_pane(d, OTHERS[0]))
+    daemon_row(d, OTHERS[0], linkState=CONNECTED)
+    probe = XProbe(d.display)
+    samples = {"to-other": [], "to-own": []}
+    try:
+        pane = d.wait_item("terminalPane")
+        spot = Desktop.centre(pane, 0.5, 0.7)
+        deadline_loop(10, "the window's own pane painted", lambda: near(probe.colour(spot), LATENCY_COLOURS[LABEL], 12))
+        for _ in range(LATENCY_JUMPS):
+            for direction, label, target in (("to-other", OTHERS[0], (other_workspace(OTHERS[0]), WORKSPACE)),
+                                              ("to-own", LABEL, (HOME_TAB, TAB))):
+                d.quiet(still=0.3)
+                clicked = probe.click(Desktop.centre(row(d, *target)))
+                end = clicked + 5
+                while not near(probe.colour(spot), LATENCY_COLOURS[label], 12):
+                    if time.monotonic() > end:
+                        raise Failure(f"a jump {direction} did not land within 5 s")
+                    time.sleep(0.001)
+                samples[direction].append((time.monotonic() - clicked) * 1000)
+                time.sleep(0.3)
+    finally:
+        probe.close()
+    record = os.environ.get("CONTOUR_E2E_LATENCY_FILE")
+    for direction, values in samples.items():
+        log(f"jump {direction}: {len(values)} jumps, median {percentile(values, 0.5):.1f} ms, "
+            f"p95 {percentile(values, 0.95):.1f} ms, min {min(values):.1f} ms, max {max(values):.1f} ms "
+            f"(goal {LATENCY_GOAL_MS} ms)")
+        if record:
+            with open(record, "a") as f:
+                f.writelines(f"{direction}\t{value:.2f}\n" for value in values)
+    # The pane draws in its painted colour, not the terminal's, which expect_on() looks for: the row alone.
+    deadline_loop(5, "the window back on its own daemon", lambda: daemon_shown(d) == LABEL)
+
+
+for _case in (case_multi_daemon_three_listed, case_multi_daemon_bell_on_other_row,
+              case_multi_daemon_watched_command_stays_seen, case_multi_daemon_filter_return_jumps,
+              case_multi_daemon_escape_in_terminal_during_jump, case_multi_daemon_second_click_wins,
+              case_multi_daemon_cancel_restores, case_multi_daemon_open_in_new_window,
+              case_multi_daemon_jump_back_after_triage, case_multi_daemon_cycle_daemon,
+              case_multi_daemon_keyboard_jump_cancel_and_back, case_multi_daemon_keyboard_second_return_wins,
+              case_multi_daemon_keyboard_open_in_new_window, case_multi_daemon_jump_latency):
+    _case.others = OTHERS
+# }}}
+
+
+
 # The tab strip the drag starts from is on top only where the tabs are not in the sidebar.
 case_tab_strip_to_workspace_row.tab_placement = "top"
 case_in_process_tab_row_to_empty_area.in_process = True
@@ -903,7 +1430,8 @@ def main(argv):
               "real input", flush=True)
         return SKIP
     desktop = Desktop(contour, tab_placement=getattr(CASES[case], "tab_placement", "sidebar"),
-                      in_process=getattr(CASES[case], "in_process", False))
+                      in_process=getattr(CASES[case], "in_process", False),
+                      others=getattr(CASES[case], "others", ()))
     try:
         desktop.start()
         log(f"case {case}")
