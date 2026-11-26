@@ -14,8 +14,8 @@
 │ ☑ │  new task                                                          n │   │
 │ ☑ │  filter the agents                                                 / │   │
 │ ☐ │  refresh the lists                                      palette only │   │
-│ ☐ │  show the last 24 hours                                 palette only │   │
-│   │  ↓ 7 more                                                            │   │
+│ ☐ │  run a task on this group                               palette only │   │
+│   │  ↓ 8 more                                                            │   │
 │   │                                                                      │   │
 │ ╭─│ ⏎ run · ↑↓ choose · esc close                                        │─╮ │
 │ │ ╰──────────────────────────────────────────────────────────────────────╯ │ │

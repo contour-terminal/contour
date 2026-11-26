@@ -530,6 +530,29 @@ namespace
             .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
                 return stepChip(interaction.work, context.engine, 1);
             } },
+        // The group of the selected line, as shown: its items no agent works on.
+        WorkHandlerRow {
+            .command = KeyCommand::RunOnGroup,
+            .handler = [](Interaction& interaction, WorkContext const& context) -> std::vector<UiAction> {
+                auto const* const line = selectedLine(interaction.work, context.lines);
+                if (line == nullptr)
+                    return {};
+                auto const group = line->group;
+                auto const shown =
+                    context.lines | std::views::filter([&](WorkLine const& each) {
+                        return each.kind == WorkLineKind::Item && each.group == group;
+                    })
+                    | std::views::transform([&](WorkLine const& each) { return context.items[each.item]; })
+                    | std::ranges::to<std::vector>();
+                if (auto dialog = openBulkDialog(context.engine, group, shown))
+                {
+                    interaction.bulk = std::move(*dialog);
+                    interaction.overlay = Overlay::Bulk;
+                }
+                else
+                    interaction.notice = "every item of this group has an agent, or it is folded";
+                return {};
+            } },
         WorkHandlerRow { .command = KeyCommand::ToggleAutomation,
                          .handler = [](Interaction&, WorkContext const& context) -> std::vector<UiAction> {
                              if (!context.engine.hasAutomationRules())

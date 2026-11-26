@@ -172,6 +172,8 @@ add_library(orchestrator_view STATIC
     view/TaskBox.hpp
     view/BoardMarkdown.cpp
     view/BoardMarkdown.hpp
+    view/BulkDialog.cpp
+    view/BulkDialog.hpp
     view/StatusBoard.cpp
     view/StatusBoard.hpp
     view/TextEdit.cpp
@@ -242,6 +244,7 @@ if(ORCHESTRATOR_TESTING)
         guest/Driver_test.cpp
         view/Actions_test.cpp
         view/Attention_test.cpp
+        view/BulkDialog_test.cpp
         view/HitMap_test.cpp
         view/Dashboard_test.cpp
         view/DispatchForm_test.cpp

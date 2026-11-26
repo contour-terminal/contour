@@ -6,16 +6,16 @@
 │   │▍ new task                                                          ⏎ │   │
 │   │  filter the agents                                                 / │   │
 │   │  refresh the lists                                      palette only │   │
-│   │  show the last 24 hours                                 palette only │   │
-╰───│  switch view                                                       w │───╯
-╭───│  fold the other groups                                  palette only │───╮
-│ No│  open · no run selected                                 palette only │   │
-│ ⏎ │  run again · no run selected                            palette only │   │
-│ On│  end · no run selected                                             e │   │
-│ es│  agent tab · no run selected                                       r │   │
-│ Ev│  open link · no run selected                                       o │   │
-│   │  retry removal · no run selected                                   x │   │
-│   │  ↓ 7 more                                                            │   │
+│   │  run a task on this group                               palette only │   │
+╰───│  show the last 24 hours                                 palette only │───╯
+╭───│  switch view                                                       w │───╮
+│ No│  fold the other groups                                  palette only │   │
+│ ⏎ │  open · no run selected                                 palette only │   │
+│ On│  run again · no run selected                            palette only │   │
+│ es│  end · no run selected                                             e │   │
+│ Ev│  agent tab · no run selected                                       r │   │
+│   │  open link · no run selected                                       o │   │
+│   │  ↓ 8 more                                                            │   │
 │   │                                                                      │   │
 │   │ ⏎ run · ↑↓ choose · esc close                                        │   │
 │   ╰──────────────────────────────────────────────────────────────────────╯   │

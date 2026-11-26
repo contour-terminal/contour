@@ -427,7 +427,8 @@ struct Dashboard::State
     std::unique_ptr<TaskBoxView> taskBoxView;         ///< Draws interaction.taskBox.
     std::unique_ptr<PaletteView> paletteView;         ///< Draws interaction.palette.
     std::unique_ptr<TimelineView> timelineView;       ///< Draws the last 24 hours while Overlay::Timeline.
-    std::unique_ptr<RowMenuView> rowMenuView;         ///< Draws interaction.work.menu.
+    std::unique_ptr<BulkDialogView> bulkView; ///< Draws "run a task on this group" while Overlay::Bulk.
+    std::unique_ptr<RowMenuView> rowMenuView; ///< Draws interaction.work.menu.
     /// Where each shown overlay was last put: moving one repaints the whole tab, so an overlay is moved only
     /// when it is put elsewhere, not on every frame it stays.
     std::vector<std::pair<Component const*, core::tui::Point>> overlayAt;
@@ -848,6 +849,7 @@ Dashboard::State::State(Engine const& engine,
     taskBoxView { std::make_unique<TaskBoxView>(engine, interaction.taskBox, hits) },
     paletteView { std::make_unique<PaletteView>(interaction.palette, hits) },
     timelineView { std::make_unique<TimelineView>(engine, hits) },
+    bulkView { std::make_unique<BulkDialogView>(engine, interaction.bulk, hits) },
     rowMenuView { std::make_unique<RowMenuView>(interaction.work.menu, work.items, hits) },
     spinner { core::tui::SpinnerType::Dots, clock },
     root { std::make_unique<core::tui::Responsive>(std::ranges::to<std::vector<core::tui::Breakpoint>>(
@@ -864,10 +866,11 @@ Dashboard::State::State(Engine const& engine,
 
 Dashboard::State::~State()
 {
-    for (Component* const overlay: std::array<Component*, 5> { startDialogView.get(),
+    for (Component* const overlay: std::array<Component*, 6> { startDialogView.get(),
                                                                taskBoxView.get(),
                                                                paletteView.get(),
                                                                timelineView.get(),
+                                                               bulkView.get(),
                                                                rowMenuView.get() })
         if (screen.isOverlayVisible(*overlay))
             screen.hideOverlay(*overlay);
@@ -2086,6 +2089,15 @@ void Dashboard::State::syncLayout()
     }
     else if (screen.isOverlayVisible(*timelineView))
         screen.hideOverlay(*timelineView);
+    if (interaction.overlay == Overlay::Bulk)
+    {
+        auto const wanted = bulkView->preferredSize();
+        showCentred(*bulkView,
+                    Size { .width = std::min(wanted.width, size.width),
+                           .height = std::min(wanted.height, size.height) });
+    }
+    else if (screen.isOverlayVisible(*bulkView))
+        screen.hideOverlay(*bulkView);
 }
 
 void Dashboard::State::showCentred(Component& overlay, Size wanted)

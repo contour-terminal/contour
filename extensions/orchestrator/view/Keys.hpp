@@ -18,6 +18,7 @@
 #include <orchestrator/core/Engine.hpp>
 #include <orchestrator/core/NavKeys.hpp>
 #include <orchestrator/core/QuickReplies.hpp>
+#include <orchestrator/view/BulkDialog.hpp>
 #include <orchestrator/view/DispatchForm.hpp>
 #include <orchestrator/view/Fleet.hpp>
 #include <orchestrator/view/RowMenu.hpp>
@@ -219,6 +220,7 @@ enum class KeyCommand : uint8_t
     HalfPageUp,     ///< Move a list's selection, or scroll the Focus's tab, up by half a page.
     HalfPageDown,   ///< Move a list's selection, or scroll the Focus's tab, down by half a page.
     ToggleAutomation, ///< Switch automation on or off; the palette's and the automation chip's.
+    RunOnGroup,       ///< The Work view: open "run a task on this group" on the selected line's group.
     Reply1,           ///< Answer the selected agent that asks with the quick reply on `1`.
     Reply2,           ///< … on `2`.
     Reply3,           ///< … on `3`.
@@ -318,6 +320,7 @@ enum class Overlay : uint8_t
 {
     None = 0, ///< Nothing.
     Timeline, ///< The last 24 hours, an hour a bar: esc or ⏎ closes it.
+    Bulk,     ///< "Run a task on this group" (Interaction::bulk): ←/→ choose the task, ⏎ starts, esc closes.
 };
 
 /// An open command palette.
@@ -423,6 +426,7 @@ struct Interaction
     WorkState work = {};          ///< Where the user is in the Work view.
     /// The start dialog, while it is open: it takes every key. Here rather than in WorkState, since a
     /// finished run's "run again" opens it from the Agents view too.
+    std::optional<BulkDialogState> bulk = {}; ///< "Run a task on this group", while Overlay::Bulk.
     std::optional<StartDialogState> startDialog = {};
     /// The `n` box, while it is open: it takes every key. Opened from either view.
     std::optional<TaskBoxState> taskBox = {};

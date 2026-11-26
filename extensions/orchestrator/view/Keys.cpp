@@ -617,6 +617,12 @@ namespace
                      } },
         // The palette installs the plugins the agents lack into the user's own Claude Code: its entry names
         // them, and dispatch() refuses while none is missing or they are being installed.
+        // The Work view runs it (WorkBoard.cpp): the Agents view has no groups of items to start on.
+        HandlerRow { .command = KeyCommand::RunOnGroup,
+                     .handler = [](Interaction& interaction, KeyContext const&) -> std::optional<UiAction> {
+                         interaction.notice = "run a task on a group · in the Work view only, w shows it";
+                         return std::nullopt;
+                     } },
         HandlerRow { .command = KeyCommand::ToggleAutomation,
                      .handler = [](Interaction&, KeyContext const& context) -> std::optional<UiAction> {
                          if (context.engine == nullptr)
@@ -1000,6 +1006,45 @@ FilterInput typeIntoFilter(core::tui::KeyEvent const& key,
     return taken;
 }
 
+namespace
+{
+    /// The keys of "run a task on this group": ←/→ step the task, ⏎ starts it, esc (or anything closing)
+    /// closes it.
+    [[nodiscard]] std::optional<UiAction> applyBulkKey(core::tui::KeyEvent const& key,
+                                                       std::optional<NavAction> nav,
+                                                       Interaction& interaction,
+                                                       KeyContext const& context)
+    {
+        auto const close = [&] {
+            interaction.bulk.reset();
+            interaction.overlay = Overlay::None;
+        };
+        auto const command = commandFor(key);
+        if (!interaction.bulk || context.engine == nullptr || nav == NavAction::Close
+            || command == KeyCommand::Back)
+        {
+            close();
+            return std::nullopt;
+        }
+        auto& dialog = *interaction.bulk;
+        auto const choices = bulkChoices(*context.engine, dialog).size();
+        if (nav == NavAction::PreviousValue || nav == NavAction::NextValue)
+        {
+            auto const step = nav == NavAction::NextValue ? std::size_t { 1 } : choices - 1;
+            dialog.choice = (dialog.choice + step) % choices;
+            return std::nullopt;
+        }
+        if (command != KeyCommand::Enter)
+            return std::nullopt;
+        auto items = bulkItems(*context.engine, dialog);
+        if (items.empty())
+            return std::nullopt;
+        auto const task = bulkChoices(*context.engine, dialog)[dialog.choice];
+        close();
+        return UiAction { RunOnItemsAction { .items = std::move(items), .task = task } };
+    }
+} // namespace
+
 std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
                                  std::optional<NavAction> nav,
                                  Interaction& interaction,
@@ -1007,6 +1052,8 @@ std::optional<UiAction> applyKey(core::tui::KeyEvent const& key,
 {
     if (interaction.palette)
         return applyPaletteKey(key, interaction, context);
+    if (interaction.overlay == Overlay::Bulk)
+        return applyBulkKey(key, nav, interaction, context);
     if (interaction.overlay == Overlay::Timeline)
     {
         // The timeline takes no command but the palette's: close, esc and ⏎ close it, as anything leaving it
