@@ -54,7 +54,15 @@ namespace
         Closed,   ///< The handle is closed.
     };
 
-    /// An event an overlapped operation signals, closed with it.
+    /// Which way a transfer moves bytes: each end has an event per direction, since one send and one receive
+    /// may run at once, and never two of either (Channel.hpp).
+    enum class TransferDirection : uint8_t
+    {
+        Send,    ///< WriteFile().
+        Receive, ///< ReadFile().
+    };
+
+    /// An event overlapped operations signal: a manual-reset one, closed when this is destroyed.
     class OverlappedEvent
     {
       public:
@@ -66,7 +74,7 @@ namespace
         }
         OverlappedEvent(OverlappedEvent const&) = delete;
         OverlappedEvent& operator=(OverlappedEvent const&) = delete;
-        OverlappedEvent(OverlappedEvent&&) = delete;
+        OverlappedEvent(OverlappedEvent&& other) noexcept: _event { std::exchange(other._event, nullptr) } {}
         OverlappedEvent& operator=(OverlappedEvent&&) = delete;
 
         /// @return The event; null if it could not be created.
@@ -75,6 +83,23 @@ namespace
       private:
         HANDLE _event;
     };
+
+    /// The events one end's transfers wait on, one per direction, made with the end and closed with it.
+    struct EndEvents
+    {
+        OverlappedEvent send;    ///< What its sends wait on.
+        OverlappedEvent receive; ///< What its receives wait on.
+    };
+
+    /// @return Both events of an end; `Io` if the system made either not, so that the end is refused as it is
+    ///         made rather than failing every transfer later without a reason.
+    [[nodiscard]] std::expected<EndEvents, ChannelError> makeEndEvents()
+    {
+        auto events = EndEvents {};
+        if (events.send.handle() == nullptr || events.receive.handle() == nullptr)
+            return std::unexpected(ChannelError::Io);
+        return events;
+    }
 
     /// @return Why a call that set @p error failed, for the channel.
     [[nodiscard]] ChannelError channelErrorOf(DWORD error) noexcept
@@ -181,12 +206,18 @@ namespace
 struct Channel::Native
 {
     HANDLE pipe;
+    /// The events this end's sends and receives wait on, one per direction, made once with the end: no
+    /// transfer makes or closes a handle, so an end holds the same handles whether a transfer is in flight
+    /// or not. ReadFile() and WriteFile() reset an event as they start.
+    EndEvents events;
     std::atomic<EndState> state { EndState::Open };
     /// Who may touch the handle: every transfer in flight, and every shutdown() from before its state change
     /// until after its cancel, so that no close slips in ahead of that cancel.
     std::atomic<uint32_t> inFlight { 0 };
 
-    explicit Native(HANDLE pipe) noexcept: pipe { pipe } {}
+    /// @param pipe The end's handle, owned from here on.
+    /// @param events Its transfers' events (makeEndEvents()).
+    Native(HANDLE pipe, EndEvents events) noexcept: pipe { pipe }, events { std::move(events) } {}
     ~Native()
     {
         if (state.load() != EndState::Closed)
@@ -209,16 +240,19 @@ struct Channel::Native
 
     /// Runs one overlapped transfer to completion, or until the end is shut down; or, polled, only as far as
     /// it completes at once.
+    /// @param direction Which way it moves bytes: whose event it waits on.
     /// @param start Starts it: ReadFile or WriteFile on the pipe with the given OVERLAPPED.
     /// @param completion Whether to wait for it.
     /// @return How many bytes it moved.
     template <typename Start>
-    [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(Start start, Completion completion)
+    [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(TransferDirection direction,
+                                                                    Start start,
+                                                                    Completion completion)
     {
         // Counted before the state is read, and shutdown() stores the state before it reads the count: either
         // this sees the end shut down, or shutdown() sees this in flight and leaves the handle to it.
         inFlight.fetch_add(1);
-        auto const result = transferCounted(start, completion);
+        auto const result = transferCounted(direction, start, completion);
         inFlight.fetch_sub(1);
         if (state.load() != EndState::Open)
             closeIfDrained();
@@ -227,15 +261,16 @@ struct Channel::Native
 
   private:
     template <typename Start>
-    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(Start start, Completion completion)
+    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(TransferDirection direction,
+                                                                           Start start,
+                                                                           Completion completion)
     {
         if (state.load() != EndState::Open)
             return std::unexpected(ChannelError::Closed);
-        auto const event = OverlappedEvent {};
-        if (!event.handle())
-            return std::unexpected(ChannelError::Io);
+        auto* const event =
+            direction == TransferDirection::Send ? events.send.handle() : events.receive.handle();
         auto overlapped = OVERLAPPED {};
-        overlapped.hEvent = event.handle();
+        overlapped.hEvent = event;
         if (!start(overlapped))
         {
             auto const error = ::GetLastError();
@@ -277,9 +312,13 @@ std::expected<Channel, ChannelError> Channel::adopt(NativeHandle handle)
     // GetFileType() reports FILE_TYPE_UNKNOWN, with an error, for a handle that is not open.
     if (handle == nullptr || handle == INVALID_HANDLE_VALUE || ::GetFileType(handle) != FILE_TYPE_PIPE)
         return std::unexpected(ChannelError::Io);
+    // Made before the end is taken: refused, the handle stays the caller's.
+    auto events = makeEndEvents();
+    if (!events)
+        return std::unexpected(events.error());
     if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0))
         return std::unexpected(ChannelError::Io);
-    return Channel { std::make_unique<Native>(handle) };
+    return Channel { std::make_unique<Native>(handle, *std::move(events)) };
 }
 
 Channel::~Channel() = default;
@@ -292,6 +331,7 @@ std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
     {
         auto const chunk = bytes.first(std::min(bytes.size(), MaxTransferBytes));
         auto const sent = _native->transfer(
+            TransferDirection::Send,
             [&](OVERLAPPED& overlapped) {
                 return ::WriteFile(
                     _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
@@ -310,6 +350,7 @@ std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t cons
         return 0;
     auto const chunk = bytes.first(std::min(bytes.size(), MaxTransferBytes));
     return _native->transfer(
+        TransferDirection::Send,
         [&](OVERLAPPED& overlapped) {
             return ::WriteFile(
                 _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
@@ -321,6 +362,7 @@ std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t>
 {
     auto const chunk = buffer.first(std::min(buffer.size(), MaxTransferBytes));
     auto const received = _native->transfer(
+        TransferDirection::Receive,
         [&](OVERLAPPED& overlapped) {
             return ::ReadFile(
                 _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
@@ -400,10 +442,16 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
         else if (error != ERROR_PIPE_CONNECTED)
             return std::unexpected(ChannelError::Io);
     }
+    auto parentEvents = makeEndEvents();
+    auto helperEvents = makeEndEvents();
+    if (!parentEvents || !helperEvents)
+        return std::unexpected(ChannelError::Io);
     // No handle travels beside a pipe's bytes: the helper has nothing to send up.
-    return ChannelPair { .parent = Channel { std::make_unique<Channel::Native>(server.release()) },
-                         .helper = Channel { std::make_unique<Channel::Native>(client.release()) },
-                         .upward = UpwardDescriptors::Refused };
+    return ChannelPair {
+        .parent = Channel { std::make_unique<Channel::Native>(server.release(), *std::move(parentEvents)) },
+        .helper = Channel { std::make_unique<Channel::Native>(client.release(), *std::move(helperEvents)) },
+        .upward = UpwardDescriptors::Refused
+    };
 }
 
 void closeNativeHandle(NativeHandle handle) noexcept

@@ -29,6 +29,7 @@
 #include <vtextension/wasm/remote/transport/Channel.hpp>
 #include <vtextension/wasm/remote/transport/testing/ClosingReceive.hpp>
 #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -189,6 +190,55 @@ TEST_CASE("Channel.endsAreNotInheritable", "[vtextension]")
         REQUIRE(::GetHandleInformation(channel->nativeHandle(), &flags));
         CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
     }
+}
+
+TEST_CASE("Channel.transferInFlightOpensNoHandle", "[vtextension]")
+{
+    // An end holds the same handles whether a receive waits on it or not: what a process holds must not
+    // depend on what its threads happen to be waiting for, or a count of its handles races them.
+    if (vtextension::wasm::testing::runsOnWine())
+        SKIP("wine's GetProcessHandleCount() reads 0, whatever the process holds");
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+    auto const handleCount = [] {
+        auto count = DWORD { 0 };
+        REQUIRE(::GetProcessHandleCount(::GetCurrentProcess(), &count));
+        return count;
+    };
+    // The receiving thread is started, and parked, before the count: a thread holds handles of its own, and
+    // std::async's pool may make them only once the thread runs, so the count waits until it has.
+    auto started = std::promise<void> {};
+    auto running = started.get_future();
+    auto go = std::promise<void> {};
+    auto received = std::async(std::launch::async, [&, release = go.get_future()] {
+        started.set_value();
+        release.wait();
+        auto buffer = std::array<uint8_t, 1> {};
+        return pair->helper.receiveSome(buffer);
+    });
+    // Before the future is destroyed, whatever fails first: the thread released, and its receive ended, so
+    // that the future's destructor, which waits for the thread, never waits on a receive nothing will end.
+    auto goSet = false;
+    auto const endTheReceive = core::Finally { [&] {
+        if (!std::exchange(goSet, true))
+            go.set_value();
+        pair->helper.shutdown();
+    } };
+    running.wait();
+    auto const before = handleCount();
+    goSet = true;
+    go.set_value();
+    // Looked at while the receive waits: long enough for it to have started, the bytes not sent yet.
+    auto most = before;
+    for ([[maybe_unused]] auto const look: std::views::iota(0, 200))
+    {
+        most = std::max(most, handleCount());
+        std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+    }
+    REQUIRE(pair->parent.send(std::array<uint8_t, 1> { 7 }).has_value());
+    auto const got = received.get();
+    CHECK(got == std::size_t { 1 });
+    CHECK(most == before);
 }
 #endif
 

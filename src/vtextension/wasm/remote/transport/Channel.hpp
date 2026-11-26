@@ -8,9 +8,10 @@
 /// Its I/O blocks, but for trySend(). shutdown() is what makes a blocked receive return, from any thread, on
 /// both ends.
 ///
-/// One thread at a time sends on an end -- send(), trySend() or sendWithHandle() -- while a receive may run
-/// beside it. trySend() relies on that where the system ignores MSG_DONTWAIT (macOS): the room it found free
-/// is still free when it sends.
+/// One thread at a time sends on an end -- send(), trySend() or sendWithHandle() -- and one at a time
+/// receives on it, while a receive may run beside a send: on Windows each direction of an end waits on one
+/// event of its own. trySend() relies on that where the system ignores MSG_DONTWAIT (macOS): the room it
+/// found free is still free when it sends.
 
 #include <cstddef>
 #include <cstdint>

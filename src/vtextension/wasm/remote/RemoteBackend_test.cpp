@@ -55,6 +55,7 @@
 #include <vtextension/wasm/testing/HostedEngine.hpp>
 #include <vtextension/wasm/testing/PreparationHookEngine.hpp>
 #include <vtextension/wasm/testing/RenderMeasurement.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -2378,6 +2379,8 @@ TEST_CASE("RemoteBackend.instancesHoldNoDescriptor", "[vtextension][remote]")
 {
     // Every object's handle is closed once granted, by the parent and by a host in this process alike: a
     // thousand live instances hold no handle, and once let go leave as many open as before.
+    if (vtextension::wasm::testing::runsOnWine())
+        SKIP("wine's GetProcessHandleCount() reads 0, whatever the process holds");
     constexpr auto Instances = 1000;
     auto const backend = makeBackend(makeConnector());
     auto const runtime = contract::createRuntime(*backend, OnePageLimits);

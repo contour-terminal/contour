@@ -76,9 +76,11 @@ struct HostEndpoints
 
 /// @param endpoints What a host serves over.
 /// @param engineDevices The devices its engine holds (IHostedEngine::heldDevices()).
-/// @return Every handle the host keeps once it is locked down, each with its role: its endpoints, the stop
-///         pipe of its wake receiver, its standard streams and @p engineDevices. The one list the host and
-///         the sandbox probe both confine.
+/// @return The handles the host keeps once it is locked down that a sandbox limiting handle by handle
+///         (FreeBSD's) confines, each with its role: its endpoints, its wake receiver's stop handles, its
+///         standard streams and @p engineDevices. The one list the host and the sandbox probe both confine.
+///         Not every handle on Windows, where no sandbox limits handle by handle: there each channel end also
+///         keeps two events of its own (Channel_win32.cpp), which no role names.
 [[nodiscard]] SandboxDescriptors sandboxDescriptorsOf(
     HostEndpoints const& endpoints, std::span<remote::transport::NativeHandle const> engineDevices);
 
