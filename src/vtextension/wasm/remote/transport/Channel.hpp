@@ -7,6 +7,10 @@
 ///
 /// Its I/O blocks, but for trySend(). shutdown() is what makes a blocked receive return, from any thread, on
 /// both ends.
+///
+/// One thread at a time sends on an end -- send(), trySend() or sendWithHandle() -- while a receive may run
+/// beside it. trySend() relies on that where the system ignores MSG_DONTWAIT (macOS): the room it found free
+/// is still free when it sends.
 
 #include <cstddef>
 #include <cstdint>
@@ -74,7 +78,8 @@ class Channel
     /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
     [[nodiscard]] std::expected<void, ChannelError> send(std::span<uint8_t const> bytes);
 
-    /// Sends as much of @p bytes as the channel takes now, without blocking.
+    /// Sends as much of @p bytes as the channel takes now, without blocking. No other send may run on this
+    /// end meanwhile (see the class).
     /// @param bytes The bytes to send.
     /// @return How many of them, from the front, were sent: 0 if none fit; `Closed` if the peer is gone or
     ///         this end was shut down.

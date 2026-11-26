@@ -239,15 +239,28 @@ TEST_CASE("PduStream.trySendKeepsAPartialFrame", "[vtextension]")
     constexpr auto MaxFrames = uint32_t { 1024 };
     auto sentFrames = uint32_t { 0 };
     auto begunTail = std::size_t { 0 };
-    while (sentFrames < MaxFrames)
+    auto filling = std::async(std::launch::async, [&]() -> std::expected<void, StreamError> {
+        while (sentFrames < MaxFrames)
+        {
+            auto const outcome = pair.parent.trySend(loadNumbered(sentFrames + 1));
+            if (!outcome)
+                return std::unexpected(outcome.error());
+            if (*outcome == transport::SendOutcome::WouldBlock)
+                break;
+            ++sentFrames;
+            begunTail = pair.parent.unsentBytes();
+        }
+        return {};
+    });
+    if (filling.wait_for(5s) != std::future_status::ready)
     {
-        auto const outcome = pair.parent.trySend(loadNumbered(sentFrames + 1));
-        REQUIRE(outcome.has_value());
-        if (*outcome == transport::SendOutcome::WouldBlock)
-            break;
-        ++sentFrames;
-        begunTail = pair.parent.unsentBytes();
+        // Nobody reads yet: a trySend() that waits for room waits forever, and the future's destructor with
+        // it. The run ends here, rather than hang.
+        FAIL_CHECK("trySend() blocked");
+        std::fputs("PduStream.trySendKeepsAPartialFrame: trySend() blocked\n", stderr);
+        std::abort();
     }
+    REQUIRE(filling.get().has_value());
     REQUIRE(sentFrames < MaxFrames);
 #ifndef _WIN32
     // A socket takes part of a frame; a pipe's write may be taken whole or not at all.
@@ -271,14 +284,18 @@ TEST_CASE("PduStream.trySendKeepsAPartialFrame", "[vtextension]")
         }
         return moduleIds;
     });
-    auto const sent = pair.parent.send(loadNumbered(sentFrames + 1));
-    if (reading.wait_for(5s) != std::future_status::ready)
+    // Sent from a thread of its own too: a system whose shutdown() wakes no blocked sender would otherwise
+    // hang the run here rather than fail it.
+    auto sending =
+        std::async(std::launch::async, [&] { return pair.parent.send(loadNumbered(sentFrames + 1)); });
+    if (reading.wait_for(5s) != std::future_status::ready
+        || sending.wait_for(5s) != std::future_status::ready)
     {
         FAIL_CHECK("the reader did not get every frame");
         std::fputs("PduStream.trySendKeepsAPartialFrame: the reader did not get every frame\n", stderr);
         std::abort();
     }
-    CHECK(sent.has_value());
+    CHECK(sending.get().has_value());
     CHECK(pair.parent.unsentBytes() == 0);
     auto const expected = std::views::iota(uint32_t { 1 }, sentFrames + 2);
     CHECK(reading.get() == std::vector<uint32_t>(expected.begin(), expected.end()));

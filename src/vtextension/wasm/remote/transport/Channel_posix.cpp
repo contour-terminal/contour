@@ -7,6 +7,13 @@
 // A descriptor travels as SCM_RIGHTS on a message's first byte. Only receiveSomeWithHandles() installs what
 // arrives; a plain recv() leaves the system to discard it. Contour's end of a pair refuses descriptors where
 // Linux lets it (SO_PASSRIGHTS), so that none is even discarded there (UpwardDescriptors).
+//
+// trySend() never waits. Where the system honours MSG_DONTWAIT on a send, that is all it takes. macOS does
+// not: XNU's sosendcheck() waits for room unless the socket itself is non-blocking or the caller passed
+// its private MSG_NBIO, and making the descriptor non-blocking would make a receive another thread blocks
+// in fail. There, a send goes out only once poll() says the socket is writable -- room for at least its
+// send low-water mark -- and is no larger than that mark, which XNU then takes without waiting. Only one
+// thread sends on an end at a time, so the room only grows in between.
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -27,6 +34,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <vtextension/wasm/remote/transport/Channel.hpp>
@@ -111,6 +119,20 @@ namespace
     /// The types of msghdr::msg_controllen and cmsghdr::cmsg_len: size_t on Linux, socklen_t on macOS.
     using ControlLength = decltype(::msghdr {}.msg_controllen);
     using ControlMessageLength = decltype(::cmsghdr {}.cmsg_len);
+
+    /// Whether a send honours MSG_DONTWAIT.
+    enum class DontWaitSend : uint8_t
+    {
+        Honoured, ///< It fails with EAGAIN rather than wait for room.
+        Ignored,  ///< It waits for room all the same (macOS: XNU's sosendcheck() tests only the socket's
+                  ///< non-blocking state and MSG_NBIO).
+    };
+
+#ifdef __APPLE__
+    constexpr auto ThisSystemDontWaitSend = DontWaitSend::Ignored;
+#else
+    constexpr auto ThisSystemDontWaitSend = DontWaitSend::Honoured;
+#endif
 
     /// The most descriptors one receive takes in: one more than a message may carry, so that a peer that
     /// attached two is told from one that attached one.
@@ -206,13 +228,52 @@ std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
     return {};
 }
 
+namespace
+{
+    /// @return How many bytes of @p bytes, from the front, one send on @p descriptor may be given without
+    ///         waiting for room: all of them where the send honours MSG_DONTWAIT; elsewhere at most the
+    ///         socket's send low-water mark, once poll() says it is writable, and none (0) while it is not.
+    ///         -1, with errno set, where asking failed.
+    [[nodiscard]] ssize_t sendableWithoutWaiting(int descriptor, std::span<uint8_t const> bytes) noexcept
+    {
+        if constexpr (ThisSystemDontWaitSend == DontWaitSend::Honoured)
+            return static_cast<ssize_t>(bytes.size());
+        else
+        {
+            auto ready = ::pollfd { .fd = descriptor, .events = POLLOUT, .revents = 0 };
+            auto const polled = ::poll(&ready, 1, 0);
+            if (polled == -1)
+                return -1;
+            // A peer that is gone, or an error pending, is what the send reports: let it.
+            if (polled == 0 || (ready.revents & (POLLOUT | POLLHUP | POLLERR)) == 0)
+                return 0;
+            auto lowWater = 0;
+            auto length = static_cast<socklen_t>(sizeof(lowWater));
+            if (::getsockopt(descriptor, SOL_SOCKET, SO_SNDLOWAT, &lowWater, &length) == -1)
+                return -1;
+            return static_cast<ssize_t>(
+                std::min(bytes.size(), static_cast<std::size_t>(std::max(lowWater, 1))));
+        }
+    }
+} // namespace
+
 std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t const> bytes)
 {
     auto sent = std::size_t { 0 };
     while (sent < bytes.size())
     {
         auto const rest = bytes.subspan(sent);
-        auto const count = ::send(_native->descriptor, rest.data(), rest.size(), SendFlags | MSG_DONTWAIT);
+        auto const sendable = sendableWithoutWaiting(_native->descriptor, rest);
+        if (sendable == -1)
+        {
+            if (errno == EINTR)
+                continue;
+            return std::unexpected(channelErrorOf(errno));
+        }
+        if (sendable == 0)
+            break;
+        auto const count = ::send(
+            _native->descriptor, rest.data(), static_cast<std::size_t>(sendable), SendFlags | MSG_DONTWAIT);
         if (count == -1)
         {
             if (errno == EINTR)
