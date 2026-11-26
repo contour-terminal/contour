@@ -7,7 +7,7 @@ Everything Contour does, grouped by what you do with it. A card with a link open
 <div class="cards" markdown>
 
 - [**Persistent sessions** Daemon mode: sessions survive the window, reattach locally or over the network, and interoperate with tmux in both directions.](persistent-sessions.md)
-- [**Workspace sidebar** Workspaces, tabs and panes as a tree.](sidebar.md)
+- [**Workspace sidebar** Workspaces, tabs and panes as a tree, across every daemon you use.](sidebar.md)
 - [**Remote hosts** Attach to sessions on another machine.](remote-hosts.md)
 - [**Quick terminal** A global hotkey slides a terminal down from the top of the screen.](quick-terminal.md)
 - [**Tabs and split panes** Colored tabs, tab badges and drag-and-drop rearranging of panes and tabs.](configuration/layouts.md#tab-colors)

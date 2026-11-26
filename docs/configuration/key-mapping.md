@@ -268,7 +268,7 @@ same chords with Shift: they move the current workspace down / up the list. The 
 | `NewWorkspace` | none | Creates a workspace and shows it in this window; for a window attached to a daemon, the workspace is created on that daemon. |
 | `OpenWorkspace` | `index:` (1-based, required) | Shows it in a new window. |
 | `CycleWorkspace` | `direction: next\|previous` (default `next`) | Shows the next or previous workspace of this window's daemon here, hidden and left ones included, in their position order. |
-| `CycleDaemon` | `direction: next\|previous` (default `next`) | Shows the next or previous daemon here: the local daemons running, by name, then the saved hosts a window here shows. |
+| `CycleDaemon` | `direction: next\|previous` (default `next`) | Shows the next or previous daemon here: the daemons the [workspace sidebar](../sidebar.md#several-daemons) lists, in its order; a hidden daemon, and one reached by an unnamed link, is skipped. |
 | `SwitchToDaemon` | `name:` or `host:` (exactly one) | Shows the named local daemon, or saved host, here. |
 | `OpenDaemon` | `name:` or `host:` (exactly one) | Shows it in a new window. |
 
@@ -328,8 +328,8 @@ before the sidebar existed still gets them, unless it binds the same chord itsel
 | `FocusSidebar` | `Ctrl+Shift+D` | `⇧⌘E` | Moves keyboard focus into the sidebar, showing it first when hidden. |
 | `FilterWorkspaces` | none | none | Opens the sidebar's filter with the keyboard in it, showing the sidebar first when hidden. |
 | `ToggleSidebarNeedsMe` | none | none | Lists only the rows on the way to a pane that needs you (blocked, failed, or done and not seen), plus the tab shown; again lists everything. Shows the sidebar first when hidden. Also the sidebar's Needs-me control and View ▸ Show Only What Needs Me. |
-| `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you: blocked or bell first, then failed, then done and not seen. |
-| `JumpBack` | `Ctrl+Shift+Alt+J` | `⇧⌘J` | Goes back to where the window was before its last jump, workspace switch, sidebar activation or switcher pick; each press goes one place further back (up to 16). A run of `JumpToNextAttention` counts as one place, and places whose daemon restarted or whose workspace or tab closed are skipped. |
+| `JumpToNextAttention` | `Ctrl+Shift+J` | `⌘J` | Shows the next pane that needs you, on any daemon the sidebar lists: blocked or bell first, then failed, then done and not seen. Also Window ▸ Next Needing Me. |
+| `JumpBack` | `Ctrl+Shift+Alt+J` | `⇧⌘J` | Goes back to where the window was before its last jump, workspace switch, sidebar activation or switcher pick; each press goes one place further back (up to 16). A run of `JumpToNextAttention` counts as one place, and places whose daemon restarted or whose workspace or tab closed are skipped. Also Window ▸ Jump Back; see [Jump back](../sidebar.md#jump-back). |
 | `CancelSwitch` | none | none | Ends a jump the sidebar started that is still under way, leaving the window where it was; nothing while none is. It does not end a daemon's connect, which the daemon row's Cancel ends. |
 | `MarkSeen` | none | none | Marks the active pane's output as seen. |
 | `RenameWorkspace` | none | none | Renames the current workspace inline. |

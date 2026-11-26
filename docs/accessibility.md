@@ -103,13 +103,17 @@ description says its link state in words, then its fold, then why the link faile
 `last known`, a workspace another window shows says `shown in another window`, and a row a jump is on its
 way to says `connecting`. The daemons you hid are one row, described as `2 hidden daemons`.
 A daemon row's **Connect**, **Start**, **Cancel** and **Remove** are buttons named by their words, even where a
-narrow sidebar shrinks them to their icons, and each has the press action.
+narrow sidebar shrinks them to their icons, and each has the press action. The sidebar's Needs-me control is a
+checkable button: its name says what the next press does, `Show only what needs me` or `Show all`, and its
+checked state says whether the tree is narrowed.
 
 When a pane in a workspace other than the one you are looking at starts needing you, Contour announces it,
 Polite, once; a pane of another daemon names it: `build in ci on starfive needs you`. A daemon newly listed,
 connected or restarted is not news: what its panes already ask is not announced. A jump to another daemon's
 row is announced as it goes: `Connecting to starfive…`, `Now on starfive › ci`, `Jump cancelled`, or
-`Could not reach starfive:` and the reason. Reduce Motion is honoured: rows fold and unfold at once.
+`Could not reach starfive:` and the reason. A jump back
+([`JumpBack`](sidebar.md#jump-back)) is announced the same way, and with nowhere left to go it says `Nowhere to
+go back to`. Reduce Motion is honoured: rows fold and unfold at once.
 
 ## Things that are only announced
 

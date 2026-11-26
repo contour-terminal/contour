@@ -1,9 +1,11 @@
 # The workspace sidebar
 
-The sidebar is a list down the left edge of a window. It shows every workspace of the daemon the window is
-attached to (or the window's own workspaces, when sessions run in-process) as a tree: a **workspace**, the
-**tabs** in it, and the **panes** of a tab that is split. It is also an inbox: it tells you which program
-is waiting for you, which finished while you were looking elsewhere, and takes you there with one key.
+The sidebar is a list down the left edge of a window. It shows every daemon you use as a tree: each
+**daemon** heads a section of its own, with its **workspaces**, the **tabs** in them, and the **panes** of a
+tab that is split (a window whose sessions run in-process shows its own workspaces alone). A window still
+shows one daemon at a time, and one click or key moves it to any tab, on any daemon; see
+[Several daemons](#several-daemons). The sidebar is also an inbox: it tells you which program is waiting for
+you, which finished while you were looking elsewhere, and takes you there with one key.
 
 !!! note
     The sidebar is part of the `native2026` defaults. A new configuration shows it; a configuration written
@@ -73,6 +75,51 @@ colour, and needs-you uses amber (on the Terminal style, as a glyph only). A don
 shown until you see its pane, which is the *done, not seen* state. Seen never hides a program that is still
 blocked.
 
+## Several daemons
+
+The tree lists every daemon you care about, each heading its section:
+
+- **The window's own daemon**, and any daemon another window of this Contour is on, always.
+- **Every local daemon that is running**, without asking. One that stops while listed stays, as **Not
+  running**, for the rest of the run, and offers **Start** and **Remove**; one that is not running when
+  Contour looks is not listed.
+- **A saved host** only when its configuration says `show_in_sidebar: true` (see
+  [Hosts](configuration/hosts.md)), or after you chose **Show in Sidebar** for it in the switcher.
+
+A window whose sessions run in-process lists nothing but its own workspaces.
+
+Every listed daemon is live. A daemon no window is on is watched by one quiet background connection that all
+windows of this Contour share. It never asks for a password, never starts a daemon, does not keep an idle daemon
+running, and does not change the pane sizes, bells or clipboard of the windows on that daemon. A host that needs
+a password or a key says **Needs you** on its row and offers **Connect**, which asks in the window you clicked
+in.
+
+What you have seen belongs to the daemon: unseen output, bells and finished commands agree across windows,
+Contour processes and machines, and survive a reconnect and a live upgrade. A pane that a focused window shows
+never turns unseen.
+
+A daemon that no window is on still alerts you: its bells, desktop notifications and finished commands are
+raised once, by the most recently focused window of one Contour process, titled `‹daemon›: ‹title›`. Its waiting
+tabs count on that process's taskbar entry only.
+
+Activating any row of another daemon is a **jump**: the window moves to that daemon and lands on the row's tab
+and pane. How a jump shows while it connects, and how to cancel it, is described with the
+[daemon rows](#daemon-rows) below. `CycleDaemon` steps through the listed daemons in the tree's
+order, skipping hidden ones.
+
+A daemon row says how its daemon is reached:
+
+| Words | Terminal mark | Meaning |
+| --- | --- | --- |
+| Connected | `●` | The daemon is reachable; the row shows the most urgent mark beneath it instead. |
+| Connecting… | `◌` | A first connection is being made. |
+| Reconnecting… | `↻` | A lost connection is being made again. |
+| Needs you | `?` | Connecting waits for you: a password, a host key. **Connect** asks. |
+| Not connected | `–` | Nothing connects to it, and nothing is tried. **Connect** tries. |
+| Not running | `◇` | No daemon serves there. A daemon of this machine offers **Start**; a host offers **Connect**, which finds its daemon once it runs there but never starts it (**Open in New Window** in the row's menu does). |
+| Daemon too old | `⊘` | The daemon's Contour is too old to be watched in the background. A host offers **Connect**, which finds it once upgraded; a daemon of this machine is tried again by itself every 30 seconds. See [Known limits](#known-limits). |
+| Failed | `⨯` | Connecting failed and is not retried; the tooltip says why. **Connect** tries again. |
+
 ## Jump to the next item that needs you
 
 **⌘J** (macOS) or **Ctrl+Shift+J** (Linux and Windows), the `JumpToNextAttention` action, shows the next pane
@@ -84,15 +131,19 @@ Pressing it again while that switch connects goes on to the next item, and showi
 own daemon meanwhile ends the switch.
 **Mark Seen** in a row's menu (the `MarkSeen` action) does that without going there.
 
-**⇧⌘J** (macOS) or **Ctrl+Shift+Alt+J** (Linux and Windows), the `JumpBack` action, goes back to where the
-window was before its last jump, workspace switch, sidebar activation or switcher pick; each press goes one
-place further back, up to 16. A run of `JumpToNextAttention` counts as one place, so after working through what
-needed you one press returns to where you started. Switching tabs in the tab strip is not a place of its own,
-and places whose daemon restarted, or whose workspace or tab closed, are skipped, as is the place the window is on
-now. A jump back that fails or is cancelled keeps its place; with nowhere left, the window says "Nowhere to go back
-to". Both are in the **Window** menu, as **Next Needing Me** and **Jump Back**, greyed while they would do nothing.
+It is also in the **Window** menu, as **Next Needing Me**, greyed while there is nothing to go to. The footer
+shows the key, so you find it again.
 
-The footer shows the key, so you find it again.
+## Jump back
+
+**⇧⌘J** (macOS) or **Ctrl+Shift+Alt+J** (Linux and Windows), the `JumpBack` action, or **Window ▸ Jump Back**,
+goes back to where the window was before its last jump, workspace switch, sidebar activation or switcher pick,
+on whichever daemon that was. Each press goes one place further back, up to 16. A run of `JumpToNextAttention`
+presses counts as one place, so after working through what needed you one press returns to where you started.
+Switching tabs in the tab strip is not a place of its own, nor is where a jump back lands. Places whose daemon
+restarted, or whose workspace or tab closed, are skipped, as is the place the window is on now. A press while a
+jump connects replaces that jump. A jump back that fails or is cancelled keeps its place; with nowhere left, the
+window shows a brief notice, "Nowhere to go back to", and the menu row is greyed.
 
 ## Showing, hiding and focusing
 
@@ -110,8 +161,9 @@ The footer shows the key, so you find it again.
 
 These are bound in the `native2026` defaults only, except `CycleWorkspace`, `MoveWorkspaceDown`/`Up` and
 `NewWorkspace`, which every defaults edition binds, one level up from the tab and window chords (Ctrl+PageUp/PageDown,
-Ctrl+Shift+PageUp/PageDown, Ctrl+Shift+N). `FilterWorkspaces`
-and `ToggleSidebarNeedsMe` have no default chord; bind one in `input_mapping`. Each control's tooltip names the chord its action is bound to at the time, so a
+Ctrl+Shift+PageUp/PageDown, Ctrl+Shift+N). `FilterWorkspaces`,
+`ToggleSidebarNeedsMe`, `CancelSwitch`, `OpenInNewWindow`, `HideDaemon` and `ShowHiddenDaemon` have no default
+chord; they are reached through the menus and the sidebar's rows, and you can bind one in `input_mapping`. Each control's tooltip names the chord its action is bound to at the time, so a
 binding you add shows there at once.
 
 By pointer, the **sidebar toggle** at the start of the title band (beside the traffic lights on macOS, at the
@@ -159,8 +211,9 @@ filter is only a view: it never changes what a drag or a rename acts on.
 - **Right-click** for the row's menu. Every row's menu begins with **Open in New Window** (as Shift+Return), which
   opens what the row names in a window of its own and leaves this window where it is; a window that shows it
   already is raised instead, with the row's tab active. A row of a daemon reached by an unnamed link, or of a
-  window that runs its sessions in-process, does not offer it, nor does a daemon's row while the daemon is not
-  running, too old or failed. An Open in New Window under way goes on while the window switches elsewhere,
+  window that runs its sessions in-process, does not offer it, nor does a daemon's row while the daemon is too
+  old or failed, or is a daemon of this machine that is not running (a host that is not running offers it: the
+  new window starts the daemon there). An Open in New Window under way goes on while the window switches elsewhere,
   and the other way round.
     - a daemon: Open in New Window, **New Workspace** (on the window's own daemon as the tab strip's; on
       another, made there and then jumped to), then what the row's buttons do, in their order and named in
@@ -304,13 +357,15 @@ the switcher; both are in the chrome's keyboard walk (Ctrl+F6).
 The switcher keeps the sidebar's times running while it is open, so a working workspace's time moves on even
 with the sidebar hidden.
 
+<a id="daemon-rows"></a>
 Each daemon heads its section with a **daemon row**: its name in the platform's section-heading type (smaller
 than its workspaces, semibold, in the secondary ink, as a source list heads a section), standing where its
 workspaces' names stand (bold at the first column on the Terminal row, its fold mark after the name, so
 it is never taken for a workspace), the computer or server icon of a local or remote daemon after the name on the
 other rows, and one status at its end: the most urgent mark beneath it while it is connected, else its link's
 mark and words, with **Connect**, **Start** (and **Remove**) or **Cancel** as the link offers. Start and Remove
-are for daemons of this machine; a host that is not running offers neither. Connect on the window's own daemon
+are for daemons of this machine; a host that is not running, or too old, offers Connect instead, which dials it
+without ever starting it and clears the row once it answers. Connect on the window's own daemon
 reconnects it, as the location chip does; while its link waits for you, it brings the prompt it waits on to the
 front instead. A blank line sets each section apart. Clicking the row, Return, ← and → fold it. On a narrow
 sidebar the locality icon goes first, then Remove, then the button shrinks to its icon (a one-cell mark on the
@@ -393,7 +448,9 @@ It is also in the Settings window, under **Appearance › Tab bar**.
 configuration is reloaded keeps the styles it opened with, and a window opened after it uses the new ones.
 
 See [Key mapping](configuration/key-mapping.md#workspace-sidebar) for the actions and their default chords.
-The default width is 220 px on macOS, 240 px on Fluent, 260 px on ContourLinux, and 28 cells under
+Which saved hosts the sidebar lists is `show_in_sidebar` of each [host](configuration/hosts.md); what you hide or
+show from the sidebar itself is remembered per user, as the sidebar's own width and visibility are.
+The default width is 220 px on macOS, 240 px on Fluent, 260 px on ContourLinux, and 30 cells under
 `ui_style: terminal`.
 
 ### Defaults
@@ -414,5 +471,13 @@ only.
 - **Ahead and behind are not shown on Windows.** They come from running `git`, and the daemon's command
   runner does not support that there. The branch still shows.
 - **The sidebar has a solid background.** macOS vibrancy and Windows Mica behind it are not done yet.
+- **A daemon of an older Contour is listed as Daemon too old** and is not watched in the background: attach a
+  window to it, or upgrade it (`contour daemon upgrade`), after which it is watched again by itself within 30
+  seconds.
+- **A saved host whose Contour predates `--no-start` is too old to be watched**, as is one whose
+  `remote_command:` does not pass `--no-start` on; it is not retried in the background, but its row's Connect
+  tries again; see [Remote hosts](remote-hosts.md#when-it-does-not-connect).
+- **A window attached to a daemon older than this release** shows what that daemon states of its panes as not
+  seen yet.
 - **Rows have no accessible expanded state**, because Qt's accessibility has none. The state is part of the
   row's name instead; see [Accessibility](accessibility.md#the-workspace-sidebar).

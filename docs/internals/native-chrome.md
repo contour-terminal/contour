@@ -422,7 +422,7 @@ forks: what differs is data.
 - **Tokens.** `SidebarTokens` (in `ChromeTokenGroups.hpp`, one per row in `ChromeTokenRows.hpp`) holds the
   extents: default, minimum and maximum width, row heights, indent, glyph edge, footer height, selection
   radius and accent-pill width. Horizontal values are pixels, or cells on the Terminal row. Colours come from
-  the `sidebar*` colour tokens. The default width is 220 px on macOS, 240 on Fluent, 260 on ContourLinux and 28
+  the `sidebar*` colour tokens. The default width is 220 px on macOS, 240 on Fluent, 260 on ContourLinux and 30
   cells on Terminal. New QML carries no size or colour literals.
 - **`SidebarLook` per row.** `LayoutTokens::sidebar` names the look: `SourceList` (macOS, an inset rounded
   selection), `NavigationPane` (Fluent, a subtle fill and an accent pill), `HeaderPane` (ContourLinux, a solid
@@ -461,13 +461,36 @@ forks: what differs is data.
   - `window/PopupAnchor.hpp`: where a dropdown hangs below its control; the location chip, a tmux
     window's host chip at the sidebar's head and the sidebar's switcher control open the switcher there, with `SwitcherScope::Everything`: the same rows
     `ShowSwitcher` opens centred, and Escape closes it rather than narrowing it.
+  - `window/DaemonLinkLook.hpp`: the one link-state vocabulary (`DaemonLinkState`, `LinkLook`,
+    `DaemonLinkGlyphRow`), read by the location chip, the switcher and the daemon rows. A Catch2 case keeps its
+    marks apart from every `TabBadge` glyph, which is why the chip's marks became `↻ ⨯ ?`; Not connected and Not
+    running take the Warning dot, as there is no neutral status role.
+  - `window/SidebarDaemonRow.hpp`: what activating a daemon row does and which buttons it carries per link
+    state; its face per look (`DaemonRowFace`: the platform's section-heading type, footnote size, semibold, in
+    the secondary ink on the native looks; bold at column 0 with the fold mark after the name on Terminal); and
+    the order it gives way in on a narrow sidebar (`DaemonRowFit`: the locality icon, then Remove, then the
+    button's icon form, then the words into the tooltip, then the name elided in the middle, never below six
+    letters).
+  - `window/SidebarTree.hpp` also builds the daemon section headings, the Hidden row, the Needs-me scope
+    (`config::SidebarScope`), the pending-jump mark and the dimmed ink of what was last known.
+  - Where the Needs-me control stands differs per look: in the sidebar's header on macOS, Fluent and Terminal,
+    in the filter row on ContourLinux, so no look elides the daemon heading at the default width. The pieces are
+    `SidebarNeedsMeButton.qml`, `SidebarSwitcherButton.qml`, `SidebarDaemonHeading.qml`,
+    `SidebarDaemonButton.qml` and `SidebarPendingMark.qml`.
+  - A toast can carry an action (Hide from Sidebar's **Undo**): `NoticeModel`'s toast action, drawn on the
+    opaque `ToastFill` so the button reads as one over any row.
 - **Accessibility.** The tree is `Accessible.Tree`, a row a `TreeItem` named by its title; its kind, its fold
   and its status are the translated description (`accessibleDescriptionOf()`): Qt 6.11's `Accessible` has no
   expanded state to bind.
 - **The model.** `SidebarModel` is a thin `QAbstractListModel` over those rows. It rebuilds on directory and
   seen-state changes, never per terminal byte, and keeps one 1 Hz timer that runs only while a visible row
   shows a live time. Reduce Motion (`motion.animates == false`) turns off the expand animation and the spinner.
-- **Tests.** Each header has a Catch2 table, and `ChromeSnapshot_test` renders the sidebar on every row.
+- **Tests.** Each header has a Catch2 table, and `ChromeSnapshot_test` renders the sidebar on every row. Several
+  daemons have scenes of their own: `sidebar-two-daemons`, `sidebar-daemon-connecting`,
+  `sidebar-daemon-reconnecting`, `sidebar-daemon-needs-input`, `sidebar-daemon-not-running`,
+  `sidebar-daemon-too-old`, `sidebar-daemon-narrow`, `sidebar-daemon-menu`, `sidebar-pending-row`,
+  `sidebar-needs-me-empty`, `sidebar-hidden-menu`, the `sidebar-other-daemon-menus-*` scenes and
+  `daemon-hidden-toast`.
 
 ## Testing strategy
 

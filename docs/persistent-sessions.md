@@ -223,7 +223,8 @@ window somewhere else without closing it, and its panes are swapped in place:
 - **To another workspace of the same daemon**, with `SwitchToWorkspace` or `CycleWorkspace`
   (`Ctrl+Alt+PageDown` / `PageUp`, `⌃⌘↓` / `⌃⌘↑` on macOS, for the next / previous one).
 - **To another daemon**: a local one by its name (`contour daemon --name`), or a saved
-  [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon`. The window lands on that
+  [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon` (which walks the daemons the sidebar lists,
+  in its order), or by activating any of its rows in the [sidebar](sidebar.md#several-daemons). The window lands on that
   daemon's only workspace, on a new one when it has none, and asks which when it has several. A workspace
   that holds no tab -- a daemon no window has attached to yet keeps one -- counts as none: there is nothing
   in it to show.
@@ -231,8 +232,8 @@ window somewhere else without closing it, and its panes are swapped in place:
   palette's family, drawn over the window. See [The switcher](#the-switcher) below.
 - **By mouse**: click the location chip (`local › billing ▾`) in the title band of a window on a daemon (Space or
   Return when it has keyboard focus) to open the same switcher below it, as `ShowSwitcher` does; its tooltip
-  names that chord, and Escape closes the popup. With the sidebar shown, the daemon at the head of the sidebar
-  does the same. Or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
+  names that chord, and Escape closes the popup. With the sidebar shown, the sidebar's switcher button (in its
+  title row; on Linux in the header bar above it) does the same. Or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
   from the Window submenu of the main menu (☰). **Switch To Daemon** lists the same daemons as the command
   palette's *Switch to daemon* rows.
 - **The chip's connection state.** The chip shows the daemon's connection too: a dot for a remote daemon that is
@@ -252,7 +253,8 @@ is refused, with a hint to run `contour daemon upgrade` or to pick **Upgrade dae
 
 Bells and desktop notifications come from one window only: the most recently focused one. A command that
 finishes in a workspace no window shows is noticed once, by that window. A program's clipboard write (OSC 52)
-reaches only a window that shows its pane.
+reaches only a window that shows its pane. A daemon no window is on, but the sidebar lists, alerts the same way:
+once, from the most recently focused window of one Contour process, its title prefixed with the daemon's name.
 
 A switch that cannot finish leaves the window as it was and says why in a notice: the destination is not
 reachable, it has no such workspace, or it did not show the workspace within 10 seconds.
