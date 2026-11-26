@@ -958,18 +958,30 @@ TEST_CASE("a ClientHello whose client area is cut short is malformed", "[vthost]
     CHECK_FALSE(decodePdu(cut).has_value());
 }
 
+namespace
+{
+/// @return A ClientHello frame whose role byte is @p role.
+[[nodiscard]] std::vector<std::byte> helloWithRoleByte(uint8_t role)
+{
+    auto const encoded = [](ConnectionRole stated) {
+        auto stream = Writer {};
+        encodePdu(stream, 1, DecodedPdu { ClientHello { .role = stated } });
+        return std::vector<std::byte> { stream.view().begin(), stream.view().end() };
+    };
+    // The role is the one byte two hellos differing only in it differ in, wherever later fields put it.
+    auto bytes = encoded(ConnectionRole::Control);
+    auto const attach = encoded(ConnectionRole::Attach);
+    REQUIRE(bytes.size() == attach.size());
+    auto const differing = std::ranges::mismatch(bytes, attach).in1;
+    REQUIRE(differing != bytes.end());
+    *differing = std::byte { role };
+    return bytes;
+}
+} // namespace
+
 TEST_CASE("an unknown ConnectionRole byte reads as Control, never as Attach", "[vthost][proto]")
 {
-    auto const future = encodeWithFieldsEdited(DecodedPdu { ClientHello { .role = ConnectionRole::Control } },
-                                               [](std::span<std::byte const> fields) {
-                                                   auto edited =
-                                                       std::vector<std::byte>(fields.begin(), fields.end());
-                                                   // The role, just before the area's presence byte, the
-                                                   // intent's kind and count, and the empty profile.
-                                                   edited.rbegin()[4] = std::byte { 7 };
-                                                   return edited;
-                                               });
-    CHECK(decodeAs<ClientHello>(future).role == ConnectionRole::Control);
+    CHECK(decodeAs<ClientHello>(helloWithRoleByte(7)).role == ConnectionRole::Control);
 }
 
 TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty", "[vthost][proto]")
