@@ -21,6 +21,7 @@
 
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
 #include <vtextension/wasm/remote/transport/Channel.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -110,7 +111,7 @@ std::vector<std::pair<std::string, std::string>> helperEnvironment()
 
 LockdownRequirement helperLockdown() noexcept
 {
-    if (host::ThisPlatformSandbox == host::PlatformSandbox::None || runsOnWine())
+    if (host::ThisPlatformSandbox == host::PlatformSandbox::None || wasm::testing::runsOnWine())
         return LockdownRequirement::AcceptUnsandboxed;
     return LockdownRequirement::RequireLockedDown;
 }

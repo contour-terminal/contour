@@ -27,10 +27,6 @@
 namespace vtextension::wasm::remote::process::testing
 {
 
-/// @return Whether this process runs on wine (ntdll exports wine_get_version()), which stubs AppContainers: a
-///         contained launch there proves nothing, and fails every case it would start. False off Windows.
-[[nodiscard]] bool runsOnWine() noexcept;
-
 /// @return What the extension host is started in by a test that starts it as Contour does: its AppContainer
 ///         on Windows, nothing under wine, and nothing on POSIX, where the helper confines itself.
 [[nodiscard]] ProcessIsolation helperIsolation() noexcept;

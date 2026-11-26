@@ -45,6 +45,7 @@
 #include <vtextension/wasm/remote/transport/ControlPage.hpp>
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
 #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -150,7 +151,7 @@ TEST_CASE("ProcessLauncher.childGetsACleanEnvironment", "[vtextension]")
     auto names = valuesOf(*report, "env=");
 #ifdef _WIN32
     // Wine adds its own variables to every process it starts, whatever block it was given; Windows adds none.
-    if (::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr)
+    if (vtextension::wasm::testing::runsOnWine())
         std::erase_if(names, [](std::string const& name) {
             return name.starts_with("WINE") || name == "SystemDrive" || name == "SystemRoot"
                    || name == "PROCESSOR_ARCHITECTURE";

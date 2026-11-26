@@ -20,6 +20,7 @@
 #include <vtextension/wasm/remote/proto/Pdu.hpp>
 #include <vtextension/wasm/remote/transport/PduStream.hpp>
 #include <vtextension/wasm/testing/BackendContract.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 namespace proto = vtextension::wasm::remote::proto;
 namespace process = vtextension::wasm::remote::process;
@@ -110,7 +111,7 @@ TEST_CASE("Helper.windowsHelperIsLockedDown", "[vtextension][appcontainer]")
     // mitigations, finds its job, and says LockedDown. Under wine, which stubs AppContainers, it is started
     // uncontained, and must say so: Unsandboxed, never a lockdown it does not have.
     auto const hello = helloOfHelperIn(process::testing::helperIsolation());
-    if (process::testing::runsOnWine())
+    if (vtextension::wasm::testing::runsOnWine())
     {
         CHECK(hello.lockdown == proto::LockdownState::Unsandboxed);
         WARN("wine: the uncontained helper says Unsandboxed, as it must; containment is proved on Windows");

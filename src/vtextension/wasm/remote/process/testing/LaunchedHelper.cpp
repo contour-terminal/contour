@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -54,20 +55,10 @@ std::vector<std::pair<std::string, std::string>> sanitizerEnvironment()
     return environment;
 }
 
-bool runsOnWine() noexcept
-{
-#ifdef _WIN32
-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
-#else
-    return false;
-#endif
-}
-
 ProcessIsolation helperIsolation() noexcept
 {
 #ifdef _WIN32
-    return runsOnWine() ? ProcessIsolation::None : ProcessIsolation::AppContainer;
+    return wasm::testing::runsOnWine() ? ProcessIsolation::None : ProcessIsolation::AppContainer;
 #else
     return ProcessIsolation::None;
 #endif

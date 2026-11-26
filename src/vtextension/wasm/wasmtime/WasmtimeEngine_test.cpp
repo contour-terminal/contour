@@ -46,6 +46,7 @@
 #include <vtextension/wasm/testing/FeatureModules.hpp>
 #include <vtextension/wasm/testing/ProcessModules.hpp>
 #include <vtextension/wasm/testing/RenderMeasurement.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
 #include <vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp>
@@ -909,16 +910,6 @@ TEST_CASE("WasmtimeEngine.reservationAndGuardAreExplicit", "[wasmtime]")
 namespace
 {
 
-#ifdef _WIN32
-/// Whether this runs under wine, which lets a store into a reserved page of a section's view through, as if
-/// it were committed, where Windows faults.
-[[nodiscard]] bool runsUnderWine() noexcept
-{
-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
-}
-#endif
-
 /// A store that faults on provided memory under signal traps.
 struct SignalFault
 {
@@ -991,7 +982,7 @@ TEST_CASE("WasmtimeEngine.signalTrapsPastTheOpenBytes", "[wasmtime]")
                   != vtextension::wasm::BuildInstrumentation::None)
         SKIP("an instrumented build traps in software only");
 #ifdef _WIN32
-    if (runsUnderWine())
+    if (vtextension::wasm::testing::runsOnWine())
         SKIP("wine lets a store into a reserved page of a section's view through, unlike Windows");
 #endif
     checkSignalTrap(SignalFault {

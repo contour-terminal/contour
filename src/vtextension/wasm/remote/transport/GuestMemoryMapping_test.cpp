@@ -11,6 +11,7 @@
 
 #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
 #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -41,20 +42,11 @@ constexpr auto ObjectBytes = 4 * Page;
 /// The guard the cases reserve after it.
 constexpr auto GuardBytes = 2 * Page;
 
-#ifdef _WIN32
-/// Whether this runs under wine.
-[[nodiscard]] bool runsUnderWine() noexcept
-{
-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
-}
-#endif
-
 /// Skips the case where this system cannot map guest memory: only wine may say so.
 void requireGuestMapping()
 {
 #ifdef _WIN32
-    if (!canMapGuestMemory() && runsUnderWine())
+    if (!canMapGuestMemory() && vtextension::wasm::testing::runsOnWine())
         SKIP("wine places no section view over a placeholder");
 #endif
     REQUIRE(canMapGuestMemory());
@@ -166,7 +158,7 @@ TEST_CASE("GuestMemoryMapping.closedPagesAreThoseNoViewCommitted", "[vtextension
 {
     // Windows commits a reserved section's pages for the section: the helper's closed pages stay closed only
     // while the parent commits no more than it granted, which is why SharedGuestMemory commits exactly that.
-    if (runsUnderWine())
+    if (vtextension::wasm::testing::runsOnWine())
         SKIP("wine commits a reserved section per view, unlike Windows");
     requireGuestMapping();
     auto const object = createSharedObject(ObjectBytes, SharedObjectUse::GuestMemory);
@@ -229,7 +221,7 @@ TEST_CASE("GuestMemoryMapping.neverShrinks", "[vtextension]")
 #ifdef _WIN32
 TEST_CASE("GuestMemoryMapping.placeholdersWork", "[vtextension]")
 {
-    if (!canMapGuestMemory() && runsUnderWine())
+    if (!canMapGuestMemory() && vtextension::wasm::testing::runsOnWine())
         SKIP("wine places no section view over a placeholder: the helper copies memory there");
     CHECK(canMapGuestMemory());
 }

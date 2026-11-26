@@ -16,6 +16,7 @@
 
 #include <vtextension/wasm/remote/transport/SharedObject.hpp>
 #include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -246,23 +247,11 @@ TEST_CASE("SharedObject.reservedSectionCommitsOnlyWhatIsAsked", "[vtextension]")
     CHECK(mapping->bytes()[GuestBytes - 1] == std::byte { 1 });
 }
 
-namespace
-{
-
-/// Whether this runs under wine, which commits a reserved section per view rather than per section.
-[[nodiscard]] bool runsUnderWine() noexcept
-{
-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
-}
-
-} // namespace
-
 TEST_CASE("SharedObject.pagesCommittedThroughOneViewAreSeenThroughAnother", "[vtextension]")
 {
     // Contour commits guest memory through its own view only; the helper's view must then reach the same
     // pages. Windows commits a reserved section's pages for the section, so any view may touch them.
-    if (runsUnderWine())
+    if (vtextension::wasm::testing::runsOnWine())
         SKIP("wine commits a reserved section per view, unlike Windows");
 
     auto const object = createSharedObject(MiB, SharedObjectUse::GuestMemory);

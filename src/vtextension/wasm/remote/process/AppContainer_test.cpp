@@ -27,6 +27,7 @@
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
 #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+#include <vtextension/wasm/testing/Wine.hpp>
 
 #ifdef _WIN32
     #include <algorithm>
@@ -647,11 +648,11 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
         CHECK(valueOf(report, "profile-file") == "ok");
         CHECK(valueOf(report, "connect") == "ok");
         // Under wine the job's process count is not held: what it says is only recorded.
-        if (!process::testing::runsOnWine())
+        if (!vtextension::wasm::testing::runsOnWine())
             CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:1816");
     }
 
-    if (process::testing::runsOnWine())
+    if (vtextension::wasm::testing::runsOnWine())
     {
         // What wine made of the contained launch, for the record; nothing it does proves a container.
         auto refusals = std::vector<std::string> {};
