@@ -418,9 +418,10 @@ TEST_CASE("Sandbox.profileHasNoNetworkOrMachLookup", "[vtextension][host]")
     CHECK(std::ranges::equal(allowed, expected));
 
     // Each rule's filter: shared memory only by the prefix Contour names its objects with, read from a
-    // parameter; signals only to itself; sysctls only the CPU feature names.
+    // parameter; signals only to itself; sysctls only the page size and the CPU feature names.
     CHECK(SandboxProfile.contains("(ipc-posix-name-prefix (param \"SHM_PREFIX\"))"));
     CHECK(SandboxProfile.contains("(allow signal (target self))"));
+    CHECK(SandboxProfile.contains("(sysctl-name \"hw.pagesize_compat\")"));
     CHECK(SandboxProfile.contains("(sysctl-name-prefix \"hw.optional.\")"));
 }
 

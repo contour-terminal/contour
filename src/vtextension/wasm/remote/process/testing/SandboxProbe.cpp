@@ -14,6 +14,8 @@
     #include <sys/procctl.h>
     #include <sys/procdesc.h>
 #elifdef __APPLE__
+    #include <sys/sysctl.h>
+
     #include <mach/mach.h>
     #include <servers/bootstrap.h>
 #endif
@@ -430,8 +432,8 @@ namespace
     }
 
     /// What the locked-down host does: takes a grant off control and maps it over a reservation, opens it,
-    /// writes it, unmaps and closes it; draws random bytes, reads the clock, waits on a condition, asks for
-    /// its alternate signal stack, and (aarch64) flushes the instruction caches.
+    /// writes it, unmaps and closes it; asks the page size; draws random bytes, reads the clock, waits on a
+    /// condition, asks for its alternate signal stack, and (aarch64) flushes the instruction caches.
     [[nodiscard]] std::string permitted(OperationContext& context)
     {
         auto const request = context.control.receive();
@@ -450,6 +452,19 @@ namespace
             constexpr auto Mark = std::string_view { "probe" };
             std::ranges::copy(std::as_bytes(std::span { Mark }), mapping->base());
         }
+        // The page size, as an engine that maps an instance's memory itself asks it (WAMR's os_mmap()). On
+        // macOS by the sysctl the C library asks, which it may have cached before the lockdown: asked here
+        // directly, so that the profile's rule for it is what answers.
+#ifdef __APPLE__
+        auto pageSize = 0;
+        auto pageSizeLength = sizeof(pageSize);
+        if (::sysctlbyname("hw.pagesize_compat", &pageSize, &pageSizeLength, nullptr, 0) != 0
+            || pageSize <= 0)
+            return "failed:page-size";
+#else
+        if (::getpagesize() <= 0)
+            return "failed:page-size";
+#endif
         auto random = std::array<std::byte, 8> {};
 #ifdef __APPLE__
         // macOS has no getrandom(); getentropy() is what its C++ library draws on.
