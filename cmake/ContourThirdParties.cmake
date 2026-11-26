@@ -261,9 +261,24 @@ if(CONTOUR_EXTENSIONS)
 
     set(_wamr_target "")
     set(_wamr_rejected "")
+    # On Apple silicon a WAMR without Contour's MAP_JIT patch (cmake/patches/) maps every instance's memory
+    # MAP_JIT, for code made at run time, which the hardened runtime refuses the interpreting extension host,
+    # which holds no allow-jit entitlement: every instantiation would fail. An installed or embedded WAMR
+    # cannot be told apart from a patched one, so every Apple build refuses it -- an Intel one too, as the
+    # same package may be built for both -- and uses only the fetched, patched WAMR.
+    set(_wamr_unpatched_refusal "")
+    if(APPLE)
+        string(CONCAT _wamr_unpatched_refusal
+            "on macOS only a WAMR with Contour's MAP_JIT patch can instantiate under the hardened runtime on "
+            "Apple silicon, and an installed or embedded one cannot be told to have it")
+    endif()
     if(TARGET iwasm::vmlib)
+        if(_wamr_unpatched_refusal)
+            message(FATAL_ERROR "The embedded WAMR (iwasm::vmlib) cannot be used: ${_wamr_unpatched_refusal}. "
+                "Let Contour fetch its own (CONTOUR_USE_CPM=ON), or configure with -DCONTOUR_EXTENSIONS=OFF.")
+        endif()
         set(_wamr_target iwasm::vmlib)
-        set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's thread-safety patch")
+        set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's patches")
     elseif(NOT CONTOUR_BUILD_STATIC)
         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
         set(_wamr_candidate "")
@@ -278,12 +293,15 @@ if(CONTOUR_EXTENSIONS)
                 endif()
             endif()
         endif()
-        if(_wamr_candidate)
+        if(_wamr_candidate AND _wamr_unpatched_refusal)
+            set(_wamr_rejected "${_wamr_unpatched_refusal}")
+            message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
+        elseif(_wamr_candidate)
             ContourThirdParties_WamrTerminates(${_wamr_candidate} _wamr_terminates)
             if(_wamr_terminates)
                 set(_wamr_target ${_wamr_candidate})
                 set(THIRDPARTY_BUILTIN_wamr
-                    "system package, without Contour's thread-safety patch (its interrupt verified)")
+                    "system package, without Contour's patches (its interrupt verified)")
             else()
                 set(_wamr_rejected "${_wamr_terminates_REASON}")
                 message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
@@ -293,6 +311,12 @@ if(CONTOUR_EXTENSIONS)
 
     if(NOT _wamr_target)
         if(NOT CONTOUR_USE_CPM)
+            # On macOS no installed WAMR is taken (above): only the fetched one will do.
+            if(_wamr_unpatched_refusal)
+                set(_wamr_remedy "Set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+            else()
+                set(_wamr_remedy "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+            endif()
             if(_wamr_rejected)
                 set(_wamr_found "The installed WAMR was rejected: ${_wamr_rejected}.")
             else()
@@ -302,29 +326,47 @@ if(CONTOUR_EXTENSIONS)
                 "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
                 "${_wamr_found} "
-                "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+                "${_wamr_remedy}")
         endif()
         message(STATUS "Using CPM to fetch WAMR")
-        set(_wamr_patch "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch")
-        file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
-        string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
-        # git applies it (cmake/ApplyPatchOnce.cmake); CPM, which clones WAMR, needs git already.
+        # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
+        # while setting or clearing any instance's exception walks every cluster under that lock: a data
+        # race between one extension's call or trap and another's unload. The first patch unlinks under the
+        # lock. An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory,
+        # as the cluster and the environment are freed only after the walk's list lock is released.
+        #
+        # On Apple silicon WAMR maps all of its memory MAP_JIT, an instance's linear memory included, which
+        # the hardened runtime refuses an executable without the allow-jit entitlement -- and the
+        # interpreting extension host has none, as it runs no code it made. The second patch asks for
+        # MAP_JIT only where the memory is to be executable, which an interpreter never maps.
+        set(_wamr_patches
+            "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch"
+            "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-map-jit-only-for-executable-memory.patch")
+        # git applies each (cmake/ApplyPatchOnce.cmake), one command after another; CPM, which clones WAMR,
+        # needs git already.
         find_package(Git REQUIRED)
+        set(_wamr_patch_command "")
+        set(_wamr_patch_hashes "")
+        foreach(_wamr_patch IN LISTS _wamr_patches)
+            if(_wamr_patch_command)
+                list(APPEND _wamr_patch_command COMMAND)
+            endif()
+            list(APPEND _wamr_patch_command "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
+                 -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake")
+            file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
+            string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
+            string(APPEND _wamr_patch_hashes "-${_wamr_patch_hash}")
+        endforeach()
         CPMAddPackage(
             NAME wamr
             VERSION ${WAMR_MINIMAL_VERSION}
             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
-            # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
-            # while setting or clearing any instance's exception walks every cluster under that lock: a data
-            # race between one extension's call or trap and another's unload. The patch unlinks under the lock.
-            # An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory, as
-            # the cluster and the environment are freed only after the walk's list lock is released. Applied
-            # once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a patched tree succeeds; the
-            # patch's own hash keys the source cache, so that a changed patch is never served an old tree.
-            PATCH_COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
-                          -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake"
-            CUSTOM_CACHE_KEY "25bd7eb63e82-${_wamr_patch_hash}"
+            # The patches above, each applied once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a
+            # patched tree succeeds; their own hashes key the source cache, so that a changed or added patch
+            # is never served an old tree.
+            PATCH_COMMAND ${_wamr_patch_command}
+            CUSTOM_CACHE_KEY "25bd7eb63e82${_wamr_patch_hashes}"
             OPTIONS
                 "WAMR_BUILD_INTERP 1"
                 "WAMR_BUILD_FAST_INTERP 1"
@@ -397,7 +439,7 @@ if(CONTOUR_EXTENSIONS)
         endif()
         set(_wamr_target vmlib)
         set(THIRDPARTY_BUILTIN_wamr
-            "CPM (${WAMR_MINIMAL_VERSION}, static, fast interpreter, with Contour's thread-safety patch)")
+            "CPM (${WAMR_MINIMAL_VERSION}, static, fast interpreter, with Contour's patches)")
         if(_wamr_rejected)
             string(APPEND THIRDPARTY_BUILTIN_wamr "; system WAMR rejected: ${_wamr_rejected}")
         endif()

@@ -1,0 +1,36 @@
+diff --git a/core/shared/platform/common/posix/posix_memmap.c b/core/shared/platform/common/posix/posix_memmap.c
+index d5cad88..7d1b7fd 100644
+--- a/core/shared/platform/common/posix/posix_memmap.c
++++ b/core/shared/platform/common/posix/posix_memmap.c
+@@ -41,12 +41,7 @@ void *
+ os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
+ {
+     int map_prot = PROT_NONE;
+-#if (defined(__APPLE__) || defined(__MACH__)) && defined(__arm64__) \
+-    && defined(TARGET_OS_OSX) && TARGET_OS_OSX != 0
+-    int map_flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_JIT;
+-#else
+     int map_flags = MAP_ANONYMOUS | MAP_PRIVATE;
+-#endif
+     uint64 request_size, page_size;
+     uint8 *addr = MAP_FAILED;
+     uint32 i;
+@@ -79,8 +74,17 @@ os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
+     if (prot & MMAP_PROT_WRITE)
+         map_prot |= PROT_WRITE;
+ 
+-    if (prot & MMAP_PROT_EXEC)
++    if (prot & MMAP_PROT_EXEC) {
+         map_prot |= PROT_EXEC;
++        /* Only memory that will hold code needs MAP_JIT, which the hardened
++           runtime refuses without the allow-jit entitlement and a sandbox
++           may refuse as dynamic code generation: an interpreter's linear
++           memory and data must not ask for it. */
++#if (defined(__APPLE__) || defined(__MACH__)) && defined(__arm64__) \
++    && defined(TARGET_OS_OSX) && TARGET_OS_OSX != 0
++        map_flags |= MAP_JIT;
++#endif
++    }
+ 
+ #if defined(BUILD_TARGET_X86_64) || defined(BUILD_TARGET_AMD_64)
+ #ifndef __APPLE__
