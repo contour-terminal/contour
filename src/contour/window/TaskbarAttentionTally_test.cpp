@@ -134,3 +134,26 @@ TEST_CASE("taskbarAttention.aDirectoryCountsItsBlockedTabsButTheDisplayedWorkspa
     CHECK(contour::window::tabsWaitingIn(directory, uint64_t { 3 }) == 2);
     CHECK(contour::window::tabsWaitingIn({}, std::nullopt) == 0);
 }
+
+TEST_CASE("taskbarAttention.aDirectoryCountsADaemonsUnseenBell", "[taskbarattention][daemon-attention]")
+{
+    auto rang = DirectoryPane {};
+    rang.bell = vthost::proto::PaneBell::Rang;
+    rang.bellSerial = 4;
+    auto const directoryWith = [](DirectoryPane const& pane) {
+        return WorkspaceDirectory {
+            .workspaces = { DirectoryWorkspace {
+                .id = 1,
+                .name = {},
+                .tabs = { DirectoryTab { .id = 1, .title = {}, .name = {}, .panes = { pane } } } } },
+            .selected = std::nullopt,
+        };
+    };
+    // A daemon that keeps the flags says the bell is unseen for every window: it waits.
+    rang.flagSource = FlagSource::Daemon;
+    CHECK(tabsWaitingIn(directoryWith(rang), std::nullopt) == 1);
+    CHECK(tabsWaitingIn(directoryWith(rang), uint64_t { 1 }) == 0);
+    // An older daemon's bell is this window's to judge by its ledger; the directory alone does not count it.
+    rang.flagSource = FlagSource::Window;
+    CHECK(tabsWaitingIn(directoryWith(rang), std::nullopt) == 0);
+}

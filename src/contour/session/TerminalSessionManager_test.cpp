@@ -25,14 +25,17 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingUserNotificationCenter.hpp>
 #include <contour/test/SecureInputFixtures.hpp>
+#include <contour/window/AttentionJump.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/LocationChip.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/SidebarTree.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/SwitcherRows.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/TaskbarAttentionTally.hpp>
 #include <contour/window/WindowController.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
 
@@ -5494,6 +5497,16 @@ class BellingSource final: public contour::window::IWorkspaceDirectorySource
         return _answer;
     }
 
+    [[nodiscard]] contour::window::FlagSource flagSource() const override
+    {
+        return contour::window::FlagSource::Window;
+    }
+    void markSeen(contour::window::PaneKey /*pane*/, contour::window::PaneSeen /*seen*/) override {}
+    void reportShown(contour::window::WindowFocusState /*focus*/,
+                     std::vector<contour::window::PaneKey> /*panes*/) override
+    {
+    }
+
     std::optional<uint64_t> selected;
 
   private:
@@ -5835,6 +5848,16 @@ class StubDirectorySource final: public contour::window::IWorkspaceDirectorySour
     contour::window::SelectResult select(uint64_t /*workspace*/) override
     {
         return contour::window::SelectResult::Requested;
+    }
+
+    [[nodiscard]] contour::window::FlagSource flagSource() const override
+    {
+        return contour::window::FlagSource::Window;
+    }
+    void markSeen(contour::window::PaneKey /*pane*/, contour::window::PaneSeen /*seen*/) override {}
+    void reportShown(contour::window::WindowFocusState /*focus*/,
+                     std::vector<contour::window::PaneKey> /*panes*/) override
+    {
     }
 };
 
@@ -6359,6 +6382,16 @@ class DaemonDirectorySource final: public contour::window::IWorkspaceDirectorySo
     {
         selected.push_back(workspace);
         return contour::window::SelectResult::Requested;
+    }
+
+    [[nodiscard]] contour::window::FlagSource flagSource() const override
+    {
+        return contour::window::FlagSource::Window;
+    }
+    void markSeen(contour::window::PaneKey /*pane*/, contour::window::PaneSeen /*seen*/) override {}
+    void reportShown(contour::window::WindowFocusState /*focus*/,
+                     std::vector<contour::window::PaneKey> /*panes*/) override
+    {
     }
 
     /// What the daemon lists instead, once a test changed it.
@@ -7862,4 +7895,341 @@ TEST_CASE("TerminalSession: decodes a PNG before any display is attached", "[con
     CHECK(session->terminal().peekInput() == std::string_view { "\033_Gi=7;OK\033\\" });
 
     contour::test::closeAllTabs(*window);
+}
+
+namespace
+{
+using contour::window::FlagSource;
+using contour::window::PaneKey;
+using contour::window::PaneSeen;
+using contour::window::WindowFocusState;
+
+/// A daemon that keeps its panes' attention flags, as one sharing Capability::DaemonAttention does: it lists
+/// each pane in a tab of its own of one workspace, and clears what a MarkSeen covers for every window.
+struct AttentionDaemon
+{
+    static constexpr auto Workspace = uint64_t { 7 };  ///< The one workspace, which every window selects.
+    std::vector<contour::window::DirectoryPane> panes; ///< What it states of each pane.
+    std::vector<std::pair<PaneKey, PaneSeen>> seen;    ///< Every MarkSeen, from whichever window.
+
+    /// @param key The pane's key; listed with FlagSource::Daemon.
+    /// @return Its entry, added when it was not listed.
+    contour::window::DirectoryPane& pane(PaneKey key)
+    {
+        if (auto const found = std::ranges::find(panes, key, &contour::window::DirectoryPane::key);
+            found != panes.end())
+            return *found;
+        auto& added = panes.emplace_back();
+        added.key = key;
+        added.flagSource = FlagSource::Daemon;
+        added.attention = contour::window::AttentionKnowledge::Stated;
+        return added;
+    }
+
+    [[nodiscard]] contour::window::WorkspaceDirectory directory() const
+    {
+        auto workspace = contour::window::DirectoryWorkspace {};
+        workspace.id = Workspace;
+        for (auto const& listed: panes)
+        {
+            auto tab = contour::window::DirectoryTab {};
+            tab.id = listed.key.value;
+            tab.panes = { listed };
+            workspace.tabs.push_back(std::move(tab));
+        }
+        auto directory = contour::window::WorkspaceDirectory {};
+        directory.workspaces = { std::move(workspace) };
+        directory.selected = Workspace;
+        return directory;
+    }
+
+    /// Clears what @p what covers of @p key, as the daemon's attention ledger does.
+    void markSeen(PaneKey key, PaneSeen what)
+    {
+        seen.emplace_back(key, what);
+        auto& entry = pane(key);
+        if (what.serials.activity >= entry.activitySerial)
+            entry.activity = vthost::proto::OutputActivity::None;
+        if (what.serials.bell >= entry.bellSerial)
+            entry.bell = vthost::proto::PaneBell::Silent;
+        if (what.serials.finished >= entry.finishedSerial)
+            entry.finished.reset();
+        entry.seenStatusGeneration = std::max(entry.seenStatusGeneration, what.statusGeneration);
+    }
+};
+
+/// One window's view of an AttentionDaemon: what it lists, and what the window tells it.
+class AttentionSource final: public contour::window::IWorkspaceDirectorySource
+{
+  public:
+    explicit AttentionSource(AttentionDaemon& daemon): _daemon(daemon) {}
+
+    [[nodiscard]] contour::window::WorkspaceDirectory directory() const override
+    {
+        return _daemon.directory();
+    }
+    contour::window::SelectResult select(uint64_t /*workspace*/) override
+    {
+        return contour::window::SelectResult::Requested;
+    }
+    [[nodiscard]] FlagSource flagSource() const override { return FlagSource::Daemon; }
+    void markSeen(PaneKey pane, PaneSeen seen) override
+    {
+        ++marksSent;
+        _daemon.markSeen(pane, seen);
+    }
+    void reportShown(WindowFocusState focus, std::vector<PaneKey> panes) override
+    {
+        reports.emplace_back(focus, std::move(panes));
+    }
+
+    int marksSent = 0; ///< How many MarkSeen this window sent.
+    /// Every report of the window's focus and shown panes, in order.
+    std::vector<std::pair<WindowFocusState, std::vector<PaneKey>>> reports;
+
+  private:
+    AttentionDaemon& _daemon;
+};
+
+/// A window's binding to an AttentionDaemon, its sessions made by a factory the test owns.
+class AttentionBinding final: public contour::session::WindowBinding
+{
+  public:
+    AttentionBinding(contour::session::SessionFactory& factory, AttentionDaemon& daemon):
+        source(daemon), _factory(factory)
+    {
+    }
+    [[nodiscard]] contour::session::SessionFactory& sessions() noexcept override { return _factory; }
+    [[nodiscard]] std::string_view hostLabel() const noexcept override { return {}; }
+    [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
+    [[nodiscard]] contour::window::IWorkspaceDirectorySource* directorySource() noexcept override
+    {
+        return &source;
+    }
+    [[nodiscard]] unsigned tabsWaitingElsewhere() const override
+    {
+        auto const directory = source.directory();
+        return contour::window::tabsWaitingIn(directory, directory.selected);
+    }
+    void windowClosed(vtworkspace::WorkspaceId /*window*/) override {}
+    void lastWindowReleased() override {}
+
+    AttentionSource source;
+
+  private:
+    contour::session::SessionFactory& _factory;
+};
+
+/// A window bound to an AttentionDaemon, holding one tab of one pane.
+struct AttentionWindow
+{
+    AttentionWindow(contour::session::TerminalSessionManager& manager, AttentionDaemon& daemon):
+        binding(factory, daemon), window(manager)
+    {
+        manager.bindWindow(window.id, binding);
+        window->createNewTab();
+        REQUIRE(window->activeSession() != nullptr);
+        key = manager.paneKeyOf(window->activeSession()->modelSessionId());
+    }
+
+    /// @return The urgency the window's sidebar shows for @p pane.
+    [[nodiscard]] contour::window::Urgency sidebarUrgency(PaneKey pane) const
+    {
+        auto const rows = contour::window::sidebarRows(window->directorySource()->directory(),
+                                                       window->tabAttention(),
+                                                       {},
+                                                       std::chrono::system_clock::time_point {},
+                                                       std::nullopt);
+        auto const row = std::ranges::find_if(rows, [pane](contour::window::SidebarRow const& candidate) {
+            return candidate.key.kind == contour::window::SidebarRowKind::Tab
+                   && candidate.key.tab == pane.value;
+        });
+        REQUIRE(row != rows.end());
+        return row->urgency;
+    }
+
+    contour::test::MockPtySessionFactory factory;
+    AttentionBinding binding;
+    contour::test::ScopedController window;
+    PaneKey key; ///< The key of its one pane.
+};
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: the tab strip, taskbar and sidebar agree on a daemon pane",
+          "[manager][attention][daemon-attention]")
+{
+    using contour::window::TabBadgeKind;
+    using contour::window::Urgency;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto daemon = AttentionDaemon {};
+    auto shown = AttentionWindow { manager, daemon };
+    auto const session = shown.window->activeSession()->modelSessionId();
+    auto& pane = daemon.pane(shown.key);
+    auto const announce = [&] {
+        manager.notifyWorkspaceDirectoryChanged(shown.binding);
+    };
+    auto const tabBadge = [&] {
+        return shown.window->tabBadgeKinds().at(0);
+    };
+    auto const otherWindowCounts = [&] {
+        return contour::window::tabsWaitingIn(daemon.directory(), std::nullopt);
+    };
+
+    // The daemon says the pane rang: all three say so, though this window's ledger saw nothing.
+    pane.bell = vthost::proto::PaneBell::Rang;
+    pane.bellSerial = 3;
+    announce();
+    CHECK(tabBadge() == TabBadgeKind::Bell);
+    CHECK(shown.sidebarUrgency(shown.key) == Urgency::NeedsYou);
+    CHECK(otherWindowCounts() == 1);
+
+    // A bell the window hears itself is the daemon's to mark, not the ledger's.
+    manager.noteBell(session, contour::window::OutputOrigin::Live);
+    CHECK(shown.window->tabAttention().of(shown.key) == contour::window::SessionAttention {});
+
+    // Cleared at the daemon (another window saw it): all three agree it asks nothing.
+    pane.bell = vthost::proto::PaneBell::Silent;
+    announce();
+    CHECK(tabBadge() == TabBadgeKind::None);
+    CHECK(shown.sidebarUrgency(shown.key) == Urgency::Idle);
+    CHECK(otherWindowCounts() == 0);
+
+    // A finished command the daemon flags: the tab and the sidebar say how it ended.
+    pane.finished = vthost::proto::FinishedCommand { .exitCode = 1 };
+    pane.finishedSerial = 4;
+    announce();
+    CHECK(tabBadge() == TabBadgeKind::Error);
+    CHECK(shown.sidebarUrgency(shown.key) == Urgency::Failed);
+
+    contour::test::closeAllTabs(*shown.window);
+}
+
+TEST_CASE("TerminalSessionManager: Done seen in window A is seen in window B",
+          "[manager][attention][daemon-attention]")
+{
+    using contour::window::Urgency;
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto daemon = AttentionDaemon {};
+    auto a = AttentionWindow { manager, daemon };
+    auto b = AttentionWindow { manager, daemon };
+    auto done = vtbackend::ProgramStatusRecord {};
+    done.id = "build";
+    done.state = vtbackend::ProgramState::Done;
+    done.generation = 5;
+    daemon.pane(a.key).status = { done };
+    manager.notifyWorkspaceDirectoryChanged(a.binding);
+    manager.notifyWorkspaceDirectoryChanged(b.binding);
+    REQUIRE(a.sidebarUrgency(a.key) == Urgency::DoneUnseen);
+    REQUIRE(b.sidebarUrgency(a.key) == Urgency::DoneUnseen);
+
+    // The user looks at it in window A: A tells the daemon, and the daemon every window.
+    a.window->markActivePaneSeen();
+    REQUIRE(daemon.seen.size() == 1);
+    CHECK(daemon.seen.front().first == a.key);
+    CHECK(daemon.seen.front().second.statusGeneration == 5);
+    manager.notifyWorkspaceDirectoryChanged(b.binding);
+    CHECK(b.sidebarUrgency(a.key) == Urgency::Idle);
+    CHECK(a.sidebarUrgency(a.key) == Urgency::Idle);
+    // Window B's own ledger knew nothing of it, and still does not.
+    CHECK(b.window->tabAttention().of(a.key) == contour::window::SessionAttention {});
+
+    contour::test::closeAllTabs(*a.window);
+    contour::test::closeAllTabs(*b.window);
+}
+
+TEST_CASE("TerminalSessionManager: output in a shown pane of an unfocused window sends no MarkSeen",
+          "[manager][attention][daemon-attention]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto daemon = AttentionDaemon {};
+    auto shown = AttentionWindow { manager, daemon };
+    auto const session = shown.window->activeSession()->modelSessionId();
+    manager.clearFocusedWindow(shown.window.id);
+
+    // The window reported the pane shown, without focus: the daemon does not count it watched.
+    REQUIRE_FALSE(shown.binding.source.reports.empty());
+    CHECK(shown.binding.source.reports.back().first == WindowFocusState::Unfocused);
+    CHECK(shown.binding.source.reports.back().second == std::vector { shown.key });
+
+    // The daemon flags the output; the window, showing the pane, answers nothing to it.
+    auto& pane = daemon.pane(shown.key);
+    pane.activity = vthost::proto::OutputActivity::Output;
+    pane.activitySerial = 1;
+    manager.notifyWorkspaceDirectoryChanged(shown.binding);
+    manager.noteSessionOutput(session, contour::window::OutputOrigin::Live);
+    manager.refreshTabBadgeForSession(session);
+    manager.markVisibleSessionsSeen(shown.window.id);
+    CHECK(shown.binding.source.marksSent == 0);
+    CHECK(shown.window->tabAttention().of(shown.key) == contour::window::SessionAttention {});
+
+    // Focused, the window says so with what it shows; the daemon keeps a watched pane seen itself.
+    manager.setFocusedWindow(shown.window.id);
+    CHECK(shown.binding.source.reports.back().first == WindowFocusState::Focused);
+    CHECK(shown.binding.source.reports.back().second == std::vector { shown.key });
+    CHECK(shown.binding.source.marksSent == 0);
+
+    contour::test::closeAllTabs(*shown.window);
+}
+
+TEST_CASE("TerminalSessionManager: the window focus leaves reports itself unfocused",
+          "[manager][attention][daemon-attention]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto daemon = AttentionDaemon {};
+    auto a = AttentionWindow { manager, daemon };
+    auto const lastReportOf = [](AttentionWindow const& window) {
+        REQUIRE_FALSE(window.binding.source.reports.empty());
+        return window.binding.source.reports.back();
+    };
+
+    // A window spawned takes focus from the one that had it.
+    manager.setFocusedWindow(a.window.id);
+    REQUIRE(lastReportOf(a).first == WindowFocusState::Focused);
+    auto b = AttentionWindow { manager, daemon };
+    CHECK(lastReportOf(a) == std::pair { WindowFocusState::Unfocused, std::vector { a.key } });
+    CHECK(lastReportOf(b).first == WindowFocusState::Focused);
+
+    // Activated, a window takes focus from the other.
+    manager.setFocusedWindow(a.window.id);
+    CHECK(lastReportOf(a).first == WindowFocusState::Focused);
+    CHECK(lastReportOf(b) == std::pair { WindowFocusState::Unfocused, std::vector { b.key } });
+
+    // The deactivation of the window that lost focus already, arriving late, leaves it unfocused.
+    manager.clearFocusedWindow(b.window.id);
+    CHECK(lastReportOf(b).first == WindowFocusState::Unfocused);
+    CHECK(manager.focusedWindow() == a.window.id);
+
+    contour::test::closeAllTabs(*a.window);
+    contour::test::closeAllTabs(*b.window);
+}
+
+TEST_CASE("TerminalSessionManager: landing on a daemon pane sends one MarkSeen",
+          "[manager][attention][daemon-attention]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    auto daemon = AttentionDaemon {};
+    auto shown = AttentionWindow { manager, daemon };
+    auto& pane = daemon.pane(shown.key);
+    pane.bell = vthost::proto::PaneBell::Rang;
+    pane.bellSerial = 6;
+    manager.notifyWorkspaceDirectoryChanged(shown.binding);
+
+    shown.window->jumpToPane(shown.key);
+    CHECK(shown.binding.source.marksSent == 1);
+    REQUIRE(daemon.seen.size() == 1);
+    CHECK(daemon.seen.front().second.serials.bell == 6);
+    CHECK(daemon.pane(shown.key).bell == vthost::proto::PaneBell::Silent);
+
+    // Nothing left unseen: landing again asks the daemon nothing.
+    manager.notifyWorkspaceDirectoryChanged(shown.binding);
+    shown.window->jumpToPane(shown.key);
+    CHECK(shown.binding.source.marksSent == 1);
+
+    contour::test::closeAllTabs(*shown.window);
 }

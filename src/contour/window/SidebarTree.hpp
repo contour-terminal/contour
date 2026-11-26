@@ -10,7 +10,8 @@
 ///
 /// What a pane asks is decided by paneUrgency() (AttentionJump.hpp), in the one order of StatusUrgency.hpp;
 /// a parent row shows the most urgent of its panes, with that pane's glyph, reason and time. A Failed or
-/// DoneUnseen pane whose verdict is a finished command has a reason (`exit 1 · 18s`) but no time:
+/// DoneUnseen pane whose verdict is a finished command has a reason (`exit 1 · 18s`), and the time since it
+/// ended where its daemon stated that (DirectoryPane::finishedAt); without it, no time, as
 /// vthost::proto::FinishedCommand carries no timestamp to measure from.
 #include <contour/window/PaneKey.hpp>
 #include <contour/window/StatusKinds.hpp>

@@ -200,3 +200,87 @@ TEST_CASE("a finished command counts by its exit, once per run", "[attention]")
     pane.finishedSerial = 2; // a new run
     CHECK(paneUrgency(pane, attention.of(pane.key)) == Urgency::DoneUnseen);
 }
+
+TEST_CASE("a daemon pane's urgency ignores the window ledger", "[attention][daemon-attention]")
+{
+    auto pane = paneOf(1, { recordOf(ProgramState::Done, 3) });
+    pane.flagSource = FlagSource::Daemon;
+    pane.attention = AttentionKnowledge::Stated;
+    auto const sawEverything = SessionAttention { .activity = TabActivity::None,
+                                                  .finished = FinishedBlockBadge::None,
+                                                  .bell = BellMark::None,
+                                                  .seenStatusGeneration = 3,
+                                                  .seenActivitySerial = 9,
+                                                  .seenBellSerial = 9,
+                                                  .seenFinishedSerial = 9 };
+    auto const markedEverything = SessionAttention { .activity = TabActivity::UnseenOutput,
+                                                     .finished = FinishedBlockBadge::Failed,
+                                                     .bell = BellMark::Rang,
+                                                     .seenStatusGeneration = 0,
+                                                     .seenActivitySerial = 0,
+                                                     .seenBellSerial = 0,
+                                                     .seenFinishedSerial = 0 };
+
+    // The Done record is unseen at the daemon: what this window's ledger saw changes nothing.
+    CHECK(paneUrgency(pane, {}) == Urgency::DoneUnseen);
+    CHECK(paneUrgency(pane, sawEverything) == Urgency::DoneUnseen);
+    pane.seenStatusGeneration = 3;
+    CHECK(paneUrgency(pane, {}) == Urgency::Idle);
+    // Nor do the ledger's own marks: the daemon flags nothing.
+    CHECK(paneUrgency(pane, markedEverything) == Urgency::Idle);
+
+    // A bell the daemon flags asks, however far the ledger's seen serial is.
+    pane.bell = vthost::proto::PaneBell::Rang;
+    pane.bellSerial = 5;
+    CHECK(paneUrgency(pane, sawEverything) == Urgency::NeedsYou);
+
+    // The same pane kept by the window reads the ledger, as before.
+    pane.flagSource = FlagSource::Window;
+    CHECK(paneUrgency(pane, sawEverything) == Urgency::Idle);
+    CHECK(paneUrgency(pane, markedEverything) == Urgency::NeedsYou);
+}
+
+TEST_CASE("a daemon pane whose flags were not stated yet shows nothing unseen",
+          "[attention][daemon-attention]")
+{
+    // Listed with a Done the window has not seen, a round trip before its daemon states what was seen of it:
+    // not known is not unseen.
+    auto pane = paneOf(1, { recordOf(ProgramState::Done, 3) });
+    pane.flagSource = FlagSource::Daemon;
+    REQUIRE(pane.attention == AttentionKnowledge::Unstated);
+    CHECK_FALSE(isUnseen(pane));
+    CHECK(paneUrgency(pane, {}) == Urgency::Idle);
+    CHECK(daemonMarksOf(pane) == SessionAttention { .seenStatusGeneration = AllStatusGenerationsSeen });
+
+    // Stated, and nothing of it seen: the Done asks.
+    pane.attention = AttentionKnowledge::Stated;
+    CHECK(isUnseen(pane));
+    CHECK(paneUrgency(pane, {}) == Urgency::DoneUnseen);
+
+    // A Blocked status asks whatever is known.
+    auto blocked = paneOf(2, { recordOf(ProgramState::Blocked, 1) });
+    blocked.flagSource = FlagSource::Daemon;
+    CHECK(paneUrgency(blocked, {}) == Urgency::NeedsYou);
+}
+
+TEST_CASE("a daemon pane is seen at the daemon, with everything its entry states",
+          "[attention][daemon-attention]")
+{
+    auto pane = paneOf(1, { recordOf(ProgramState::Done, 7) });
+    pane.flagSource = FlagSource::Daemon;
+    pane.attention = AttentionKnowledge::Stated;
+    pane.seenStatusGeneration = 7;
+    CHECK_FALSE(isUnseen(pane));
+    pane.activity = vthost::proto::OutputActivity::Output;
+    pane.activitySerial = 4;
+    pane.bellSerial = 2; // a bell seen before, still carrying its serial
+    CHECK(isUnseen(pane));
+    auto const seen = paneSeenOf(pane);
+    CHECK(seen.serials.activity == 4);
+    CHECK(seen.serials.bell == 2);
+    CHECK(seen.serials.finished == 0);
+    CHECK(seen.statusGeneration == 7);
+    pane.activity = vthost::proto::OutputActivity::None;
+    pane.status.push_back(recordOf(ProgramState::Error, 8));
+    CHECK(isUnseen(pane));
+}

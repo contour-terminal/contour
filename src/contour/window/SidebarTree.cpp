@@ -122,14 +122,14 @@ namespace
     }
 
     LeafStatus leafOf(DirectoryPane const& pane,
-                      SessionAttention const& attention,
+                      SessionAttention const& windowMarks,
                       std::chrono::system_clock::time_point now)
     {
         auto leaf = LeafStatus {};
-        leaf.urgency = paneUrgency(pane, attention);
+        leaf.urgency = paneUrgency(pane, windowMarks);
         leaf.folder = rowTextOf(pane.cwd);
         leaf.fullFolder = rowTextOf(pane.cwd, MaxFullReasonLength);
-        auto const winner = winnerOf(pane.status, attention.seenStatusGeneration);
+        auto const winner = winnerOf(pane.status, marksOf(pane, windowMarks).seenStatusGeneration);
         if (winner.record && urgencyOf(winner.kind, StatusSeen::Unseen) == leaf.urgency)
         {
             leaf.glyph = glyphOf(winner.kind);
@@ -158,7 +158,11 @@ namespace
             return std::nullopt;
         }();
         if (verdict && pane.finished && finishedBadgeOf(*pane.finished) == *verdict)
+        {
             leaf.reason = leaf.fullReason = finishedText(*pane.finished);
+            // Where the daemon stated when it ended, the time since.
+            leaf.time = formatTimeText(TimeKind::Relative, pane.finishedAt, std::nullopt, now);
+        }
         return leaf;
     }
 

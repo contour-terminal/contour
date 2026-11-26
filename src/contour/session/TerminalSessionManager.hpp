@@ -1484,10 +1484,23 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void markVisibleSessionsSeen(vtworkspace::WorkspaceId window);
 
     /// Counts @p session, a pane of @p window, as seen: the window's ledger clears its marks and takes the
-    /// session's newest program-status generation as seen.
+    /// session's newest program-status generation as seen. Nothing for a pane whose flags a daemon keeps,
+    /// which the window marks seen there (WindowController::noteDirectoryPaneSeenByKey).
     /// @param window  The window displaying the session's workspace.
     /// @param session The pane's session.
     void markPaneSeen(vtworkspace::WorkspaceId window, vtworkspace::SessionId session);
+
+    /// Tells the daemon behind @p window, if it has one, whether the window has the user's focus and which of
+    /// its panes it shows (window::IWorkspaceDirectorySource::reportShown()): the window's one report of
+    /// either, made on every change of its focus, its binding and what it shows. GUI thread.
+    /// @param window The window.
+    void reportShownPanes(vtworkspace::WorkspaceId window);
+
+    /// Records @p next as the focus-owning window: the one write of _focusedWindow. When the owner changes,
+    /// the window that lost focus reports itself unfocused and the one that took it focused
+    /// (reportShownPanes()), whichever path moved it -- a window spawned, clicked, activated or closed.
+    /// @param next The window that owns focus now, or std::nullopt for none.
+    void moveFocusedWindow(std::optional<vtworkspace::WorkspaceId> next);
 
     /// Tells every session of @p window that its display's exposure may have changed (a window-state change).
     /// @param window The window.
@@ -2326,6 +2339,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The seen-state ledger of the window owning the workspace that holds it; nullptr when none
     /// does.
     [[nodiscard]] window::TabAttention* ledgerOf(vtworkspace::SessionId session) const noexcept;
+
+    /// @param session A session of the model.
+    /// @return Who keeps its attention flags: the daemon of the window holding it, where that window's
+    ///         directory source says so; the window's ledger otherwise, and for a session no window holds.
+    [[nodiscard]] window::FlagSource flagSourceOf(vtworkspace::SessionId session) const;
 
     /// The seen-state of panes about to change windows, as a move notes it before it happens.
     struct AttentionCarry

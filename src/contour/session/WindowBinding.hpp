@@ -103,12 +103,6 @@ class WindowBinding
     /// serves is the manager's to know (TerminalSessionManager::windowsBoundTo). GUI thread.
     virtual void lastWindowReleased() = 0;
 
-    /// Tells the daemon behind the binding whether the window bound here has the user's focus: of every
-    /// window on a daemon, the one focused most recently raises (raiseRole()). Nothing for a binding with no
-    /// daemon. GUI thread.
-    /// @param focus Whether the window gained or lost the focus.
-    virtual void reportFocus(vthost::proto::WindowFocus /*focus*/) {}
-
     /// @return Whether a window bound here rings, alerts and notifies for its panes, or only marks them: the
     ///         daemon names one window of all those on it, so that a bell sounds once. Raise for a binding
     ///         with no daemon, whose window is the only one that sees its panes. GUI thread.

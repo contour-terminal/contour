@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,26 @@ namespace contour::window
 /// states of its workspaces: name, control id, git state), so the list never depends on which workspace is
 /// mirrored.
 
+/// Who keeps a pane's attention flags (output, bell, finished command, the status generation seen).
+enum class FlagSource : uint8_t
+{
+    /// The window: its own ledger (TabAttention) marks the pane and holds what the user saw; flags the
+    /// directory states (an older daemon's summaries) count only while their serials are newer than seen.
+    Window = 0,
+    /// The daemon (Capability::DaemonAttention): the directory's flags are what is unseen, for every
+    /// window alike, and the window's ledger has no say.
+    Daemon,
+};
+
+/// Whether the daemon that keeps a pane's flags (FlagSource::Daemon) has stated them yet.
+enum class AttentionKnowledge : uint8_t
+{
+    /// Nothing arrived yet -- the daemon states every pane's flags, a round trip after the pane is listed:
+    /// what is not known is not unseen, so the pane shows nothing unseen meanwhile.
+    Unstated = 0,
+    Stated, ///< The daemon stated the pane's flags (proto::PaneAttentionState).
+};
+
 /// One pane of a tab, with what is known of it.
 struct DirectoryPane
 {
@@ -49,6 +70,14 @@ struct DirectoryPane
     uint64_t activitySerial = 0; ///< Serial of the last output the daemon stated.
     uint64_t bellSerial = 0;     ///< Serial of the last bell the daemon stated.
     uint64_t finishedSerial = 0; ///< Serial of the last finished command the daemon stated.
+    /// When @ref finished finished, if the daemon stated it (FlagSource::Daemon only).
+    std::optional<std::chrono::system_clock::time_point> finishedAt = std::nullopt;
+    /// The newest program-status generation a window saw (FlagSource::Daemon only): a Done or Error record
+    /// asks for the user only while newer.
+    uint64_t seenStatusGeneration = 0;
+    FlagSource flagSource = FlagSource::Window; ///< Who keeps the flags above.
+    /// Whether the daemon stated the flags above yet (FlagSource::Daemon only).
+    AttentionKnowledge attention = AttentionKnowledge::Unstated;
     bool operator==(DirectoryPane const&) const = default;
 };
 
@@ -233,7 +262,30 @@ struct PaneStatus
     uint64_t activitySerial = 0; ///< @see DirectoryPane::activitySerial
     uint64_t bellSerial = 0;     ///< @see DirectoryPane::bellSerial
     uint64_t finishedSerial = 0; ///< @see DirectoryPane::finishedSerial
+    std::optional<std::chrono::system_clock::time_point> finishedAt =
+        std::nullopt;                                            ///< @see DirectoryPane::finishedAt
+    uint64_t seenStatusGeneration = 0;                           ///< @see DirectoryPane::seenStatusGeneration
+    FlagSource flagSource = FlagSource::Window;                  ///< @see DirectoryPane::flagSource
+    AttentionKnowledge attention = AttentionKnowledge::Unstated; ///< @see DirectoryPane::attention
 };
+
+/// Resets the attention flags of @p status -- what a pane raised, their serials and what was seen of them --
+/// and keeps everything else it states: the pane's title, directory and program status.
+/// @param status The pane's status.
+inline void clearFlags(PaneStatus& status)
+{
+    auto const none = PaneStatus {};
+    status.activity = none.activity;
+    status.bell = none.bell;
+    status.finished = none.finished;
+    status.activitySerial = none.activitySerial;
+    status.bellSerial = none.bellSerial;
+    status.finishedSerial = none.finishedSerial;
+    status.finishedAt = none.finishedAt;
+    status.seenStatusGeneration = none.seenStatusGeneration;
+    status.flagSource = none.flagSource;
+    status.attention = none.attention;
+}
 
 /// Where a directory gets the status of a pane from.
 class PaneStatusLookup
@@ -318,6 +370,10 @@ namespace detail
                 pane.activitySerial = known->activitySerial;
                 pane.bellSerial = known->bellSerial;
                 pane.finishedSerial = known->finishedSerial;
+                pane.finishedAt = known->finishedAt;
+                pane.seenStatusGeneration = known->seenStatusGeneration;
+                pane.flagSource = known->flagSource;
+                pane.attention = known->attention;
             }
             panes.push_back(std::move(pane));
         });

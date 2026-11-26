@@ -24,6 +24,7 @@
 #include <contour/remote/SelectAnswer.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
@@ -59,6 +60,7 @@
 #include <utility>
 #include <vector>
 
+#include <vthost/AttentionLedger.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/client/ClientSupervisor.hpp>
@@ -406,11 +408,31 @@ class NativeController final: public QObject, public contour::session::SessionFa
     [[nodiscard]] std::expected<uint64_t, std::string> select(
         uint64_t workspace, std::optional<uint64_t> directoryFrom = std::nullopt);
 
-    /// GUI thread. Tells the daemon whether this window has the user's focus; it decides from the reports of
-    /// every attached window which one raises for a bell (raiseRole()). Stated again to every connection that
-    /// replaces a lost one.
+    /// GUI thread. Tells the daemon whether this window has the user's focus, keeping the panes it last said
+    /// the window shows (reportShown()).
     /// @param focus The window's focus now.
     void reportFocus(vthost::proto::WindowFocus focus);
+
+    /// GUI thread. Tells the daemon whether this window has the user's focus and which panes it shows: it
+    /// decides from the reports of every attached window which one raises for a bell (raiseRole()), and a
+    /// pane a focused window shows is watched, so it raises nothing for attention. The one producer of the
+    /// connection's ReportFocus; the last report is stated again to every connection that replaces a lost
+    /// one.
+    /// @param focus The window's focus now.
+    /// @param sessions The daemon sessions of the panes the window shows; told only to a daemon sharing
+    ///        Capability::DaemonAttention.
+    void reportShown(vthost::proto::WindowFocus focus, std::vector<uint64_t> sessions);
+
+    /// GUI thread. Tells the daemon the window showed @p session and saw its attention up to @p seen: the
+    /// daemon clears what that covers, and tells every window. Nothing is sent to a daemon that does not
+    /// share Capability::DaemonAttention.
+    /// @param session The pane's daemon session.
+    /// @param seen The serials and status generation the window saw (window::DirectoryPane).
+    void markSeen(uint64_t session, vthost::SeenSerials seen);
+
+    /// @return Who keeps the attention flags of the panes directory() lists: the daemon, when this connection
+    ///         shares Capability::DaemonAttention with it; the window otherwise. Takes _mutex.
+    [[nodiscard]] window::FlagSource flagSource() const;
 
     /// GUI thread.
     /// @return Whether this window rings and raises for a bell or notification, as the daemon decided it for
@@ -428,6 +450,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         is known of them: the layouts the daemon pushes for every workspace, and the status it
     ///         pushes for every pane, mirrored or not. Takes _mutex.
     [[nodiscard]] window::WorkspaceDirectory directory() const;
+
+    /// @return The marks of every pane whose status the daemon stated, by session, while it keeps their flags
+    ///         (flagSource()); none otherwise. Read from the statuses alone, no layout listed. Takes _mutex.
+    [[nodiscard]] std::unordered_map<uint64_t, window::SessionAttention> daemonMarks() const;
 
     /// @return Whether any pty this controller made is still alive, bound to a remote session or detached
     ///         from one: the controller must outlive it, as the pty calls back into it until its destruction
@@ -874,6 +900,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///             layouts, landed moves and tab pairings this clears are read by the GUI thread under it.
     void adoptReconnect(std::lock_guard<std::mutex> const& held);
 
+    /// Reactor-side, under _mutex: a connection was accepted. Takes who keeps the panes' attention flags on
+    /// it (flagSource()), and drops the flags the other keeper stated when that changed.
+    /// @param held The caller's lock of _mutex.
+    void adoptFlagSource(std::lock_guard<std::mutex> const& held);
+
     /// Lets the tests run code on the reactor thread, against the client of the moment, to stage a
     /// connection that is ending before its state change is delivered -- a window no daemon can be made to
     /// open on demand.
@@ -922,6 +953,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// Reactor thread. Merges what the daemon says changed about a pane field by field into the status store.
     void onPaneSummary(vthost::proto::PaneSummary const& summary);
+
+    /// Reactor thread. Takes what the daemon's attention ledger states of a pane into the status store
+    /// (Capability::DaemonAttention).
+    void onPaneAttention(vthost::proto::PaneAttentionState const& state);
 
     /// Reactor thread. Takes the role the daemon gives this connection.
     void onRaiseRole(vthost::proto::RaiseRole role);
@@ -1270,6 +1305,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::vector<vthost::proto::PaneSummary> _raised;
     /// The focus last reported, stated again to each connection that replaces a lost one. Under _mutex.
     vthost::proto::WindowFocus _focus = vthost::proto::WindowFocus::Unfocused;
+    /// The daemon sessions the window last said it shows (reportShown()), stated again with @ref _focus.
+    /// Under _mutex.
+    std::vector<uint64_t> _shown;
+    /// Who keeps the panes' attention flags on the connection up now, or the last one. Under _mutex.
+    window::FlagSource _flagSource = window::FlagSource::Window;
     /// ResumeFallback::Nothing: the workspaces a reconnect resumed whose first layout is still to come. One
     /// that comes with no tab is lost, as Resume would have judged it: its session ended meanwhile. Under
     /// _mutex.

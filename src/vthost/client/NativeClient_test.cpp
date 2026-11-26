@@ -2803,7 +2803,7 @@ TEST_CASE("a client reports its focus and is told the role the daemon gives it",
     auto delivery = vthost::client::Delivery::Unsupported;
     auto scenario = [](IntentHarness* h, vthost::client::Delivery* delivery) -> Task<void> {
         co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
-        *delivery = h->client->reportFocus(proto::WindowFocus::Focused);
+        *delivery = h->client->reportFocus(proto::WindowFocus::Focused, {});
         // The only window attached is the one that raises: the daemon says so with a NotifyRole.
         co_await core::net::testing::waitUntil(
             &h->loop, [h] { return h->client->raiseRole() == proto::RaiseRole::Raise; });

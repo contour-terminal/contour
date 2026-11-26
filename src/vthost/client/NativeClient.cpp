@@ -478,7 +478,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            PaneSummaryHandler onPaneSummary,
                            RaiseRoleHandler onRaiseRole,
                            WorkspaceMetaHandler onWorkspaceMeta,
-                           SnapshotProgressHandler onSnapshotProgress):
+                           SnapshotProgressHandler onSnapshotProgress,
+                           PaneAttentionHandler onPaneAttention):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -499,6 +500,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onRaiseRole(std::move(onRaiseRole)),
     _onWorkspaceMeta(std::move(onWorkspaceMeta)),
     _onSnapshotProgress(std::move(onSnapshotProgress)),
+    _onPaneAttention(std::move(onPaneAttention)),
     _liveness(liveness),
     _keyAuth(_handshake.keySource ? std::optional { KeyAuthenticator { _handshake.keySource } }
                                   : std::nullopt),
@@ -803,11 +805,22 @@ std::optional<uint64_t> NativeClient::selectWorkspace(uint64_t workspace,
     return serial != 0 ? std::optional { serial } : std::nullopt;
 }
 
-Delivery NativeClient::reportFocus(proto::WindowFocus focus)
+Delivery NativeClient::reportFocus(proto::WindowFocus focus, std::span<uint64_t const> shownSessions)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
-    if (!shares(proto::Capability::DaemonFollow)
-        || send(proto::DecodedPdu { proto::ReportFocus { .focus = focus } }) == 0)
+    if (!shares(proto::Capability::DaemonFollow))
+        return Delivery::Unsupported;
+    auto report = proto::ReportFocus { .focus = focus };
+    if (shares(proto::Capability::DaemonAttention))
+        report.shownSessions.assign(shownSessions.begin(), shownSessions.end());
+    return send(proto::DecodedPdu { std::move(report) }) != 0 ? Delivery::Sent : Delivery::Unsupported;
+}
+
+Delivery NativeClient::sendMarkSeen(uint64_t session, proto::SeenSerials seen)
+{
+    // A daemon that did not negotiate it refuses it: it is not sent at all.
+    if (!shares(proto::Capability::DaemonAttention)
+        || send(proto::DecodedPdu { proto::MarkSeen { .session = session, .seen = seen } }) == 0)
         return Delivery::Unsupported;
     return Delivery::Sent;
 }
@@ -1087,6 +1100,12 @@ bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
     {
         if (_onPaneSummary)
             _onPaneSummary(*summary);
+        return true;
+    }
+    if (auto const* attention = std::get_if<proto::PaneAttentionState>(&pdu))
+    {
+        if (_onPaneAttention)
+            _onPaneAttention(*attention);
         return true;
     }
     if (auto const* meta = std::get_if<proto::WorkspaceMeta>(&pdu))

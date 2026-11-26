@@ -312,6 +312,7 @@ void WindowController::initSidebar()
     _sidebar = std::make_unique<SidebarModel>(*_sidebarHost, _attention, _wallClock, *_noticeAnnouncer);
     connect(this, &WindowController::workspaceDirectoryChanged, _sidebar.get(), &SidebarModel::noteChanged);
     connect(this, &WindowController::workspaceDirectoryChanged, this, &WindowController::followMovedPane);
+    connect(this, &WindowController::workspaceDirectoryChanged, this, &WindowController::refreshDaemonMarks);
     connect(_sidebar.get(),
             &SidebarModel::summaryChanged,
             this,
@@ -1230,9 +1231,7 @@ ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& 
             auto const _ = std::lock_guard { terminal };
             return resolvedRecords(terminal.programStatus());
         },
-        [this](vtworkspace::SessionId id) {
-            return _attention.of(_manager.paneKeyOf(id)).seenStatusGeneration;
-        });
+        [this](vtworkspace::SessionId id) { return marksOfSession(id).seenStatusGeneration; });
 }
 
 ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab const& tab) const
@@ -1243,8 +1242,8 @@ ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab c
 TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab) const
 {
     auto const program = cachedProgramStatusBadge(tab);
-    auto const pooled = pooledAttention(
-        tab, _attention, [this](vtworkspace::SessionId id) { return _manager.paneKeyOf(id); });
+    auto const pooled =
+        pooledAttention(tab, [this](vtworkspace::SessionId id) { return marksOfSession(id); });
     // The model holds a percentage as uint8_t; the badge decision speaks int (§3.4), widened here.
     return resolveTabBadge({
         .programStatus = program.kind,
@@ -3557,13 +3556,14 @@ void WindowController::jumpToNextAttention()
         jumpToPane(*target);
 }
 
-void WindowController::setDirectorySource(IWorkspaceDirectorySource* source) noexcept
+void WindowController::setDirectorySource(IWorkspaceDirectorySource* source)
 {
     if (source == _directorySource)
         return;
     // What waited names the old source's ids, which mean nothing in the new one.
     cancelPendingNavigation();
     _directorySource = source;
+    refreshDaemonMarks();
 }
 
 void WindowController::cancelPendingNavigation() noexcept
@@ -3655,9 +3655,39 @@ void WindowController::noteDirectoryPaneSeenByKey(PaneKey key)
     if (_directorySource == nullptr)
         return;
     auto const directory = _directorySource->directory();
-    if (auto const listed = tabHoldingPane(directory, key))
-        std::ignore = noteDirectoryPaneSeen(_attention,
-                                            *std::ranges::find(listed->tab->panes, key, &DirectoryPane::key));
+    auto const listed = tabHoldingPane(directory, key);
+    if (!listed)
+        return;
+    auto const& pane = *std::ranges::find(listed->tab->panes, key, &DirectoryPane::key);
+    switch (pane.flagSource)
+    {
+        case FlagSource::Window: std::ignore = noteDirectoryPaneSeen(_attention, pane); break;
+        case FlagSource::Daemon:
+            // Asked only when there is something to clear: the daemon tells every window what it cleared.
+            if (isUnseen(pane))
+                _directorySource->markSeen(key, paneSeenOf(pane));
+            break;
+    }
+}
+
+void WindowController::refreshDaemonMarks()
+{
+    auto marks = _directorySource != nullptr && _directorySource->flagSource() == FlagSource::Daemon
+                     ? _directorySource->daemonMarks()
+                     : std::unordered_map<uint64_t, SessionAttention> {};
+    if (marks == _daemonMarks)
+        return;
+    _daemonMarks = std::move(marks);
+    // A seen status generation decides the program badge too.
+    _badges.clear();
+    notifyAllTabRowsChanged({ Roles::BadgeRole, Roles::BadgeTextRole, Roles::BadgeProgressRole });
+}
+
+SessionAttention WindowController::marksOfSession(vtworkspace::SessionId session) const
+{
+    auto const key = _manager.paneKeyOf(session);
+    auto const found = _daemonMarks.find(key.value);
+    return found != _daemonMarks.end() ? found->second : _attention.of(key);
 }
 
 void WindowController::cancelPendingJump() noexcept

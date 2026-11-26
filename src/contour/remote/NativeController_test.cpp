@@ -4604,6 +4604,17 @@ namespace
     return found->tabs[0].panes[0];
 }
 
+/// @return What a window that showed @p pane hands back as seen: every flag serial its entry states, no
+/// status
+///         generation.
+[[nodiscard]] vthost::SeenSerials flagsSeenOf(contour::window::DirectoryPane const& pane)
+{
+    return vthost::SeenSerials { .activity = pane.activitySerial,
+                                 .bell = pane.bellSerial,
+                                 .finished = pane.finishedSerial,
+                                 .statusGeneration = 0 };
+}
+
 } // namespace
 
 TEST_CASE("every workspace's layout reaches the directory", "[attach][controller][directory]")
@@ -5112,7 +5123,11 @@ TEST_CASE("select() moves the mirrored sessions", "[attach][controller][director
     REQUIRE(controller.select(second.id).has_value());
     REQUIRE(waitUntil([&] { return controller.selectedWorkspace() == second.id; }));
     CHECK(controller.directory().selected == std::optional<uint64_t> { second.id });
-    CHECK(paneOf(controller, second.id).activity == vthost::proto::OutputActivity::None);
+    // Selected is not seen: the daemon clears the output once a focused window shows the pane.
+    CHECK(paneOf(controller, second.id).activity == vthost::proto::OutputActivity::Output);
+    controller.reportShown(vthost::proto::WindowFocus::Focused, { second.session.value });
+    CHECK(waitUntil(
+        [&] { return paneOf(controller, second.id).activity == vthost::proto::OutputActivity::None; }));
     // Its sessions are mirrored in full now: its screen reaches a pane beside the first workspace's.
     REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
     auto paneA = MirrorPane { controller, controller.createPty(std::nullopt) };
@@ -5164,18 +5179,20 @@ TEST_CASE("a pane of a hidden workspace rings again for output and a bell after 
             return 0;
         });
     };
-    auto attention = contour::window::TabAttention {};
     auto const urgency = [&] {
-        auto const pane = paneOf(controller, second.id);
-        return contour::window::paneUrgency(pane, attention.of(pane.key));
+        return contour::window::paneUrgency(paneOf(controller, second.id), {});
+    };
+    // Seen as a window that showed the pane says it: at the daemon, which clears the flags for every window.
+    auto const see = [&] {
+        controller.markSeen(second.session.value, flagsSeenOf(paneOf(controller, second.id)));
+        return waitUntil([&] { return urgency() == Urgency::Idle; });
     };
 
-    // Output, marked seen here; the flag stays set on the daemon's side, but is old news.
+    // Output, marked seen.
     write("\r\nfirst");
     REQUIRE(waitUntil([&] { return paneOf(controller, second.id).activitySerial > 0; }));
     CHECK(urgency() == Urgency::UnseenOutput);
-    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
-    CHECK(urgency() == Urgency::Idle);
+    CHECK(see());
 
     // The daemon marks again at most once per FlushPolicy::activityMarkInterval: more output after it is a
     // second summary, and a new serial.
@@ -5186,12 +5203,11 @@ TEST_CASE("a pane of a hidden workspace rings again for output and a bell after 
     CHECK(urgency() == Urgency::UnseenOutput);
 
     // A bell, then seen, then another bell: each is a summary of its own.
-    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
+    CHECK(see());
     write("\a");
     REQUIRE(waitUntil([&] { return paneOf(controller, second.id).bellSerial > 0; }));
     CHECK(urgency() == Urgency::NeedsYou);
-    std::ignore = contour::window::noteDirectoryPaneSeen(attention, paneOf(controller, second.id));
-    CHECK(urgency() == Urgency::Idle);
+    CHECK(see());
     auto const seenBell = paneOf(controller, second.id).bellSerial;
     write("\a");
     REQUIRE(waitUntil([&] { return paneOf(controller, second.id).bellSerial > seenBell; }, 5000));
@@ -7209,4 +7225,264 @@ TEST_CASE("a launch of a workspace holding no tab asks for a shell there, when t
         CHECK_FALSE(waitUntil([&] { return !workspaceOf(controller, empty).tabs.empty(); }, 300));
         CHECK(daemon.clientFrames.count(vthost::proto::PduType::OpenFirstTab) == 0);
     }
+}
+
+namespace
+{
+
+/// @return What the daemon's attention ledger states of @p session; a quiet pane for one it does not hold.
+[[nodiscard]] vthost::PaneAttention daemonLedgerOf(DaemonFixture& daemon, vtworkspace::SessionId session)
+{
+    return daemon.onDaemon([&daemon, session] {
+        auto const entries = daemon.host->paneAttention();
+        auto const found =
+            std::ranges::find(entries, session.value, &std::pair<uint64_t, vthost::PaneAttention>::first);
+        return found != entries.end() ? found->second : vthost::PaneAttention {};
+    });
+}
+
+/// Rings the bell in @p session on the daemon.
+void ringOn(DaemonFixture& daemon, vtworkspace::SessionId session)
+{
+    daemon.onDaemon([&daemon, session] {
+        daemon.host->terminal(session)->writeToScreen("\a");
+        return 0;
+    });
+}
+
+/// @return Whether @p session is watched on the daemon: shown by a focused window.
+[[nodiscard]] bool watchedOn(DaemonFixture& daemon, vtworkspace::SessionId session)
+{
+    return daemon.onDaemon([&daemon, session] { return daemon.host->isWatched(session.value); });
+}
+
+} // namespace
+
+TEST_CASE("a bell on the daemon reaches the directory with the daemon's serial",
+          "[attach][controller][directory][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto const workspace = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    CHECK(controller.flagSource() == contour::window::FlagSource::Daemon);
+
+    ringOn(daemon, session);
+    REQUIRE(waitUntil([&] { return paneOf(controller, workspace).bell == vthost::proto::PaneBell::Rang; }));
+    auto const pane = paneOf(controller, workspace);
+    CHECK(pane.flagSource == contour::window::FlagSource::Daemon);
+    // The daemon's state arrived: what it flags is unseen from now on (AttentionKnowledge).
+    CHECK(pane.attention == contour::window::AttentionKnowledge::Stated);
+    CHECK(pane.bellSerial == daemonLedgerOf(daemon, session).bellSerial);
+    CHECK(pane.bellSerial != 0);
+}
+
+TEST_CASE("markSeen from one controller clears the pane in a second",
+          "[attach][controller][directory][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto const workspace = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto firstTimeline = TestTimeline {};
+    auto secondTimeline = TestTimeline {};
+    auto const firstOwned = makeNativeController(daemon.endpoint(), firstTimeline);
+    auto const secondOwned = makeNativeController(daemon.endpoint(), secondTimeline);
+    auto& first = *firstOwned;
+    auto& second = *secondOwned;
+    auto const stopFirst = StopOnExit { first };
+    auto const stopSecond = StopOnExit { second };
+    requireConnected(first);
+    requireConnected(second);
+
+    ringOn(daemon, session);
+    auto const rang = [&](contour::remote::NativeController const& controller) {
+        return paneOf(controller, workspace).bell == vthost::proto::PaneBell::Rang;
+    };
+    REQUIRE(waitUntil([&] { return rang(first) && rang(second); }));
+
+    first.markSeen(session.value, flagsSeenOf(paneOf(first, workspace)));
+    CHECK(waitUntil([&] { return !rang(second); }));
+    CHECK(waitUntil([&] { return !rang(first); }));
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::MarkSeen) == 1);
+}
+
+TEST_CASE("a reconnect restates unseen flags", "[attach][controller][reconnect][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto const workspace = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(paneOf(controller, workspace).bell == vthost::proto::PaneBell::Silent);
+
+    // Rung while no window is attached: only the state the next connection is told can carry it.
+    daemon.whileDisconnected([&daemon, session] { daemon.host->terminal(session)->writeToScreen("\a"); });
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 3000));
+    CHECK(waitUntil([&] { return paneOf(controller, workspace).bell == vthost::proto::PaneBell::Rang; }));
+    CHECK(paneOf(controller, workspace).bellSerial == daemonLedgerOf(daemon, session).bellSerial);
+}
+
+TEST_CASE("daemonMarks states what the directory lists of each pane",
+          "[attach][controller][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto const workspace = daemon.onDaemon([&daemon] { return daemon.host->workspaceId().value; });
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    ringOn(daemon, session);
+    REQUIRE(waitUntil([&] { return paneOf(controller, workspace).bell == vthost::proto::PaneBell::Rang; }));
+
+    // Read from the statuses alone, they are what the listing derives them from.
+    auto const marks = controller.daemonMarks();
+    auto const pane = paneOf(controller, workspace);
+    REQUIRE(marks.contains(session.value));
+    CHECK(marks.at(session.value) == contour::window::daemonMarksOf(pane));
+    CHECK(marks.at(session.value).bell == contour::window::BellMark::Rang);
+}
+
+TEST_CASE("reportShown reaches the daemon and watching follows it", "[attach][controller][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    REQUIRE_FALSE(watchedOn(daemon, session));
+
+    controller.reportShown(vthost::proto::WindowFocus::Focused, { session.value });
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->isWatched(session.value); }));
+
+    // Shown by a window without focus: nobody looks.
+    controller.reportShown(vthost::proto::WindowFocus::Unfocused, { session.value });
+    CHECK(daemon.waitUntilOnDaemon([&] { return !daemon.host->isWatched(session.value); }));
+
+    // Focused, but showing another pane.
+    controller.reportShown(vthost::proto::WindowFocus::Focused, { session.value });
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->isWatched(session.value); }));
+    controller.reportShown(vthost::proto::WindowFocus::Focused, {});
+    CHECK(daemon.waitUntilOnDaemon([&] { return !daemon.host->isWatched(session.value); }));
+}
+
+TEST_CASE("a reconnect and a live upgrade restate what is shown",
+          "[attach][controller][reconnect][upgrade][daemon-attention]")
+{
+    using vthost::client::ConnectionState;
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities.idents.push_back(
+        std::to_underlying(vthost::proto::Capability::LiveUpgrade));
+    services.daemon = control;
+    auto daemon = DaemonFixture { {}, std::move(services) };
+    auto const session = daemon.seedSession("shell");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+
+    controller.reportShown(vthost::proto::WindowFocus::Focused, { session.value });
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->isWatched(session.value); }));
+    auto const reported = daemon.clientFrames.count(vthost::proto::PduType::ReportFocus);
+
+    SECTION("a lost connection")
+    {
+        daemon.dropConnections();
+        REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    }
+    SECTION("a live upgrade")
+    {
+        daemon.onDaemon([&control] {
+            control.announceUpgrade("9.9.10");
+            control.closeObservers();
+            return 0;
+        });
+        REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+        CHECK(log.count(ConnectionState::Upgrading) == 1);
+    }
+
+    // The lost connection's report went with it; the new one is told again, unasked by the window.
+    CHECK(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::ReportFocus) == reported + 1; }));
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->isWatched(session.value); }));
+}
+
+TEST_CASE("a reconnect to a restarted daemon restates no pane of the old run",
+          "[attach][controller][reconnect][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(daemon.instance != 0);
+    controller.reportShown(vthost::proto::WindowFocus::Focused, { session.value });
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->isWatched(session.value); }));
+    auto const reported = daemon.clientFrames.count(vthost::proto::PduType::ReportFocus);
+
+    // The new run's first session takes the old one's id.
+    daemon.whileDisconnected([&daemon] {
+        ++daemon.instance;
+        daemon.host = daemon.makeHost();
+        daemon.host->createTab();
+    });
+    REQUIRE(waitUntil([&] { return log.count(vthost::client::ConnectionState::Connected) == 2; }, 3000));
+
+    // The focus is restated, but the old run's pane is not the new run's: nobody looks at that yet.
+    REQUIRE(waitUntil(
+        [&] { return daemon.clientFrames.count(vthost::proto::PduType::ReportFocus) == reported + 1; }));
+    CHECK_FALSE(daemon.onDaemon([&] { return daemon.host->isWatched(session.value); }));
+}
+
+TEST_CASE("an unchanged report is not sent again", "[attach][controller][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+    controller.reportShown(vthost::proto::WindowFocus::Focused, { session.value });
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return daemon.host->isWatched(session.value); }));
+    auto const reported = daemon.clientFrames.count(vthost::proto::PduType::ReportFocus);
+
+    // The same again, then a change: only the change reaches the daemon, and after the first.
+    controller.reportShown(vthost::proto::WindowFocus::Focused, { session.value });
+    controller.reportFocus(vthost::proto::WindowFocus::Focused);
+    controller.reportShown(vthost::proto::WindowFocus::Unfocused, { session.value });
+    REQUIRE(daemon.waitUntilOnDaemon([&] { return !daemon.host->isWatched(session.value); }));
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::ReportFocus) == reported + 1);
+}
+
+TEST_CASE("a focus-only report keeps the shown set", "[attach][controller][daemon-attention]")
+{
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("shell");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const stopOnExit = StopOnExit { controller };
+    requireConnected(controller);
+
+    controller.reportShown(vthost::proto::WindowFocus::Unfocused, { session.value });
+    controller.reportFocus(vthost::proto::WindowFocus::Focused);
+    CHECK(daemon.waitUntilOnDaemon([&] { return daemon.host->isWatched(session.value); }));
+    controller.reportFocus(vthost::proto::WindowFocus::Unfocused);
+    CHECK(daemon.waitUntilOnDaemon([&] { return !daemon.host->isWatched(session.value); }));
 }

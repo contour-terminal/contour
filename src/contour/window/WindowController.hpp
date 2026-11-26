@@ -380,7 +380,7 @@ class WindowController:
     /// follows (TerminalSessionManager::bindWindow).
     /// @param source The source; borrowed, and it must outlive its use here, or be replaced first.
     /// A jump, a row action or a follow that waited for the old source is given up.
-    void setDirectorySource(IWorkspaceDirectorySource* source) noexcept;
+    void setDirectorySource(IWorkspaceDirectorySource* source);
 
     /// When @p workspace is one of several this window owns and holds no tab, ends it: the window shows the
     /// next owned one first, if it was showing this, and the manager forgets the workspace
@@ -2104,7 +2104,9 @@ class WindowController:
         PaneKey pane;       ///< The pane to show.
         uint64_t workspace; ///< The directory's id of the workspace holding it.
     };
-    /// Counts the directory's entry for @p key as seen, as far as the daemon's flags go (the serials).
+    /// Counts the directory's entry for @p key as seen: in this window's ledger, as far as an older daemon's
+    /// flags go (the serials), or at the daemon that keeps the pane's flags, when it states something of
+    /// the pane unseen.
     void noteDirectoryPaneSeenByKey(PaneKey key);
     std::optional<PendingJump> _pendingJump; ///< The jump whose workspace is being selected.
     /// A pane moved into a new workspace of the daemon's, which the window shows once it is listed.
@@ -2167,6 +2169,16 @@ class WindowController:
     std::unique_ptr<LocationChipModel> _chip;     ///< The location chip's surface; built with the sidebar.
     std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
     TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
+    /// The marks of each listed pane whose flags a daemon keeps (FlagSource::Daemon), by PaneKey value, as
+    /// the directory last listed them: what the tab strip reads for those panes instead of @ref _attention.
+    std::unordered_map<uint64_t, SessionAttention> _daemonMarks;
+    /// Takes the daemon's marks from the directory (@ref _daemonMarks), and repaints the tab badges when they
+    /// changed.
+    void refreshDaemonMarks();
+    /// @param session A pane's session.
+    /// @return The marks its tab's badge reads: the daemon's where it keeps the pane's flags, this window's
+    ///         ledger's otherwise.
+    [[nodiscard]] SessionAttention marksOfSession(vtworkspace::SessionId session) const;
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the
     /// window's whole life.
     std::unique_ptr<PromptHost> _promptHost;

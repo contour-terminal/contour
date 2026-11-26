@@ -1133,18 +1133,24 @@ connection and batch) only where the intent names none. Reconnects state `Resume
 that still counts the lost connection's selection does not hand the window a new workspace. A window whose
 workspace a reconnect lost displays what the connection selects instead, and closes only when that is nothing.
 The panes' seen and activity marks are kept per window under the daemon's session ids (`window::PaneKey`), so a
-reconnect, which realizes no new key, keeps them.
+reconnect, which realizes no new key, keeps them -- for a daemon that does not share `DaemonAttention`. One that does
+keeps them itself (`window::FlagSource::Daemon`): the controller takes each pane's flags from `PaneAttentionState`,
+every reader (tab strip, taskbar, sidebar, next-attention) reads them from the directory instead of the window's
+`TabAttention`, and a window that lands on a pane hands what it saw back with `MarkSeen`
+(`IWorkspaceDirectorySource::markSeen`).
 
-Each link reports its window's focus (`WindowBinding::reportFocus`), and the daemon names the most recently focused
-connection the raise holder (`NotifyRole`). `TerminalSessionManager::raises()` asks the window's binding: a
-daemon's session rings its bell, alerts, and shows its desktop and finish notifications only in the window
-holding `RaiseRole::Raise`; every window still marks the pane's tab. The raise holder also rings, alerts and
-notifies for what panes of workspaces it does not select raised -- a bell (`PaneSummary.bell`), a desktop
-notification (`PaneSummary.notifications`), a command that finished (`PaneSummary.finished`, through
-`platform::finishNoticeKind` with the visibility `Hidden`). Whether it raises is judged by the role the
-connection held as each summary arrived (`NativeController::takeRaised`), so a focus change in flight neither
-drops nor repeats one, and each is raised once. The taskbar counts a daemon window's waiting tabs over
-its directory, and, for an application-wide count, each daemon once, as its most recently focused window counts
+Each window reports its focus and the panes it shows (`TerminalSessionManager::reportShownPanes`, through
+`IWorkspaceDirectorySource::reportShown` to `NativeController::reportShown`, the one producer of `ReportFocus`,
+which states the last report again to every new connection) on every change of either. The daemon keeps a pane a
+focused window shows seen, and names the most recently focused connection the raise holder (`NotifyRole`).
+`TerminalSessionManager::raises()` asks the window's binding: a daemon's session rings its bell, alerts, and shows
+its desktop and finish notifications only in the window holding `RaiseRole::Raise`; every window still marks the
+pane's tab. The raise holder also rings, alerts and notifies for what panes of workspaces it does not select raised
+-- a bell (`PaneSummary.bell`), a desktop notification (`PaneSummary.notifications`), a command that finished
+(`PaneSummary.finished`, through `platform::finishNoticeKind` with the visibility `Hidden`). Whether it raises is
+judged by the role the connection held as each summary arrived (`NativeController::takeRaised`), so a focus change
+in flight neither drops nor repeats one, and each is raised once. The taskbar counts a daemon window's waiting tabs
+over its directory, and, for an application-wide count, each daemon once, as its most recently focused window counts
 it.
 
 The attach-window binder a spawned window's `Main.qml` consults is installed by the link that opens a window,

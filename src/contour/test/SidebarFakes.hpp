@@ -20,7 +20,8 @@
 namespace contour::test
 {
 
-/// A source that lists what the test sets and records what it is asked to select.
+/// A source that lists what the test sets, answers a selection as the test chooses, and records what it is
+/// asked.
 struct FakeDirectorySource final: window::IWorkspaceDirectorySource
 {
     window::WorkspaceDirectory listed;
@@ -35,8 +36,23 @@ struct FakeDirectorySource final: window::IWorkspaceDirectorySource
     window::SelectResult select(uint64_t workspace) override
     {
         selected.push_back(workspace);
-        return window::SelectResult::Requested;
+        return answer;
     }
+    [[nodiscard]] window::FlagSource flagSource() const override { return flags; }
+    void markSeen(window::PaneKey pane, window::PaneSeen seen) override
+    {
+        seenMarks.emplace_back(pane, seen);
+    }
+    void reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes) override
+    {
+        shownReports.emplace_back(focus, std::move(panes));
+    }
+
+    window::SelectResult answer = window::SelectResult::Requested; ///< What select() answers.
+    window::FlagSource flags = window::FlagSource::Window;         ///< Who keeps the listed panes' flags.
+    std::vector<std::pair<window::PaneKey, window::PaneSeen>> seenMarks; ///< Every markSeen(), in order.
+    /// Every reportShown(), in order.
+    std::vector<std::pair<window::WindowFocusState, std::vector<window::PaneKey>>> shownReports;
 };
 
 /// A window that records what the sidebar asks of it.

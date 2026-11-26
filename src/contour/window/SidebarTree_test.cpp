@@ -606,13 +606,29 @@ TEST_CASE("SidebarTree.hostile_titles_and_branches_are_sanitized", "[sidebar]")
 
 TEST_CASE("SidebarTree.a_failed_command_has_a_reason_but_no_time", "[sidebar]")
 {
-    // vthost::proto::FinishedCommand carries no timestamp, so nothing can be measured from.
+    // vthost::proto::FinishedCommand carries no timestamp, so without the daemon's finish time nothing can be
+    // measured from.
     auto pane = paneOf(1, "p");
     pane.finished = vthost::proto::FinishedCommand { .exitCode = 1, .durationMs = 18'000 };
     pane.finishedSerial = 1;
     auto const row = tabRowOf(rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { pane }) }) })));
     CHECK(row.reason == "exit 1 · 18s");
     CHECK(row.time == TimeText {});
+}
+
+TEST_CASE("SidebarTree.finished_command_shows_time_since_it_ended", "[sidebar][daemon-attention]")
+{
+    // A daemon keeps the pane's flags and stated when the command ended: the row says how long ago.
+    auto pane = paneOf(1, "p");
+    pane.flagSource = FlagSource::Daemon;
+    pane.attention = AttentionKnowledge::Stated;
+    pane.finished = vthost::proto::FinishedCommand { .exitCode = 1, .durationMs = 18'000 };
+    pane.finishedSerial = 1;
+    pane.finishedAt = Now - std::chrono::minutes { 3 };
+    auto const row = tabRowOf(rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { pane }) }) })));
+    CHECK(row.reason == "exit 1 · 18s");
+    CHECK(row.time.kind == TimeKind::Relative);
+    CHECK(row.time.text == formatRelative(std::chrono::minutes { 3 }));
 }
 
 TEST_CASE("SidebarTree.git_text", "[sidebar]")

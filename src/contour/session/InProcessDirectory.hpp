@@ -90,6 +90,15 @@ class InProcessDirectory final: public window::IWorkspaceDirectorySource
     /// @return Refused for a workspace the window does not own.
     window::SelectResult select(uint64_t workspace) override;
 
+    /// @return FlagSource::Window: the window's own ledger marks its panes.
+    [[nodiscard]] window::FlagSource flagSource() const override { return window::FlagSource::Window; }
+
+    /// Nothing: the window's own ledger notes what its user saw (TabAttention).
+    void markSeen(window::PaneKey /*pane*/, window::PaneSeen /*seen*/) override {}
+
+    /// Nothing: no daemon watches the window's panes.
+    void reportShown(window::WindowFocusState /*focus*/, std::vector<window::PaneKey> /*panes*/) override {}
+
     /// Tells the window's listeners that directory() lists something else than it did.
     void notifyChanged() const;
 

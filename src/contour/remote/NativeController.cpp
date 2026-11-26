@@ -4,6 +4,7 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/AttentionJump.hpp>
 
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
@@ -96,6 +97,7 @@ namespace
             vthost::proto::Capability::ClientGoodbye,
             vthost::proto::Capability::LaunchFirstTab,
             vthost::proto::Capability::WorkspaceColor,
+            vthost::proto::Capability::DaemonAttention,
             // compat(0.9.0): Names may stay; the legacy branches taken without it go.
             vthost::proto::Capability::Names,
         });
@@ -407,7 +409,9 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
         NativeClient::WorkspaceMetaHandler {
             [this](vthost::proto::WorkspaceMeta const& meta) { onWorkspaceMeta(meta); } },
         // A snapshot piece is the daemon delivering: the wait for the first session is not out of time yet.
-        NativeClient::SnapshotProgressHandler { [this] { noteAttachProgress(); } });
+        NativeClient::SnapshotProgressHandler { [this] { noteAttachProgress(); } },
+        NativeClient::PaneAttentionHandler {
+            [this](vthost::proto::PaneAttentionState const& state) { onPaneAttention(state); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -526,9 +530,10 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                     _selected = _client->selectedWorkspace();
                 // A daemon that cannot follow a window's selection cannot serve a window of this version.
                 predatesFollow = _client != nullptr && !followsSelection(_client->negotiated());
-                // The new connection knows nothing of the focus the lost one was told.
-                if (_client != nullptr && _focus == vthost::proto::WindowFocus::Focused)
-                    std::ignore = _client->reportFocus(_focus);
+                adoptFlagSource(lock);
+                // The new connection knows nothing of the focus and the shown panes the lost one was told.
+                if (_client != nullptr && (_focus == vthost::proto::WindowFocus::Focused || !_shown.empty()))
+                    std::ignore = _client->reportFocus(_focus, _shown);
                 ++_acceptedConnections;
                 _inputConnection = _acceptedConnections;
                 attachLog()("Attached to {}.", where);
@@ -659,6 +664,9 @@ void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*
         _inputEchoes.clear();
         // The new run's sessions count from 1 again: an old status is no session's of this run.
         _paneStatus.clear();
+        // The new run's sessions count from 1 again: the panes the window said it shows are none of this
+        // run's, and restated they would keep the new run's panes of the same ids watched.
+        _shown.clear();
         _closedSessions.clear();
         // The new run's tab ids count from 1 again: an old pairing would name another tab of this run.
         _wireTabOf.clear();
@@ -1092,14 +1100,60 @@ std::expected<uint64_t, std::string> NativeController::select(uint64_t workspace
 
 void NativeController::reportFocus(vthost::proto::WindowFocus focus)
 {
+    auto shown = std::vector<uint64_t> {};
     {
         auto const lock = std::lock_guard { _mutex };
-        _focus = focus;
+        shown = _shown;
     }
-    _reactor.post([this, focus] {
+    reportShown(focus, std::move(shown));
+}
+
+void NativeController::reportShown(vthost::proto::WindowFocus focus, std::vector<uint64_t> sessions)
+{
+    std::ranges::sort(sessions);
+    auto const duplicates = std::ranges::unique(sessions);
+    sessions.erase(duplicates.begin(), duplicates.end());
+    {
+        auto const lock = std::lock_guard { _mutex };
+        // What the connection was told last, by this or by the restate a new connection is sent as it is
+        // accepted: told again, it changes nothing at the daemon.
+        if (_focus == focus && _shown == sessions)
+            return;
+        _focus = focus;
+        _shown = sessions;
+    }
+    _reactor.post([this, focus, sessions = std::move(sessions)] {
         if (_client != nullptr)
-            std::ignore = _client->reportFocus(focus);
+            std::ignore = _client->reportFocus(focus, sessions);
     });
+}
+
+void NativeController::markSeen(uint64_t session, vthost::SeenSerials seen)
+{
+    _reactor.post([this, session, seen] {
+        if (_client != nullptr)
+            std::ignore = _client->sendMarkSeen(session, seen);
+    });
+}
+
+window::FlagSource NativeController::flagSource() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _flagSource;
+}
+
+void NativeController::adoptFlagSource(std::lock_guard<std::mutex> const& /*held*/)
+{
+    auto const source =
+        _negotiated && _negotiated->shared.contains(vthost::proto::Capability::DaemonAttention)
+            ? window::FlagSource::Daemon
+            : window::FlagSource::Window;
+    if (std::exchange(_flagSource, source) == source)
+        return;
+    // What the other keeper stated means nothing to this one: the daemon states every pane anew after the
+    // hello, and a window marks from nothing. The flags alone are reset; whatever else the pane stated stays.
+    for (auto& status: _paneStatus | std::views::values)
+        window::clearFlags(status);
 }
 
 vthost::proto::RaiseRole NativeController::raiseRole() const noexcept
@@ -1119,16 +1173,27 @@ namespace
     class StoreLookup final: public window::PaneStatusLookup
     {
       public:
-        explicit StoreLookup(std::map<uint64_t, window::PaneStatus> const& store): _store(store) {}
+        /// @param store The status store.
+        /// @param flagSource Who keeps the attention flags of every pane, those of which nothing is known
+        ///        yet included.
+        StoreLookup(std::map<uint64_t, window::PaneStatus> const& store, window::FlagSource flagSource):
+            _store(store), _flagSource(flagSource)
+        {
+        }
 
         [[nodiscard]] std::optional<window::PaneStatus> statusOf(window::PaneKey pane) const override
         {
             auto const found = _store.find(pane.value);
-            return found != _store.end() ? std::optional { found->second } : std::nullopt;
+            if (found == _store.end() && _flagSource == window::FlagSource::Window)
+                return std::nullopt;
+            auto status = found != _store.end() ? found->second : window::PaneStatus {};
+            status.flagSource = _flagSource;
+            return status;
         }
 
       private:
         std::map<uint64_t, window::PaneStatus> const& _store;
+        window::FlagSource _flagSource;
     };
 
     /// A directory's view of what the daemon stated of each workspace.
@@ -1169,6 +1234,16 @@ namespace
     }
 } // namespace
 
+std::unordered_map<uint64_t, window::SessionAttention> NativeController::daemonMarks() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto marks = std::unordered_map<uint64_t, window::SessionAttention> {};
+    if (_flagSource == window::FlagSource::Daemon)
+        for (auto const& [session, status]: _paneStatus)
+            marks.insert_or_assign(session, window::daemonMarksOf(status));
+    return marks;
+}
+
 window::WorkspaceDirectory NativeController::directory() const
 {
     auto const lock = std::lock_guard { _mutex };
@@ -1189,7 +1264,7 @@ window::WorkspaceDirectory NativeController::directory() const
     std::ranges::stable_sort(layouts,
                              [&](auto const& a, auto const& b) { return positionOf(a) < positionOf(b); });
     return window::directoryFromLayouts(layouts,
-                                        StoreLookup { _paneStatus },
+                                        StoreLookup { _paneStatus, _flagSource },
                                         MetaLookup { _workspaceMeta },
                                         _selected != 0 ? std::optional { _selected } : std::nullopt);
 }
@@ -1226,20 +1301,25 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
         status.cwd = shownDirectoryOf(*summary.cwd, sameMachine ? std::string_view { _homeDirectory } : "");
     }
     // Each occurrence takes the next serial, so a window that acknowledged the old one still sees the new.
-    if (summary.activity == vthost::proto::OutputActivity::Output)
+    // Where the daemon's attention ledger states the flags itself (onPaneAttention()), the summary says only
+    // what to raise for.
+    if (_flagSource == window::FlagSource::Window)
     {
-        status.activity = vthost::proto::OutputActivity::Output;
-        status.activitySerial = ++_flagSerial;
-    }
-    if (summary.bell == vthost::proto::PaneBell::Rang)
-    {
-        status.bell = vthost::proto::PaneBell::Rang;
-        status.bellSerial = ++_flagSerial;
-    }
-    if (summary.finished)
-    {
-        status.finished = *summary.finished;
-        status.finishedSerial = ++_flagSerial;
+        if (summary.activity == vthost::proto::OutputActivity::Output)
+        {
+            status.activity = vthost::proto::OutputActivity::Output;
+            status.activitySerial = ++_flagSerial;
+        }
+        if (summary.bell == vthost::proto::PaneBell::Rang)
+        {
+            status.bell = vthost::proto::PaneBell::Rang;
+            status.bellSerial = ++_flagSerial;
+        }
+        if (summary.finished)
+        {
+            status.finished = *summary.finished;
+            status.finishedSerial = ++_flagSerial;
+        }
     }
     // What it raised is judged by the role as it stands now, in the order the daemon decided both: a focus
     // change on its way to the GUI thread cannot leave the raise to no window.
@@ -1248,6 +1328,26 @@ void NativeController::onPaneSummary(vthost::proto::PaneSummary const& summary)
                                                        .finished = summary.finished,
                                                        .bell = summary.bell,
                                                        .notifications = summary.notifications });
+    scheduleStatusFlush();
+}
+
+void NativeController::onPaneAttention(vthost::proto::PaneAttentionState const& state)
+{
+    auto const lock = std::lock_guard { _mutex };
+    captureHandshake();
+    // Whole: the daemon states a pane in full each time, a cleared flag as cleared.
+    auto& status = _paneStatus[state.session];
+    status.activity = state.activity;
+    status.activitySerial = state.activitySerial;
+    status.bell = state.bell;
+    status.bellSerial = state.bellSerial;
+    status.finished = state.finished;
+    status.finishedSerial = state.finishedSerial;
+    status.finishedAt = state.finishedAtUnixMs.transform([](int64_t unixMs) {
+        return std::chrono::system_clock::time_point { std::chrono::milliseconds { unixMs } };
+    });
+    status.seenStatusGeneration = state.seenStatusGeneration;
+    status.attention = window::AttentionKnowledge::Stated;
     scheduleStatusFlush();
 }
 
@@ -1292,6 +1392,9 @@ void NativeController::failAttach(std::string reason)
 
 void NativeController::clearSelectedActivity()
 {
+    // The daemon clears what a window watches itself.
+    if (_flagSource == window::FlagSource::Daemon)
+        return;
     auto const selected = _layouts.find(_selected);
     if (selected == _layouts.end())
         return;

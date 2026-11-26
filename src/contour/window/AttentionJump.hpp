@@ -3,11 +3,14 @@
 
 /// @file
 /// What a listed pane asks of the user, and which pane "jump to the next item that needs you" goes to.
-/// Qt-free and table-tested. A pane's urgency pools what the directory states of it (the daemon's records,
-/// output and bell, which stay set until this window shows the pane) with this window's own ledger (an
-/// in-process pane's directory entry leaves them at their defaults), so a mark from either source counts.
+/// Qt-free and table-tested. For a pane whose flags the window keeps (FlagSource::Window), its urgency pools
+/// what the directory states of it (an older daemon's records, output and bell, which stay set until this
+/// window shows the pane) with this window's own ledger (an in-process pane's directory entry leaves them at
+/// their defaults), so a mark from either source counts. For a pane whose flags a daemon keeps
+/// (FlagSource::Daemon) the directory alone speaks: what it flags is unseen, for every window alike.
 
 #include <contour/window/PaneKey.hpp>
+#include <contour/window/PaneSeen.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/StatusUrgency.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -15,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <vector>
@@ -53,6 +57,70 @@ namespace contour::window
     return newest;
 }
 
+/// What a window hands back to the daemon that keeps @p pane's flags once the user saw it: everything its
+/// directory entry states so far.
+/// @param pane The directory's entry for the pane.
+/// @return Its serials and its newest program-status generation.
+[[nodiscard]] inline PaneSeen paneSeenOf(DirectoryPane const& pane) noexcept
+{
+    return { .serials = serialsOf(pane), .statusGeneration = newestGenerationOf(pane) };
+}
+
+/// @param pane The directory's entry for a pane whose flags a daemon keeps.
+/// @return Whether the daemon states something of it unseen: a flag, or a program status newer than seen;
+///         never before it stated the pane at all (AttentionKnowledge::Unstated).
+[[nodiscard]] inline bool isUnseen(DirectoryPane const& pane) noexcept
+{
+    if (pane.attention == AttentionKnowledge::Unstated)
+        return false;
+    return pane.activity == vthost::proto::OutputActivity::Output
+           || pane.bell == vthost::proto::PaneBell::Rang || pane.finished.has_value()
+           || newestGenerationOf(pane) > pane.seenStatusGeneration;
+}
+
+/// The seen program-status generation of a pane whose daemon stated nothing of it yet: every generation
+/// counts as seen, so a Done or an Error it reports asks for nobody until the daemon says it was not seen.
+inline constexpr auto AllStatusGenerationsSeen = std::numeric_limits<uint64_t>::max();
+
+/// What a daemon states of a pane, as the marks a window's ledger would hold: each flag it sets is unseen.
+/// A pane it stated nothing of yet holds no mark (AttentionKnowledge::Unstated).
+/// @tparam Pane DirectoryPane, or the PaneStatus it is listed from: both carry the same flag fields.
+/// @param pane The directory's entry, or the status, of a pane whose flags a daemon keeps.
+/// @return Its marks.
+template <typename Pane>
+[[nodiscard]] constexpr SessionAttention daemonMarksOf(Pane const& pane) noexcept
+{
+    // Not stated yet: nothing of it is unseen, and every program status it reports counts as seen.
+    if (pane.attention == AttentionKnowledge::Unstated)
+        return SessionAttention { .seenStatusGeneration = AllStatusGenerationsSeen };
+    return SessionAttention {
+        .activity = pane.activity == vthost::proto::OutputActivity::Output ? TabActivity::UnseenOutput
+                                                                           : TabActivity::None,
+        .finished = pane.finished ? finishedBadgeOf(*pane.finished) : FinishedBlockBadge::None,
+        .bell = pane.bell == vthost::proto::PaneBell::Rang ? BellMark::Rang : BellMark::None,
+        .seenStatusGeneration = pane.seenStatusGeneration,
+        .seenActivitySerial = 0,
+        .seenBellSerial = 0,
+        .seenFinishedSerial = 0,
+    };
+}
+
+/// The marks a reader takes for a pane: the daemon's (daemonMarksOf()) where it keeps the pane's flags,
+/// @p windowMarks otherwise.
+/// @param pane The directory's entry for the pane.
+/// @param windowMarks This window's own marks for it.
+/// @return The marks that decide what the pane asks.
+[[nodiscard]] constexpr SessionAttention marksOf(DirectoryPane const& pane,
+                                                 SessionAttention const& windowMarks) noexcept
+{
+    switch (pane.flagSource)
+    {
+        case FlagSource::Window: return windowMarks;
+        case FlagSource::Daemon: return daemonMarksOf(pane);
+    }
+    return windowMarks;
+}
+
 /// Notes in @p attention that the user sees @p pane: everything its directory entry states so far is seen.
 /// @param attention This window's marks.
 /// @param pane The directory's entry for the pane.
@@ -63,13 +131,16 @@ namespace contour::window
 }
 
 /// What a pane asks of the user.
-/// @param pane      The directory's entry for the pane.
-/// @param attention This window's marks for the pane.
+/// @param pane        The directory's entry for the pane.
+/// @param windowMarks This window's marks for the pane; ignored for a pane whose flags a daemon keeps.
 /// @return The most urgent of: its program status (a seen Done or Error asks for nothing, a Blocked one
-///         always asks), a bell, a finished command and output. A flag a daemon stated counts only while its
-///         serial is newer than the one the window has seen; the ledger's own marks count as they are.
-[[nodiscard]] inline Urgency paneUrgency(DirectoryPane const& pane, SessionAttention const& attention)
+///         always asks), a bell, a finished command and output. Where the window keeps the flags, a flag a
+///         daemon stated counts only while its serial is newer than the one the window has seen, and the
+///         ledger's own marks count as they are; where the daemon keeps them, its flags and its seen status
+///         generation alone decide (marksOf()).
+[[nodiscard]] inline Urgency paneUrgency(DirectoryPane const& pane, SessionAttention const& windowMarks)
 {
+    auto const attention = marksOf(pane, windowMarks);
     auto const status = badgeFor(pane.status, attention.seenStatusGeneration);
     auto urgency = urgencyOf(status.kind, StatusSeen::Unseen);
     auto const rang =

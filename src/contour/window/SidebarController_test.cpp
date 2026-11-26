@@ -14,6 +14,7 @@
 #include <contour/test/ContextMenuRows.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/SidebarFakes.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/SwitcherPresenter.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -61,30 +62,14 @@ void useNativeSidebarDefaults(contour::test::TestApp& app)
     return static_cast<int>(visibility);
 }
 
+using contour::test::FakeDirectorySource;
 using contour::window::DirectoryPane;
 using contour::window::DirectoryTab;
 using contour::window::DirectoryWorkspace;
-using contour::window::IWorkspaceDirectorySource;
 using contour::window::PaneKey;
 using contour::window::SelectResult;
 using contour::window::SidebarPresence;
 using contour::window::SidebarRowKind;
-using contour::window::WorkspaceDirectory;
-
-/// A directory a test scripts, with ids of its own as a daemon's are, and answers it chooses.
-struct ScriptedSource final: IWorkspaceDirectorySource
-{
-    WorkspaceDirectory listed;
-    SelectResult answer = SelectResult::Requested;
-    std::vector<uint64_t> selected;
-
-    [[nodiscard]] WorkspaceDirectory directory() const override { return listed; }
-    SelectResult select(uint64_t workspace) override
-    {
-        selected.push_back(workspace);
-        return answer;
-    }
-};
 
 [[nodiscard]] DirectoryTab tabHolding(uint64_t id, std::vector<uint64_t> const& panes)
 {
@@ -156,7 +141,7 @@ TEST_CASE("a sidebar action whose pane is not there waits and never runs on the 
     std::ignore = contour::test::createSessionTabs(app.manager(), *window, 2);
 
     // The directory lists two tabs whose panes this window has no session for.
-    auto source = ScriptedSource {};
+    auto source = FakeDirectorySource {};
     auto const shown = window->directorySource()->directory().selected;
     REQUIRE(shown.has_value());
     source.listed.selected = shown;
@@ -184,7 +169,7 @@ TEST_CASE("a refused workspace selection drops the sidebar action that waited fo
         contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
     std::ignore = contour::test::createSessionTabs(app.manager(), *window, 2);
 
-    auto source = ScriptedSource {};
+    auto source = FakeDirectorySource {};
     auto const shown = window->directorySource()->directory().selected.value_or(1);
     source.listed.selected = shown;
     source.listed.workspaces = {
@@ -226,7 +211,7 @@ TEST_CASE("a sidebar menu's Mark seen, Move and Rename act on a background row w
     std::ignore = contour::test::createSessionTabs(app.manager(), *window, 1);
 
     // A background workspace whose second tab's pane finished a command nobody has seen.
-    auto source = ScriptedSource {};
+    auto source = FakeDirectorySource {};
     auto const shown = window->directorySource()->directory().selected.value_or(1);
     source.listed.selected = shown;
     auto there = DirectoryWorkspace { .id = 777,
@@ -309,7 +294,7 @@ TEST_CASE("the displayed tab is the one holding the active pane, whatever id the
     SECTION("a daemon's source: its tab ids are its own")
     {
         auto const active = app.manager().paneKeyOf(window->activeSession()->modelSessionId());
-        auto source = ScriptedSource {};
+        auto source = FakeDirectorySource {};
         auto const shown = window->directorySource()->directory().selected.value_or(1);
         source.listed.selected = shown;
         source.listed.workspaces = { DirectoryWorkspace {

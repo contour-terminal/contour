@@ -231,7 +231,6 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @param window The closed window.
     void windowClosed(vtworkspace::WorkspaceId window) override;
 
-    void reportFocus(vthost::proto::WindowFocus focus) override;
     /// @return Whether its window raises, as its daemon last said; Raise for a link that has given up, whose
     ///         window has no daemon's panes left to ring for.
     [[nodiscard]] vthost::proto::RaiseRole raiseRole() const noexcept override;
@@ -243,6 +242,22 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @return Every workspace of its daemon, as its connection holds them; none while it holds no
     ///         connection.
     [[nodiscard]] window::WorkspaceDirectory directory() const override;
+    /// @return Its daemon's marks of every pane (NativeController::daemonMarks()), read without listing a
+    ///         workspace; none while it holds no connection.
+    [[nodiscard]] std::unordered_map<uint64_t, window::SessionAttention> daemonMarks() const override;
+    /// @return Who keeps its panes' attention flags: its daemon, when its connection shares them
+    ///         (NativeController::flagSource()); the window while it holds no connection.
+    [[nodiscard]] window::FlagSource flagSource() const override;
+    /// Hands what its window saw of @p pane to its daemon (NativeController::markSeen()). No-op once given up
+    /// or stopped.
+    /// @param pane The pane, by its daemon session.
+    /// @param seen What the window saw of it.
+    void markSeen(window::PaneKey pane, window::PaneSeen seen) override;
+    /// Tells its daemon its window's focus and shown panes (NativeController::reportShown()), which the
+    /// controller states again to every connection after. No-op once given up or stopped.
+    /// @param focus The window's focus now.
+    /// @param panes The panes the window shows, by their daemon sessions.
+    void reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes) override;
     /// Has its window show @p workspace of its daemon (selectWorkspace()); a refusal is logged, as the
     /// window has no one to tell,
     /// and a refusal by the daemon cancels the window's pending jump (WindowController::cancelPendingJump()).

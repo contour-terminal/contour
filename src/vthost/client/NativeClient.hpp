@@ -354,6 +354,9 @@ class NativeClient final
     /// Told that a piece of a snapshot still being received arrived: the daemon is delivering, however long
     /// the whole takes. A frontend waiting for its first session counts that as headway, not as silence.
     using SnapshotProgressHandler = std::function<void()>;
+    /// Told what the daemon's attention ledger states of one pane (Capability::DaemonAttention): of every
+    /// pane once after the hello, then of each pane whose state changed.
+    using PaneAttentionHandler = std::function<void(proto::PaneAttentionState const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -430,6 +433,8 @@ class NativeClient final
     /// @param onWorkspaceMeta Told what the daemon states of each workspace besides its layout
     ///        (Capability::WorkspaceMeta).
     /// @param onSnapshotProgress Told of each piece of a snapshot that is not yet whole.
+    /// @param onPaneAttention Told what the daemon's attention ledger states of each pane
+    ///        (Capability::DaemonAttention).
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -448,7 +453,8 @@ class NativeClient final
                  PaneSummaryHandler onPaneSummary = {},
                  RaiseRoleHandler onRaiseRole = {},
                  WorkspaceMetaHandler onWorkspaceMeta = {},
-                 SnapshotProgressHandler onSnapshotProgress = {});
+                 SnapshotProgressHandler onSnapshotProgress = {},
+                 PaneAttentionHandler onPaneAttention = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -533,11 +539,22 @@ class NativeClient final
                                             std::optional<uint64_t> directoryFrom = std::nullopt);
 
     /// Tells the daemon whether this connection's window has the user's focus, from which it decides which
-    /// window raises for a bell or a notification.
+    /// window raises for a bell or a notification, and which panes the window shows: a pane a focused window
+    /// shows is watched, and raises nothing for attention.
     /// @param focus The window's focus now.
+    /// @param shownSessions The sessions of the panes the window shows; sent only to a daemon sharing
+    ///        Capability::DaemonAttention, as any other ignores them.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
     ///         Capability::DaemonFollow.
-    [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus);
+    [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus, std::span<uint64_t const> shownSessions);
+
+    /// Tells the daemon the window showed @p session and saw its attention up to @p seen: the daemon clears
+    /// what that covers and tells every window.
+    /// @param session The pane's session.
+    /// @param seen The serials and the status generation the window saw.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
+    ///         Capability::DaemonAttention.
+    [[nodiscard]] Delivery sendMarkSeen(uint64_t session, proto::SeenSerials seen);
 
     /// Asks the daemon to open the first tab of the workspace this connection selects, which holds none (a
     /// launch that named it).
@@ -865,6 +882,7 @@ class NativeClient final
     RaiseRoleHandler _onRaiseRole;
     WorkspaceMetaHandler _onWorkspaceMeta;
     SnapshotProgressHandler _onSnapshotProgress;
+    PaneAttentionHandler _onPaneAttention;
     /// When run() began: what the elapsed times of the attach log count from.
     core::platform::SteadyTimePoint _attachStartedAt {};
     /// Whether the first whole snapshot has been logged, once per connection.

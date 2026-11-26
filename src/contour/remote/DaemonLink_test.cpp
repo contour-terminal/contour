@@ -313,6 +313,17 @@ void endClosedSessions(std::span<QPointer<contour::session::TerminalSession> con
             session->onClosed();
 }
 
+/// @return What @p link's directory states of the pane @p key; none while it lists no such pane.
+[[nodiscard]] std::optional<contour::window::DirectoryPane> listedPane(
+    contour::remote::DaemonLink const& link, contour::window::PaneKey key)
+{
+    auto const directory = link.directory();
+    auto const listed = contour::window::tabHoldingPane(directory, key);
+    if (!listed)
+        return std::nullopt;
+    return *std::ranges::find(listed->tab->panes, key, &contour::window::DirectoryPane::key);
+}
+
 /// Lets the GUI thread run what was queued for a while: long enough for what the daemon would send to land.
 void settleGui()
 {
@@ -1752,18 +1763,26 @@ TEST_CASE("DaemonLink: a jump to a bell in an unselected workspace shows its pan
         },
         3000));
 
+    auto const rings = [&] {
+        auto const pane = listedPane(link, belled->key);
+        return pane && pane->bell == vthost::proto::PaneBell::Rang;
+    };
+
     // The pane is not shown, and not seen, until the switch lands.
     controller->jumpToNextAttention();
     CHECK(controller->jumpPending());
-    CHECK(controller->tabAttention().of(belled->key).seenBellSerial == 0);
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::MarkSeen) == 0);
     REQUIRE(waitUntil([&] { return displayedBy(manager, link, boot.windowId) == ids[1]; }, 3000));
     REQUIRE(waitUntil([&] { return !controller->jumpPending(); }, 3000));
-    CHECK(controller->tabAttention().of(belled->key).seenBellSerial == belled->bellSerial);
+    // Landing on it is seeing it: the window tells the daemon, which clears the bell for every window.
+    CHECK(waitUntil([&] { return !rings(); }, 3000));
+    CHECK(daemon.clientFrames.count(vthost::proto::PduType::MarkSeen) == 1);
+    CHECK(controller->tabAttention().of(belled->key) == contour::window::SessionAttention {});
     auto const* const active = controller->activeSession();
     REQUIRE(active != nullptr);
     CHECK(manager.paneKeyOf(active->modelSessionId()) == belled->key);
 
-    // The bell is seen in this window now: nothing more to jump to.
+    // The bell is seen now: nothing more to jump to.
     controller->jumpToNextAttention();
     CHECK_FALSE(controller->jumpPending());
 }
@@ -2088,18 +2107,13 @@ TEST_CASE("DaemonLink: seen marks survive a reconnect", "[attach][link][reconnec
     });
     REQUIRE(waitUntil([&] { return manager.model().workspace(boot.id)->tabCount() == 2; }));
     manager.activateTab(boot.id, 1);
-    auto& ledger = boot.controller->tabAttention();
     auto const key = contour::window::PaneKey { .value = background };
 
-    // Output in the hidden tab marks it, once the connection's first moments -- which repaint every pane --
-    // are over (window::ResyncGracePeriod).
-    rig.app.steadyClock().advance(std::chrono::seconds { 1 });
-    // After the second tab appears the daemon pushes each session one resync snapshot, at a moment the
-    // test cannot see. Output that lands in that snapshot is part of the repaint, not news -- a missed dot by
-    // design (vthost::client::frameOf) -- so one write is not enough: write until one lands as output of its
-    // own.
+    // Output in the hidden tab marks it: the daemon keeps the mark, under its own session id, and the
+    // window's tab strip reads it there.
     auto const isMarked = [&] {
-        return ledger.of(key).activity != contour::window::TabActivity::None;
+        auto const pane = listedPane(link, key);
+        return pane && pane->activity == vthost::proto::OutputActivity::Output;
     };
     auto const writeUntilMarked = [&] {
         for ([[maybe_unused]] auto const attempt: std::views::iota(0, 20))
@@ -2115,13 +2129,14 @@ TEST_CASE("DaemonLink: seen marks survive a reconnect", "[attach][link][reconnec
     };
     REQUIRE(writeUntilMarked());
 
-    // The connection goes and comes back: the mark is kept under the daemon's session id.
+    // The connection goes and comes back: the daemon states the mark again.
     auto const* const controller = link.liveController();
     daemon.dropConnections();
     REQUIRE(waitUntil([&] { return controller->connectionState() != ConnectionState::Connected; }));
     REQUIRE(waitUntil([&] { return controller->connectionState() == ConnectionState::Connected; }, 3000));
     drainGuiEvents();
-    CHECK(ledger.of(key).activity != contour::window::TabActivity::None);
+    CHECK(waitUntil(isMarked, 3000));
+    CHECK(boot.controller->tabAttention().of(key) == contour::window::SessionAttention {});
     CHECK(link.workspaceOf(boot.id).has_value());
 }
 

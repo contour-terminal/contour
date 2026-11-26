@@ -4,7 +4,9 @@
 /// @file
 /// What each pane has to tell its tab's badge: output its user has not seen, and how its last unseen
 /// command ended. Marked only while the pane is off screen, cleared once it is seen. Qt-free; every window
-/// keeps one ledger of its own, keyed by PaneKey, and the decisions are table-tested.
+/// keeps one ledger of its own, keyed by PaneKey, and the decisions are table-tested. The ledger holds the
+/// panes whose flags the window keeps (FlagSource::Window): in-process ones, and those of a daemon that does
+/// not keep them itself. A daemon that does states them in the directory, which every reader takes instead.
 
 #include <contour/platform/SessionVisibility.hpp>
 #include <contour/window/PaneKey.hpp>
@@ -17,6 +19,7 @@
 #include <cstdint>
 #include <optional>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 
 #include <vthost/client/ConnectionState.hpp>
@@ -233,22 +236,20 @@ class TabAttention
 };
 
 /// What a tab's panes have to tell it, pooled.
-/// @param tab    The tab.
-/// @param ledger The marks of the window showing it.
-/// @param keyOf  Resolves a leaf's session to the PaneKey the ledger holds it under.
+/// @param tab     The tab.
+/// @param marksOf The marks of a leaf, by its session: the window's ledger's, or a daemon's.
 /// @return Unseen output when any leaf has some, the strongest finished verdict of any leaf, and a bell when
 ///         any leaf rang.
-template <typename KeyOf>
-[[nodiscard]] SessionAttention pooledAttention(vtworkspace::Tab const& tab,
-                                               TabAttention const& ledger,
-                                               KeyOf const& keyOf)
+template <typename MarksOf>
+    requires std::is_invocable_r_v<SessionAttention, MarksOf const&, vtworkspace::SessionId>
+[[nodiscard]] SessionAttention pooledAttention(vtworkspace::Tab const& tab, MarksOf const& marksOf)
 {
     auto pooled = SessionAttention {};
     if (auto* root = tab.rootPane())
         root->walkTree([&](vtworkspace::Pane& pane) {
             if (!pane.isLeaf())
                 return;
-            auto const own = ledger.of(keyOf(pane.session()));
+            auto const own = marksOf(pane.session());
             if (own.activity == TabActivity::UnseenOutput)
                 pooled.activity = TabActivity::UnseenOutput;
             pooled.finished = strongerFinishedBlock(pooled.finished, own.finished);
@@ -256,6 +257,19 @@ template <typename KeyOf>
                 pooled.bell = BellMark::Rang;
         });
     return pooled;
+}
+
+/// What a tab's panes have to tell it, pooled from one window's ledger.
+/// @param tab    The tab.
+/// @param ledger The marks of the window showing it.
+/// @param keyOf  Resolves a leaf's session to the PaneKey the ledger holds it under.
+/// @return As the overload above, with each leaf's marks from @p ledger.
+template <typename KeyOf>
+[[nodiscard]] SessionAttention pooledAttention(vtworkspace::Tab const& tab,
+                                               TabAttention const& ledger,
+                                               KeyOf const& keyOf)
+{
+    return pooledAttention(tab, [&](vtworkspace::SessionId session) { return ledger.of(keyOf(session)); });
 }
 
 } // namespace contour::window

@@ -773,6 +773,7 @@ target_include_directories(contour_block_tooltip PUBLIC "${CMAKE_CURRENT_SOURCE_
 add_library(contour_inprocess_directory STATIC
     session/InProcessDirectory.cpp
     session/InProcessDirectory.hpp
+    window/PaneSeen.hpp
     window/WorkspaceDirectory.hpp
     window/WorkspaceDirectorySource.hpp
 )

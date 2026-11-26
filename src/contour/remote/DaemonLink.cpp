@@ -874,11 +874,37 @@ void DaemonLink::windowClosed(vtworkspace::WorkspaceId window)
     _shown.reset();
 }
 
-void DaemonLink::reportFocus(vthost::proto::WindowFocus focus)
+window::FlagSource DaemonLink::flagSource() const
+{
+    return isLive() ? _controller->flagSource() : window::FlagSource::Window;
+}
+
+void DaemonLink::markSeen(window::PaneKey pane, window::PaneSeen seen)
 {
     requireGuiThread();
     if (isLive())
-        _controller->reportFocus(focus);
+        _controller->markSeen(pane.value,
+                              vthost::SeenSerials { .activity = seen.serials.activity,
+                                                    .bell = seen.serials.bell,
+                                                    .finished = seen.serials.finished,
+                                                    .statusGeneration = seen.statusGeneration });
+}
+
+void DaemonLink::reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes)
+{
+    requireGuiThread();
+    if (!isLive())
+        return;
+    auto const wireFocus = [focus] {
+        switch (focus)
+        {
+            case window::WindowFocusState::Unfocused: return vthost::proto::WindowFocus::Unfocused;
+            case window::WindowFocusState::Focused: return vthost::proto::WindowFocus::Focused;
+        }
+        return vthost::proto::WindowFocus::Unfocused;
+    }();
+    _controller->reportShown(
+        wireFocus, std::ranges::to<std::vector>(panes | std::views::transform(&window::PaneKey::value)));
 }
 
 vthost::proto::RaiseRole DaemonLink::raiseRole() const noexcept
@@ -889,6 +915,12 @@ vthost::proto::RaiseRole DaemonLink::raiseRole() const noexcept
 window::WorkspaceDirectory DaemonLink::directory() const
 {
     return _controller != nullptr ? _controller->directory() : window::WorkspaceDirectory {};
+}
+
+std::unordered_map<uint64_t, window::SessionAttention> DaemonLink::daemonMarks() const
+{
+    return _controller != nullptr ? _controller->daemonMarks()
+                                  : std::unordered_map<uint64_t, window::SessionAttention> {};
 }
 
 window::SelectResult DaemonLink::select(uint64_t workspace)
@@ -1259,10 +1291,6 @@ void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace:
         own->opening.askedBy.reset();
     _sessions.bindWindow(local, *this);
     applyShownLayout();
-    // The daemon names the window that raises by the focus each one reports: a window focused as it comes
-    // says so at once.
-    if (_shown && _sessions.focusedWindow() == local)
-        _controller->reportFocus(vthost::proto::WindowFocus::Focused);
 }
 
 void DaemonLink::noteOpeningFailed(std::string const& reason)

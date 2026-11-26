@@ -258,11 +258,11 @@ class ClientFrameCounts
 {
   public:
     /// The PDU kinds counted.
-    static constexpr auto Kinds = std::array { vthost::proto::PduType::ResizeRequest,
-                                               vthost::proto::PduType::Heartbeat,
-                                               vthost::proto::PduType::ResizePane,
-                                               vthost::proto::PduType::OpenFirstTab,
-                                               vthost::proto::PduType::SetWorkspaceColor };
+    static constexpr auto Kinds =
+        std::array { vthost::proto::PduType::ResizeRequest,     vthost::proto::PduType::Heartbeat,
+                     vthost::proto::PduType::ResizePane,        vthost::proto::PduType::OpenFirstTab,
+                     vthost::proto::PduType::SetWorkspaceColor, vthost::proto::PduType::MarkSeen,
+                     vthost::proto::PduType::ReportFocus };
 
     /// @param type A counted kind.
     /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.
