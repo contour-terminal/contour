@@ -16,6 +16,7 @@
 #include <wasm_export.h>
 
 #include <vtextension/wasm/WasiAllowList.hpp>
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
 #include <vtextension/wasm/wasi/Preview1Shim.hpp>
 #include <vtextension/wasm/wasi/Preview1Signatures.hpp>
@@ -111,8 +112,7 @@ namespace detail
         if (registeredFor == runtimeGeneration())
             return true;
         auto& table = symbols();
-        if (!wasm_runtime_register_natives_raw(
-                WasiModuleName, table.data(), static_cast<uint32_t>(table.size())))
+        if (!registerNativesRaw(WasiModuleName, table).has_value())
             return false;
         registeredFor = runtimeGeneration();
         return true;

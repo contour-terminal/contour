@@ -7,6 +7,7 @@
 add_library(vtextension_wamr STATIC
     DefaultBackend.cpp
     HiddenExports.cpp
+    WamrGlobals.cpp
     TableCaps.cpp
     WamrBackend.cpp
     WamrInstance.cpp
@@ -14,6 +15,7 @@ add_library(vtextension_wamr STATIC
     WamrThreadEnv.cpp
     WasiOverrides.cpp
     HiddenExports.hpp
+    WamrGlobals.hpp
     TableCaps.hpp
     WamrBackend.hpp
     WamrHandles.hpp

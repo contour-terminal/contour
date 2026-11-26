@@ -4,11 +4,14 @@
 // process-wide runtime its backends share, driven through WAMR's C API directly.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <ranges>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -213,6 +216,71 @@ TEST_CASE("Wamr.hostFunctionArities")
         REQUIRE_FALSE(runtime.has_value());
         CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
     }
+}
+
+TEST_CASE("Wamr.registrationsRaceLoads", "[threading]")
+{
+    // WAMR keeps every runtime's host functions on one process-wide list, which creating and dropping a
+    // runtime changes and loading a module walks. Runtimes with registrations of their own come and go on
+    // several threads while each loads and instantiates a module importing its own: no load may walk a node
+    // another thread frees (ThreadSanitizer and AddressSanitizer see it if one does), and every load links
+    // the import to the function its own runtime registered. (Catch2's assertions are not thread-safe: the
+    // workers count, the test thread checks.) Nothing is called here: clearing an instance's exception walks
+    // WAMR's list of thread clusters, which destroying another instance's environment changes unlocked -- a
+    // race of WAMR's own, apart from this one.
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::wasm::HostFunction;
+    constexpr auto Workers = std::size_t { 4 };
+    static constexpr auto Rounds = 50;
+    // Where ZeroArityModule spells its import module, "arity": after the header (8 bytes), the type section
+    // (6) and the import section's id, size, count and name length (4).
+    constexpr auto ImportModuleNameOffset = 18;
+
+    auto const backend = makeWamrBackend();
+    // Keeps WAMR up throughout, so that the workers race each other's registrations, not its bring-up.
+    auto const anchor = contract::createRuntime(*backend);
+
+    auto served = std::array<int, Workers> {};
+    {
+        auto workers = std::vector<std::jthread> {};
+        for (auto const worker: std::views::iota(std::size_t { 0 }, Workers))
+            workers.emplace_back([&backend, &served, worker] {
+                // Each worker's module imports "arit<worker>" "nop", which only its own runtimes provide.
+                auto bytes = ZeroArityModule;
+                auto const name = std::array { 'a', 'r', 'i', 't', static_cast<char>('0' + worker) };
+                std::ranges::transform(name, bytes.begin() + ImportModuleNameOffset, [](char letter) {
+                    return static_cast<std::uint8_t>(letter);
+                });
+                auto const hostFunctions =
+                    std::array { HostFunction { .module = std::string_view { name.data(), name.size() },
+                                                .name = "nop",
+                                                .parameterCount = 0 } };
+                for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+                {
+                    auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
+                    if (!runtime)
+                        return;
+                    auto const guard = backend->enterThread();
+                    if (!guard)
+                        return;
+                    auto const module = (*runtime)->load(vtextension::wasm::ModuleIdentity {},
+                                                         vtextension::testing::toModule(bytes));
+                    if (!module)
+                        return;
+                    auto const imports = (*module)->imports();
+                    if (imports.size() != 1
+                        || imports.front().linkage != vtextension::wasm::Linkage::Satisfied)
+                        return;
+                    auto context = contract::RecordingHostContext {};
+                    if (!(*module)->instantiate(context))
+                        return;
+                    ++served.at(worker);
+                }
+            });
+    }
+
+    for (auto const count: served)
+        CHECK(count == Rounds);
 }
 
 TEST_CASE("Wamr.measureRender", "[.measure]")

@@ -18,6 +18,7 @@
 #include <vtextension/wasm/WasmBinary.hpp>
 #include <vtextension/wasm/wamr/HiddenExports.hpp>
 #include <vtextension/wasm/wamr/TableCaps.hpp>
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
@@ -224,6 +225,9 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
     bytes = std::move(*capped);
     auto errorBuffer = std::array<char, 128> {};
     // The vector's buffer stays where it is when the vector moves into the module. WAMR may rewrite it.
+    // Loading links the imports by walking WAMR's list of host functions, which no runtime may change
+    // meanwhile, and writes the interpreter's global handle table: alone.
+    auto const changing = detail::changingWamrGlobals();
     auto module = detail::ModuleHandle { wasm_runtime_load(reinterpret_cast<uint8_t*>(bytes.data()),
                                                            static_cast<uint32_t>(bytes.size()),
                                                            errorBuffer.data(),

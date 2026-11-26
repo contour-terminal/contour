@@ -24,6 +24,7 @@
 #include <wasm_export.h>
 
 #include <vtextension/wasm/wamr/HiddenExports.hpp>
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
@@ -276,8 +277,11 @@ namespace
         wasm_runtime_instantiation_args_set_max_memory_pages(args.get(), capPages);
 
         auto errorBuffer = std::array<char, 128> {};
-        auto instance = detail::InstanceHandle { wasm_runtime_instantiate_ex2(
-            module, args.get(), errorBuffer.data(), static_cast<uint32_t>(errorBuffer.size())) };
+        auto instance = detail::InstanceHandle { [&] {
+            auto const reading = detail::readingWamrGlobals();
+            return wasm_runtime_instantiate_ex2(
+                module, args.get(), errorBuffer.data(), static_cast<uint32_t>(errorBuffer.size()));
+        }() };
         if (!instance)
             return std::unexpected(ExtensionError::InvalidComponent);
 

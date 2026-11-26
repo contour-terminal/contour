@@ -11,6 +11,8 @@
 
 #include <wasm_export.h>
 
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
+
 namespace vtextension::wasm::wamr
 {
 
@@ -71,13 +73,8 @@ std::expected<void, ExtensionError> acquireRuntime()
     // The system allocator and the interpreter, the build's only running mode. Only the first call
     // initializes; later ones join the running runtime. WAMR reference-counts this pair with
     // wasm_runtime_destroy() under its own lock.
-    if (!wasm_runtime_init())
+    if (auto const changing = detail::changingWamrGlobals(); !wasm_runtime_init())
         return std::unexpected(ExtensionError::RuntimeUnavailable);
-
-    // WAMR logs to stdout, which is not ours to write to. Errors that matter reach the caller through
-    // error buffers and exceptions; the warnings are noise, among them one on every load of a
-    // wit-bindgen cdylib, which is neither a WASI command nor a reactor.
-    wasm_runtime_set_log_level(WASM_LOG_LEVEL_ERROR);
 
     auto& ownership = runtimeOwnership();
     auto const lock = std::scoped_lock { ownership.mutex };
@@ -85,6 +82,12 @@ std::expected<void, ExtensionError> acquireRuntime()
     {
         ownership.initializingThread = std::this_thread::get_id();
         currentGeneration.fetch_add(1);
+        // WAMR logs to stdout, which is not ours to write to. Errors that matter reach the caller through
+        // error buffers and exceptions; the warnings are noise, among them one on every load of a
+        // wit-bindgen cdylib, which is neither a WASI command nor a reactor. Set once per bring-up, under
+        // this lock, which every later holder takes before it runs anything that logs: WAMR reads the level
+        // unlocked.
+        wasm_runtime_set_log_level(WASM_LOG_LEVEL_ERROR);
     }
     return {};
 }
@@ -97,6 +100,7 @@ void releaseRuntime() noexcept
         if (--ownership.holders == 0)
             ownership.initializingThread = {};
     }
+    auto const changing = detail::changingWamrGlobals();
     wasm_runtime_destroy();
 }
 

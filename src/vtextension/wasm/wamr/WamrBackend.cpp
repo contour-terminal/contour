@@ -18,6 +18,7 @@
 
 #include <wasm_export.h>
 
+#include <vtextension/wasm/wamr/WamrGlobals.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
 #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
@@ -161,7 +162,7 @@ class HostRegistrations
         ~Group()
         {
             if (!symbols.empty())
-                wasm_runtime_unregister_natives(module.c_str(), symbols.data());
+                detail::unregisterNatives(module.c_str(), symbols.data());
         }
 
         /// Registers the group with WAMR.
@@ -175,9 +176,8 @@ class HostRegistrations
                                                .func_ptr = entry.native.function,
                                                .signature = entry.native.signature,
                                                .attachment = entry.native.attachment });
-            if (!wasm_runtime_register_natives_raw(
-                    module.c_str(), table.data(), static_cast<uint32_t>(table.size())))
-                return std::unexpected(ExtensionError::RuntimeUnavailable);
+            if (auto registered = detail::registerNativesRaw(module.c_str(), table); !registered)
+                return registered;
             symbols = std::move(table); // moving a vector keeps its buffer, which WAMR now holds
             return {};
         }
