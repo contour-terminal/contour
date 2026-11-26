@@ -18,9 +18,11 @@
 // this process's console unasked -- the environment it is given and nothing else (contained, with
 // LOCALAPPDATA, TEMP and TMP set to the container's own folders, whatever it was given or this process has:
 // the system refuses a contained launch without them; LaunchSpelling_win32.hpp), the root of its
-// executable's volume as its working directory (contained, its executable's own, as above), and a console of
-// its own that shows no window (CREATE_NO_WINDOW), so that it is attached to no console of the parent's and
-// receives none of its Ctrl+C events.
+// executable's volume as its working directory (contained, its executable's own, as above), and no console at
+// all (DETACHED_PROCESS): it is attached to no console of the parent's and receives none of its Ctrl+C
+// events, and the system starts no console host for it -- a console of its own (CREATE_NO_WINDOW) would cost
+// one console host process per extension host, which the extension host, reading and writing only the handles
+// it is given, has no use for.
 //
 // The inheritance window. The handle list binds only this CreateProcessW(): while the duplicates are
 // inheritable, any other CreateProcess() of this process that inherits handles without a list of its own
@@ -532,13 +534,17 @@ namespace
             auto info = PROCESS_INFORMATION {};
             if (auto const allowed = allowInheritance(handleList); !allowed)
                 return std::unexpected(allowed.error());
+            // No console (DETACHED_PROCESS): a contained child started with one of its own (CREATE_NO_WINDOW)
+            // died in its startup with 0xC0000142 on a Windows runner. Unverified why; a likely reason is
+            // that its console host is started as its child, which a contained child may not have
+            // (PROCESS_CREATION_CHILD_PROCESS_RESTRICTED).
             auto const created =
                 ::CreateProcessW(executable.c_str(),
                                  commandLine.data(),
                                  nullptr,
                                  nullptr,
                                  TRUE,
-                                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
+                                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS,
                                  block->data(),
                                  workingDirectory.c_str(),
                                  &startup.StartupInfo,

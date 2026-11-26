@@ -8,8 +8,8 @@
 /// A child starts with exactly the handles it is given (`LaunchSpec::inherited`), the environment it is given
 /// and nothing of the parent's, the null device as its stdin and stdout, the stderr it is given or else the
 /// null device, the root directory as its working directory, and no terminal of the parent's: on POSIX in a
-/// session of its own, which has no controlling terminal; on Windows with a console of its own, which shows
-/// no window. On POSIX the i-th inherited handle is descriptor 3 + i in the child;
+/// session of its own, which has no controlling terminal; on Windows with no console at all
+/// (DETACHED_PROCESS). On POSIX the i-th inherited handle is descriptor 3 + i in the child;
 /// on Windows a child sees inheritable duplicates under values known only once they exist, which is why the
 /// command line is a function of them.
 

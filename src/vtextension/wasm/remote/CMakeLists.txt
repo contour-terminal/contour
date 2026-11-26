@@ -134,6 +134,11 @@ if(_process_source)
         if(WIN32)
             # --contained tries a loopback connection.
             target_link_libraries(extension_host_probe PRIVATE ws2_32)
+            # The loader probe (process/testing/LoaderProbe.cpp): says which libraries a process may load. Its
+            # C runtime linked in, it imports kernel32 alone, so that it starts wherever a process can.
+            add_executable(extension_host_loader_probe process/testing/LoaderProbe.cpp)
+            set_target_properties(extension_host_loader_probe PROPERTIES
+                MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()
         # Where a sandbox is built (VTEXTENSION_{LINUX,FREEBSD,MACOS}_SANDBOX), the probe also locks
         # itself down as the host does, and process_test proves the sandbox with it and tests its pieces.
@@ -184,7 +189,15 @@ if(_process_source)
             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
         endif()
         if(WIN32)
-            target_sources(vtextension_process_test PRIVATE process/LaunchSpelling_test.cpp)
+            target_sources(vtextension_process_test PRIVATE
+                process/LaunchSpelling_test.cpp
+                process/LoaderProbe_test.cpp
+                process/testing/PeImports_win32.cpp
+                process/testing/PeImports_win32.hpp
+            )
+            add_dependencies(vtextension_process_test extension_host_loader_probe)
+            target_compile_definitions(vtextension_process_test PRIVATE
+                VTEXTENSION_LOADER_PROBE_PATH="$<TARGET_FILE:extension_host_loader_probe>")
             # Sandbox.windowsHelperRunsContained listens on loopback for the contained probe.
             target_link_libraries(vtextension_process_test PRIVATE ws2_32)
         endif()
@@ -374,8 +387,17 @@ if(VTEXTENSION_TESTING AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND _process
             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
     endif()
     if(WIN32)
-        # The startup imports of the extension host and of the probe (process/StartupImports_test.cpp).
-        target_sources(vtextension_helper_test PRIVATE process/StartupImports_test.cpp)
+        # The startup imports of the extension host and of the probe, and what the extension host loads as it
+        # starts, loaded contained (process/StartupImports_test.cpp, process/LoaderProbe_test.cpp).
+        target_sources(vtextension_helper_test PRIVATE
+            process/LoaderProbe_test.cpp
+            process/StartupImports_test.cpp
+            process/testing/PeImports_win32.cpp
+            process/testing/PeImports_win32.hpp
+        )
+        add_dependencies(vtextension_helper_test extension_host_loader_probe)
+        target_compile_definitions(vtextension_helper_test PRIVATE
+            VTEXTENSION_LOADER_PROBE_PATH="$<TARGET_FILE:extension_host_loader_probe>")
     endif()
     add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
     if(NOT WIN32)
@@ -424,11 +446,18 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_so
             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
     endif()
     if(WIN32)
-        # The startup imports of this extension host and of the probe (process/StartupImports_test.cpp).
-        target_sources(vtextension_wamr_helper_test PRIVATE process/StartupImports_test.cpp)
-        add_dependencies(vtextension_wamr_helper_test extension_host_probe)
+        # The startup imports of this extension host and of the probe, and what this extension host loads as it
+        # starts, loaded contained (process/StartupImports_test.cpp, process/LoaderProbe_test.cpp).
+        target_sources(vtextension_wamr_helper_test PRIVATE
+            process/LoaderProbe_test.cpp
+            process/StartupImports_test.cpp
+            process/testing/PeImports_win32.cpp
+            process/testing/PeImports_win32.hpp
+        )
+        add_dependencies(vtextension_wamr_helper_test extension_host_probe extension_host_loader_probe)
         target_compile_definitions(vtextension_wamr_helper_test PRIVATE
-            VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+            VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>"
+            VTEXTENSION_LOADER_PROBE_PATH="$<TARGET_FILE:extension_host_loader_probe>")
     endif()
     add_test(NAME vtextension_wamr_helper_test COMMAND vtextension_wamr_helper_test)
     if(NOT WIN32)
