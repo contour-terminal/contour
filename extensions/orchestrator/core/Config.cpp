@@ -80,7 +80,20 @@ struct glz::meta<orchestrator::config::detail::JsonConfig>
                                               "keys",
                                               &T::keys,
                                               "work",
-                                              &T::work);
+                                              &T::work,
+                                              "automation",
+                                              &T::automation);
+};
+
+/// The `automation` map's snake_case names.
+template <>
+struct glz::meta<orchestrator::config::detail::JsonAutomation>
+{
+    using T = orchestrator::config::detail::JsonAutomation;
+    // Glaze finds the table by this spelling, as the standard library finds `value_type`.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr auto value =
+        glz::object("enabled", &T::enabled, "max_agents", &T::maxAgents, "rules", &T::rules);
 };
 
 /// The `work` map's snake_case names.
@@ -189,6 +202,8 @@ namespace orchestrator
 
 namespace
 {
+    using config::detail::JsonAutomation;
+    using config::detail::JsonAutomationRule;
     using config::detail::JsonConfig;
     using config::detail::JsonDuration;
     using config::detail::JsonIssueSource;
@@ -254,6 +269,7 @@ namespace
         TaskRoles,       ///< TaskRoleRows.
         KeyNames,        ///< SpecialKeyNames.
         WorkGroups,      ///< WorkGroupRows' configNames.
+        Conditions,      ///< AutomationConditionRows' names.
     };
 
     /// What each problem means; one row per ConfigProblem, in its order.
@@ -373,6 +389,16 @@ namespace
         ProblemText { .problem = ConfigProblem::UnknownGroup,
                       .text = "must be one of",
                       .listing = Listing::WorkGroups },
+        ProblemText { .problem = ConfigProblem::UnknownCondition,
+                      .text = "is no condition; the conditions are",
+                      .listing = Listing::Conditions },
+        ProblemText { .problem = ConfigProblem::UnknownRuleTask,
+                      .text = "is no configured task a rule can start" },
+        ProblemText { .problem = ConfigProblem::RuleTaskMismatch,
+                      .text = "does not apply to the items this condition matches" },
+        ProblemText { .problem = ConfigProblem::UnknownRuleWorker, .text = "names no worker" },
+        ProblemText { .problem = ConfigProblem::RuleWorkerTakesNoProfile,
+                      .text = "takes no permission profile, and the task has one" },
     };
 
     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ProblemTexts.size()),
@@ -380,7 +406,8 @@ namespace
                                           return static_cast<std::size_t>(ProblemTexts[i].problem) == i;
                                       }),
                   "ProblemTexts has one row per ConfigProblem, in its order");
-    static_assert(ProblemTexts.size() == static_cast<std::size_t>(ConfigProblem::UnknownGroup) + 1,
+    static_assert(ProblemTexts.size()
+                      == static_cast<std::size_t>(ConfigProblem::RuleWorkerTakesNoProfile) + 1,
                   "ProblemTexts covers every ConfigProblem");
 
     /// @return The values @p listing names, as the user writes them, of the rows @p sources holds.
@@ -430,6 +457,10 @@ namespace
             case Listing::WorkGroups:
                 for (auto const& row: WorkGroupRows)
                     values.push_back(row.configName);
+                break;
+            case Listing::Conditions:
+                for (auto const& row: AutomationConditionRows)
+                    values.push_back(row.name);
                 break;
         }
         return values;
@@ -489,6 +520,8 @@ namespace
         Worker,
         Keys,
         Work,
+        Automation,
+        AutomationRule,
     };
 
     /// One key an object may have, and the type of its value.
@@ -521,6 +554,7 @@ namespace
         Field { .key = "quick_replies", .type = JsonType::Objects, .object = ObjectKind::QuickReply },
         Field { .key = "keys", .type = JsonType::Object, .object = ObjectKind::Keys },
         Field { .key = "work", .type = JsonType::Object, .object = ObjectKind::Work },
+        Field { .key = "automation", .type = JsonType::Object, .object = ObjectKind::Automation },
     };
 
     constexpr auto RepoFields = std::array {
@@ -609,6 +643,20 @@ namespace
         Field { .key = "fold_empty", .type = JsonType::Bool },
     };
 
+    constexpr auto AutomationFields = std::array {
+        Field { .key = "enabled", .type = JsonType::Bool },
+        Field { .key = "max_agents", .type = JsonType::Count },
+        Field { .key = "rules", .type = JsonType::Objects, .object = ObjectKind::AutomationRule },
+    };
+
+    constexpr auto AutomationRuleFields = std::array {
+        Field { .key = "when", .type = JsonType::String },
+        Field { .key = "task", .type = JsonType::String },
+        Field { .key = "worker", .type = JsonType::String },
+        Field { .key = "model", .type = JsonType::String },
+        Field { .key = "permissions", .type = JsonType::String },
+    };
+
     [[nodiscard]] constexpr std::span<Field const> fieldsOf(ObjectKind kind) noexcept
     {
         switch (kind)
@@ -623,6 +671,8 @@ namespace
             case ObjectKind::Worker: return WorkerFields;
             case ObjectKind::Keys: return KeysFields;
             case ObjectKind::Work: return WorkFields;
+            case ObjectKind::Automation: return AutomationFields;
+            case ObjectKind::AutomationRule: return AutomationRuleFields;
         }
         return {};
     }
@@ -652,6 +702,10 @@ namespace
     static_assert(matchesMirror<JsonWorker>(WorkerFields), "WorkerFields and JsonWorker name the same keys");
     static_assert(matchesMirror<JsonKeys>(KeysFields), "KeysFields and JsonKeys name the same keys");
     static_assert(matchesMirror<JsonWork>(WorkFields), "WorkFields and JsonWork name the same keys");
+    static_assert(matchesMirror<JsonAutomation>(AutomationFields),
+                  "AutomationFields and JsonAutomation name the same keys");
+    static_assert(matchesMirror<JsonAutomationRule>(AutomationRuleFields),
+                  "AutomationRuleFields and JsonAutomationRule name the same keys");
 
     /// Integers are read exactly, so that a count is never a rounded double.
     using Generic = glz::generic_u64;
@@ -1403,6 +1457,87 @@ namespace
         return settings;
     }
 
+    /// What a rule is checked against: what the configuration read before `automation`.
+    struct RuleTables
+    {
+        std::span<std::string const> models;         ///< `models`.
+        std::span<TaskDef const> tasks;              ///< The tasks, the unavailable ones left out.
+        std::span<WorkerDef const> workers;          ///< The workers.
+        std::span<PermissionProfile const> profiles; ///< The resolved permission profiles.
+    };
+
+    /// @return The rule @p json spells, checked against @p tables, reported at `automation.rules[<index>]`.
+    [[nodiscard]] Checked<AutomationRule> ruleOf(JsonAutomationRule const& json,
+                                                 std::size_t index,
+                                                 RuleTables const& tables)
+    {
+        auto const key = [index](std::string_view field) {
+            return std::format("automation.rules[{}].{}", index, field);
+        };
+        if (!json.when)
+            return fail(key("when"), ConfigProblem::Missing);
+        auto const when = automationConditionNamed(*json.when);
+        if (!when)
+            return fail(key("when"), ConfigProblem::UnknownCondition);
+        if (!json.task)
+            return fail(key("task"), ConfigProblem::Missing);
+        auto const task = std::ranges::find(tables.tasks, *json.task, &TaskDef::id);
+        if (task == tables.tasks.end())
+            return fail(key("task"), ConfigProblem::UnknownRuleTask);
+        if (task->appliesTo != automationConditionRow(*when).appliesTo)
+            return fail(key("task"), ConfigProblem::RuleTaskMismatch);
+        auto rule = AutomationRule { .when = *when,
+                                     .task = *json.task,
+                                     .worker = json.worker.value_or(std::string {}),
+                                     .model = json.model.value_or(std::string {}),
+                                     .permissions = json.permissions.value_or(std::string {}) };
+        if (!rule.worker.empty())
+        {
+            auto const worker = std::ranges::find(tables.workers, rule.worker, &WorkerDef::id);
+            if (worker == tables.workers.end())
+                return fail(key("worker"), ConfigProblem::UnknownRuleWorker);
+            // The rule's own profile stands for the task's on this worker.
+            auto withProfile = *task;
+            if (!rule.permissions.empty())
+                withProfile.permissions = rule.permissions;
+            if (takesNoProfileFor(withProfile, *worker))
+                return fail(key("worker"), ConfigProblem::RuleWorkerTakesNoProfile);
+        }
+        if (!rule.model.empty() && !std::ranges::contains(tables.models, rule.model))
+            return fail(key("model"), ConfigProblem::UnlistedModel);
+        if (!rule.permissions.empty() && findProfile(tables.profiles, rule.permissions) == nullptr)
+            return fail(key("permissions"), ConfigProblem::UnknownProfile);
+        return rule;
+    }
+
+    /// @return The settings `automation` asks for; without it, none: no rule, and the switch paused.
+    [[nodiscard]] Checked<AutomationSettings> automationOf(std::optional<JsonAutomation> const& value,
+                                                           RuleTables const& tables)
+    {
+        if (!value)
+            return AutomationSettings {};
+        auto settings = AutomationSettings {
+            .enabled = value->enabled.value_or(false) ? AutomationSwitch::On : AutomationSwitch::Paused,
+        };
+        if (value->maxAgents)
+        {
+            auto const cap = limitOf(value->maxAgents, "automation.max_agents", 1);
+            if (!cap)
+                return std::unexpected(cap.error());
+            settings.maxAgents = *cap;
+        }
+        if (!value->rules)
+            return settings;
+        for (auto const [index, json]: std::views::enumerate(*value->rules))
+        {
+            auto rule = ruleOf(json, static_cast<std::size_t>(index), tables);
+            if (!rule)
+                return std::unexpected(std::move(rule.error()));
+            settings.rules.push_back(std::move(*rule));
+        }
+        return settings;
+    }
+
     /// @return The rules of a profile's @p list, each checked, reported at `<key>[i]`.
     [[nodiscard]] Checked<std::vector<std::string>> checkedRules(
         std::optional<std::vector<std::string>> const& list, std::string const& key)
@@ -1666,6 +1801,13 @@ std::expected<Config, ConfigError> Config::parse(std::string_view json,
                                                        .problem = ConfigProblem::ProfileOnCopilot });
         std::erase_if(values.tasks,
                       [&](TaskDef const& task) { return profileRefused(task, values.workers); });
+        if (auto e = assign(values.automation,
+                            automationOf(document.automation,
+                                         RuleTables { .models = values.models,
+                                                      .tasks = values.tasks,
+                                                      .workers = values.workers,
+                                                      .profiles = values.profiles })))
+            return e;
         return std::nullopt;
     }();
     if (problem)
@@ -1694,6 +1836,7 @@ Config::Config(Values values) noexcept:
     _defaultProfile { std::move(values.defaultProfile) },
     _keys { std::move(values.keys) },
     _work { std::move(values.work) },
+    _automation { std::move(values.automation) },
     _sources { values.sources }
 {
     // Every configuration can start an agent on a topic: without a task of its own, the topic's text is the

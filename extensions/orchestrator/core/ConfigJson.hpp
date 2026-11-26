@@ -92,6 +92,24 @@ struct JsonWork
     std::optional<bool> foldEmpty;                  ///< `fold_empty`.
 };
 
+/// One `automation.rules` entry.
+struct JsonAutomationRule
+{
+    std::optional<std::string> when;
+    std::optional<std::string> task;
+    std::optional<std::string> worker;
+    std::optional<std::string> model;
+    std::optional<std::string> permissions;
+};
+
+/// The `automation` map; Config.cpp maps the snake_case names.
+struct JsonAutomation
+{
+    std::optional<bool> enabled;
+    std::optional<uint32_t> maxAgents;
+    std::optional<std::vector<JsonAutomationRule>> rules;
+};
+
 /// One `workers` entry.
 struct JsonWorker
 {
@@ -136,6 +154,7 @@ struct JsonConfig
     std::optional<std::vector<JsonQuickReply>> quickReplies;
     std::optional<JsonKeys> keys;
     std::optional<JsonWork> work;
+    std::optional<JsonAutomation> automation;
 };
 
 } // namespace orchestrator::config::detail

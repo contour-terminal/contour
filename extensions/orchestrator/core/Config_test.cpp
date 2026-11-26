@@ -1387,3 +1387,137 @@ TEST_CASE("work: an unknown group's message lists the five names", "[config]")
           == "work.folded[0]: must be one of: needs_you, ready_to_merge, in_review, no_mr_yet, "
              "everything_else");
 }
+
+namespace
+{
+
+/// The example with two more workers, one of them Copilot's, and @p automation as its `automation` value.
+[[nodiscard]] std::expected<Config, ConfigError> parseAutomation(std::string_view automation)
+{
+    auto const replaced = std::format(
+        R"("max_agents": 4, "workers": [ {{ "id": "claude", "agent": "claude" }}, {{ "id": "w2", "agent": "claude" }},
+           {{ "id": "cop", "agent": "copilot" }} ], "automation": {},)",
+        automation);
+    return parse(Input { .find = R"("max_agents": 4,)", .replace = replaced });
+}
+
+} // namespace
+
+TEST_CASE("automation: absent, no rule and the switch paused", "[config][automation]")
+{
+    auto const config = parse(Input {});
+    REQUIRE(config.has_value());
+    CHECK(config->automation() == AutomationSettings {});
+}
+
+TEST_CASE("automation: rules, the switch's default and the cap", "[config][automation]")
+{
+    auto const config = parseAutomation(R"({ "enabled": true, "max_agents": 2, "rules": [
+        { "when": "pipeline_failed", "task": "fix_ci", "worker": "w2", "model": "opus" },
+        { "when": "no_mr_yet", "task": "issue", "permissions": "auto" } ] })");
+    REQUIRE(config.has_value());
+    CHECK(config->automation()
+          == AutomationSettings { .enabled = AutomationSwitch::On,
+                                  .maxAgents = 2,
+                                  .rules = { AutomationRule { .when = AutomationCondition::PipelineFailed,
+                                                              .task = "fix_ci",
+                                                              .worker = "w2",
+                                                              .model = "opus" },
+                                             AutomationRule { .when = AutomationCondition::NoMrYet,
+                                                              .task = "issue",
+                                                              .permissions = "auto" } } });
+    CHECK(ruleKeyOf(config->automation().rules[0]) == "pipeline_failed/fix_ci");
+}
+
+TEST_CASE("automation: what is refused, and where", "[config][automation]")
+{
+    struct Row
+    {
+        std::string_view automation;
+        std::string_view key;
+        ConfigProblem problem;
+    };
+    for (
+        auto const& row: {
+            Row { .automation = R"({ "rules": [ { "when": "nightly", "task": "fix_ci" } ] })",
+                  .key = "automation.rules[0].when",
+                  .problem = ConfigProblem::UnknownCondition },
+            Row { .automation = R"({ "rules": [ { "when": "conflicts", "task": "rebase" } ] })",
+                  .key = "automation.rules[0].task",
+                  .problem = ConfigProblem::UnknownRuleTask },
+            Row { .automation = R"({ "rules": [ { "when": "conflicts", "task": "topic" } ] })",
+                  .key = "automation.rules[0].task",
+                  .problem = ConfigProblem::UnknownRuleTask },
+            Row { .automation = R"({ "rules": [ { "when": "pipeline_failed", "task": "issue" } ] })",
+                  .key = "automation.rules[0].task",
+                  .problem = ConfigProblem::RuleTaskMismatch },
+            Row { .automation = R"({ "rules": [ { "when": "no_mr_yet", "task": "fix_ci" } ] })",
+                  .key = "automation.rules[0].task",
+                  .problem = ConfigProblem::RuleTaskMismatch },
+            Row { .automation =
+                      R"({ "rules": [ { "when": "conflicts", "task": "fix_ci", "worker": "nobody" } ] })",
+                  .key = "automation.rules[0].worker",
+                  .problem = ConfigProblem::UnknownRuleWorker },
+            Row {
+                .automation =
+                    R"({ "rules": [ { "when": "conflicts", "task": "fix_ci", "worker": "cop", "permissions": "auto" } ] })",
+                .key = "automation.rules[0].worker",
+                .problem = ConfigProblem::RuleWorkerTakesNoProfile },
+            Row { .automation =
+                      R"({ "rules": [ { "when": "conflicts", "task": "fix_ci", "model": "gpt" } ] })",
+                  .key = "automation.rules[0].model",
+                  .problem = ConfigProblem::UnlistedModel },
+            Row { .automation =
+                      R"({ "rules": [ { "when": "conflicts", "task": "fix_ci", "permissions": "nope" } ] })",
+                  .key = "automation.rules[0].permissions",
+                  .problem = ConfigProblem::UnknownProfile },
+            Row { .automation = R"({ "max_agents": 0 })",
+                  .key = "automation.max_agents",
+                  .problem = ConfigProblem::Zero },
+            Row { .automation = R"({ "rules": [ { "when": "conflicts", "task": "fix_ci", "at": "9" } ] })",
+                  .key = "automation.rules[0].at",
+                  .problem = ConfigProblem::UnknownKey },
+            Row { .automation = R"({ "rules": [ { "task": "fix_ci" } ] })",
+                  .key = "automation.rules[0].when",
+                  .problem = ConfigProblem::Missing },
+            Row { .automation = R"({ "enabled": "yes" })",
+                  .key = "automation.enabled",
+                  .problem = ConfigProblem::WrongType },
+        })
+    {
+        CAPTURE(row.automation);
+        auto const config = parseAutomation(row.automation);
+        REQUIRE_FALSE(config.has_value());
+        CHECK(config.error().key == row.key);
+        CHECK(config.error().problem == row.problem);
+    }
+}
+
+TEST_CASE("automation: an unknown condition's message lists the conditions", "[config][automation]")
+{
+    auto const config = parseAutomation(R"({ "rules": [ { "when": "nightly", "task": "fix_ci" } ] })");
+    REQUIRE_FALSE(config.has_value());
+    CHECK(message(config.error(), sourceTables())
+          == "automation.rules[0].when: is no condition; the conditions are: pipeline_failed, conflicts, "
+             "changes_requested, ready_to_merge, no_mr_yet");
+}
+
+TEST_CASE("automation: the cap is max_agents, else one less than the workers, at least one",
+          "[config][automation]")
+{
+    CHECK(automationCapOf(AutomationSettings {}, 1) == 1);
+    CHECK(automationCapOf(AutomationSettings {}, 4) == 3);
+    CHECK(automationCapOf(AutomationSettings { .maxAgents = 7 }, 2) == 7);
+}
+
+TEST_CASE("automation: every condition row is named once", "[config][automation]")
+{
+    auto names = std::set<std::string_view> {};
+    for (auto const& row: AutomationConditionRows)
+    {
+        CHECK(names.insert(row.name).second);
+        CHECK(automationConditionNamed(row.name) == row.condition);
+        CHECK(automationConditionName(row.condition) == row.name);
+    }
+    CHECK(names.size() == AutomationConditionRows.size());
+}

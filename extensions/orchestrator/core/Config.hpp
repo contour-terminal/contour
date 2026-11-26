@@ -13,6 +13,8 @@
 #include <vector>
 
 #include <orchestrator/core/Agents.hpp>
+#include <orchestrator/core/AppliesTo.hpp>
+#include <orchestrator/core/AutomationRules.hpp>
 #include <orchestrator/core/HostPaths.hpp>
 #include <orchestrator/core/IssueSources.hpp>
 #include <orchestrator/core/Model.hpp>
@@ -26,23 +28,6 @@
 
 namespace orchestrator
 {
-
-/// The kind of item a task works on.
-enum class AppliesTo : uint8_t
-{
-    PullRequest, ///< A change request; spelled `pr`.
-    Issue,       ///< An issue; spelled `issue`.
-    Topic,       ///< A topic the user typed; spelled `topic`.
-};
-
-/// @param item An item.
-/// @return The kind of task it takes: a change request's, an issue's (forge or Jira), or a topic's.
-[[nodiscard]] constexpr AppliesTo appliesToOf(ItemRef const& item) noexcept
-{
-    if (std::holds_alternative<ChangeRequestRef>(item))
-        return AppliesTo::PullRequest;
-    return std::holds_alternative<TopicRef>(item) ? AppliesTo::Topic : AppliesTo::Issue;
-}
 
 /// The id of the task that stands in for topics when no configured task applies to them, and the one it
 /// takes instead when a configured task already has that id.
@@ -170,13 +155,18 @@ enum class ConfigProblem : uint8_t
     LabelTooLong,           ///< A quick reply's label longer than MaxQuickReplyLabelBytes.
     UnknownAgent,           ///< A worker's `agent` that is no agent's name (AgentRows).
     UnknownWorker,          ///< A task's `worker` that names no worker: a notice; the first worker runs it.
-    ProfileOnCopilot, ///< A task with its own `permissions` on a worker that takes no profile: a notice;
-                      ///< the task is unavailable.
-    UnknownRole,      ///< A task's `role` no TaskRoleRows row spells.
-    NotAKeyName,      ///< A `keys` entry that is no key spelling.
-    KeyTaken,         ///< A `keys` entry another binding, or a command, already holds.
-    TypesText,        ///< A `leave_field` key that would type.
-    UnknownGroup,     ///< A `work.folded` entry no WorkGroupRows row spells.
+    ProfileOnCopilot,  ///< A task with its own `permissions` on a worker that takes no profile: a notice;
+                       ///< the task is unavailable.
+    UnknownRole,       ///< A task's `role` no TaskRoleRows row spells.
+    NotAKeyName,       ///< A `keys` entry that is no key spelling.
+    KeyTaken,          ///< A `keys` entry another binding, or a command, already holds.
+    TypesText,         ///< A `leave_field` key that would type.
+    UnknownGroup,      ///< A `work.folded` entry no WorkGroupRows row spells.
+    UnknownCondition,  ///< An `automation.rules[].when` no AutomationConditionRows row spells.
+    UnknownRuleTask,   ///< A rule's task that no configured task has as its id.
+    RuleTaskMismatch,  ///< A rule's task that does not apply to the items its condition matches.
+    UnknownRuleWorker, ///< A rule's worker that names no worker.
+    RuleWorkerTakesNoProfile, ///< A rule's worker takes no permission profile, and the rule or task has one.
 };
 
 /// Why a configuration was refused.
@@ -301,6 +291,8 @@ class Config
     [[nodiscard]] NavKeys const& keys() const noexcept { return _keys; }
     /// @return The Work board's settings (`work`): the groups folded at start, and whether empty groups show.
     [[nodiscard]] WorkSettings const& work() const noexcept { return _work; }
+    /// @return The rules that start agents by themselves (`automation`); without it, none.
+    [[nodiscard]] AutomationSettings const& automation() const noexcept { return _automation; }
     /// @return How long an agent stays done before its run is ended; 0: never.
     [[nodiscard]] std::chrono::milliseconds endDoneAfter() const noexcept { return _endDoneAfter; }
 
@@ -357,6 +349,7 @@ class Config
         std::string defaultProfile = std::string { DefaultProfileName };
         NavKeys keys = NavKeys::defaults(VimKeys::On);
         WorkSettings work = defaultWorkSettings();
+        AutomationSettings automation = {};
         std::chrono::milliseconds endDoneAfter = DefaultEndDoneAfter;
         std::chrono::milliseconds finishedRetention = DefaultFinishedRetention;
         std::vector<Repo> repos = {};
@@ -388,6 +381,7 @@ class Config
     std::string _defaultProfile;
     NavKeys _keys;
     WorkSettings _work;
+    AutomationSettings _automation;
     SourceTables _sources;
 };
 
