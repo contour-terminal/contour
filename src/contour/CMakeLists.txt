@@ -865,6 +865,10 @@ contour_production_executable(contour)
 # contour_gui_test, built only with ThreadSanitizer against glibc. The definition must be exported for
 # the dynamic linker to bind Qt's call to it.
 if(CONTOUR_FRONTEND_GUI AND CONTOUR_SANITIZE STREQUAL "thread")
+    # ThreadSanitizer's default options for the same two executables (platform/ThreadSanitizerOptions.cpp
+    # says which and why), so a direct run of either is as quiet about Qt's own hand-offs as ctest's.
+    add_library(contour_tsan_options OBJECT platform/ThreadSanitizerOptions.cpp)
+    target_link_libraries(contour PRIVATE contour_tsan_options)
     include(CheckSymbolExists)
     check_symbol_exists(__GLIBC__ "features.h" CONTOUR_HAVE_GLIBC)
     if(CONTOUR_HAVE_GLIBC)
@@ -1326,7 +1330,11 @@ if(CONTOUR_FRONTEND_GUI)
         endforeach()
         target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy contour_test_trace)
 
-        # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
+        # ThreadSanitizer's default options and the QThread join forwarding, as for the executable itself
+        # (see contour_tsan_options and contour_tsan_thread_join).
+        if(TARGET contour_tsan_options)
+            target_link_libraries(contour_gui_test PRIVATE contour_tsan_options)
+        endif()
         if(TARGET contour_tsan_thread_join)
             target_link_libraries(contour_gui_test PRIVATE contour_tsan_thread_join)
         endif()
@@ -1401,9 +1409,16 @@ if(CONTOUR_FRONTEND_GUI)
         # A budget of their own, over the presets' 10-minute default: on the Windows runner these four run
         # in parallel and each takes 8 to 10 minutes, so the slowest crossed 600 s on a busy runner and ctest
         # killed it mid-case -- a different "hung" case every time, though nothing hung. 20 minutes still
-        # fails a real hang well inside the Test step's 30.
+        # fails a real hang well inside the Test step's 30. A sanitized build gets twice that: no CI job
+        # runs one, and under AddressSanitizer the default run alone takes some 24 minutes on a developer
+        # machine, its snapshot matrix nearly five of them.
+        if(NOT CONTOUR_SANITIZE)
+            set(_contourGuiTestTimeout 1200)
+        else()
+            set(_contourGuiTestTimeout 2400)
+        endif()
         set_tests_properties(contour_gui_test contour_gui_test_fluent contour_gui_test_contourlinux
-                             contour_gui_test_contourtui PROPERTIES TIMEOUT 1200)
+                             contour_gui_test_contourtui PROPERTIES TIMEOUT ${_contourGuiTestTimeout})
 
         if(WIN32)
             # Native HWND geometry cannot be exercised through the offscreen platform. Keep the
@@ -1430,34 +1445,6 @@ if(CONTOUR_FRONTEND_GUI)
                     LABELS "native;windows")
         endif()
 
-        # Under ThreadSanitizer, ignore_noninstrumented_modules=1, for this suite only.
-        #
-        # Why: the distro Qt (and the glib and libdbus under it) is not instrumented, so its allocator and
-        # teardown traffic shows as races the sanitizer cannot order. Qt hands memory between its threads
-        # through synchronization it cannot see -- the futex-based QMutex and QSemaphore, QObject's
-        # connection locks -- so a QDBusConnection hooking a receiver's destroyed() from its own thread,
-        # the QML type loader's thread, the thread pool and QPainter's parallel span fills all read as
-        # races. The option drops the memory accesses of interceptors those libraries call (malloc, free,
-        # memcpy, ...) and keeps their mutex and condition-variable synchronization; Contour's own
-        # accesses stay checked, in QThread::run(), QThreadPool tasks and queued slots alike.
-        #
-        # The blind spot: code that runs inside an interceptor called from uninstrumented code runs
-        # unchecked -- the bodies of std::call_once and std::async through libstdc++, pthread_once and
-        # qsort callbacks. A race planted in a std::call_once body or a std::async task goes unreported
-        # here; one planted in QThread::run(), a QThreadPool task or a queued slot does not.
-        #
-        # So src/contour must not lean on this suite alone for races in such code: threaded logic that
-        # runs in such bodies -- FontLocatorProvider's and SystemdScopePlacement's std::call_once, the
-        # libssh2 initialisation in SshSession -- must have its races tested in an unsilenced module suite
-        # (text_shaper_test, vtpty_test), not through contour_gui_test.
-        set(CONTOUR_QML_TEST_TSAN_OPTIONS "TSAN_OPTIONS=string_append: ignore_noninstrumented_modules=1")
-        # The style runs above are the same suite over the same uninstrumented Qt: under the Fluent style
-        # alone, QPainter's parallel span fills (the popup shadow's mask) read as thousands of races.
-        if(CONTOUR_SANITIZE STREQUAL "thread")
-            set_property(TEST contour_gui_test contour_gui_test_fluent contour_gui_test_contourlinux
-                              contour_gui_test_contourtui
-                         APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
-        endif()
 
         # The notification suite again, but against a session bus whose org.freedesktop.Notifications
         # is activatable and never answers -- a desktop with its notification daemon disabled, which
@@ -1479,10 +1466,6 @@ if(CONTOUR_FRONTEND_GUI)
                         "QT_QPA_PLATFORM=offscreen;${CONTOUR_QML_TEST_ENVIRONMENT}"
                     TIMEOUT 120
                     LABELS e2e)
-            if(CONTOUR_SANITIZE STREQUAL "thread")
-                set_property(TEST contour_notification_nonblocking APPEND PROPERTY ENVIRONMENT_MODIFICATION
-                             "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
-            endif()
         else()
             message(STATUS "dbus-daemon not found: skipping contour_notification_nonblocking test")
         endif()
@@ -1586,20 +1569,6 @@ if(CONTOUR_FRONTEND_GUI)
                               contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_tls_key_login
                          APPEND PROPERTY LABELS daemon)
 
-            # Under ThreadSanitizer, the same ignore_noninstrumented_modules=1 as contour_gui_test, and
-            # for the same reason: the application loads the same uninstrumented Qt, glib and libdbus,
-            # plus Qt Multimedia's PulseAudio, whose allocator and teardown traffic between their own
-            # threads shows as races the sanitizer cannot order. Contour's own accesses stay checked.
-            # The same blind spot applies -- std::call_once and std::async bodies through libstdc++,
-            # pthread_once and qsort callbacks run unchecked -- with the same consequence: threaded logic
-            # in such bodies has its races tested in an unsilenced module suite, not through these runs.
-            if(CONTOUR_SANITIZE STREQUAL "thread")
-                set_property(TEST contour_e2e_lifecycle contour_e2e_vt_stream contour_e2e_custom_config
-                                  contour_e2e_cli contour_e2e_daemon
-                                  contour_e2e_client_unreachable contour_e2e_hosting contour_e2e_stdio_relay
-                                  contour_e2e_connect
-                             APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
-            endif()
         endif()
 
         # {{{ The sidebar's workflows on a real X server (label e2e-display)
@@ -1660,10 +1629,6 @@ if(CONTOUR_FRONTEND_GUI)
                     TIMEOUT 120
                     RUN_SERIAL TRUE
                     LABELS "e2e;daemon")
-            if(CONTOUR_SANITIZE STREQUAL "thread")
-                set_property(TEST contour_e2e_daemon_live_upgrade
-                             APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
-            endif()
 
             # A real crash: the daemon its PTY keeper keeps is SIGKILLed twice, its configuration broken in
             # between, and the hosted program, its pane and its ids come through each restart.
@@ -1676,10 +1641,6 @@ if(CONTOUR_FRONTEND_GUI)
                     TIMEOUT 180
                     RUN_SERIAL TRUE
                     LABELS "e2e;daemon;keeper")
-            if(CONTOUR_SANITIZE STREQUAL "thread")
-                set_property(TEST contour_e2e_daemon_crash_recovery
-                             APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
-            endif()
         elseif(WIN32)
             # The same upgrade on Windows, where the daemon hands itself over to a successor process rather
             # than exec'ing in place: the daemon's pid changes and the program's does not. Windows PowerShell,

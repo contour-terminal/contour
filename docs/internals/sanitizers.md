@@ -56,3 +56,33 @@ When a report names only system libraries:
 
 A frame of `<unknown module>` belongs to a library that was unloaded before the report; no entry can name
 it. Name the nearest frame that has a name, as the `QRhi::endFrame` entry does, and say so in its comment.
+
+## Races that are not ours
+
+Qt and the glib, libdbus and PulseAudio under it are not built with ThreadSanitizer. The sanitizer sees
+their calls to `malloc`, `free`, `memcpy` or `write` through its interceptors, but not the futex-based
+locks their event queues, thread pools and wakeup descriptors synchronize with, so memory they hand from one
+thread to another reads as a race: an object the QML loader thread made and the GUI thread deleted, a queued
+event posted from `NativeController`'s client thread and freed by the GUI thread's event loop, a `QImage` a
+pooled raster thread filled before `PopupShadowImageProvider` read it, glib's wakeup eventfd written by
+`AskpassBroker` or `SpeechSynthesizer` and closed by `g_main_context_unref`. A run of
+`contour_gui_test "[threading]"` without a filter prints some seventy such reports and exits with 66, though
+every case passes.
+
+The two executables that load Qt, `contour` and `contour_gui_test`, are therefore built in a `clang-tsan`
+tree with `ignore_noninstrumented_modules=1` as their default: `src/contour/platform/ThreadSanitizerOptions.cpp`
+returns it from `__tsan_default_options()`, which the runtime applies before `TSAN_OPTIONS`. A direct run of
+either, a focused `out/clang-tsan/src/contour/contour_gui_test "[threading]"` included, is as quiet as a ctest
+run, and the module suites (`vthost_test`, `vtpty_test`, ...) keep the sanitizer unfiltered. The option drops
+the memory accesses of interceptors those libraries call and keeps their mutex and condition-variable
+synchronization; every access of our own code is still checked.
+
+It is not a suppressions list, deliberately. A `race:` entry hides a report when any frame of either stack
+matches, ours included, wherever Qt merely called into our code. A `called_from_lib:libQt6Core.so` entry is
+worse: it also drops the mutex calls Qt makes, and with them the ordering of every queued slot, so the
+hand-offs above come back as reports in our own frames. The source file names the option's blind spot --
+`std::call_once` and `std::async` bodies run unchecked -- and where such code is tested instead.
+
+No CI job builds with ThreadSanitizer: `ctest --preset=clang-tsan` and `<module>_test "[threading]"` run
+locally, before a change to a thread boundary lands.
+
