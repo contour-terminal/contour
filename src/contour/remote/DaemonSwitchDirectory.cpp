@@ -3,7 +3,6 @@
 #include <contour/remote/DaemonSwitchDirectory.hpp>
 
 #include <algorithm>
-#include <format>
 #include <optional>
 #include <ranges>
 #include <utility>
@@ -11,10 +10,10 @@
 namespace contour::remote
 {
 
-DaemonSwitchDirectory::DaemonSwitchDirectory(std::shared_ptr<cli::IDaemonDiscovery> discovery,
+DaemonSwitchDirectory::DaemonSwitchDirectory(DaemonPresence& presence,
                                              std::unique_ptr<IWorkspaceLister> lister,
                                              LinkedDaemons linked):
-    _discovery(std::move(discovery)), _linked(std::move(linked)), _lister(std::move(lister))
+    _presence(presence), _linked(std::move(linked)), _lister(std::move(lister))
 {
 }
 
@@ -22,18 +21,34 @@ DaemonSwitchDirectory::~DaemonSwitchDirectory() = default;
 
 std::string DaemonSwitchDirectory::cacheKeyOf(LinkedDaemon const& daemon)
 {
-    switch (daemon.address.kind)
-    {
-        case vthost::proto::SwitchDaemonKind::Name: return std::format("name:{}", daemon.address.name);
-        case vthost::proto::SwitchDaemonKind::Host: return std::format("host:{}", daemon.address.name);
-        case vthost::proto::SwitchDaemonKind::Same: break;
-    }
-    return std::format("link:{}", daemon.link.value);
+    return daemonRefOf(daemon.address, daemon.link).value;
 }
 
 std::vector<cli::DiscoveredDaemon> DaemonSwitchDirectory::localDaemons() const
 {
-    return _localDaemons;
+    return _presence.localDaemons();
+}
+
+std::vector<session::SwitchTarget> DaemonSwitchDirectory::daemonRing() const
+{
+    auto ring = std::vector<session::SwitchTarget> {};
+    for (auto const& daemon: _presence.listed())
+    {
+        auto const parsed = window::parseDaemonRef(daemon);
+        if (!parsed)
+            continue;
+        // A daemon reached by a link alone is one no switch can name.
+        auto const& [kind, name] = *parsed;
+        auto switchKind = vthost::proto::SwitchDaemonKind::Name;
+        switch (kind)
+        {
+            case window::DaemonRefKind::Local: break;
+            case window::DaemonRefKind::Host: switchKind = vthost::proto::SwitchDaemonKind::Host; break;
+            case window::DaemonRefKind::Link: continue;
+        }
+        ring.push_back({ .kind = switchKind, .daemon = std::string { name }, .workspace = {} });
+    }
+    return ring;
 }
 
 std::vector<std::string> DaemonSwitchDirectory::hostsShownHere() const
@@ -78,7 +93,7 @@ std::vector<session::KnownWorkspace> DaemonSwitchDirectory::workspacesOf(
 
 void DaemonSwitchDirectory::refresh()
 {
-    startDiscovery();
+    _presence.refresh();
     auto const linked = _linked();
     // A daemon no window is on any more is forgotten, so a later one by the same name starts afresh.
     auto const keys = std::ranges::to<std::set>(linked | std::views::transform(&cacheKeyOf));
@@ -89,20 +104,8 @@ void DaemonSwitchDirectory::refresh()
 
 void DaemonSwitchDirectory::refreshDiscovery()
 {
-    startDiscovery();
-}
-
-void DaemonSwitchDirectory::startDiscovery()
-{
-    if (_discoveryState == Discovery::Running)
-        return;
-    _discoveryState = Discovery::Running;
-    // Off the GUI thread: each socket is probed.
-    _jobs.run([discovery = _discovery] { return discovery->discover(); },
-              [this](std::vector<cli::DiscoveredDaemon> found) {
-                  _localDaemons = std::move(found);
-                  _discoveryState = Discovery::Idle;
-              });
+    // The presence's one discovery, and its observers: a listed daemon is watched whichever surface asks.
+    _presence.refresh();
 }
 
 void DaemonSwitchDirectory::startListing(LinkedDaemon const& daemon)

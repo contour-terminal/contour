@@ -4,6 +4,7 @@
 /// The window a SidebarModel sits in, faked: a directory source that lists what a test sets, and a host that
 /// records what the sidebar asks of the window. Shared by the model's own tests and by the QML tests, which
 /// drive the real model under the real Sidebar.qml.
+#include <contour/test/FakeDaemonSections.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
 

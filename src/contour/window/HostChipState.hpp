@@ -6,7 +6,9 @@
 /// the chip's four, each with its dot colour and text. Pure, so the chip, its accessibility name and the
 /// tests read the same rows.
 
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/window/DaemonLinkLook.hpp>
 #include <contour/window/TranslateNoop.hpp>
 
 #include <array>
@@ -116,6 +118,28 @@ inline constexpr size_t HostNoticeCount = static_cast<size_t>(HostNotice::Interr
                                                                                     : HostNotice::None;
 }
 
+/// The link state a chip state draws the mark of, so the chip's mark means what it means on a daemon row.
+/// @param state A chip state.
+/// @return Its link state: Disconnected is Failed (nothing is retried), NeedsAttention is NeedsInput.
+[[nodiscard]] constexpr DaemonLinkState chipLinkState(HostChipState state) noexcept
+{
+    switch (state)
+    {
+        case HostChipState::Connected: return DaemonLinkState::Connected;
+        case HostChipState::Reconnecting: return DaemonLinkState::Reconnecting;
+        case HostChipState::Disconnected: return DaemonLinkState::Failed;
+        case HostChipState::NeedsAttention: return DaemonLinkState::NeedsInput;
+    }
+    return DaemonLinkState::Failed;
+}
+
+/// @param state A chip state.
+/// @return The Terminal row's mark of its link state (@c DaemonLinkLooks).
+[[nodiscard]] constexpr std::string_view chipGlyphOf(HostChipState state) noexcept
+{
+    return linkLookOf(chipLinkState(state), config::SidebarLook::CellTree).glyph;
+}
+
 /// How one chip state looks and what it says.
 struct HostChipLook
 {
@@ -126,7 +150,7 @@ struct HostChipLook
     std::string_view tooltipFormat; ///< The chip's tooltip sentence (`%1` the daemon, `%2` the action); empty
                                     ///< when connected, whose tooltip is the action alone.
     std::string_view description;   ///< What a screen reader adds to the chip's name; empty when connected.
-    std::string_view glyph;         ///< The terminal-style stand-in for the dot.
+    std::string_view glyph;         ///< The terminal-style stand-in for the dot: its link state's mark.
 };
 
 /// The looks, indexed by @c HostChipState.
@@ -137,21 +161,21 @@ inline constexpr std::array<HostChipLook, HostChipStateCount> HostChipLooks {
                    .accessibleState = "connected",
                    .tooltipFormat = "",
                    .description = "",
-                   .glyph = "●" },
+                   .glyph = chipGlyphOf(HostChipState::Connected) },
     HostChipLook { .state = HostChipState::Reconnecting,
                    .dot = config::StatusColorRole::Warning,
                    .status = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting…"),
                    .accessibleState = "reconnecting",
                    .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 · %2"),
                    .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting"),
-                   .glyph = "◑" },
+                   .glyph = chipGlyphOf(HostChipState::Reconnecting) },
     HostChipLook { .state = HostChipState::Disconnected,
                    .dot = config::StatusColorRole::Danger,
                    .status = QT_TRANSLATE_NOOP("LocationChip", "Disconnected"),
                    .accessibleState = "disconnected",
                    .tooltipFormat = QT_TRANSLATE_NOOP("LocationChip", "Disconnected from %1 · %2"),
                    .description = QT_TRANSLATE_NOOP("LocationChip", "Disconnected"),
-                   .glyph = "✕" },
+                   .glyph = chipGlyphOf(HostChipState::Disconnected) },
     HostChipLook { .state = HostChipState::NeedsAttention,
                    .dot = config::StatusColorRole::Warning,
                    .status = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting needs your attention"),
@@ -159,7 +183,7 @@ inline constexpr std::array<HostChipLook, HostChipStateCount> HostChipLooks {
                    .tooltipFormat =
                        QT_TRANSLATE_NOOP("LocationChip", "Reconnecting to %1 needs your attention · %2"),
                    .description = QT_TRANSLATE_NOOP("LocationChip", "Reconnecting, needs your attention"),
-                   .glyph = "!" },
+                   .glyph = chipGlyphOf(HostChipState::NeedsAttention) },
 };
 
 namespace detail

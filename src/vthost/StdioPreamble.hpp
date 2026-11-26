@@ -20,6 +20,10 @@ namespace vthost
 inline constexpr std::string_view StdioPreambleReady = "contour-stdio 1 ready\n";
 /// The relay could not reach the daemon; the reason follows, up to the end of the line.
 inline constexpr std::string_view StdioPreambleErrorPrefix = "contour-stdio 1 error: ";
+/// The reason a relay told not to start a daemon (`contour daemon --stdio --no-start`) gives, as its error
+/// preamble's message, when none serves. The client reads a refusal that starts with it as
+/// TransportErrorKind::DaemonAbsent rather than as a refusal: the daemon is not running, and can be started.
+inline constexpr std::string_view StdioDaemonAbsentMessage = "no daemon is running";
 /// How many bytes of junk (a login banner, a motd) may come before the preamble.
 inline constexpr std::size_t StdioPreambleScanLimit = std::size_t { 64 } * 1024;
 

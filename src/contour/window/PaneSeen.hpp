@@ -15,6 +15,8 @@ struct PaneSeen
 {
     TabAttention::FlagSerials serials; ///< The serial of each flag seen; 0 acknowledges none.
     uint64_t statusGeneration = 0;     ///< The newest program-status generation seen.
+
+    bool operator==(PaneSeen const&) const = default;
 };
 
 /// Whether a window has the user's focus, as it tells the daemon of the panes it shows.

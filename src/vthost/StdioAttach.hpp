@@ -40,7 +40,9 @@ using DaemonConnector = std::function<std::expected<std::shared_ptr<IByteStream>
 /// @param socketPath The daemon's control socket.
 /// @param spawner Asks whether a daemon serves (DaemonSpawner::probe()); not owned, outlives the connector.
 /// @param starter Phase 2's `chooseDaemonStarter(...)`: a registered user service when there is one,
-///        else spawn-on-demand from the staged per-version binary. Owned by the connector.
+///        else spawn-on-demand from the staged per-version binary. Owned by the connector. Null never starts
+///        one (`--no-start`): when none serves, the connector fails with @ref StdioDaemonAbsentMessage,
+///        which the client reads as an absent daemon.
 /// @return The connector.
 [[nodiscard]] DaemonConnector makeLocalDaemonConnector(std::filesystem::path socketPath,
                                                        DaemonSpawner& spawner,

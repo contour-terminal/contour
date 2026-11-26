@@ -1500,8 +1500,11 @@ QVariantList SettingsController::hostFields() const
         auto problem = QString {};
         if (info.field)
         {
-            row[QStringLiteral("value")] =
-                QString::fromStdString(_hostDraft.*config::hostDraftMember(*info.field));
+            auto const& text = _hostDraft.*config::hostDraftMember(*info.field);
+            if (info.control == SettingsControl::Switch)
+                row[QStringLiteral("value")] = text == "true";
+            else
+                row[QStringLiteral("value")] = QString::fromStdString(text);
             if (auto const found = std::ranges::find(problems, *info.field, &config::HostFieldProblem::field);
                 found != problems.end())
                 problem = QString::fromStdString(found->message);
@@ -1512,7 +1515,8 @@ QVariantList SettingsController::hostFields() const
 
         auto options = QStringList {};
         auto labels = QStringList {};
-        auto type = SettingsValueType::String;
+        auto type =
+            info.control == SettingsControl::Switch ? SettingsValueType::Bool : SettingsValueType::String;
         if (info.row == HostPageRow::Profile)
         {
             // Empty is the configuration's default profile.
@@ -1603,7 +1607,7 @@ std::expected<void, SettingsError> SettingsController::hostDraftWritable() const
     return refuse(SettingsErrorKind::ReadOnly, "Defined in contour.yml · Duplicate to Edit.");
 }
 
-std::expected<void, SettingsError> SettingsController::stageHostDraft()
+std::expected<void, SettingsError> SettingsController::stageHostDraft(ListingEdit listing)
 {
     // A page with a problem saves nothing: its rows say what, and the file keeps what it last had.
     if (!config::checkHostDraft(_hostDraft).empty())
@@ -1614,6 +1618,8 @@ std::expected<void, SettingsError> SettingsController::stageHostDraft()
     if (!staged)
         return staged;
     _hostSeededFrom = std::move(bytes);
+    if (listing == ListingEdit::Changed && _services.hostListingEdited)
+        _services.hostListingEdited(_editingHost.toStdString());
     if (wasUnsaved)
     {
         rebuildHostRows();
@@ -1629,11 +1635,20 @@ std::expected<void, SettingsError> SettingsController::setHostField(QString cons
     auto const* const row = editableHostRow(key);
     if (row == nullptr)
         return refuse(SettingsErrorKind::UnknownSetting, "Unknown host setting.");
-    _hostDraft.*config::hostDraftMember(*row->field) = value.toString().trimmed().toStdString();
+    // A switch's bool is kept as the word the file spells it with.
+    auto& field = _hostDraft.*config::hostDraftMember(*row->field);
+    auto const before =
+        std::exchange(field,
+                      value.typeId() == QMetaType::Bool ? std::string { value.toBool() ? "true" : "false" }
+                                                        : value.toString().trimmed().toStdString());
     if (auto const scheme = config::hostSchemeOf(_hostDraft.url))
         _hostScheme = scheme;
+    // Only the switch itself overrides what the sidebar was told at runtime: editing the port keeps it.
+    auto const listing = row->field == config::HostField::ShowInSidebar && field != before
+                             ? ListingEdit::Changed
+                             : ListingEdit::Unchanged;
     // Told after the staging: whether the host can be attached to follows what is staged for it.
-    auto staged = stageHostDraft();
+    auto staged = stageHostDraft(listing);
     emit hostDraftChanged();
     return staged;
 }
@@ -1669,7 +1684,7 @@ std::expected<QString, SettingsError> SettingsController::openNewHost(std::strin
     _hostAccess = DraftAccess::Editable;
     _hostScheme = config::hostSchemeOf(_hostDraft.url);
     _hostSeededFrom.reset();
-    if (auto const staged = stageHostDraft(); !staged)
+    if (auto const staged = stageHostDraft(ListingEdit::Unchanged); !staged)
     {
         closeHostDraft();
         return std::unexpected(staged.error());

@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -89,6 +90,22 @@ struct SidebarPrefs
     [[nodiscard]] bool operator==(SidebarPrefs const&) const = default;
 };
 
+/// The daemons the user listed or unlisted in the workspace sidebar (`sidebar_daemons:`), each by its
+/// `window::DaemonRef` spelling (`host:starfive`, `local:work`). A runtime choice: it wins over a host's
+/// `show_in_sidebar` until that host's Settings page is edited.
+struct SidebarDaemons
+{
+    std::set<std::string> shown {};  ///< The daemons the user chose to list.
+    std::set<std::string> hidden {}; ///< The daemons the user chose to unlist.
+
+    [[nodiscard]] bool operator==(SidebarDaemons const&) const = default;
+};
+
+/// Forgets the user's sidebar choice for one daemon, so that its configuration decides again.
+/// @param daemons   The choices.
+/// @param daemonKey The daemon, as `window::DaemonRef::value`.
+void forgetDaemonChoice(SidebarDaemons& daemons, std::string const& daemonKey);
+
 /// What the GUI remembers about the user's answers and its windows, as opposed to what they configured.
 ///
 /// Kept out of `settings.yml` on purpose: that file holds settings, which a reload re-applies, while
@@ -115,6 +132,8 @@ struct GuiState
     /// The workspace sidebar as the user last left it; none before they ever changed it, when the
     /// configuration's defaults apply.
     std::optional<SidebarPrefs> sidebar {};
+    /// The daemons the user listed or unlisted in the sidebar; empty before any choice.
+    SidebarDaemons sidebarDaemons {};
 
     [[nodiscard]] bool operator==(GuiState const&) const = default;
 };
@@ -185,12 +204,12 @@ inline constexpr std::string_view GuiStateBackupSuffix = ".bak";
 /// The file reads `dismissed_new_defaults: [existing_config]`, `dismissed_shell_integration: [zsh]` and
 /// `settings_window: { x, y, width, height, screen, show: normal|maximized, page }` and
 /// `last_connect_target: starfive`, `last_color_preference: light|dark` and
-/// `sidebar: { visibility: shown|hidden, width_px, width_cells }`. A token no offer
-/// or shell answers to is skipped, so a file written by a newer release still loads, and a save keeps those
-/// tokens and any other keys. A `settings_window` that is not a map is no state; an unknown `show` word is
-/// `normal`.
-/// Saving over a file that does not load first copies it to `gui-state.yml.bak` (GuiStateBackupSuffix),
-/// and saves nothing when that copy fails.
+/// `sidebar: { visibility: shown|hidden, width_px, width_cells }` and
+/// `sidebar_daemons: { shown: [host:a], hidden: [local:work] }` (written only when either is non-empty). A
+/// token no offer or shell answers to is skipped, so a file written by a newer release still loads, and a
+/// save keeps those tokens and any other keys. A `settings_window` that is not a map is no state; an unknown
+/// `show` word is `normal`. Saving over a file that does not load first copies it to `gui-state.yml.bak`
+/// (GuiStateBackupSuffix), and saves nothing when that copy fails.
 class FileGuiStateStore final: public GuiStateStore
 {
   public:

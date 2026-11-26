@@ -651,6 +651,8 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 if (_supervisor != nullptr
                     && _supervisor->roleAcceptance() == NativeClient::RoleAcceptance::ObserveUnsupported)
                     _observeSupport = ObserveSupport::TooOld;
+                if (state != ConnectionState::Stopped && _supervisor != nullptr)
+                    _failureKind = _supervisor->failureKind();
                 // No connection is left to answer a promotion under way.
                 tellPromotion = endPromotion(
                     lock,
@@ -1358,7 +1360,8 @@ std::expected<void, SelectError> NativeController::demote(std::shared_ptr<vthost
         _pending.clear();
         _shown.clear();
     }
-    _guiRaiseRole = vthost::proto::RaiseRole::Quiet;
+    if (std::exchange(_guiRaiseRole, vthost::proto::RaiseRole::Quiet) != vthost::proto::RaiseRole::Quiet)
+        emit raiseRoleChanged();
     _reactor.post([this] {
         if (_client != nullptr)
             std::ignore = _client->observeOnly();
@@ -1376,6 +1379,12 @@ ObserveSupport NativeController::observeSupport() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _observeSupport;
+}
+
+std::optional<vthost::TransportErrorKind> NativeController::failureKind() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _failureKind;
 }
 
 std::shared_ptr<vthost::ITransportFactory> NativeController::dialTransport() const
@@ -1665,7 +1674,10 @@ void NativeController::onRaiseRole(vthost::proto::RaiseRole role)
     // The GUI thread's copy changes in line with the events: a bell or notification this connection was sent
     // before the change was posted to the GUI thread before this is, so it is judged by the role it arrived
     // under there too (raiseRole()), as a summary is (takeRaised()).
-    platform::postToObject(this, [this, role] { _guiRaiseRole = role; });
+    platform::postToObject(this, [this, role] {
+        if (std::exchange(_guiRaiseRole, role) != role)
+            emit raiseRoleChanged();
+    });
 }
 
 void NativeController::failAttach(std::string reason)

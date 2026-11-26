@@ -62,8 +62,12 @@ DaemonConnector makeLocalDaemonConnector(std::filesystem::path socketPath,
     return [socketPath = std::move(socketPath), &spawner, starter = std::shared_ptr { std::move(starter) }]()
                -> std::expected<std::shared_ptr<IByteStream>, std::string> {
         if (spawner.probe(socketPath) == DaemonPresence::Absent)
+        {
+            if (!starter)
+                return std::unexpected { std::string { StdioDaemonAbsentMessage } };
             if (auto const started = starter->start(); !started)
                 return std::unexpected { started.error() };
+        }
         return connectUnixStream(nativeSocketPath(socketPath));
     };
 }

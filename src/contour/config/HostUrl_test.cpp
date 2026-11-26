@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/HostSideFile.hpp>
 #include <contour/config/HostUrl.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -14,12 +15,16 @@
 
 using contour::config::checkHostDraft;
 using contour::config::describe;
+using contour::config::emitHostYaml;
 using contour::config::HostDraft;
+using contour::config::hostDraftOf;
+using contour::config::HostEntry;
 using contour::config::HostField;
 using contour::config::HostFieldProblem;
 using contour::config::HostScheme;
 using contour::config::hostSchemeOf;
 using contour::config::HostUrlError;
+using contour::config::parseHostDraftYaml;
 using contour::config::parseHostUrl;
 
 namespace
@@ -141,4 +146,24 @@ TEST_CASE("checkHostDraft says what the loader would, under the field it is abou
               == Problems { { .field = HostField::Url,
                               .message = std::string { describe(HostUrlError::PortRequired) } } });
     }
+}
+
+TEST_CASE("HostDraft: show_in_sidebar round-trips and only true or false is accepted", "[config][hosts]")
+{
+    auto const draft = HostDraft { .url = "ssh://h", .showInSidebar = "true" };
+    CHECK(parseHostDraftYaml(emitHostYaml(draft)) == draft);
+    CHECK(checkHostDraft(draft).empty());
+    CHECK(checkHostDraft(HostDraft { .url = "ssh://h", .showInSidebar = "false" }).empty());
+    CHECK(checkHostDraft(HostDraft { .url = "ssh://h", .showInSidebar = "" }).empty());
+
+    auto const problems = checkHostDraft(HostDraft { .url = "ssh://h", .showInSidebar = "maybe" });
+    REQUIRE(problems.size() == 1);
+    CHECK(problems.front().field == HostField::ShowInSidebar);
+    CHECK_FALSE(problems.front().message.empty());
+
+    auto entry = HostEntry {};
+    entry.url = *parseHostUrl("ssh://h");
+    CHECK(hostDraftOf(entry).showInSidebar.empty());
+    entry.showInSidebar = true;
+    CHECK(hostDraftOf(entry).showInSidebar == "true");
 }

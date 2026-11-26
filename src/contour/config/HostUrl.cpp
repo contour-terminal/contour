@@ -198,6 +198,8 @@ std::vector<HostFieldProblem> checkHostDraft(HostDraft const& draft)
     auto problems = std::vector<HostFieldProblem> {};
     if (auto const url = parseHostUrl(draft.url); !url)
         problems.push_back({ .field = HostField::Url, .message = std::string { describe(url.error()) } });
+    if (draft.showInSidebar != "" && draft.showInSidebar != "true" && draft.showInSidebar != "false")
+        problems.push_back({ .field = HostField::ShowInSidebar, .message = "Expected true or false." });
     return problems;
 }
 
@@ -210,6 +212,7 @@ HostDraft hostDraftOf(HostEntry const& entry)
         .identityFile = core::pathToUtf8(entry.identityFile),
         .remoteCommand = entry.remoteCommand,
         .profile = entry.profile,
+        .showInSidebar = entry.showInSidebar ? "true" : "",
     };
 }
 

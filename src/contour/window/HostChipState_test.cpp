@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/window/DaemonLinkLook.hpp>
 #include <contour/window/HostChipState.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -52,6 +53,20 @@ TEST_CASE("hostChip.looks", "[hostchip]")
     CHECK(hostChipLook(HostChipState::Disconnected).dot == StatusColorRole::Danger);
     CHECK(hostChipLook(HostChipState::Disconnected).status == "Disconnected");
     CHECK(hostChipLook(HostChipState::Disconnected).accessibleState == "disconnected");
+}
+
+TEST_CASE("the chip's glyph is its link state's mark", "[hostchip]")
+{
+    CHECK(chipLinkState(HostChipState::Connected) == DaemonLinkState::Connected);
+    CHECK(chipLinkState(HostChipState::Reconnecting) == DaemonLinkState::Reconnecting);
+    CHECK(chipLinkState(HostChipState::Disconnected) == DaemonLinkState::Failed);
+    CHECK(chipLinkState(HostChipState::NeedsAttention) == DaemonLinkState::NeedsInput);
+    for (auto const i: std::views::iota(size_t { 0 }, HostChipStateCount))
+    {
+        auto const state = HostChipState(i);
+        CHECK(hostChipLook(state).glyph
+              == linkLookOf(chipLinkState(state), contour::config::SidebarLook::CellTree).glyph);
+    }
 }
 
 TEST_CASE("hostChip.presence", "[hostchip]")

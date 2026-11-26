@@ -121,6 +121,11 @@ class IDaemonLinkHost
     /// again as each of those panes goes.
     virtual void linkEnded() = 0;
 
+    /// @p link's connection changed state, or the directory it lists changed: every window's sidebar that
+    /// lists its daemon is told at once. Called on the GUI thread, never from a link's destructor.
+    /// @param link The link.
+    virtual void linkChanged(DaemonLink& link) = 0;
+
     /// Starts a link to the daemon @p config names that opens a window of its own once its connection's
     /// selected workspace holds a tab: New Window, a tab torn off, a pane dropped outside every window. One
     /// OS window has one connection; the new link is the application's, and awaited by nobody.

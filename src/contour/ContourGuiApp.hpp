@@ -5,6 +5,7 @@
 #include <contour/askpass/AskpassPromptRouter.hpp>
 #include <contour/cli/ContourApp.hpp>
 #include <contour/cli/HostTransport.hpp>
+#include <contour/cli/NewDaemon.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Config.hpp>
@@ -22,11 +23,13 @@
 #include <contour/platform/ExecutionPolicySource.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/KnownFolders.hpp>
+#include <contour/platform/OffThreadJobs.hpp>
 #include <contour/platform/Registry.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/remote/DaemonLinkHost.hpp>
+#include <contour/remote/DaemonPresence.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/remote/StartupAttach.hpp>
 #include <contour/remote/SwitchGrants.hpp>
@@ -379,6 +382,9 @@ class ContourGuiApp:
     /// @param applicationAtStart Whether a QApplication exists already. Pending (the default) for main(),
     ///                     which makes it in terminalGuiAction(); tests, which make their own first, pass
     ///                     Ready.
+    /// @param presence     What a test replaces of the presence of the listed daemons
+    ///                     (remote::DaemonPresence): how its observers are made and its refreshes timed.
+    ///                     Production's by default.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -407,7 +413,8 @@ class ContourGuiApp:
         std::unique_ptr<remote::IWorkspaceLister> startupLister = nullptr,
         std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe = nullptr,
         platform::ApplicationReadiness::State applicationAtStart =
-            platform::ApplicationReadiness::State::Pending);
+            platform::ApplicationReadiness::State::Pending,
+        remote::PresenceOverrides presence = {});
     ~ContourGuiApp() override;
 
     /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
@@ -794,6 +801,7 @@ class ContourGuiApp:
     [[nodiscard]] remote::UpgradeStart upgradeDaemon(remote::DaemonLink& link) override;
     void restartDaemon(remote::DaemonLink& link) override;
     void linkEnded() override;
+    void linkChanged(remote::DaemonLink& link) override;
     void startWindowLink(remote::DaemonLinkConfig config) override;
     [[nodiscard]] remote::ElsewhereNotices elsewhereNotices() override;
     [[nodiscard]] remote::SwitchGrants& switchGrants() override { return _switchGrants; }
@@ -1189,12 +1197,14 @@ class ContourGuiApp:
     /// @param prompting Whether the transport may ask the user anything.
     /// @param daemonFingerprint `--daemon-fingerprint`: what a tls host without a CA must present on first
     ///        contact; empty for none.
+    /// @param remoteStart Whether an ssh host's relay may start the daemon there.
     [[nodiscard]] std::expected<OpenedHost, std::string> openHost(
         std::string const& configPath,
         std::string const& nameOrUrl,
         askpass::AskpassRouteId route = askpass::AnyWindow,
         cli::SshPrompts prompting = cli::SshPrompts::Askpass,
-        std::string daemonFingerprint = {});
+        std::string daemonFingerprint = {},
+        cli::RemoteStart remoteStart = cli::RemoteStart::IfAbsent);
 
     /// @param route The window that starts the attach, where the prompt is shown.
     /// @param prompting Whether the transport may ask the user anything.
@@ -1211,12 +1221,14 @@ class ContourGuiApp:
     /// @param route The window that starts the attach, where its ssh prompts are shown.
     /// @param prompting Whether the transport may ask the user anything.
     /// @param daemonFingerprint `--daemon-fingerprint`; empty for none.
+    /// @param remoteStart Whether an ssh host's relay may start the daemon there.
     [[nodiscard]] std::expected<OpenedHost, std::string> transportOf(
         std::string const& nameOrUrl,
         config::HostEntry host,
         askpass::AskpassRouteId route = askpass::AnyWindow,
         cli::SshPrompts prompting = cli::SshPrompts::Askpass,
-        std::string daemonFingerprint = {});
+        std::string daemonFingerprint = {},
+        cli::RemoteStart remoteStart = cli::RemoteStart::IfAbsent);
 
   private:
     /// Prepares the Connect picker's check of whether @p target answers, before it spends a window on it.
@@ -1262,7 +1274,26 @@ class ContourGuiApp:
     /// @return The discovery of the local daemons, made on first use.
     [[nodiscard]] std::shared_ptr<cli::IDaemonDiscovery> localDaemonDiscovery();
 
-    /// @return The production switch directory: the local discovery, a control-API workspace lister, and
+    /// @return The presence of the daemons the sidebars list: production's, with what @p overrides replaces.
+    ///         Built in the member-initializer list; nothing it is built with is called before the first
+    ///         refresh or link notice.
+    [[nodiscard]] std::unique_ptr<remote::DaemonPresence> makeDaemonPresence(
+        remote::PresenceOverrides overrides);
+
+    /// @return The attached links of this process, as the presence reads them. GUI thread.
+    [[nodiscard]] std::vector<remote::WindowLinkView> windowLinkViews();
+
+    /// @param label A local daemon's label.
+    /// @return The control socket of that daemon, as this process's daemon settings place it.
+    [[nodiscard]] std::filesystem::path localDaemonSocket(std::string const& label) const;
+
+    /// @param label A local daemon's label.
+    /// @return The job that starts that daemon ("New daemon…", a sidebar row's Start): built on the GUI
+    ///         thread, run on a worker, holding all it needs.
+    [[nodiscard]] std::function<std::expected<cli::NamedDaemonStart, std::string>()> namedDaemonStart(
+        std::string const& label);
+
+    /// @return The production switch directory: the presence, a control-API workspace lister, and
     ///         the links' windows (linkedDaemons()). Built in the member-initializer list, before the session
     ///         manager it reads through linkedDaemons() later -- never while either is constructed.
     [[nodiscard]] std::unique_ptr<session::SwitchDirectory> makeSwitchDirectory();
@@ -1666,6 +1697,13 @@ class ContourGuiApp:
     /// Finds the daemons running here, for the Connect picker and the switch directory; made on first use.
     /// Declared before _switchDirectory, which the constructor builds on it.
     std::shared_ptr<cli::IDaemonDiscovery> _localDaemonDiscovery;
+    /// What every sidebar lists of the daemons, and the observers of those no window is on. Declared after
+    /// _daemonLinks and _knownDaemons, so destroyed (its observers stopped) before them, and before
+    /// _switchDirectory, which is built on it.
+    std::unique_ptr<remote::DaemonPresence> _daemonPresence;
+    /// The daemon starts a sidebar row asked for; their answers refresh _daemonPresence, so destroyed
+    /// (joined) first.
+    platform::OffThreadJobs _presenceJobs;
     // What the switching actions dispatch to and list; both declared before _sessionManager, which holds
     // them by reference. The first is a remote::WindowSwitcher unless a test injected a double; it is built
     // on the manager not yet constructed, which it does not use until a request -- the cyclic wiring of the

@@ -745,6 +745,9 @@ void TerminalSessionManager::setFocusedWindow(vtworkspace::WorkspaceId window)
     syncFocusForWindow(controllerDisplaying(window));
     // The app came to the front with focus where it was: no focus-in moved the session to refresh.
     refreshSecureInput();
+    // A per-window taskbar counts the observed daemons' tabs on the window focused last: they move with it.
+    if (_observedWaiting != 0)
+        scheduleTaskbarProgress();
 
     // Activated with focus where it already was, as after a window manager that kept it through a
     // minimise: no focus-in tells the pane it is being looked at.
@@ -860,6 +863,12 @@ void TerminalSessionManager::refreshTaskbarAttention()
     scheduleTaskbarProgress();
 }
 
+void TerminalSessionManager::setObservedWaiting(unsigned waiting)
+{
+    if (std::exchange(_observedWaiting, waiting) != waiting)
+        scheduleTaskbarProgress();
+}
+
 void TerminalSessionManager::bindWindow(vtworkspace::WorkspaceId window, WindowBinding& binding)
 {
     auto& bound = _bindingOfWindow[window.value];
@@ -871,9 +880,9 @@ void TerminalSessionManager::bindWindow(vtworkspace::WorkspaceId window, WindowB
     notifyHostBindingChanged(window);
     // The new binding's daemon learns what the window shows, and whether it has focus.
     reportShownPanes(window);
-    // A window on a daemon is one whose menus list daemons: start discovering them now, so that the first
-    // menu opened already has them. Discovery only: a listing opens a connection per saved host, which a bind
-    // must not (a surface that lists them refreshes fully as it opens).
+    // A window on a daemon is one whose sidebar and menus list daemons: start discovering them now, so that
+    // the first menu opened already has them, and the listed daemons are observed (without asking anyone
+    // anything). Their workspaces are listed for the switcher only as a surface that shows them opens.
     if (binding.daemonTarget())
         _switchDirectory.refreshDiscovery();
     // Last: the binding the window left may stop, and release what it still holds here.
@@ -2238,11 +2247,11 @@ void TerminalSessionManager::cycleDaemon(TerminalSession const& acting, actions:
         logNoDaemon("CycleDaemon");
         return;
     }
-    auto const local = _switchDirectory.localDaemons();
-    auto const hosts = _switchDirectory.hostsShownHere();
-    // What is cached answers this press; the refresh is for the next one.
+    // The listed daemons, in the sidebar's order; what is cached answers this press, the refresh is for the
+    // next one.
+    auto const ring = _switchDirectory.daemonRing();
     _switchDirectory.refresh();
-    if (auto next = nextDaemon(local, hosts, *current, direction))
+    if (auto next = nextDaemon(ring, *current, direction))
         requestSwitch(acting, *std::move(next), SwitchMode::Switch);
     else
         managerLog()("CycleDaemon: there is no other daemon to show.");
@@ -3812,8 +3821,11 @@ void TerminalSessionManager::publishTaskbarAttention()
     if (_taskbarProgressSink.scope() == platform::TaskbarProgressScope::Application)
     {
         // Windows on one daemon list the same workspaces: that daemon counts once, as its most recently
-        // focused window counts it; an in-process window counts its own.
-        auto windows = std::vector<window::WindowWaiting> {};
+        // focused window counts it; an in-process window counts its own. The daemons no window is on count
+        // once more, as no window's.
+        auto windows = std::vector<window::WindowWaiting> {
+            { .window = 0, .waiting = _observedWaiting, .daemon = std::nullopt, .focusOrder = 0 }
+        };
         for (auto const& [window, waiting]: tally.perWindow)
         {
             auto const id = window::WindowId { window };
@@ -3831,6 +3843,16 @@ void TerminalSessionManager::publishTaskbarAttention()
             _taskbarProgressSink.setApplicationAttention({ .waiting = tally.total });
     }
     else
+    {
+        // The daemons no window is on count in the window the user focused last, as it raises for them.
+        if (auto const* const speaking = applicationController())
+            if (auto entry = std::ranges::find(
+                    tally.perWindow, speaking->windowId().value, &std::pair<uint64_t, unsigned>::first);
+                entry != tally.perWindow.end())
+            {
+                entry->second += _observedWaiting;
+                tally.total += _observedWaiting;
+            }
         for (auto const& [window, waiting]: tally.perWindow)
         {
             auto const known = std::ranges::find(
@@ -3838,6 +3860,7 @@ void TerminalSessionManager::publishTaskbarAttention()
             if (known == _publishedAttention.perWindow.end() ? waiting != 0 : known->second != waiting)
                 _taskbarProgressSink.setAttention(window, { .waiting = waiting });
         }
+    }
     _publishedAttention = std::move(tally);
 }
 

@@ -81,6 +81,7 @@ DaemonVerbOptions readDaemonVerbOptions(core::cli::FlagStore const& parameters)
         .logFile = textOf(parameters, "log-file"),
         .authorizedKeys = textOf(parameters, "authorized-keys"),
         .auth = textOf(parameters, "auth"),
+        .noStart = flagOf(parameters, "no-start"),
     };
 }
 

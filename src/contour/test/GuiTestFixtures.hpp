@@ -224,6 +224,7 @@ class FakeSwitchDirectory final: public contour::session::SwitchDirectory
         return daemons;
     }
     [[nodiscard]] std::vector<std::string> hostsShownHere() const override { return hosts; }
+    [[nodiscard]] std::vector<contour::session::SwitchTarget> daemonRing() const override { return ring; }
     [[nodiscard]] std::vector<contour::session::KnownWorkspace> workspacesOf(
         vtworkspace::WorkspaceId /*window*/) const override
     {
@@ -234,6 +235,7 @@ class FakeSwitchDirectory final: public contour::session::SwitchDirectory
 
     std::vector<contour::cli::DiscoveredDaemon> daemons;      ///< What localDaemons() answers.
     std::vector<std::string> hosts;                           ///< What hostsShownHere() answers.
+    std::vector<contour::session::SwitchTarget> ring;         ///< What daemonRing() answers.
     std::vector<contour::session::KnownWorkspace> workspaces; ///< What workspacesOf() answers.
     int discoveryRefreshes = 0;                               ///< How often refreshDiscovery() was called.
     int refreshes = 0;                                        ///< How often refresh() was called.

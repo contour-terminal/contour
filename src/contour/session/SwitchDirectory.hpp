@@ -51,6 +51,10 @@ class SwitchDirectory
     /// @return The saved hosts some window of this process shows.
     [[nodiscard]] virtual std::vector<std::string> hostsShownHere() const = 0;
 
+    /// @return The daemons CycleDaemon steps through: the listed daemons a switch can name, in the sidebar's
+    ///         tree order.
+    [[nodiscard]] virtual std::vector<SwitchTarget> daemonRing() const = 0;
+
     /// @param window The asking window.
     /// @return The workspaces of the daemon @p window is on, in position order; empty when unknown.
     [[nodiscard]] virtual std::vector<KnownWorkspace> workspacesOf(vtworkspace::WorkspaceId window) const = 0;
@@ -59,9 +63,9 @@ class SwitchDirectory
     /// that lists them opens.
     virtual void refresh() = 0;
 
-    /// Starts only the local discovery, without waiting for it: what is cheap enough to do ahead of any
-    /// surface that lists daemons (a window binding to one). Unlike refresh() it opens no connection to a
-    /// daemon.
+    /// Starts the local discovery, without waiting for it: what is cheap enough to do ahead of any surface
+    /// that lists daemons (a window binding to one). Unlike refresh() it lists no daemon's workspaces; what
+    /// the sidebar lists is watched regardless.
     virtual void refreshDiscovery() = 0;
 };
 

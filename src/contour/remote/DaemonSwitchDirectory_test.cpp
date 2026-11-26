@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/platform/Notifier.hpp>
+#include <contour/remote/DaemonPresence.hpp>
 #include <contour/remote/DaemonSwitchDirectory.hpp>
+#include <contour/remote/NativeController.hpp>
 
 #include <QtCore/QCoreApplication>
 
@@ -22,9 +25,11 @@
 #include <vector>
 
 using contour::remote::DaemonLinkId;
+using contour::remote::DaemonPresence;
 using contour::remote::DaemonSwitchDirectory;
 using contour::remote::LinkedDaemon;
 using contour::remote::ListTarget;
+using contour::remote::PresenceDeps;
 using contour::remote::WindowOnDaemon;
 using contour::remote::WorkspacesListed;
 using vthost::proto::SwitchDaemonKind;
@@ -102,6 +107,14 @@ class FakeLister final: public contour::remote::IWorkspaceLister
     std::vector<Asked> asked;
 };
 
+/// @return A dial refused, as nothing here is dialled.
+[[nodiscard]] std::expected<std::shared_ptr<vthost::ITransportFactory>, contour::remote::DialRefusal>
+refused()
+{
+    return std::unexpected { contour::remote::DialRefusal { .state = contour::window::DaemonLinkState::Failed,
+                                                            .reason = "not in this test" } };
+}
+
 [[nodiscard]] vtcontrol::WorkspaceInfo workspace(uint64_t native,
                                                  uint32_t position,
                                                  std::string name,
@@ -148,6 +161,33 @@ struct DirectoryRig
                        .transport = nullptr,
                        .windows = {} },
     };
+    contour::platform::NullNotifier notifier; ///< Raises nothing: nothing is observed.
+    /// Lists nothing (no window link is on a daemon) and dials nothing: here for its discovery.
+    DaemonPresence presence { PresenceDeps {
+        .discovery = discovery,
+        .settings = [] { return contour::remote::ListingSettings {}; },
+        .observerTransport = [](contour::window::DaemonRef const&) { return refused(); },
+        .interactiveTransport = [](contour::window::DaemonRef const&, WorkspaceId) { return refused(); },
+        .makeObserver =
+            [](contour::window::DaemonRef const&,
+               std::shared_ptr<vthost::ITransportFactory>,
+               vthost::client::BackoffSchedule) {
+                return std::unique_ptr<contour::remote::NativeController> {};
+            },
+        .windowLinks = [] { return std::vector<contour::remote::WindowLinkView> {}; },
+        .refreshTimer = [](std::chrono::milliseconds, std::function<void()>) {},
+        .visibility = [] { return contour::remote::AppVisibility::Hidden; },
+        .startDaemon = [](contour::window::DaemonRef const&) {},
+        .updateListing = [](std::function<void(contour::config::SidebarDaemons&)> const&) {},
+        .elsewhereNotices =
+            [this] {
+                return contour::remote::ElsewhereNotices {
+                    .policy = {}, .bell = {}, .homeDirectory = {}, .notifier = notifier
+                };
+            },
+        .ringLastFocusedWindow = [](contour::config::Bell const&) {},
+        .observedWaitingChanged = [](unsigned) {},
+    } };
     std::unique_ptr<DaemonSwitchDirectory> directory;
 
     DirectoryRig()
@@ -155,7 +195,7 @@ struct DirectoryRig
         auto made = std::make_unique<FakeLister>();
         lister = made.get();
         directory =
-            std::make_unique<DaemonSwitchDirectory>(discovery, std::move(made), [this] { return linked; });
+            std::make_unique<DaemonSwitchDirectory>(presence, std::move(made), [this] { return linked; });
     }
 
     DirectoryRig(DirectoryRig const&) = delete;
@@ -174,7 +214,7 @@ struct DirectoryRig
 
 } // namespace
 
-TEST_CASE("DaemonSwitchDirectory: local daemons come from a discovery that never blocks the GUI thread",
+TEST_CASE("DaemonSwitchDirectory: local daemons come from the presence's one discovery",
           "[switch][directory]")
 {
     auto rig = DirectoryRig {};
@@ -184,12 +224,15 @@ TEST_CASE("DaemonSwitchDirectory: local daemons come from a discovery that never
     // The discovery runs, and holds, on its own thread: the GUI thread is back here, answering the cache.
     REQUIRE(waitUntil([&] { return rig.discovery->asked == 1; }));
     CHECK(rig.directory->localDaemons().empty());
-    rig.directory->refresh(); // one under way: no second
+    rig.directory->refresh();          // one under way: no second
+    rig.presence.refresh();            // nor from the presence, whose discovery it is
+    rig.directory->refreshDiscovery(); // nor from a window binding
     rig.discovery->released.count_down();
 
     REQUIRE(waitUntil([&] { return rig.directory->localDaemons().size() == 2; }));
     CHECK(rig.directory->localDaemons().front().label == "default");
     CHECK(rig.discovery->asked == 1);
+    CHECK(rig.presence.localDaemons().size() == 2);
 
     rig.directory->refresh(); // once answered, a refresh discovers again
     REQUIRE(waitUntil([&] { return rig.discovery->asked == 2; }));
@@ -263,4 +306,36 @@ TEST_CASE("DaemonSwitchDirectory: a window's workspaces are its daemon's every o
     {
         CHECK(rig.directory->workspacesOf(WorkspaceId { 99 }).empty());
     }
+}
+
+TEST_CASE("DaemonSwitchDirectory: a daemon is cached under its DaemonRef", "[switch][directory]")
+{
+    auto rig = DirectoryRig {};
+    // A second link to local:admin, and a daemon reached by a link alone, which no switch names.
+    rig.linked.push_back(
+        LinkedDaemon { .link = DaemonLinkId { 5 },
+                       .address = { .kind = SwitchDaemonKind::Name, .name = "admin" },
+                       .transport = nullptr,
+                       .windows = { WindowOnDaemon { .window = WorkspaceId { 13 }, .workspace = 8 } } });
+    rig.linked.push_back(
+        LinkedDaemon { .link = DaemonLinkId { 6 },
+                       .address = { .kind = SwitchDaemonKind::Same, .name = {} },
+                       .transport = nullptr,
+                       .windows = { WindowOnDaemon { .window = WorkspaceId { 14 }, .workspace = 1 } } });
+
+    rig.directory->refresh();
+    // local:admin, host:studio, host:attic, link:6: one listing per daemon.
+    REQUIRE(rig.lister->asked.size() == 4);
+    rig.lister->answer("admin",
+                       std::vector { workspace(7, 1, "ops", "shown"), workspace(8, 2, "build", "shown") });
+
+    // Both windows on local:admin read the one listing, each marked with its own workspace.
+    auto const first = rig.directory->workspacesOf(WorkspaceId { 10 });
+    auto const second = rig.directory->workspacesOf(WorkspaceId { 13 });
+    REQUIRE(first.size() == 2);
+    REQUIRE(second.size() == 2);
+    CHECK(first[0].role == contour::session::WorkspaceRole::Current);
+    CHECK(second[1].role == contour::session::WorkspaceRole::Current);
+    // The link's daemon is a daemon of its own, not listed yet.
+    CHECK(rig.directory->workspacesOf(WorkspaceId { 14 }).empty());
 }

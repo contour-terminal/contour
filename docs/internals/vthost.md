@@ -951,7 +951,7 @@ ssh -T -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o Server
 | `-o ConnectTimeout=10` | A host that does not answer fails within ssh itself, before the transport's own bound. |
 | `-o ServerAliveInterval=15`, `-o ServerAliveCountMax=3` | A dead peer (sleep, Wi-Fi) is noticed in about 45 s, so ssh exits and the reconnect loop takes over. |
 | `--` | Ends ssh's options. `parseHostUrl` already refuses a user or host that begins with `-`, but the argv does not rely on it: a destination like `-oProxyCommand=…` can never be read as an option. |
-| `REMOTE_COMMAND` | `contour daemon --stdio`, or the host's `remote_command:`, verbatim. |
+| `REMOTE_COMMAND` | `contour daemon --stdio`, or the host's `remote_command:`, verbatim (`cli::remoteCommandOf()`). A background observer (`cli::RemoteStart::Never`) runs `contour daemon --stdio --no-start` instead of the default, and the host's `remote_command:` followed by `--no-start` (`vthost::NoStartFlag`); a remote Contour that predates the flag is classified `SshFailure::RemoteContourCannotSkipStart` (`TransportErrorKind::RemoteProgramTooOld`, never retried); its relay answers an absent daemon with the error preamble `no daemon is running` (`StdioDaemonAbsentMessage`), which the transport reads as `TransportErrorKind::DaemonAbsent` rather than as a refusal. |
 
 From the spawn to the preamble the attempt is bounded by `SshConnectTimeout` (30 s). Bytes before the
 ready line are skipped and logged (`vthost.client`); the ready line hands out the child's socket as the

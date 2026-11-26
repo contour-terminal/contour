@@ -114,7 +114,8 @@ TEST_CASE("Config: a host round-trips through emitHostYaml, as written and as lo
                                                     .tokenFile = "~/build-box.token",
                                                     .tlsCa = {},
                                                     .remoteCommand = {},
-                                                    .profile = "remote" };
+                                                    .profile = "remote",
+                                                    .showInSidebar = "true" };
     auto const bytes = contour::config::emitHostYaml(draft);
     CHECK_FALSE(bytes.contains("tls_ca")); // an empty field is left out, as the loader defaults it
     CHECK(contour::config::parseHostDraftYaml(bytes) == draft);
@@ -126,4 +127,29 @@ TEST_CASE("Config: a host round-trips through emitHostYaml, as written and as lo
     auto const& host = config.hosts.value().at("build-box");
     CHECK(host.tokenFile == vtpty::Process::homeDirectory() / "build-box.token");
     CHECK(host.profile == "remote");
+    CHECK(host.showInSidebar);
+    CHECK(contour::config::hostDraftOf(host).showInSidebar == "true");
+}
+
+TEST_CASE("Config: show_in_sidebar parses and defaults to off", "[config][hosts]")
+{
+    QTemporaryDir const dir;
+    writeSideFile(dir, "hosts/listed.yml", "url: ssh://listed\nshow_in_sidebar: true\n");
+    writeSideFile(dir, "hosts/unsure.yml", "url: ssh://unsure\nshow_in_sidebar: maybe\n");
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    plain:
+        url: "ssh://plain"
+    shown:
+        url: "ssh://shown"
+        show_in_sidebar: true
+)"sv);
+
+    auto const& hosts = config.hosts.value();
+    REQUIRE(hosts.size() == 4);
+    CHECK_FALSE(hosts.at("plain").showInSidebar);
+    CHECK(hosts.at("shown").showInSidebar);
+    CHECK(hosts.at("listed").showInSidebar);
+    // A value that is no boolean leaves the host loaded, and unlisted.
+    CHECK_FALSE(hosts.at("unsure").showInSidebar);
 }

@@ -1677,9 +1677,9 @@ struct LayoutBatchEnd
     /// The workspace this connection selects as of this batch, so a client learns a daemon-side reselection
     /// (its workspace closed) explicitly rather than inferring it from which snapshots arrive.
     uint64_t selected = 0;
-    /// Appended (Capability::Observe): the restore announcement ServerHello::restoredWorkspaces states, told
-    /// instead by the batch answering an observer's promotion when that promotion is the first viewer since
-    /// the restore. Zero on every other batch, and when a sender from before the field leaves it out.
+    /// Appended, and written to every peer: the restore announcement ServerHello::restoredWorkspaces states,
+    /// told instead by the batch answering an observer's promotion when that promotion is the first viewer
+    /// since the restore. Zero on every other batch, and when a sender from before the field leaves it out.
     uint32_t restoredWorkspaces = 0;
     /// The tabs of those workspaces; zero as @ref restoredWorkspaces is.
     uint32_t restoredTabs = 0;

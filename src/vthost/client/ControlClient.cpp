@@ -57,6 +57,7 @@ namespace
             case TransportErrorKind::Refused:
             case TransportErrorKind::AuthenticationRequired:
             case TransportErrorKind::RemoteProgramMissing:
+            case TransportErrorKind::RemoteProgramTooOld:
             case TransportErrorKind::ProgramNotFound:
             case TransportErrorKind::Protocol:
             case TransportErrorKind::DaemonAbsent: return ControlFailure::Unreachable;

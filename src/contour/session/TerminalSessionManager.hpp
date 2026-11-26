@@ -1817,6 +1817,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// directory of the workspaces a window does not display: it is published anew. GUI thread.
     void refreshTaskbarAttention();
 
+    /// The tabs that wait in the daemons no window is on, which the application observes: counted once, in
+    /// the window the user focused last (@see applicationController), and once in the application's count.
+    /// GUI thread.
+    /// @param waiting How many tabs wait there.
+    void setObservedWaiting(unsigned waiting);
+
     /// The key @p session's seen-state is kept under in a window's ledger: the daemon's id for a session
     /// bound to a daemon session (@see hostSessionIdOf), the local id otherwise, and for a session this
     /// manager does not know.
@@ -2561,6 +2567,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void publishTaskbarAttention();
     /// What the sink was last told, so that an unchanged count costs the OS no call.
     window::AttentionTally _publishedAttention {};
+    /// The tabs that wait in the daemons no window is on (@see setObservedWaiting).
+    unsigned _observedWaiting = 0;
 
     ContourGuiApp& _app;
     /// What makes the sessions of every window no binding claims. @see factoryFor

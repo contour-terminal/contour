@@ -120,7 +120,7 @@ TEST_CASE("LocationChipModel: each group of readers hears only what they read", 
         model.setInputs(inputs);
         CHECK(surface.count() == 1);
         CHECK(accessibility.count() == 1);
-        CHECK(model.stateGlyph() == "◑");
+        CHECK(model.stateGlyph() == "↻");
         CHECK(stepText(model, LocationChipFit::Full, "status") == "Reconnecting…");
         CHECK(stepText(model, LocationChipFit::NoStateText, "status").isEmpty());
     }

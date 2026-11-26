@@ -113,7 +113,7 @@ namespace
                     "remote_command: for this host to the full path, e.g. \"/opt/contour/bin/contour daemon "
                     "--stdio\"." },
         { .failure = SshFailure::RemoteContourTooOld,
-          .kind = TransportErrorKind::RemoteProgramMissing,
+          .kind = TransportErrorKind::RemoteProgramTooOld,
           .format =
               "Contour on {0} is too old for ssh attach (it has no `contour daemon --stdio`). Upgrade it "
               "there." },
@@ -131,7 +131,18 @@ namespace
         { .failure = SshFailure::Cancelled,
           .kind = TransportErrorKind::Cancelled,
           .format = "The ssh login to {0} was cancelled." },
+        { .failure = SshFailure::RemoteDaemonAbsent,
+          .kind = TransportErrorKind::DaemonAbsent,
+          .format = "No Contour daemon is running on {0}." },
+        // Permanent: a background dial retried every few seconds would log in to the host again each time.
+        { .failure = SshFailure::RemoteContourCannotSkipStart,
+          .kind = TransportErrorKind::RemoteProgramTooOld,
+          .format = "Contour on {0} is too old to be watched in the background (its `contour daemon --stdio` "
+                    "has no `--no-start`). Upgrade it there, or connect to it." },
     });
+
+    static_assert(SshFailureMessages.size() == SshFailureCount,
+                  "SshFailureMessages needs a row for every SshFailure");
 
     /// @return @p host in brackets when it is an IPv6 address, as a URL spells it.
     [[nodiscard]] std::string bracketed(std::string_view host)
@@ -290,6 +301,12 @@ std::vector<std::string> sshArguments(SshTarget const& target, SshPromptMode mod
     argv.push_back(destinationOf(target));
     argv.push_back(target.remoteCommand);
     return argv;
+}
+
+SshFailure classifyRelayRefusal(std::string_view message) noexcept
+{
+    return message.starts_with(StdioDaemonAbsentMessage) ? SshFailure::RemoteDaemonAbsent
+                                                         : SshFailure::RemoteRelayError;
 }
 
 std::string interactiveSshCommand(SshTarget const& target)
@@ -541,7 +558,7 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Ss
             },
             [&](PreambleRefused const& refused) -> ConnectResult {
                 return failWith(*child,
-                                sshTransportError(SshFailure::RemoteRelayError,
+                                sshTransportError(classifyRelayRefusal(refused.message),
                                                   { .target = _target, .detail = refused.message }));
             },
             [&](PreambleOverflow const&) -> ConnectResult {

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -180,10 +181,11 @@ TEST_CASE("locationChip.translation", "[LocationChip]")
 
 TEST_CASE("locationChip.stateGlyph", "[LocationChip]")
 {
-    CHECK(daemonStateGlyph(HostChipState::Connected) == "●");
-    CHECK(daemonStateGlyph(HostChipState::Reconnecting) == "◑");
-    CHECK(daemonStateGlyph(HostChipState::Disconnected) == "✕");
-    CHECK(daemonStateGlyph(HostChipState::NeedsAttention) == "!");
+    for (auto const i: std::views::iota(size_t { 0 }, HostChipStateCount))
+    {
+        auto const state = HostChipState(i);
+        CHECK(daemonStateGlyph(state) == hostChipLook(state).glyph);
+    }
 }
 
 TEST_CASE("locationChip.toolTip", "[LocationChip]")

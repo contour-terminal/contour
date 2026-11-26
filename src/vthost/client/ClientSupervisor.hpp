@@ -118,6 +118,12 @@ class ClientSupervisor
     ///         does, since no redial could observe it either.
     [[nodiscard]] NativeClient::RoleAcceptance roleAcceptance() const noexcept { return _roleAcceptance; }
 
+    /// @return How the attempt that ended the supervisor failed, once it ended Failed or Refused: the
+    ///         transport's failure, Refused for a daemon that refused the hello, Protocol for one that did
+    ///         not answer it; nullopt before then, and after a stop. Read on the loop's thread, as the
+    ///         handler is told the state.
+    [[nodiscard]] std::optional<TransportErrorKind> failureKind() const noexcept { return _failureKind; }
+
   private:
     /// How one connection ended.
     enum class Ending : uint8_t
@@ -144,7 +150,7 @@ class ClientSupervisor
     struct Outcome
     {
         Ending ending = Ending::Stopped;
-        /// Why, in words for the user; the kind matters for Ending::TransportFailed only.
+        /// Why, in words for the user; its kind is what a reconnect is retried by, and failureKind().
         TransportError error = {};
     };
 
@@ -212,6 +218,8 @@ class ClientSupervisor
     uint64_t _selected = 0;
     /// @see roleAcceptance()
     NativeClient::RoleAcceptance _roleAcceptance = NativeClient::RoleAcceptance::Accepted;
+    /// @see failureKind()
+    std::optional<TransportErrorKind> _failureKind;
     /// The current connection's lifetime. Declared before @ref _current so that it outlives the client
     /// holding the socket it carries.
     std::shared_ptr<void> _currentLifetime;

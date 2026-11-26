@@ -63,6 +63,13 @@ enum class SshPrompts : std::uint8_t
     return vthost::AttachBudget { transportBound + SshAttachMargin };
 }
 
+/// Whether reaching a host's daemon may start it when none runs there.
+enum class RemoteStart : std::uint8_t
+{
+    IfAbsent = 0, ///< Yes: what an attach the user asked for does.
+    Never,        ///< No: a background observer only watches a daemon that already runs.
+};
+
 /// What an ssh host needs to have its prompts answered: both are shared by every host of the process.
 struct SshPrompting
 {
@@ -107,13 +114,27 @@ struct HostTransport
 [[nodiscard]] std::expected<std::string, std::string> readPinnedCa(
     core::platform::FileSystem const& fileSystem, std::filesystem::path const& path, std::string_view origin);
 
+/// What the remote login of an ssh host runs.
+///
+/// Without a `remote_command:` it is the relay (vthost::DefaultRemoteCommand), or with RemoteStart::Never
+/// vthost::NoStartRemoteCommand, so that the relay reports an absent daemon rather than starting one. A
+/// host's own `remote_command:` is run as written, and with RemoteStart::Never ends in vthost::NoStartFlag
+/// too: a custom command must therefore take the relay's trailing flags, as `contour daemon --stdio` does.
+/// @param host The host.
+/// @param remoteStart Whether the relay may start the daemon there.
+/// @return The command line the remote shell runs.
+[[nodiscard]] std::string remoteCommandOf(config::HostEntry const& host, RemoteStart remoteStart);
+
 /// Maps a saved host onto its transport. Reads token_file and tls_ca through @p fileSystem.
+///
+/// An ssh host runs remoteCommandOf() on the remote side. A tls host starts no daemon either way.
 /// @param label The host's name, or the URL of an ad-hoc host; what the window's chrome shows.
 /// @param host The host.
 /// @param fileSystem Where token_file and tls_ca are read.
 /// @param spawner Starts ssh, for an ssh host.
 /// @param prompting Who answers an ssh host's prompts, and the shared version probe.
 /// @param tls How a tls host's daemon is trusted, and what signs in to it.
+/// @param remoteStart Whether an ssh host's relay may start the daemon there.
 /// @return The transport, or why the host cannot be reached as configured.
 [[nodiscard]] std::expected<HostTransport, std::string> makeHostTransport(
     std::string label,
@@ -121,6 +142,7 @@ struct HostTransport
     core::platform::FileSystem const& fileSystem,
     std::shared_ptr<vthost::IStdioSpawner> spawner,
     SshPrompting prompting,
-    TlsTrust tls);
+    TlsTrust tls,
+    RemoteStart remoteStart = RemoteStart::IfAbsent);
 
 } // namespace contour::cli

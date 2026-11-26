@@ -406,6 +406,18 @@ TEST_CASE("stdio attach starts the daemon through the starter when none serves",
     }
 }
 
+TEST_CASE("a connector without a starter reports an absent daemon", "[vthost][stdio][afunix]")
+{
+    auto const directory = SocketDirectory {};
+    auto const spawner = vthost::makeNativeDaemonSpawner();
+    auto connector = vthost::makeLocalDaemonConnector(directory.controlSocket(), *spawner, nullptr);
+
+    auto const client = makeMemoryStreamPair();
+    CHECK(vthost::runStdioAttach(client.a, connector) == EXIT_FAILURE);
+    auto const expected = vthost::stdioPreambleError(vthost::StdioDaemonAbsentMessage);
+    CHECK(readText(*client.b, expected.size() + 1) == expected);
+}
+
 // What the stdio relay rests on: the daemon learns that the client is gone from the client's half-close, and
 // ends the connection, which ends the relay. Here the half-close is made while the connection still waits in
 // the listener's backlog, before any accept is posted -- the order a scheduler can produce whenever a client

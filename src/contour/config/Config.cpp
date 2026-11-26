@@ -2446,7 +2446,8 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
     };
 
     if (!hostNode.IsMap())
-        return skip("expected a map of url, token_file, tls_ca, identity_file, remote_command and profile");
+        return skip("expected a map of url, token_file, tls_ca, identity_file, remote_command, profile and "
+                    "show_in_sidebar");
     auto const urlText = scalar("url");
     if (!urlText)
         return skip("it has no url");
@@ -2461,7 +2462,12 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
         .identityFile = path("identity_file"),
         .remoteCommand = scalar("remote_command").value_or(std::string {}),
         .profile = scalar("profile").value_or(std::string {}),
+        .showInSidebar = false,
     };
+    // A value that is no boolean is reported, and the host still loads, unlisted.
+    if (auto const show = hostNode["show_in_sidebar"]; show)
+        if (!show.IsScalar() || !YAML::convert<bool>::decode(show, host.showInSidebar))
+            errorLog()("Host '{}': show_in_sidebar must be true or false; the host is not listed.", name);
     return host;
 }
 

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
-#include <contour/platform/FinishNotification.hpp>
-#include <contour/platform/Notifier.hpp>
 #include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/DaemonLink.hpp>
+#include <contour/remote/ElsewhereRaise.hpp>
+#include <contour/remote/PresencePlan.hpp>
 #include <contour/remote/SwitchGrants.hpp>
 #include <contour/remote/SwitchGuard.hpp>
+#include <contour/remote/WindowWire.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/NoticeQueue.hpp>
@@ -20,14 +21,12 @@
 #include <QtCore/QThread>
 
 #include <algorithm>
-#include <chrono>
 #include <format>
 #include <ranges>
 #include <set>
 #include <span>
 #include <utility>
 
-#include <vthost/NotifyWire.hpp>
 #include <vthost/RestoredCounts.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/ViewRouting.hpp>
@@ -61,94 +60,6 @@ namespace
     {
         auto const found = layouts.find(workspace);
         return found != layouts.end() ? LayoutSnapshot { *found } : LayoutSnapshot {};
-    }
-
-    /// @return A command that finished in a pane this client does not mirror, as a finish notice reads one.
-    [[nodiscard]] vtbackend::CommandBlockSummary summaryOf(vthost::proto::FinishedCommand const& finished)
-    {
-        auto summary = vtbackend::CommandBlockSummary {};
-        summary.commandLine = vtbackend::CommandLineText { finished.commandLine };
-        summary.exitCode = finished.exitCode;
-        summary.duration = finished.durationMs.transform([](uint64_t ms) {
-            return std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::milliseconds { ms });
-        });
-        return summary;
-    }
-
-    /// What every finish notice of a pane of another workspace is raised under: the pane's daemon session id
-    /// follows, so a pane's later finish replaces its earlier one.
-    constexpr auto FinishedElsewhereIdentifier = std::string_view { "contour-daemon-finished-{}" };
-
-    /// Whether a window rings for what was raised.
-    enum class RingBell : uint8_t
-    {
-        No = 0,
-        Yes,
-    };
-
-    /// @param directory What the window lists.
-    /// @param pane A daemon session.
-    /// @return The name of the tab holding @p pane; empty for none.
-    [[nodiscard]] std::string tabLabelOf(window::WorkspaceDirectory const& directory, uint64_t pane)
-    {
-        for (auto const& workspace: directory.workspaces)
-            for (auto const& tab: workspace.tabs)
-                if (std::ranges::contains(tab.panes, window::PaneKey { pane }, &window::DirectoryPane::key))
-                    return tab.name;
-        return {};
-    }
-
-    /// Notifies a command that finished in a pane of a workspace the window does not select, as a hidden
-    /// pane's finish is decided.
-    /// @param pane The pane's daemon session.
-    /// @param finished How the command finished.
-    /// @param tabName The name of the pane's tab.
-    /// @param notices What the finish is decided and raised with.
-    /// @return Whether the finish asks the window to ring too.
-    [[nodiscard]] RingBell noticeFinishedElsewhere(uint64_t pane,
-                                                   vthost::proto::FinishedCommand const& finished,
-                                                   std::string const& tabName,
-                                                   ElsewhereNotices const& notices)
-    {
-        auto const summary = summaryOf(finished);
-        auto const ending =
-            platform::finishNoticeKind(summary, notices.policy, platform::SessionVisibility::Hidden);
-        if (!ending)
-            return RingBell::No;
-        auto const request = platform::finishNotificationText(
-            summary, *ending, tabName, notices.homeDirectory, notices.policy.action);
-        auto const effects = platform::effectsOf(request.action);
-        if (effects.test(platform::FinishEffect::Notification))
-        {
-            auto notification = vtbackend::DesktopNotification {};
-            notification.identifier = std::format(FinishedElsewhereIdentifier, pane);
-            notification.title = request.title;
-            notification.body = request.body;
-            notification.sound = platform::finishNoticeSound(
-                request.action, platform::bellAudibilityOf(notices.bell.sound, notices.bell.volume));
-            notices.notifier.notify(notification);
-        }
-        return effects.test(platform::FinishEffect::Bell) ? RingBell::Yes : RingBell::No;
-    }
-
-    /// Raises a desktop notification of a pane of a workspace the window does not select, as a hidden pane's.
-    /// @param notice What the pane notified.
-    /// @param notifier Where it is raised.
-    void notifyElsewhere(vthost::proto::PaneNotification const& notice, platform::Notifier& notifier)
-    {
-        // As a mirrored pane raises one (ScreenMirror::applyEvent): one that stated no occasion takes the OSC
-        // 9 / OSC 777 rule.
-        auto const occasion =
-            vthost::displayOccasionOf(notice.occasion).value_or(platform::UnstatedNotificationOccasion);
-        if (!platform::isNoticeWanted(platform::notifyWhenOf(occasion), platform::SessionVisibility::Hidden))
-            return;
-        auto notification = vtbackend::DesktopNotification {};
-        notification.title = notice.title;
-        notification.body = notice.body;
-        notification.occasion = occasion;
-        notification.focusOnActivation = false;
-        notifier.notify(notification);
     }
 
     /// @return @p failure, or what a connection lost without a word says.
@@ -441,6 +352,7 @@ void DaemonLink::connectController()
             raiseElsewhere();
             _sessions.refreshTaskbarAttention();
             _sessions.notifyWorkspaceDirectoryChanged(*this);
+            _host.linkChanged(*this);
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -883,11 +795,7 @@ void DaemonLink::markSeen(window::PaneKey pane, window::PaneSeen seen)
 {
     requireGuiThread();
     if (isLive())
-        _controller->markSeen(pane.value,
-                              vthost::SeenSerials { .activity = seen.serials.activity,
-                                                    .bell = seen.serials.bell,
-                                                    .finished = seen.serials.finished,
-                                                    .statusGeneration = seen.statusGeneration });
+        _controller->markSeen(pane.value, wireSeenOf(seen));
 }
 
 void DaemonLink::reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes)
@@ -895,16 +803,9 @@ void DaemonLink::reportShown(window::WindowFocusState focus, std::vector<window:
     requireGuiThread();
     if (!isLive())
         return;
-    auto const wireFocus = [focus] {
-        switch (focus)
-        {
-            case window::WindowFocusState::Unfocused: return vthost::proto::WindowFocus::Unfocused;
-            case window::WindowFocusState::Focused: return vthost::proto::WindowFocus::Focused;
-        }
-        return vthost::proto::WindowFocus::Unfocused;
-    }();
     _controller->reportShown(
-        wireFocus, std::ranges::to<std::vector>(panes | std::views::transform(&window::PaneKey::value)));
+        wireFocusOf(focus),
+        std::ranges::to<std::vector>(panes | std::views::transform(&window::PaneKey::value)));
 }
 
 vthost::proto::RaiseRole DaemonLink::raiseRole() const noexcept
@@ -1251,6 +1152,16 @@ void DaemonLink::connectReconnectSignals()
             }
         },
         Qt::QueuedConnection);
+    // After the handler above has settled the link's own state: the application reads it.
+    QObject::connect(
+        _controller.get(),
+        &NativeController::connectionStateChanged,
+        &_receiver,
+        [this] {
+            if (!isStopped())
+                _host.linkChanged(*this);
+        },
+        Qt::QueuedConnection);
     QObject::connect(
         _controller.get(),
         &NativeController::workspacesLost,
@@ -1315,37 +1226,14 @@ void DaemonLink::raiseElsewhere()
     if (raised.empty())
         return;
     auto const notices = _host.elsewhereNotices();
-    auto const directory = _controller->directory();
-    auto ring = RingBell::No;
-    // Out of every window's sight by definition: decided as a hidden pane's are.
-    for (auto const& summary: raised)
-    {
-        if (summary.bell == vthost::proto::PaneBell::Rang)
-            ring = RingBell::Yes;
-        for (auto const& notice: summary.notifications)
-            notifyElsewhere(notice, notices.notifier);
-        if (summary.finished
-            && noticeFinishedElsewhere(
-                   summary.session, *summary.finished, tabLabelOf(directory, summary.session), notices)
-                   == RingBell::Yes)
-            ring = RingBell::Yes;
-    }
-    // Once per turn, however many rang, as a pane coalesces its own bells.
-    if (ring == RingBell::Yes)
-        ringWindowBell(notices.bell);
-}
-
-void DaemonLink::ringWindowBell(config::Bell const& bell)
-{
-    auto* const controller = _shown ? _sessions.controllerDisplaying(_shown->local) : nullptr;
-    if (controller == nullptr)
+    auto const daemon =
+        RaisingDaemon { .daemon = daemonRefOf(address(), _id),
+                        .instance = window::DaemonInstance { _controller->daemonInstance().value_or(0) },
+                        .name = {} };
+    if (remote::raiseElsewhere(raised, _controller->directory(), notices, daemon) != RingBell::Yes)
         return;
-    // The window rings, as it does for a finish in one of its own background tabs: the pane has no
-    // SessionChrome here to ring it.
-    controller->requestBell(QString::fromStdString(platform::bellSourceOf(bell.sound)),
-                            static_cast<double>(bell.volume));
-    if (bell.alert)
-        controller->requestAlert();
+    if (auto* const controller = _shown ? _sessions.controllerDisplaying(_shown->local) : nullptr)
+        ringWindowBell(*controller, notices.bell);
 }
 
 void DaemonLink::expireRestoreSummaryAfterLayout()

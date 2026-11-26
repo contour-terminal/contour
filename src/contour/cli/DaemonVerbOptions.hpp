@@ -63,6 +63,8 @@ struct DaemonVerbOptions
     std::string logFile;          ///< `--log-file`: where the log goes; `-` for standard error.
     std::string authorizedKeys;   ///< `--authorized-keys`: the keys that may log in over TCP by signature.
     std::string auth;             ///< `--auth`: which TCP credentials the listener accepts.
+    /// `--no-start`: with `--stdio`, relay only to a daemon that serves already, and never start one.
+    OptionFlag noStart = OptionFlag::Absent;
 
     /// The wire ids of the fields: stable, never reused or renumbered. A field is added at the end, with the
     /// next id after the last one DaemonLaunch uses; a record an older release wrote lacks it, and decodes
@@ -91,6 +93,8 @@ struct DaemonVerbOptions
         std::pair { 20U, &DaemonVerbOptions::logFile },
         std::pair { 21U, &DaemonVerbOptions::authorizedKeys },
         std::pair { 22U, &DaemonVerbOptions::auth },
+        // 23 is DaemonLaunchSocketPathField.
+        std::pair { 24U, &DaemonVerbOptions::noStart },
     };
 
     /// Lists the fields for the codec.
@@ -103,7 +107,7 @@ struct DaemonVerbOptions
 };
 
 /// How many members DaemonVerbOptions has, and so how many rows its codec lists.
-inline constexpr std::size_t DaemonOptionFieldCount = 22;
+inline constexpr std::size_t DaemonOptionFieldCount = 23;
 
 static_assert(std::tuple_size_v<decltype(DaemonVerbOptions::Fields)> == DaemonOptionFieldCount,
               "a member of DaemonVerbOptions was added or removed without its row in Fields");
@@ -135,7 +139,8 @@ inline void requireEveryDaemonOptionListed(DaemonVerbOptions const& options)
                                   log,
                                   logFile,
                                   authorizedKeys,
-                                  auth] = options;
+                                  auth,
+                                  noStart] = options;
 }
 
 /// What `contour daemon` launches a daemon with: the options as given, and what they resolve to.
@@ -181,12 +186,14 @@ class DaemonLaunch
 };
 
 /// The options a restarted daemon must not repeat, each back at its default in DaemonLaunch::relaunched():
-/// `--handover` named the live upgrade one process took over from, and is used up; `--background` and
-/// `--stdio` belong to the process the command line started, which a restarted daemon is not.
+/// `--handover` named the live upgrade one process took over from, and is used up; `--background`,
+/// `--stdio` and `--no-start` belong to the process the command line started, which a restarted daemon is
+/// not.
 inline constexpr auto ProcessBoundOptions = std::tuple {
     &DaemonVerbOptions::handover,
     &DaemonVerbOptions::background,
     &DaemonVerbOptions::stdio,
+    &DaemonVerbOptions::noStart,
 };
 
 /// The wire id of DaemonLaunch::socketPath in the options record: after every DaemonVerbOptions field.

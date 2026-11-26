@@ -255,6 +255,9 @@ set(_header_files
     window/DragEndProbe.hpp
     window/DropZonePolicy.hpp
     window/DroppedText.hpp
+    window/DaemonLinkLook.hpp
+    window/DaemonSection.hpp
+    window/DaemonSections.hpp
     window/SidebarDropPolicy.hpp
     window/SidebarSelection.hpp
     window/CloseDialogTable.hpp
@@ -295,6 +298,7 @@ set(_header_files
 # are only referenced reflectively at runtime.
 set(_core_source_files
     session/HyperlinkTooltip.cpp
+    window/DaemonSections.cpp
     window/SidebarTree.cpp
     window/SwitcherStatus.cpp
     window/SwitcherRows.cpp
@@ -403,7 +407,12 @@ if(CONTOUR_FRONTEND_GUI)
         remote/SwitchGrants.hpp
         remote/SwitchGuard.hpp
         remote/SwitchHost.hpp
+        remote/DaemonPresence.hpp
+        remote/ElsewhereRaise.hpp
+        remote/PresencePlan.hpp
+        remote/PresenceTransport.hpp
         remote/SwitchPlan.hpp
+        remote/WindowWire.hpp
         remote/SwitchingService.hpp
         remote/TmuxController.hpp
         remote/WindowSwitcher.hpp
@@ -469,6 +478,10 @@ if(CONTOUR_FRONTEND_GUI)
         remote/RemoteController.cpp
         remote/RemoteLayout.cpp
         remote/SwitchGuard.cpp
+        remote/DaemonPresence.cpp
+        remote/ElsewhereRaise.cpp
+        remote/PresencePlan.cpp
+        remote/PresenceTransport.cpp
         remote/SwitchPlan.cpp
         remote/TmuxController.cpp
         remote/WindowSwitcher.cpp
@@ -1017,6 +1030,10 @@ if(CONTOUR_FRONTEND_GUI)
             remote/RemoteController_test.cpp
             remote/DaemonSwitchDirectory_test.cpp
             remote/SwitchGuard_test.cpp
+            remote/DaemonPresence_test.cpp
+            remote/ElsewhereRaise_test.cpp
+            remote/PresencePlan_test.cpp
+            remote/PresenceTransport_test.cpp
             remote/SwitchPlan_test.cpp
             remote/DirectorySource_test.cpp
             platform/AppearanceSources_test.cpp
@@ -1046,6 +1063,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/SwitcherController_test.cpp
             test/SwitcherQml_test.cpp
             test/SidebarQml_test.cpp
+            test/FakeDaemonSections.hpp
             test/SidebarFakes.hpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
@@ -1083,6 +1101,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ContextMenuRows.hpp
             test/QmlMocks.hpp
             test/RecordingAnnouncer.hpp
+            test/RecordingNotifier.hpp
             test/PermissionFixtures.hpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
@@ -1812,6 +1831,10 @@ if(CONTOUR_TESTING)
         window/SecureInputPolicy_test.cpp
         window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp
+        window/DaemonLinkLook_test.cpp
+        window/DaemonSection_test.cpp
+        window/DaemonSections.cpp
+        window/DaemonSections_test.cpp
         window/LocationChip_test.cpp
         window/TabAttention_test.cpp
         window/SidebarMenuState_test.cpp

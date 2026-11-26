@@ -437,24 +437,21 @@ class NativeController final: public QObject, public contour::session::SessionFa
         uint64_t workspace, std::optional<uint64_t> directoryFrom = std::nullopt);
 
     /// GUI thread. Promotes this observing connection to a window's attach of @p workspace: states @p area
-    /// and
-    /// @p cell, then selects the workspace, which the daemon answers by running the viewer setup an attach
-    /// runs. The connection stays an observer until that answer: one dropped before it reconnects as an
-    /// observer and asks again, and the promotion fails if the daemon restarted meanwhile. Every dial from
-    /// now on goes through @p interactive, whose prompts reach the window -- or, should the promotion fail,
-    /// again through the transport it dialled through before.
+    /// and @p cell, then selects the workspace, which the daemon answers by running the viewer setup an
+    /// attach runs. The connection stays an observer until that answer: one dropped before it reconnects as
+    /// an observer and asks again, and the promotion fails if the daemon restarted meanwhile. Every dial
+    /// from now on goes through @p interactive, whose prompts reach the window -- or, should the promotion
+    /// fail, again through the transport it dialled through before.
     /// @param workspace The daemon workspace; 0 asks the daemon to create one.
-    /// @param directoryFromSession The daemon session whose working directory a new workspace (@p workspace
-    /// 0)
-    ///        starts in. Ignored otherwise.
+    /// @param directoryFromSession The daemon session whose working directory a new workspace
+    ///        (@p workspace 0) starts in. Ignored otherwise.
     /// @param area The client area of the window adopting the connection.
     /// @param cell That window's cell size in pixels, when it knows one.
     /// @param interactive The transport later dials go through; never null.
     /// @param landed Told on the GUI thread once the daemon answered, or the connection ended first: the
     ///        workspace selected, or why none.
     /// @return Nothing once asked; NotConnected, Unsupported (not an observer, or a daemon that cannot
-    /// promote
-    ///         it), or Busy (a promotion under way) otherwise, nothing then changed.
+    ///         promote it), or Busy (a promotion under way) otherwise, nothing then changed.
     [[nodiscard]] std::expected<void, SelectError> promote(
         uint64_t workspace,
         std::optional<uint64_t> directoryFromSession,
@@ -480,6 +477,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// @return Whether the daemon can be observed, as the last answered hello told. Safe from any thread.
     [[nodiscard]] ObserveSupport observeSupport() const;
+
+    /// @return How the attempt that ended the connection failed (ClientSupervisor::failureKind()): Protocol
+    ///         for a daemon that never answered the hello, Refused for one that refused it, else the
+    ///         transport's failure; nullopt while it has not ended so. Safe from any thread.
+    [[nodiscard]] std::optional<vthost::TransportErrorKind> failureKind() const;
 
     /// GUI thread. Tells the daemon whether this window has the user's focus, keeping the panes it last said
     /// the window shows (reportShown()).
@@ -844,6 +846,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// batch and on the GUI thread for a status flush; connect queued).
     void directoryChanged();
 
+    /// What raiseRole() reads changed (fires on the GUI thread).
+    void raiseRoleChanged();
+
     /// A daemon's status-line extension asks this client's user something (fires on the reactor thread;
     /// connect queued). The GUI takes the questions with takePermissionRequests().
     void extensionPermissionRequested();
@@ -1203,6 +1208,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// forgotten as the promotion ends or the connection drops. Reactor thread, under _mutex.
     std::optional<uint64_t> _promotionSerial;
     ObserveSupport _observeSupport = ObserveSupport::Unknown; ///< @see observeSupport(). Under _mutex.
+    std::optional<vthost::TransportErrorKind> _failureKind;   ///< @see failureKind(). Under _mutex.
     vthost::proto::AttachIntent _intent;                      ///< What the first connection follows.
     /// @see Config::resumeFallback. Under _mutex: read on the reactor as a reconnect is made, and changed by
     /// resumeAsLaunch() on the GUI thread.

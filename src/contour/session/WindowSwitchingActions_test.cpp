@@ -128,19 +128,17 @@ TEST_CASE("a failed switch is logged and leaves nothing pending", "[switch][sess
     CHECK(rig.requests().size() == 1);
 }
 
-TEST_CASE("CycleDaemon steps through local labels, then shown hosts", "[switch][session]")
+TEST_CASE("CycleDaemon steps through the listed daemons in the sidebar's order", "[switch][session]")
 {
     auto rig = SwitchRig { labelTarget("default") };
-    rig.app.switchDirectory().daemons = { { .label = "default", .socket = {}, .workspaces = std::nullopt },
-                                          { .label = "admin", .socket = {}, .workspaces = std::nullopt } };
-    rig.app.switchDirectory().hosts = { "studio" };
+    rig.app.switchDirectory().ring = { labelTarget("default"), labelTarget("admin"), hostTarget("studio") };
 
     rig.run(contour::actions::CycleDaemon { CycleDirection::Next });
     rig.run(contour::actions::CycleDaemon { CycleDirection::Previous });
 
     REQUIRE(rig.requests().size() == 2);
-    CHECK(rig.requests()[0].target == hostTarget("studio")); // admin, default, studio
-    CHECK(rig.requests()[1].target == labelTarget("admin"));
+    CHECK(rig.requests()[0].target == labelTarget("admin"));
+    CHECK(rig.requests()[1].target == hostTarget("studio"));
     CHECK(rig.requests()[0].mode == SwitchMode::Switch);
     CHECK(rig.app.switchDirectory().refreshes == 2); // each press renews the cache for the next
 }
@@ -148,7 +146,7 @@ TEST_CASE("CycleDaemon steps through local labels, then shown hosts", "[switch][
 TEST_CASE("CycleDaemon with no other daemon switches nothing", "[switch][session]")
 {
     auto rig = SwitchRig { labelTarget("default") };
-    rig.app.switchDirectory().daemons = { { .label = "default", .socket = {}, .workspaces = std::nullopt } };
+    rig.app.switchDirectory().ring = { labelTarget("default") };
     rig.run(contour::actions::CycleDaemon {});
     CHECK(rig.requests().empty());
 }

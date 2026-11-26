@@ -10,6 +10,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/RecordingNotifier.hpp>
 #include <contour/window/PromptHost.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -56,20 +57,7 @@ using contour::session::SiblingShows;
 
 namespace
 {
-
-/// Raises nothing and records every notification: the recorded vector is the assertion.
-class RecordingNotifier final: public contour::platform::Notifier
-{
-  public:
-    void notify(vtbackend::DesktopNotification const& notification) override
-    {
-        raised.push_back(notification);
-    }
-    void close(std::string const& identifier) override { closed.push_back(identifier); }
-
-    std::vector<vtbackend::DesktopNotification> raised; ///< What was raised, in order.
-    std::vector<std::string> closed;                    ///< What was withdrawn, in order.
-};
+using contour::test::RecordingNotifier;
 
 /// An application that records what a link asks of it. A window it opens is a manager-minted controller that
 /// asks the attach-window binder at once, as a spawned window's Main.qml does while it loads. A link it is
@@ -134,6 +122,7 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
         // As the application does.
         contour::remote::passOnLaunchResume(links());
     }
+    void linkChanged(contour::remote::DaemonLink& /*link*/) override { ++linkChanges; }
     [[nodiscard]] contour::remote::SwitchGrants& switchGrants() override { return grants; }
     /// Never fires: no question of these tests expires.
     [[nodiscard]] contour::remote::SwitchDeadline const& switchDeadline() override { return _deadline; }
@@ -167,7 +156,8 @@ class FakeLinkHost final: public contour::remote::IDaemonLinkHost
     /// What upgradeDaemon() answers.
     contour::remote::UpgradeStart upgradeAnswer = contour::remote::UpgradeStart::Started;
     int restarts = 0;
-    int endings = 0; ///< How often linkEnded() was told.
+    int endings = 0;     ///< How often linkEnded() was told.
+    int linkChanges = 0; ///< How often linkChanged() was told.
     /// Whether a window openWindowFor() opens loads and asks the binder, or never comes.
     enum class WindowLoad : uint8_t
     {
@@ -2980,4 +2970,19 @@ TEST_CASE(
     REQUIRE(waitUntil([&] { return visibilityOn(daemon, ids[1]) == WorkspaceVisibility::Shown; }));
     CHECK(visibilityOn(daemon, ids[0]) == WorkspaceVisibility::Hidden);
     CHECK(daemon.onDaemon([&daemon] { return daemon.live.size(); }) == 1);
+}
+
+TEST_CASE("DaemonLink: its connection and its directory changing tell the application", "[attach][link]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = seedWorkspaces(daemon, 1);
+    auto rig = LinkRig { daemon.endpoint() };
+    auto const boot = contour::test::ScopedController { rig.app.manager() };
+    REQUIRE(pollUntilAttached(*rig.link, 10s).has_value());
+    // The connect itself was a change of the connection's state.
+    REQUIRE(waitUntil([&] { return rig.host.linkChanges > 0; }));
+
+    auto const before = rig.host.linkChanges;
+    std::ignore = addWorkspace(daemon);
+    CHECK(waitUntil([&] { return rig.host.linkChanges > before; }));
 }

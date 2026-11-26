@@ -1485,6 +1485,80 @@ TEST_CASE(
     manager.releaseBinding(daemon);
 }
 
+TEST_CASE("TerminalSessionManager: observed daemons' waiting tabs count once, in the last focused window",
+          "[manager][taskbarattention][taskbar]")
+{
+    using contour::platform::TaskbarAttention;
+
+    SECTION("a per-window taskbar counts them on the window focused last")
+    {
+        auto sink = std::make_unique<contour::test::RecordingTaskbar>(
+            contour::test::RecordingTaskbar::Support::Available,
+            contour::platform::TaskbarProgressScope::Window);
+        auto* const recording = sink.get();
+        auto app = appWithTaskbar(std::move(sink));
+        auto& manager = app.manager();
+        contour::test::ScopedController const windowA { manager };
+        contour::test::ScopedController const windowB { manager };
+        // What each window's button was last told.
+        auto const toldTo = [&](contour::test::ScopedController const& window) {
+            auto told = std::optional<TaskbarAttention> {};
+            for (auto const& [id, attention]: recording->windowAttention)
+                if (id == window->windowId().value)
+                    told = attention;
+            return told;
+        };
+
+        manager.setFocusedWindow(windowA.id);
+        manager.setObservedWaiting(2);
+        settle();
+        CHECK(toldTo(windowA) == TaskbarAttention { .waiting = 2 });
+        CHECK_FALSE(toldTo(windowB).has_value());
+
+        // Moving the focus moves them, with nothing else to say the count changed.
+        manager.setFocusedWindow(windowB.id);
+        settle();
+        CHECK(toldTo(windowA) == TaskbarAttention {});
+        CHECK(toldTo(windowB) == TaskbarAttention { .waiting = 2 });
+
+        manager.setObservedWaiting(0);
+        settle();
+        CHECK(toldTo(windowB) == TaskbarAttention {});
+    }
+
+    SECTION("an application taskbar counts them once beside every window's own")
+    {
+        auto sink = std::make_unique<contour::test::RecordingTaskbar>(
+            contour::test::RecordingTaskbar::Support::Available,
+            contour::platform::TaskbarProgressScope::Application);
+        auto* const recording = sink.get();
+        auto app = appWithTaskbar(std::move(sink));
+        auto& manager = app.manager();
+        contour::test::ScopedController const windowA { manager };
+        contour::test::ScopedController const windowB { manager };
+        windowA->createNewTab();
+        auto* const inA = sessionAtRow(manager, *windowA, 0);
+        REQUIRE(inA != nullptr);
+        inA->terminal().writeToScreen(BlockedStatus);
+        manager.setFocusedWindow(windowA.id);
+        manager.setObservedWaiting(2);
+        settle();
+        REQUIRE_FALSE(recording->applicationAttention.empty());
+        CHECK(recording->applicationAttention.back() == TaskbarAttention { .waiting = 3 });
+
+        // Whichever window is focused, they count once.
+        manager.setFocusedWindow(windowB.id);
+        manager.refreshTaskbarAttention();
+        settle();
+        CHECK(recording->applicationAttention.back() == TaskbarAttention { .waiting = 3 });
+
+        manager.setObservedWaiting(0);
+        settle();
+        CHECK(recording->applicationAttention.back() == TaskbarAttention { .waiting = 1 });
+        contour::test::closeAllTabs(*windowA);
+    }
+}
+
 TEST_CASE("TerminalSessionManager: an application taskbar is told how many tabs are Blocked",
           "[manager][taskbarattention]")
 {

@@ -249,6 +249,7 @@ class FakeApp final: public contour::remote::IDaemonLinkHost, public contour::re
         // As the application does.
         contour::remote::passOnLaunchResume(switchableLinks());
     }
+    void linkChanged(DaemonLink& /*link*/) override {}
     void startWindowLink(DaemonLinkConfig config) override
     {
         std::ignore = startSwitchLink(std::move(config));

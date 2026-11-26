@@ -238,7 +238,10 @@ core::async::Task<void> ClientSupervisor::run()
         if (outcome.ending == Ending::Stopped)
             enter(ConnectionState::Stopped);
         else
+        {
+            _failureKind = outcome.error.kind;
             enter(ConnectionState::Failed, outcome.error.message);
+        }
         co_return;
     }
 
@@ -259,7 +262,10 @@ core::async::Task<void> ClientSupervisor::run()
     if (outcome.ending == Ending::Stopped)
         enter(ConnectionState::Stopped);
     else
+    {
+        _failureKind = outcome.error.kind;
         enter(ConnectionState::Refused, outcome.error.message);
+    }
 }
 
 } // namespace vthost::client

@@ -92,6 +92,9 @@ struct HostEntry
     std::filesystem::path identityFile {};
     std::string remoteCommand; ///< Replaces the whole remote command (`ssh://`); empty for the default.
     std::string profile;       ///< The profile the remote sessions are created with; empty for the default.
+    /// Whether the workspace sidebar lists this host's daemon unasked (`show_in_sidebar`). A `bool` at the
+    /// configuration boundary, as Config's fields are; the sidebar speaks window::SidebarListingChoice.
+    bool showInSidebar = false;
 };
 
 /// @return The scheme @p url begins with (`ssh://`, `TLS://`), whether or not the rest of it parses; nullopt
@@ -110,6 +113,7 @@ enum class HostField : std::uint8_t
     IdentityFile,  ///< `identity_file`
     RemoteCommand, ///< `remote_command`
     Profile,       ///< `profile`
+    ShowInSidebar, ///< `show_in_sidebar`
 };
 
 /// A saved host as written, field by field: what Settings edits and writes to `hosts/<name>.yml`. Unlike a
@@ -122,6 +126,7 @@ struct HostDraft
     std::string identityFile {};  ///< The key file to sign in with; empty for the agent's keys.
     std::string remoteCommand {}; ///< Replaces the remote command (`ssh://`); empty for the default.
     std::string profile {}; ///< The profile the remote sessions are created with; empty for the default.
+    std::string showInSidebar {}; ///< `true` to list the host in the sidebar; `false` or empty for not.
 
     [[nodiscard]] bool operator==(HostDraft const&) const = default;
 };
@@ -142,6 +147,7 @@ inline constexpr auto HostFields = std::array {
     HostFieldInfo { HostField::IdentityFile, "identity_file", &HostDraft::identityFile },
     HostFieldInfo { HostField::RemoteCommand, "remote_command", &HostDraft::remoteCommand },
     HostFieldInfo { HostField::Profile, "profile", &HostDraft::profile },
+    HostFieldInfo { HostField::ShowInSidebar, "show_in_sidebar", &HostDraft::showInSidebar },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, HostFields.size()),
@@ -166,7 +172,7 @@ struct HostFieldProblem
 };
 
 /// What keeps @p draft from loading, field by field, in the loader's own words: an address that does not
-/// parse.
+/// parse, or a `show_in_sidebar` that is neither `true` nor `false`.
 /// @param draft The host as written.
 /// @return The problems, in @ref HostField order; empty when the loader would take it.
 [[nodiscard]] std::vector<HostFieldProblem> checkHostDraft(HostDraft const& draft);

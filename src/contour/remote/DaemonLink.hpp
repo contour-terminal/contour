@@ -501,8 +501,6 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// held the raise role (NativeController::takeRaised) -- a bell, a desktop notification, a command that
     /// finished -- as a pane out of sight would (IDaemonLinkHost::elsewhereNotices); each once.
     void raiseElsewhere();
-    /// Rings the bell, and alerts, on the link's window, as @p bell says.
-    void ringWindowBell(config::Bell const& bell);
     /// What a link a switch started, or a switch under way, makes of the connection's state: anything but
     /// connected or connecting before the workspace was shown fails it.
     void noteConnectionForSwitch();

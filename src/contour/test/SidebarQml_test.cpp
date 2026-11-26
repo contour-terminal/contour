@@ -2621,7 +2621,7 @@ TEST_CASE("the location chip names the daemon, a remote's dot and its state on e
     CHECK(chipPart(*chip, "workspaceChipStatus")->property("text").toString()
           == QStringLiteral("Reconnecting…"));
     if (bracketed)
-        CHECK(chipSpelling(*chip) == QStringLiteral("[◑ starfive Reconnecting… › billing ▾]"));
+        CHECK(chipSpelling(*chip) == QStringLiteral("[↻ starfive Reconnecting… › billing ▾]"));
 
     // Each state has its own glyph, so colour is never the only cue.
     if (bracketed)
@@ -3044,8 +3044,8 @@ TEST_CASE("a shown sidebar's daemon control adds the dot and the state when not 
         auto const fit = chip->property("fit").toInt();
         CHECK(fit <= static_cast<int>(contour::window::LocationChipFit::NoStateText));
         CHECK(chipSpelling(*chip)
-              == (fit == 0 ? QStringLiteral("[◑ starfive Reconnecting… ▾]")
-                           : QStringLiteral("[◑ starfive ▾]")));
+              == (fit == 0 ? QStringLiteral("[↻ starfive Reconnecting… ▾]")
+                           : QStringLiteral("[↻ starfive ▾]")));
     }
     CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
 }

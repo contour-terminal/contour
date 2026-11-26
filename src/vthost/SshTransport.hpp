@@ -38,6 +38,18 @@ class IAskpassBroker;
 /// What a remote host runs when its saved entry names no `remote_command:`.
 inline constexpr std::string_view DefaultRemoteCommand = "contour daemon --stdio";
 
+/// What a remote host runs instead of @ref DefaultRemoteCommand when the attach must not start a daemon
+/// there (a background observer): the relay reports an absent daemon rather than starting one.
+/// The relay's flag that tells it not to start a daemon: what a custom `remote_command:` is ended with when
+/// the attach must not start one.
+inline constexpr std::string_view NoStartFlag = "--no-start";
+
+inline constexpr std::string_view NoStartRemoteCommand = "contour daemon --stdio --no-start";
+
+static_assert(NoStartRemoteCommand.starts_with(DefaultRemoteCommand)
+                  && NoStartRemoteCommand.ends_with(NoStartFlag),
+              "NoStartRemoteCommand is the default command told not to start a daemon");
+
 /// How long an attempt may take from spawning ssh to the remote relay's preamble.
 inline constexpr auto SshConnectTimeout = std::chrono::seconds { 30 };
 
@@ -145,7 +157,15 @@ enum class SshFailure : std::uint8_t
     RemoteShellNoise,       ///< The remote login printed too much before the preamble.
     NoPreamble,             ///< ssh ended without the relay answering, for no reason recognized.
     Cancelled,              ///< The user dismissed a prompt, or the attempt was cancelled.
+    RemoteDaemonAbsent,     ///< The relay was told not to start a daemon, and none serves there.
+    /// The remote `contour` has `daemon --stdio` but no `--no-start`: too old to be reached without letting
+    /// it start a daemon.
+    RemoteContourCannotSkipStart,
 };
+
+/// Number of @c SshFailure enumerators, derived from the last one.
+inline constexpr std::size_t SshFailureCount =
+    static_cast<std::size_t>(SshFailure::RemoteContourCannotSkipStart) + 1;
 
 /// One row of the stderr classification: a text ssh or the remote shell prints, and what it means.
 struct SshFailureRule
@@ -168,7 +188,11 @@ inline constexpr auto SshFailureRules = std::to_array<SshFailureRule>({
     { .needle = "Connection timed out", .failure = SshFailure::HostUnreachable },
     { .needle = "Operation timed out", .failure = SshFailure::HostUnreachable },
     { .needle = "No route to host", .failure = SshFailure::HostUnreachable },
-    { .needle = "Unexpected argument \"--stdio\"", .failure = SshFailure::RemoteContourTooOld },
+    // The flag in the quotes the remote parser puts around a token it refuses, whichever refusal it is: a
+    // contour before core-cpp v0.18.1 says `Unexpected argument "--no-start".`, a later one
+    // `Unknown option "--no-start".`. Unmatched, either would read as NoPreamble and be redialled.
+    { .needle = "\"--stdio\"", .failure = SshFailure::RemoteContourTooOld },
+    { .needle = "\"--no-start\"", .failure = SshFailure::RemoteContourCannotSkipStart },
     { .needle = "command not found", .failure = SshFailure::RemoteContourMissing },
     { .needle = "is not recognized as an internal or external command",
       .failure = SshFailure::RemoteContourMissing },
@@ -184,6 +208,12 @@ inline constexpr int ShellCommandNotFound = 127;
 /// @return The first rule whose needle occurs in @p stderrTail; else RemoteContourMissing for exit code
 ///         127; else NoPreamble.
 [[nodiscard]] SshFailure classifySshFailure(std::string_view stderrTail, std::optional<int> exitCode);
+
+/// Classifies the relay's error preamble.
+/// @param message The preamble's message.
+/// @return RemoteDaemonAbsent when it starts with @ref StdioDaemonAbsentMessage (a relay told not to start
+///         a daemon found none); else RemoteRelayError.
+[[nodiscard]] SshFailure classifyRelayRefusal(std::string_view message) noexcept;
 
 /// Whether the local ssh was asked for its version before the attempt.
 enum class SshVersionProbed : uint8_t

@@ -1439,6 +1439,11 @@ int ContourApp::daemonAction()
     // Every option the daemon reads, in one record, before anything is acted on: from here on the verb uses
     // the record alone.
     auto const options = readDaemonVerbOptions(parameters());
+    if (auto const stdioOnly = checkStdioOnlyOptions(options); !stdioOnly)
+    {
+        cerr << std::format("contour daemon: {}\n", stdioOnly.error());
+        return EXIT_FAILURE;
+    }
 
 #ifndef _WIN32
     // The daemon runs behind a PTY keeper, which this process becomes. Not for `--stdio`, which relays to a
@@ -1924,22 +1929,30 @@ std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> Conto
 
 namespace
 {
-    /// Each names something only a daemon this process would become can do; the relay becomes none.
-    struct StdioRefusal
+    /// One option of `contour daemon`, and how to tell from the record that it was given.
+    struct GivenOption
     {
         std::string_view name;                     ///< The option, without its dashes.
         bool (*isGiven)(DaemonVerbOptions const&); ///< Whether the record says it was given.
     };
 
+    /// Each names something only a daemon this process would become can do; the relay becomes none.
     constexpr auto StdioRefusals = std::array {
-        StdioRefusal { .name = "listen-tcp",
-                       .isGiven = [](DaemonVerbOptions const& given) { return !given.listenTcp.empty(); } },
-        StdioRefusal {
+        GivenOption { .name = "listen-tcp",
+                      .isGiven = [](DaemonVerbOptions const& given) { return !given.listenTcp.empty(); } },
+        GivenOption {
             .name = "background",
             .isGiven = [](DaemonVerbOptions const& given) { return given.background == OptionFlag::Given; } },
-        StdioRefusal {
+        GivenOption {
             .name = "tmux-compat-socket",
             .isGiven = [](DaemonVerbOptions const& given) { return !given.tmuxCompatSocket.empty(); } },
+    };
+
+    /// Each says how the relay behaves, and means nothing to a daemon this process becomes.
+    constexpr auto StdioOnlyOptions = std::array {
+        GivenOption {
+            .name = "no-start",
+            .isGiven = [](DaemonVerbOptions const& given) { return given.noStart == OptionFlag::Given; } },
     };
 } // namespace
 
@@ -1954,6 +1967,16 @@ std::optional<std::string_view> ContourApp::firstGivenOption(std::string_view ve
             return option.name;
     }
     return std::nullopt;
+}
+
+std::expected<void, std::string> ContourApp::checkStdioOnlyOptions(DaemonVerbOptions const& options)
+{
+    if (options.stdio == OptionFlag::Given)
+        return {};
+    for (auto const& option: StdioOnlyOptions)
+        if (option.isGiven(options))
+            return std::unexpected { std::format("--{} applies to --stdio only", option.name) };
+    return {};
 }
 
 std::expected<void, std::string> ContourApp::checkStdioCombinations(DaemonVerbOptions const& options)
@@ -1975,6 +1998,12 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
     // that ends it as signal 13 in the ssh session's exit status.
     std::signal(SIGPIPE, SIG_IGN);
 #endif
+    auto const spawner = vthost::makeNativeDaemonSpawner();
+    // `--no-start`: a daemon that does not serve already stays down, and the client is told so; no
+    // registered service is looked up, let alone repaired.
+    if (options.noStart == OptionFlag::Given)
+        return vthost::runStdioAttach(std::move(client),
+                                      vthost::makeLocalDaemonConnector(socketPath, *spawner, nullptr));
     // An auto-started daemon is told what `contour client` would tell it.
     auto const spawnOptions = vthost::DaemonSpawnOptions {
         .filter = options.log,
@@ -1988,7 +2017,6 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
         core::platform::NativeFileSystem::instance(),
         CONTOUR_VERSION_STRING,
         core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}));
-    auto const spawner = vthost::makeNativeDaemonSpawner();
     auto const commands = vthost::makeNativeCommandRunner();
     auto const services =
         vthost::ServiceBackendServices { .fileSystem = core::platform::NativeFileSystem::instance(),
@@ -2849,6 +2877,11 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "Relays the native protocol between standard input/output and this "
                                   "user's daemon, starting it if needed. What `contour client --host` "
                                   "runs over ssh." },
+                    CLI::Option { "no-start",
+                                  CLI::Value { false },
+                                  "With --stdio: relays only to a daemon that is running already, and "
+                                  "never starts one; the client is told that none runs. What the "
+                                  "workspace sidebar runs over ssh to watch a host in the background." },
                     CLI::Option { "in-place",
                                   CLI::Value { false },
                                   "Runs from the installed binary instead of a per-version copy; a "

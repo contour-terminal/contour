@@ -507,7 +507,7 @@ if(VTHOST_TESTING)
         tmux/TmuxClientModel_test.cpp
         tmux/TmuxGateway_test.cpp
     )
-    target_link_libraries(vthost_test vthost core::net_tls glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    target_link_libraries(vthost_test vthost core::cli core::net_tls glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
     if(NOT WIN32)
         # A daemon behind a real PTY keeper, out of the test binary itself (`--keeper`, `--keeper-serve`).
         add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)

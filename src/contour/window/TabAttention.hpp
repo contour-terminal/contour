@@ -183,6 +183,8 @@ class TabAttention
         uint64_t activity = 0; ///< @see DirectoryPane::activitySerial
         uint64_t bell = 0;     ///< @see DirectoryPane::bellSerial
         uint64_t finished = 0; ///< @see DirectoryPane::finishedSerial
+
+        bool operator==(FlagSerials const&) const = default;
     };
 
     /// Notes that the user sees @p session, a pane listed from a daemon's directory: as noteSeen(), and the
