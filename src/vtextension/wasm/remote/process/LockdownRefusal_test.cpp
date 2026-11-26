@@ -119,7 +119,7 @@ TEST_CASE("HelperIncarnation.olderHostIsRefusedForItsVersion", "[vtextension][re
         .launcher = fake, .clock = &clock, .teardownGrace = std::chrono::milliseconds { 0 } });
     REQUIRE(supervisor.has_value());
     auto lines = std::make_shared<std::vector<std::string>>();
-    auto const writer = [lines](std::string_view line) {
+    auto const writer = [lines](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view line) {
         lines->emplace_back(line);
     };
     {
@@ -145,7 +145,7 @@ TEST_CASE("ProcessHostConnector.lockdownFailureIsNotRelaunched", "[vtextension][
     // Contour's error log, which the connector and the backend both write to; read once both are gone, as
     // they write on this thread.
     auto lines = std::make_shared<std::vector<std::string>>();
-    auto const writer = [lines](std::string_view line) {
+    auto const writer = [lines](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view line) {
         lines->emplace_back(line);
     };
     {

@@ -78,9 +78,11 @@ TEST_CASE("AppContainer.launchCarriesTheIsolation", "[vtextension]")
         if (expectation.configured)
             config.isolation = *expectation.configured;
         {
-            auto connector = process::ProcessHostConnector { (*supervisor)->mailbox(),
-                                                             std::move(config),
-                                                             [](std::string_view /*line*/) {} };
+            auto connector =
+                process::ProcessHostConnector { (*supervisor)->mailbox(),
+                                                std::move(config),
+                                                [](vtextension::wasm::remote::LineSeverity /*severity*/,
+                                                   std::string_view /*line*/) {} };
             REQUIRE(connector.connect().has_value());
             REQUIRE(connector.connect().has_value());
         }

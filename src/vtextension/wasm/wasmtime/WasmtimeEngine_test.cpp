@@ -1137,3 +1137,54 @@ TEST_CASE("Wasmtime.measureRender", "[.measure]")
     auto const backend = WasmtimeTraits::make();
     vtextension::wasm::testing::measureBundledRender(*backend, "Wasmtime");
 }
+
+TEST_CASE("WasmtimeEngine.resourceErrorsAreOutOfMemory", "[wasmtime]")
+{
+    // What Wasmtime passes on from this operating system when a mapping or an allocation is refused reads as
+    // the system being out of memory, which a host refuses for a reason that does not last; anything else --
+    // the other system's numbers for it among them, which mean something else here -- stays the runtime being
+    // unavailable.
+    using vtextension::wasm::wasmtime::resourceErrorOf;
+#ifdef _WIN32
+    CHECK(resourceErrorOf(
+              "failed to allocate memory: Not enough memory resources are available to process this "
+              "command. (os error 8)")
+          == ExtensionError::OutOfMemory);
+    CHECK(resourceErrorOf("VirtualAlloc failed (os error 14)") == ExtensionError::OutOfMemory);
+    CHECK(resourceErrorOf("mmap failed: The paging file is too small for this operation to complete. "
+                          "(os error 1455)")
+          == ExtensionError::OutOfMemory);
+    // ENOMEM's number is ERROR_INVALID_ACCESS here.
+    CHECK(resourceErrorOf("The access code is invalid. (os error 12)") == ExtensionError::RuntimeUnavailable);
+#else
+    CHECK(resourceErrorOf("failed to create stack pool mapping: Cannot allocate memory (os error 12)")
+          == ExtensionError::OutOfMemory);
+    CHECK(resourceErrorOf("mmap failed (os error 12)") == ExtensionError::OutOfMemory);
+    // Windows' out-of-memory numbers are ENOEXEC and EFAULT here.
+    CHECK(resourceErrorOf("Exec format error (os error 8)") == ExtensionError::RuntimeUnavailable);
+    CHECK(resourceErrorOf("Bad address (os error 14)") == ExtensionError::RuntimeUnavailable);
+#endif
+    CHECK(resourceErrorOf("allocation failed: out of memory") == ExtensionError::OutOfMemory);
+    CHECK(resourceErrorOf("failed to parse WebAssembly module") == ExtensionError::RuntimeUnavailable);
+    CHECK(resourceErrorOf("") == ExtensionError::RuntimeUnavailable);
+}
+
+TEST_CASE("WasmtimeEngine.primingErrorsAreReadForMemory", "[wasmtime]")
+{
+    // What priming maps each Wasmtime failure through (compilePriming, runPriming): the error's own message,
+    // read out of a real wasmtime_error_t.
+    using vtextension::wasm::wasmtime::detail::extensionErrorOf;
+#ifdef _WIN32
+    auto* const exhausted = wasmtime_error_new("failed to allocate memory: Not enough memory resources are "
+                                               "available to process this command. (os error 8)");
+#else
+    auto* const exhausted =
+        wasmtime_error_new("failed to create stack pool mapping: Cannot allocate memory (os error 12)");
+#endif
+    auto* const other = wasmtime_error_new("failed to parse WebAssembly module");
+    CHECK(extensionErrorOf(exhausted) == ExtensionError::OutOfMemory);
+    CHECK(extensionErrorOf(other) == ExtensionError::RuntimeUnavailable);
+    CHECK(extensionErrorOf(nullptr) == ExtensionError::RuntimeUnavailable);
+    wasmtime_error_delete(other);
+    wasmtime_error_delete(exhausted);
+}

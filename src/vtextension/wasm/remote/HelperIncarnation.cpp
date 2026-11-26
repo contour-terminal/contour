@@ -69,6 +69,10 @@ namespace
     {
         if (hello.version != proto::ProtocolVersion)
             return HostRefusal::ProtocolVersion;
+        // A failure the next host may not meet is refused for a reason that does not last.
+        if (hello.lockdown == proto::LockdownState::Failed)
+            return lockdownFailureRefusal(
+                proto::LockdownFailure { .step = hello.failedStep, .code = hello.failureCode });
         return lockdownRefusalOf(hello.lockdown, requirement);
     }
 

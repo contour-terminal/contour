@@ -56,7 +56,7 @@ class ProcessHostConnector final: public remote::IHostConnector
   public:
     /// @param supervisor What launches and supervises the processes.
     /// @param config How each one is started.
-    /// @param refusals Where why a host could not be started is logged, once per reason: errorLogWriter() in
+    /// @param refusals Where why a host could not be started is logged, once per reason: logWriter() in
     ///        Contour.
     ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor,
                          ProcessHostConfig config,

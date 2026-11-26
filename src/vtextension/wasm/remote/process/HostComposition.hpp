@@ -52,7 +52,7 @@ struct HostCompositionConfig
     /// The extension host executable; or why it was not found, in which case no helper is ever started and
     /// every load fails `HostUnavailable`.
     std::expected<std::filesystem::path, HelperLocationError> helper;
-    /// Where why no host serves is logged: errorLogWriter() in Contour.
+    /// Where why no host serves is logged: logWriter() in Contour.
     remote::HostRefusalLog::Writer refusals;
     /// How long a helper let go may take to exit on its own: as this build is instrumented.
     std::chrono::milliseconds teardownGrace = teardownGraceFor(ThisBuildInstrumentation);
@@ -127,7 +127,7 @@ class HostComposition: public std::enable_shared_from_this<HostComposition>
 /// @param config Its budgets and lockdown requirement; a connector it names is used instead of the
 ///        composition's.
 /// @param helper The extension host executable; or why it was not found.
-/// @param refusals Where why no host serves is logged: errorLogWriter() in Contour.
+/// @param refusals Where why no host serves is logged: logWriter() in Contour.
 /// @return The backend.
 [[nodiscard]] std::unique_ptr<IWasmBackend> makeProcessBackend(
     BackendConfig config,

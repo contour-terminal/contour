@@ -48,7 +48,9 @@ TEST_CASE("ProcessHostConnector.launchFailureIsLoggedOncePerReason", "[vtextensi
                                          .extraArguments = {},
                                          .caps = {},
                                          .standardError = std::nullopt },
-            [lines](std::string_view line) { lines->emplace_back(line); }
+            [lines](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view line) {
+                lines->emplace_back(line);
+            }
         };
         // Every attempt fails; the first says why.
         for ([[maybe_unused]] auto const attempt: { 1, 2, 3 })
@@ -94,7 +96,8 @@ TEST_CASE("ProcessHostConnector.lastingRefusalsStartNoOtherHost", "[vtextension]
                                                                          .extraArguments = {},
                                                                          .caps = {},
                                                                          .standardError = std::nullopt },
-                                            [](std::string_view /*line*/) {} };
+                                            [](vtextension::wasm::remote::LineSeverity /*severity*/,
+                                               std::string_view /*line*/) {} };
         // The host of a first connection was refused, as the handshake tells the connector.
         REQUIRE(connector.connect().has_value());
         connector.refused(expectation.refusal);

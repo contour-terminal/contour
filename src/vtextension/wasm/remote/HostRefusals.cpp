@@ -12,6 +12,7 @@
 #include <string_view>
 #include <utility>
 
+#include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
 
@@ -20,6 +21,13 @@ namespace vtextension::wasm::remote
 
 namespace
 {
+    /// Warnings of extensions running, but not quite as they should: a sandbox short of a step is worth
+    /// knowing about whether or not anyone debugs extensions, so it is on unless turned off. At namespace
+    /// scope, so that it is registered -- listed, and turned off by a filter -- before anything logs.
+    auto const warningLog = core::log::Category("vtextension.warning",
+                                                "Warns of extensions running, but not quite as they should.",
+                                                core::log::Category::State::Enabled);
+
     /// The line for a host that could not be started, around what the launcher says of why.
     constexpr auto LaunchLine =
         std::string_view { "The extension host cannot be started: {}. Extensions do not run." };
@@ -48,8 +56,30 @@ namespace
                                   "requires, and was refused. Extensions do not run." },
     };
     static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
-    static_assert(std::to_underlying(proto::LockdownStep::WriteXorExecute) < 32,
+    static_assert(std::to_underlying(proto::LastLockdownStep) < 32,
                   "a bit per step in HostRefusalLog's word of unavailable steps");
+
+    /// A confinement failure a host started again may not meet, and the reason it is refused for instead of
+    /// the lasting `LockdownFailed`.
+    struct TransientLockdownFailure
+    {
+        proto::LockdownStep step; ///< The step.
+        uint32_t code;            ///< Its code, as the step's row reads it.
+        HostRefusal refusal;      ///< The reason, one that is `Transient`.
+    };
+
+    /// The failures that do not last: preparing a thread while the system was out of memory.
+    constexpr auto TransientLockdownFailures = std::array {
+        TransientLockdownFailure { .step = proto::LockdownStep::Priming,
+                                   .code = std::to_underlying(ExtensionError::OutOfMemory),
+                                   .refusal = HostRefusal::OutOfResources },
+    };
+    static_assert(std::ranges::all_of(TransientLockdownFailures,
+                                      [](TransientLockdownFailure const& row) {
+                                          return refusalPersistence(row.refusal)
+                                                 == RefusalPersistence::Transient;
+                                      }),
+                  "a transient lockdown failure is refused for a transient reason");
 
     /// The line for a host that could not confine itself, around the step it named.
     constexpr auto LockdownStepLine = std::string_view {
@@ -107,6 +137,14 @@ std::string refusalLine(HostRefusal refusal, proto::LockdownFailure failure)
     return refusalLine(refusal);
 }
 
+HostRefusal lockdownFailureRefusal(proto::LockdownFailure failure) noexcept
+{
+    for (auto const& row: TransientLockdownFailures)
+        if (row.step == failure.step && row.code == failure.code)
+            return row.refusal;
+    return HostRefusal::LockdownFailed;
+}
+
 std::string unavailableStepLine(proto::LockdownStep step)
 {
     return std::format(UnavailableStepLine, proto::lockdownStepText(step));
@@ -126,23 +164,28 @@ void HostRefusalLog::refused(HostRefusal refusal, proto::LockdownFailure failure
     auto const bit = uint32_t { 1 } << std::to_underlying(refusal);
     if ((_logged.fetch_or(bit) & bit) != 0)
         return;
-    _writer(refusalLine(refusal, failure));
+    _writer(LineSeverity::Error, refusalLine(refusal, failure));
 }
 
 void HostRefusalLog::unavailable(proto::LockdownStep step)
 {
-    if (step == proto::LockdownStep::None || std::to_underlying(step) >= proto::lockdownSteps().size())
+    if (step == proto::LockdownStep::None
+        || std::to_underlying(step) > std::to_underlying(proto::LastLockdownStep))
         return;
     auto const bit = uint32_t { 1 } << std::to_underlying(step);
     if ((_unavailable.fetch_or(bit) & bit) != 0)
         return;
-    _writer(unavailableStepLine(step));
+    _writer(LineSeverity::Warning, unavailableStepLine(step));
 }
 
-HostRefusalLog::Writer errorLogWriter()
+HostRefusalLog::Writer logWriter()
 {
-    return [](std::string_view line) {
-        errorLog()("{}", line);
+    return [](LineSeverity severity, std::string_view line) {
+        switch (severity)
+        {
+            case LineSeverity::Warning: warningLog()("{}", line); return;
+            case LineSeverity::Error: errorLog()("{}", line); return;
+        }
     };
 }
 

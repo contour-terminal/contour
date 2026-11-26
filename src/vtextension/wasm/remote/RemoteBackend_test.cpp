@@ -53,6 +53,7 @@
     #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
 #endif
 #include <vtextension/wasm/testing/HostedEngine.hpp>
+#include <vtextension/wasm/testing/PreparationHookEngine.hpp>
 #include <vtextension/wasm/testing/RenderMeasurement.hpp>
 
 #ifdef _WIN32
@@ -917,10 +918,14 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
     unprimed.lockdown = proto::LockdownState::Failed;
     unprimed.failedStep = proto::LockdownStep::Priming;
     unprimed.failureCode = std::to_underlying(ExtensionError::RuntimeUnavailable);
+    // One that could not for want of memory is refused for a reason the next host may not share.
+    auto starved = unprimed;
+    starved.failureCode = std::to_underlying(ExtensionError::OutOfMemory);
     auto const rows = std::array {
         RefusalRow { versioned, LockdownRequirement::AcceptUnsandboxed, HostRefusal::ProtocolVersion },
         RefusalRow { failed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
         RefusalRow { unprimed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
+        RefusalRow { starved, LockdownRequirement::AcceptUnsandboxed, HostRefusal::OutOfResources },
         RefusalRow { HonestHello, LockdownRequirement::RequireLockedDown, HostRefusal::Unsandboxed },
     };
     auto const runtime = proto::CreateRuntime {
@@ -936,7 +941,8 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
             });
         auto lines = std::vector<std::string> {};
         // One log, as one backend has: the same host refused again says nothing new.
-        auto refusals = HostRefusalLog { [&lines](std::string_view line) { lines.emplace_back(line); } };
+        auto refusals = HostRefusalLog { [&lines](vtextension::wasm::remote::LineSeverity /*severity*/,
+                                                  std::string_view line) { lines.emplace_back(line); } };
         for ([[maybe_unused]] auto const attempt: { 1, 2 })
         {
             auto const connected = HelperIncarnation::connect(
@@ -973,7 +979,8 @@ TEST_CASE("RemoteBackend.unavailableStepIsLoggedOnceAndServed", "[vtextension][r
         .runtimeId = HelperIncarnation::RuntimeId, .memoryBytes = 65536, .stackBytes = 65536, .functions = {}
     };
     auto lines = std::vector<std::string> {};
-    auto refusals = HostRefusalLog { [&lines](std::string_view line) { lines.emplace_back(line); } };
+    auto refusals = HostRefusalLog { [&lines](vtextension::wasm::remote::LineSeverity /*severity*/,
+                                              std::string_view line) { lines.emplace_back(line); } };
     for ([[maybe_unused]] auto const attempt: { 1, 2 })
     {
         auto const connected = HelperIncarnation::connect(
@@ -986,6 +993,56 @@ TEST_CASE("RemoteBackend.unavailableStepIsLoggedOnceAndServed", "[vtextension][r
     CHECK(lines == std::vector { unavailableStepLine(proto::LockdownStep::FileSystem) });
     CHECK(lines.front().contains(proto::lockdownStepText(proto::LockdownStep::FileSystem)));
     CHECK(connector->refusals().empty());
+}
+
+TEST_CASE("RemoteBackend.hostShortOfMemoryAsItPrimesIsRetried", "[vtextension][remote]")
+{
+    // A real host in this process whose engine runs out of memory preparing its threads (injected at the
+    // engine's own seam, prepareThread()): its server says so in a Failed Hello at Priming, and Contour
+    // refuses it for a reason that does not last -- so the next load starts a host again.
+    struct RecordingConnector final: IHostConnector
+    {
+        InProcessHostConnector hosts;
+        std::mutex mutex;
+        std::vector<HostRefusal> seen;
+
+        explicit RecordingConnector(vtextension::wasm::host::EngineFactory engines):
+            hosts { std::move(engines), HostServerConfig {} }
+        {
+        }
+        [[nodiscard]] std::expected<HostConnection, ExtensionError> connect() override
+        {
+            return hosts.connect();
+        }
+        void refused(HostRefusal refusal) override
+        {
+            auto const lock = std::scoped_lock { mutex };
+            seen.push_back(refusal);
+        }
+    };
+    auto const starved = [] {
+        return std::make_unique<vtextension::wasm::testing::PreparationHookEngine>(
+            vtextension::wasm::testing::makeHostedEngine(proto::MemoryMode::Copy),
+            []() -> std::expected<void, ExtensionError> {
+                return std::unexpected(ExtensionError::OutOfMemory);
+            });
+    };
+    auto const connector = std::make_shared<RecordingConnector>(starved);
+    auto const backend = makeRemoteBackend(
+        makeRemoteKindState(),
+        BackendConfig {
+            .timeouts = {}, .connector = connector, .lockdown = LockdownRequirement::AcceptUnsandboxed });
+    auto const runtime = contract::createRuntime(*backend);
+    for ([[maybe_unused]] auto const attempt: { 1, 2 })
+    {
+        auto const module = runtime->load(ModuleIdentity {}, toModule(PeekModule));
+        REQUIRE_FALSE(module.has_value());
+        CHECK(module.error() == ExtensionError::HostUnavailable);
+    }
+    auto const lock = std::scoped_lock { connector->mutex };
+    CHECK(connector->seen == std::vector { HostRefusal::OutOfResources, HostRefusal::OutOfResources });
+    CHECK(vtextension::wasm::remote::refusalPersistence(HostRefusal::OutOfResources)
+          == vtextension::wasm::remote::RefusalPersistence::Transient);
 }
 
 TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")

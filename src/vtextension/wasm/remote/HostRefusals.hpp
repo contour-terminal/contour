@@ -143,14 +143,26 @@ static_assert(everyRefusalHasAPersistenceRow());
 /// @return The line logged for it, user-readable, naming no engine: the host runs confined, without it.
 [[nodiscard]] std::string unavailableStepLine(proto::LockdownStep step);
 
+/// @param failure The step of its confinement a host's Hello said failed, and its code.
+/// @return Why the host is refused: `LockdownFailed`, which lasts, but for a failure a host started again may
+///         not meet (a row of TransientLockdownFailures in HostRefusals.cpp), which is refused for that.
+[[nodiscard]] HostRefusal lockdownFailureRefusal(proto::LockdownFailure failure) noexcept;
+
+/// How a logged line weighs.
+enum class LineSeverity : uint8_t
+{
+    Warning, ///< Extensions run, though not quite as they should.
+    Error,   ///< Extensions do not run.
+};
+
 /// Logs each reason the first time it comes up. Thread-safe; the reasons seen are kept wait-free.
 class HostRefusalLog
 {
   public:
-    /// Writes one logged line.
-    using Writer = std::function<void(std::string_view line)>;
+    /// Writes one logged line, as heavy as @p severity says.
+    using Writer = std::function<void(LineSeverity severity, std::string_view line)>;
 
-    /// @param writer Where the lines go: errorLogWriter() for Contour's error log, a recorder in a test.
+    /// @param writer Where the lines go: logWriter() for Contour's log, a recorder in a test.
     explicit HostRefusalLog(Writer writer);
 
     /// Logs @p refusal's line, unless it was logged already.
@@ -162,20 +174,21 @@ class HostRefusalLog
     /// @param failure The step of its confinement the host named, and its code.
     void refused(HostRefusal refusal, proto::LockdownFailure failure);
 
-    /// Logs that hosts run without @p step, which their system lacks (unavailableStepLine()), unless that was
-    /// logged already: once, though every host started says it. `None` is no step, and logs nothing.
+    /// Warns that hosts run without @p step, which their system lacks (unavailableStepLine()), unless that
+    /// was logged already: once, though every host started says it. `None` is no step, and logs nothing.
     /// @param step The step a host's Hello said it went without.
     void unavailable(proto::LockdownStep step);
 
   private:
     Writer _writer;
-    std::atomic<uint32_t> _logged { 0 }; ///< A bit per reason logged, at its enumerator's value.
-    std::atomic<uint32_t> _unavailable {
-        0
-    }; ///< A bit per unavailable step logged, at its enumerator's value.
+    /// A bit per reason logged, at its enumerator's value.
+    std::atomic<uint32_t> _logged { 0 };
+    /// A bit per unavailable step logged, at its enumerator's value.
+    std::atomic<uint32_t> _unavailable { 0 };
 };
 
-/// @return A writer to Contour's error log.
-[[nodiscard]] HostRefusalLog::Writer errorLogWriter();
+/// @return A writer to Contour's log: an error to its error log, a warning to `vtextension.warning`, which is
+///         on unless turned off.
+[[nodiscard]] HostRefusalLog::Writer logWriter();
 
 } // namespace vtextension::wasm::remote

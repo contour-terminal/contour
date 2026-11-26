@@ -41,8 +41,7 @@ std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
     // A connector of the caller's starts the hosts: no helper to look for, and no composition to share.
     if (config.connector)
         return remote::makeRemoteBackend(remote::makeRemoteKindState(), std::move(config));
-    return remote::process::makeProcessBackend(
-        std::move(config), installedHelper(), remote::errorLogWriter());
+    return remote::process::makeProcessBackend(std::move(config), installedHelper(), remote::logWriter());
 }
 
 } // namespace vtextension::wasm

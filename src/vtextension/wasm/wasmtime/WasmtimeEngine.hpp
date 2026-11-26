@@ -7,11 +7,15 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
+#include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 #include <vtextension/wasm/host/IHostedEngine.hpp>
 #include <vtextension/wasm/wasi/Preview1Shim.hpp>
 #include <vtextension/wasm/wasi/SystemEnvironment.hpp>
+
+struct wasmtime_error;
 
 namespace vtextension::wasm::wasmtime
 {
@@ -67,6 +71,21 @@ class KindState;
 ///         empty function there.
 [[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
                                                                       WasmtimeConfig config);
+
+/// @param message What Wasmtime said of a failure (wasmtime_error_message()).
+/// @return `OutOfMemory` where it says the system ran out of memory or address space, as an allocation or a
+///         mapping the operating system refused (a row of this system's ResourceErrorMarkers in
+///         WasmtimeEngine.cpp);
+///         `RuntimeUnavailable` otherwise.
+[[nodiscard]] ExtensionError resourceErrorOf(std::string_view message) noexcept;
+
+namespace detail
+{
+    /// @param error What a Wasmtime call failed with, or null: what priming an engine's threads maps each of
+    ///        its failures through.
+    /// @return resourceErrorOf() its message; `RuntimeUnavailable` for no error.
+    [[nodiscard]] ExtensionError extensionErrorOf(::wasmtime_error const* error);
+} // namespace detail
 
 } // namespace vtextension::wasm::wasmtime
 

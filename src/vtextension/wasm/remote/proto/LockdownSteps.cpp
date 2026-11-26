@@ -75,7 +75,7 @@ namespace
                                           return std::to_underlying(LockdownStepTable[index].step) == index;
                                       }),
                   "LockdownStepTable lists every LockdownStep at its own index");
-    static_assert(LockdownStepTable.back().step == LockdownStep::WriteXorExecute,
+    static_assert(LockdownStepTable.back().step == LastLockdownStep,
                   "LockdownStepTable ends at the last LockdownStep");
 } // namespace
 

@@ -253,7 +253,7 @@ TEST_CASE("Process.measureSpawn", "[.measure]")
     auto const config = realHelper();
     auto const connector = process::testing::binaryComposition().connector(config);
     auto const policy = HelperPolicy { .timeouts = config.timeouts, .lockdown = config.lockdown };
-    auto refusals = vtextension::wasm::remote::HostRefusalLog { vtextension::wasm::remote::errorLogWriter() };
+    auto refusals = vtextension::wasm::remote::HostRefusalLog { vtextension::wasm::remote::logWriter() };
 
     auto& clock = core::defaultSteadyClock();
     auto durations = std::vector<std::chrono::nanoseconds> {};

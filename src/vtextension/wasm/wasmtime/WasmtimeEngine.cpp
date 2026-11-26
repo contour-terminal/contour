@@ -375,8 +375,33 @@ namespace
         detail::ModuleHandle module;
     };
 
+    /// What this operating system says when memory or address space ran out, as Wasmtime passes it on: the
+    /// error's text, the number Rust's io::Error appends to it -- each system's own, as the same number means
+    /// something else on the other (12 is ERROR_INVALID_ACCESS on Windows; 8 and 14, ENOEXEC and EFAULT on
+    /// POSIX) -- and Wasmtime's own words.
+#ifdef _WIN32
+    constexpr auto ResourceErrorMarkers = std::to_array<std::string_view>({
+        "Not enough memory resources", // ERROR_NOT_ENOUGH_MEMORY
+        "os error 8)",
+        "Not enough storage", // ERROR_OUTOFMEMORY
+        "os error 14)",
+        "paging file is too small", // ERROR_COMMITMENT_LIMIT
+        "os error 1455)",
+        "out of memory",
+    });
+#else
+    constexpr auto ResourceErrorMarkers = std::to_array<std::string_view>({
+        "Cannot allocate memory", // ENOMEM
+        "os error 12)",
+        "out of memory",
+    });
+#endif
+
     /// Compiles PrimingModule on an engine configured by @p config as to how it traps.
-    /// @return The engine and the module; `RuntimeUnavailable` if either cannot be made.
+    /// @return The engine and the module; `OutOfMemory` if compiling it ran out of memory
+    /// (resourceErrorOf()),
+    ///         `RuntimeUnavailable` if either cannot be made otherwise. A null engine is a refused
+    ///         configuration: Wasmtime aborts where it cannot allocate one.
     [[nodiscard]] std::expected<Priming, ExtensionError> compilePriming(WasmtimeConfig const& config)
     {
         // Its own memory: the module has none, and so needs no provision.
@@ -392,14 +417,15 @@ namespace
         auto const error = detail::ErrorHandle { wasmtime_module_new(
             engine.get(), PrimingModule.data(), PrimingModule.size(), &module) };
         if (error || module == nullptr)
-            return std::unexpected(ExtensionError::RuntimeUnavailable);
+            return std::unexpected(detail::extensionErrorOf(error.get()));
         primingCompilationCount.fetch_add(1);
         return Priming { .engine = std::move(engine), .module = detail::ModuleHandle { module } };
     }
 
     /// Instantiates @p priming's module and calls its function on the calling thread: what the engine does
     /// the first time a guest runs on a thread, and once in the process.
-    /// @return Nothing once it returned; `RuntimeUnavailable` if anything failed or trapped.
+    /// @return Nothing once it returned; `OutOfMemory` if instantiating or calling it ran out of memory
+    ///         (resourceErrorOf()); `RuntimeUnavailable` if anything else failed or it trapped.
     [[nodiscard]] std::expected<void, ExtensionError> runPriming(Priming const& priming)
     {
         auto const store = detail::StoreHandle { wasmtime_store_new(priming.engine.get(), nullptr, nullptr) };
@@ -414,7 +440,7 @@ namespace
             context, priming.module.get(), nullptr, 0, &instance, &rawTrap) };
         auto const trap = detail::TrapHandle { rawTrap };
         if (error || trap)
-            return std::unexpected(ExtensionError::RuntimeUnavailable);
+            return std::unexpected(detail::extensionErrorOf(error.get()));
         auto item = wasmtime_extern_t {};
         if (!wasmtime_instance_export_get(
                 context, &instance, PrimingExport.data(), PrimingExport.size(), &item))
@@ -429,7 +455,7 @@ namespace
             context, &item.of.func, nullptr, 0, nullptr, 0, &rawCallTrap) };
         auto const callTrap = detail::TrapHandle { rawCallTrap };
         if (callError || callTrap)
-            return std::unexpected(ExtensionError::RuntimeUnavailable);
+            return std::unexpected(detail::extensionErrorOf(callError.get()));
         return {};
     }
 
@@ -642,6 +668,25 @@ std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindStat
                                                         WasmtimeConfig config)
 {
     return std::make_unique<WasmtimeEngine>(std::move(kind), std::move(config));
+}
+
+ExtensionError detail::extensionErrorOf(wasmtime_error const* error)
+{
+    if (error == nullptr)
+        return ExtensionError::RuntimeUnavailable;
+    auto message = wasm_name_t {};
+    wasmtime_error_message(error, &message);
+    auto const kind = resourceErrorOf(std::string_view { message.data, message.size });
+    wasm_byte_vec_delete(&message);
+    return kind;
+}
+
+ExtensionError resourceErrorOf(std::string_view message) noexcept
+{
+    return std::ranges::any_of(ResourceErrorMarkers,
+                               [message](std::string_view marker) { return message.contains(marker); })
+               ? ExtensionError::OutOfMemory
+               : ExtensionError::RuntimeUnavailable;
 }
 
 } // namespace vtextension::wasm::wasmtime

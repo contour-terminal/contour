@@ -614,7 +614,9 @@ std::shared_ptr<IProcessLauncher> makeWin32ProcessLauncher(
 
 std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
 {
-    return makeWin32ProcessLauncher(systemAppContainerApi(), errorLogWriter());
+    return makeWin32ProcessLauncher(systemAppContainerApi(), [writer = logWriter()](std::string_view line) {
+        writer(LineSeverity::Error, line);
+    });
 }
 
 ProcessId currentProcessId() noexcept

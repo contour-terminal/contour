@@ -47,7 +47,7 @@ namespace
 /// @return A refusal log writer that drops every line: no case here that uses it starts a host.
 [[nodiscard]] vtextension::wasm::remote::HostRefusalLog::Writer ignoredLines()
 {
-    return [](std::string_view /*line*/) {
+    return [](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view /*line*/) {
     };
 }
 
@@ -55,7 +55,8 @@ namespace
 [[nodiscard]] vtextension::wasm::remote::HostRefusalLog::Writer recordingInto(
     std::shared_ptr<std::vector<std::string>> lines)
 {
-    return [lines = std::move(lines)](std::string_view line) {
+    return [lines = std::move(lines)](vtextension::wasm::remote::LineSeverity /*severity*/,
+                                      std::string_view line) {
         lines->emplace_back(line);
     };
 }

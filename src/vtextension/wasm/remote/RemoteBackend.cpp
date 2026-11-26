@@ -975,7 +975,7 @@ namespace
         BackendConfig _config;
         std::shared_ptr<IncarnationRoster> _roster = std::make_shared<IncarnationRoster>();
         /// Why its hosts were refused, each reason logged once for the backend.
-        std::shared_ptr<HostRefusalLog> _refusals = std::make_shared<HostRefusalLog>(errorLogWriter());
+        std::shared_ptr<HostRefusalLog> _refusals = std::make_shared<HostRefusalLog>(logWriter());
     };
 } // namespace
 

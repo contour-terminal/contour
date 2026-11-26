@@ -119,6 +119,10 @@ enum class LockdownStep : uint8_t
     WriteXorExecute,  ///< No memory both writable and executable (FreeBSD: PROC_WXMAP_CTL).
 };
 
+/// The last step: what lockdownSteps() ends at, checked there, and so what bounds every table and mask over
+/// the steps at compile time.
+inline constexpr auto LastLockdownStep = LockdownStep::WriteXorExecute;
+
 /// Which way a PDU travels.
 enum class Direction : uint8_t
 {

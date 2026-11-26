@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtextension/ExtensionError.hpp>
 #include <vtextension/wasm/remote/HostRefusals.hpp>
 #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
 #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
@@ -24,7 +25,11 @@
 using vtextension::wasm::remote::HostRefusal;
 using vtextension::wasm::remote::HostRefusalLog;
 using vtextension::wasm::remote::LastHostRefusal;
+using vtextension::wasm::remote::LineSeverity;
+using vtextension::wasm::remote::lockdownFailureRefusal;
 using vtextension::wasm::remote::refusalLine;
+using vtextension::wasm::remote::refusalPersistence;
+using vtextension::wasm::remote::RefusalPersistence;
 using vtextension::wasm::remote::RefusalSource;
 using vtextension::wasm::remote::refusalSource;
 using vtextension::wasm::remote::unavailableStepLine;
@@ -42,13 +47,15 @@ struct Lines
 {
     std::mutex mutex;
     std::vector<std::string> written;
+    std::vector<LineSeverity> severities; ///< Each line's, in order.
 
     /// @return A writer appending to these lines.
     [[nodiscard]] HostRefusalLog::Writer writer()
     {
-        return [this](std::string_view line) {
+        return [this](LineSeverity severity, std::string_view line) {
             auto const lock = std::scoped_lock { mutex };
             written.emplace_back(line);
+            severities.push_back(severity);
         };
     }
 };
@@ -145,6 +152,8 @@ TEST_CASE("HostRefusals.unavailableStepIsLoggedOnce", "[vtextension]")
     log.unavailable(proto::LockdownStep::FileSystem);
     log.unavailable(proto::LockdownStep::FileSystem);
     CHECK(lines.written == std::vector { unavailableStepLine(proto::LockdownStep::FileSystem) });
+    // Extensions run: a warning, not an error.
+    CHECK(lines.severities == std::vector { LineSeverity::Warning });
     auto const& line = lines.written.front();
     CHECK(line.contains(proto::lockdownStepText(proto::LockdownStep::FileSystem)));
     for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
@@ -189,4 +198,23 @@ TEST_CASE("HostRefusals.oneLineHoweverManyThreadsRefuse", "[vtextension][threadi
             });
     }
     CHECK(lines.written.size() == 1);
+}
+
+TEST_CASE("HostRefusals.primingOutOfMemoryDoesNotLast", "[vtextension]")
+{
+    // A host that could not prepare a thread for want of memory may well prepare it next time: refused for a
+    // reason that does not last. Any other priming failure, and every other step's, lasts.
+    using vtextension::ExtensionError;
+    auto const outOfMemory = lockdownFailureRefusal(
+        { .step = proto::LockdownStep::Priming, .code = std::to_underlying(ExtensionError::OutOfMemory) });
+    CHECK(outOfMemory == HostRefusal::OutOfResources);
+    CHECK(refusalPersistence(outOfMemory) == RefusalPersistence::Transient);
+    auto const unavailable =
+        lockdownFailureRefusal({ .step = proto::LockdownStep::Priming,
+                                 .code = std::to_underlying(ExtensionError::RuntimeUnavailable) });
+    CHECK(unavailable == HostRefusal::LockdownFailed);
+    CHECK(refusalPersistence(unavailable) == RefusalPersistence::Lasting);
+    CHECK(lockdownFailureRefusal({ .step = proto::LockdownStep::SystemCalls,
+                                   .code = std::to_underlying(ExtensionError::OutOfMemory) })
+          == HostRefusal::LockdownFailed);
 }

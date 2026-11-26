@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <tuple>
 #include <utility>
@@ -53,6 +54,14 @@ namespace
         auto const lock = std::scoped_lock { ownership.mutex };
         return ownership.holders > 0 && currentGeneration.load() == generation && body();
     }
+
+    /// What preparing a thread's environment came to.
+    enum class ThreadEnvInit : uint8_t
+    {
+        RuntimeDown, ///< No runtime of the generation asked for was up.
+        Refused,     ///< WAMR could not make the environment.
+        Ready,       ///< The environment is there.
+    };
 
     /// Whether the calling thread is the one that brought the running runtime up.
     [[nodiscard]] bool isInitializingThread()
@@ -124,8 +133,19 @@ std::expected<ThreadEnv, ExtensionError> ThreadEnv::enter()
     }
     // With no runtime up there is nothing to prepare the thread for, and on Windows WAMR would keep the
     // thread's state in a thread-local slot the runtime does not hold: its key is freed, or never was.
-    if (!whileRuntimeUp(generation, [] { return wasm_runtime_init_thread_env(); }))
-        return std::unexpected(ExtensionError::RuntimeUnavailable);
+    auto initialized = ThreadEnvInit::RuntimeDown;
+    std::ignore = whileRuntimeUp(generation, [&initialized] {
+        initialized = wasm_runtime_init_thread_env() ? ThreadEnvInit::Ready : ThreadEnvInit::Refused;
+        return true;
+    });
+    switch (initialized)
+    {
+        case ThreadEnvInit::RuntimeDown: return std::unexpected(ExtensionError::RuntimeUnavailable);
+        // All a thread's environment can fail at is allocating it: its record and the semaphore, mutex and
+        // condition WAMR makes for it on Windows (os_thread_env_init); on POSIX nothing fails.
+        case ThreadEnvInit::Refused: return std::unexpected(ExtensionError::OutOfMemory);
+        case ThreadEnvInit::Ready: break;
+    }
     ++threadEnvDepth;
     threadEnvGeneration = generation;
     return ThreadEnv { Hold::Owned, generation };

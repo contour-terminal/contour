@@ -308,7 +308,7 @@ enum class StandardStream : uint8_t
                                      // What is proved here is the parent's end, not the helper's confinement;
                                      // an uncontained helper starts under wine too.
                                      .isolation = process::ProcessIsolation::None },
-        vtextension::wasm::remote::errorLogWriter()
+        vtextension::wasm::remote::logWriter()
     };
     auto connection = connector.connect();
     if (!connection || recording->processIds().empty())

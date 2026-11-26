@@ -143,7 +143,7 @@ std::shared_ptr<ProcessHostConnector> HelperComposition::connector(HelperBackend
                                                                       .caps = {},
                                                                       .standardError = originalStandardError,
                                                                       .isolation = config.isolation },
-                                                  errorLogWriter());
+                                                  logWriter());
 }
 
 std::unique_ptr<IWasmBackend> HelperComposition::backend(HelperBackendConfig const& config) const

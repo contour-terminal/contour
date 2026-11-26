@@ -32,8 +32,8 @@ class ThreadEnv
 {
   public:
     /// Prepares the calling thread.
-    /// @return The guard; `RuntimeUnavailable` if no runtime is up or the runtime could not set up the
-    ///         thread.
+    /// @return The guard; `RuntimeUnavailable` if no runtime is up, `OutOfMemory` if the runtime could not
+    ///         allocate the thread's environment.
     [[nodiscard]] static std::expected<ThreadEnv, ExtensionError> enter();
 
     ThreadEnv(ThreadEnv&& other) noexcept;
