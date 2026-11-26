@@ -938,6 +938,8 @@ QColor UiStyleProvider::rowBandFillColor(int fill) const
         case config::BandFill::Clear: return { Qt::transparent };
         case config::BandFill::Tint: return orPaletteWindow(legibleBandTint(background, tone));
         case config::BandFill::Background: return orPaletteWindow(legibleBandBackground(background, tone));
+        case config::BandFill::Bar:
+            return platform::toQColor(_inputs.scheme.bySlot[static_cast<size_t>(config::SchemeSlot::Bar)]);
         case config::BandFill::FrostTint:
         case config::BandFill::GlassTint:
             return platform::atOpacity(orPaletteWindow(legibleBandTint(background, tone)),

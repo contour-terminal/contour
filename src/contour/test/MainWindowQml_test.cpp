@@ -4047,7 +4047,7 @@ TEST_CASE("the Fluent band is cleared over Mica, and tinted without it (offscree
     }
 }
 
-TEST_CASE("the Terminal row's band keeps the palette and one cell (offscreen)",
+TEST_CASE("the Terminal row's band is its bar, one cell high (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
     QQmlEngine engine;
@@ -4056,7 +4056,10 @@ TEST_CASE("the Terminal row's band keeps the palette and one cell (offscreen)",
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
     showWindow(*root);
     REQUIRE(controller.titleBandHeight() == 0);
-    CHECK(bandBackgroundOf(*root) == QGuiApplication::palette().color(QPalette::Window));
+    // The scheme's bar colour, as the row's sidebar and tabs are, whose ink everything on the band takes.
+    auto const* colors = chromeStyleOf(engine).property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    CHECK(bandBackgroundOf(*root) == colors->property("bannerFill").value<QColor>());
     CHECK(named(*root, QStringLiteral("titleBar")).height()
           == chromeStyleOf(engine).property("cellHeight").toReal());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

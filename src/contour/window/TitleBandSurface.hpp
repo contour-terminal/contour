@@ -77,6 +77,13 @@ struct TitleBandSurfaceRow
 /// Both grow the title bar by the toolbar as the Solid band does. KDE Plasma's bands are the Blurred
 /// backdrop over KWin's blur, under a translucent tint, with no title bar to grow.
 inline constexpr auto TitleBandSurfaceRows = std::array {
+    // The Terminal row's band is its bar, in the scheme's bar colour as its sidebar and tabs are: its inks
+    // are the bar's, which read on the bar alone, not on the palette's window a light appearance paints.
+    TitleBandSurfaceRow { .style = config::ChromeStyle::Terminal,
+                          .material = config::Material::None,
+                          .surface = { .backdrop = config::BandBackdrop::Client,
+                                       .fill = config::BandFill::Bar,
+                                       .growth = config::TitleBarGrowth::None } },
     TitleBandSurfaceRow { .style = config::ChromeStyle::MacOS,
                           .material = config::Material::Frost,
                           .surface = { .backdrop = config::BandBackdrop::Blurred,

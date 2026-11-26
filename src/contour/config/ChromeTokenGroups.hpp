@@ -88,10 +88,13 @@ enum class BandFill : uint8_t
     Background,  //!< The terminal background itself (Minimal's bare band).
     FrostTint,   //!< The tint, mostly opaque, so a blurred backdrop colours it softly.
     GlassTint,   //!< The tint, clearly translucent, so a blurred backdrop shows through.
+    /// The scheme's bar colour (SchemeSlot::Bar): the Terminal row's band, whose inks are the bar's
+    /// (SchemeSlot::BarInk), so they read on it whatever the palette's window is.
+    Bar,
 };
 
 /// Number of @c BandFill enumerators, derived from the last one.
-inline constexpr size_t BandFillCount = static_cast<size_t>(BandFill::GlassTint) + 1;
+inline constexpr size_t BandFillCount = static_cast<size_t>(BandFill::Bar) + 1;
 
 /// What draws the tabs' own surfaces in the title band.
 enum class TabSurface : uint8_t
@@ -117,7 +120,8 @@ enum class TabSurface : uint8_t
         case BandFill::Palette:
         case BandFill::Clear:
         case BandFill::Tint:
-        case BandFill::Background: break;
+        case BandFill::Background:
+        case BandFill::Bar: break;
     }
     return 100;
 }
