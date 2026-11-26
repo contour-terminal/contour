@@ -15,13 +15,17 @@
 
 #include <core/Clock.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -128,20 +132,87 @@ enum class ExitKind : uint8_t
 {
     Exited,    ///< It exited; the value is its exit code.
     Signalled, ///< A signal ended it; the value is the signal's number (POSIX).
+    Lost,      ///< It ended, but how is not known: another reaped it, or it could not be waited for.
 };
 
 /// How a process ended, and with what.
 struct ExitStatus
 {
     ExitKind kind = ExitKind::Exited;
-    int value = 0; ///< The exit code, or the signal's number.
+    int value = 0; ///< The exit code, or the signal's number; 0 where its status was lost.
 
     bool operator==(ExitStatus const&) const = default;
 };
 
 /// How a process ended that another reaped -- a SIGCHLD handler of this process's -- or that could not be
-/// waited for: its status is lost.
-inline constexpr auto LostExitStatus = ExitStatus { .kind = ExitKind::Exited, .value = -1 };
+/// waited for: its status is lost. A kind of its own, so that no exit code a process really ends with --
+/// 0xFFFFFFFF on Windows -- reads as lost.
+inline constexpr auto LostExitStatus = ExitStatus { .kind = ExitKind::Lost, .value = 0 };
+
+/// How an ExitStatus's value is spelled in a log line.
+enum class ExitValueSpelling : uint8_t
+{
+    None,     ///< Not at all: there is none.
+    Decimal,  ///< In decimal.
+    ExitCode, ///< In decimal, or -- negative, an NTSTATUS -- in hex, with its KnownExitCodes reason.
+};
+
+/// One ExitKind: what a log line calls it, and how it spells the value.
+struct ExitKindRow
+{
+    ExitKind kind;              ///< The kind.
+    std::string_view text;      ///< What a log line says of it, before the value.
+    ExitValueSpelling spelling; ///< How it spells the value.
+};
+
+/// Every ExitKind, one row each, at its enumerator's index.
+inline constexpr auto ExitKinds = std::to_array<ExitKindRow>({
+    { .kind = ExitKind::Exited, .text = "exit code", .spelling = ExitValueSpelling::ExitCode },
+    { .kind = ExitKind::Signalled, .text = "signal", .spelling = ExitValueSpelling::Decimal },
+    { .kind = ExitKind::Lost, .text = "its exit status was lost", .spelling = ExitValueSpelling::None },
+});
+static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ExitKinds.size()),
+                                  [](std::size_t index) {
+                                      return std::to_underlying(ExitKinds[index].kind) == index;
+                                  })
+                  && ExitKinds.back().kind == ExitKind::Lost,
+              "ExitKinds holds every ExitKind at its enumerator's index");
+
+/// An exit code that says why a process ended: on Windows, an NTSTATUS the loader ends a process with before
+/// its main() runs. POSIX exit codes are 0 to 255, so none of these is mistaken for one.
+struct KnownExitCode
+{
+    uint32_t code;           ///< The exit code, as its bits read unsigned.
+    std::string_view reason; ///< Why the process ended, completing "it ended: ...".
+};
+
+/// Every exit code with a reason of its own.
+inline constexpr auto KnownExitCodes = std::to_array<KnownExitCode>({
+    { .code = 0xC0000022, .reason = "access was denied (STATUS_ACCESS_DENIED)" },
+    { .code = 0xC0000135, .reason = "a library it needs was not found (STATUS_DLL_NOT_FOUND)" },
+    { .code = 0xC0000142, .reason = "a library it loads failed to initialise (STATUS_DLL_INIT_FAILED)" },
+});
+
+/// @return How @p status says a process ended, for a log line: its ExitKinds row's text, then its value --
+///         `its exit status was lost`, `signal N`, `exit code N`, or for a negative exit code, an NTSTATUS,
+///         `exit code 0xXXXXXXXX`, with its reason where KnownExitCodes has one.
+[[nodiscard]] inline std::string exitStatusText(ExitStatus status)
+{
+    auto const& row = ExitKinds[std::to_underlying(status.kind)];
+    switch (row.spelling)
+    {
+        case ExitValueSpelling::None: return std::string { row.text };
+        case ExitValueSpelling::Decimal: return std::format("{} {}", row.text, status.value);
+        case ExitValueSpelling::ExitCode: break;
+    }
+    if (status.value >= 0)
+        return std::format("{} {}", row.text, status.value);
+    auto const code = static_cast<uint32_t>(status.value);
+    auto const known = std::ranges::find(KnownExitCodes, code, &KnownExitCode::code);
+    if (known == KnownExitCodes.end())
+        return std::format("{} 0x{:08X}", row.text, code);
+    return std::format("{} 0x{:08X}: {}", row.text, code, known->reason);
+}
 
 /// The caps on a child's resources.
 struct ResourceCaps

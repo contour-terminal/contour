@@ -258,10 +258,11 @@ namespace
                 case WAIT_TIMEOUT: return std::nullopt;
                 default: return std::unexpected(launchErrorOf(::GetLastError()));
             }
+            // Ended, but its code could not be read: lost, rather than a code it may really have ended with.
             auto code = DWORD { 0 };
-            if (!::GetExitCodeProcess(_process.get(), &code))
-                code = static_cast<DWORD>(-1);
-            _status = ExitStatus { .kind = ExitKind::Exited, .value = static_cast<int>(code) };
+            _status = ::GetExitCodeProcess(_process.get(), &code)
+                          ? ExitStatus { .kind = ExitKind::Exited, .value = static_cast<int>(code) }
+                          : LostExitStatus;
             return _status;
         }
 

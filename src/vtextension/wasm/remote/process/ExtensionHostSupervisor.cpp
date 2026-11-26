@@ -701,9 +701,7 @@ void SupervisorLoop::reapEnded(Observation observation)
         if (isUnclean(status, helper.killed))
         {
             ++_counters.uncleanExits;
-            errorLog()("An extension host ended unexpectedly ({} {}).",
-                       status.kind == ExitKind::Exited ? "exit code" : "signal",
-                       status.value);
+            errorLog()("An extension host ended unexpectedly ({}).", exitStatusText(status));
         }
         announceDeath(helper);
         if (helper.holding == Holding::Dropped)

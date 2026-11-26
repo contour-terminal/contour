@@ -135,9 +135,7 @@ namespace
     {
         if (!status)
             return "it still runs, or could not be waited for";
-        if (status->kind == ExitKind::Exited)
-            return std::format("it exited with 0x{:08X}", static_cast<uint32_t>(status->value));
-        return std::format("a signal ended it: {}", status->value);
+        return std::format("it ended: {}", exitStatusText(*status));
     }
 
     /// @return @p ending, then what the process wrote: @p written.

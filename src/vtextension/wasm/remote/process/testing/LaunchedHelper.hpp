@@ -86,9 +86,9 @@ class CapturedStandardError
 /// as it ended is not lost.
 using StandardErrorReader = std::function<std::string()>;
 
-/// Reaps @p process, which ended before it did what it was started for, and says how it ended: its exit
-/// code in hex, so that an NTSTATUS such as 0xC0000135 (a DLL not found) or 0xC0000022 (access denied) is
-/// recognised, or its signal; then what it wrote, read through @p standardError once it was reaped.
+/// Reaps @p process, which ended before it did what it was started for, and says how it ended
+/// (exitStatusText(), which names an NTSTATUS such as 0xC0000142 and why); then what it wrote, read through
+/// @p standardError once it was reaped.
 /// @return One line for a test's INFO or FAIL.
 [[nodiscard]] std::string endOf(IProcessLauncher& launcher,
                                 IProcessHandle& process,

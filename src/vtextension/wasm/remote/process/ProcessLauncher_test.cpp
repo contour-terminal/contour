@@ -140,6 +140,28 @@ struct ProbeOptions
 
 } // namespace
 
+TEST_CASE("ProcessLauncher.exitStatusSaysWhyWhereItKnows", "[vtextension]")
+{
+    struct Row
+    {
+        ExitStatus status;
+        std::string_view text;
+    };
+    auto const rows = std::to_array<Row>({
+        { .status = process::LostExitStatus, .text = "its exit status was lost" },
+        { .status = { .kind = ExitKind::Exited, .value = 3 }, .text = "exit code 3" },
+        { .status = { .kind = ExitKind::Signalled, .value = 9 }, .text = "signal 9" },
+        // A process that really exits with 0xFFFFFFFF is not one whose status was lost.
+        { .status = { .kind = ExitKind::Exited, .value = -1 }, .text = "exit code 0xFFFFFFFF" },
+        { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000005U) },
+          .text = "exit code 0xC0000005" },
+        { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000142U) },
+          .text = "exit code 0xC0000142: a library it loads failed to initialise (STATUS_DLL_INIT_FAILED)" },
+    });
+    for (auto const& row: rows)
+        CHECK(process::exitStatusText(row.status) == row.text);
+}
+
 TEST_CASE("ProcessLauncher.childGetsACleanEnvironment", "[vtextension]")
 {
     auto const leak = core::testing::ScopedEnv { "VTEXTENSION_LEAK", "1" };
