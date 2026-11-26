@@ -22,3 +22,7 @@ src/contour/config/testdata/*.txt text eol=lf
 # CRLF checkout would change both, so the text stays LF and the stream is never converted.
 src/vtbackend/state/golden/*.txt text eol=lf
 src/vtbackend/state/golden/*.bin binary
+
+# The patches applied to fetched dependencies (cmake/ApplyPatchOnce.cmake) are `git apply`-ed to trees checked out
+# with LF: a CRLF checkout of a patch would match none of their lines.
+cmake/patches/*.patch -text

@@ -372,6 +372,17 @@ if(CONTOUR_TESTING)
         # bundle, on every platform, without codesign.
         contour_add_lint_gate(check_macos_bundle_selftest macos-bundle.py --self-test)
 
+        # How a fetched dependency's patch is applied (cmake/ApplyPatchOnce.cmake): an unpatched tree is patched,
+        # a patched one left alone, a half-patched one refused, without a terminal to answer any question.
+        find_package(Git QUIET)
+        if(GIT_EXECUTABLE)
+            add_test(NAME check_apply_patch_once_selftest
+                     COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
+                             -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/apply-patch-once-test"
+                             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApplyPatchOnceTest.cmake")
+            list(APPEND CONTOUR_LINT_GATES check_apply_patch_once_selftest)
+        endif()
+
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.

@@ -57,6 +57,18 @@ constexpr auto IdleModule = std::to_array<std::uint8_t>({
     0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,                         // 0: (empty)
 });
 
+/// Exports a function that returns and one that traps:
+/// (module (func (export "idle")) (func (export "trap") unreachable)).
+constexpr auto TrapModule = std::to_array<std::uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,             // magic, version
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                         // type 0: () -> ()
+    0x03, 0x03, 0x02, 0x00, 0x00,                               // func 0, 1: type 0
+    0x07, 0x0f, 0x02, 0x04, 'i',  'd',  'l',  'e',  0x00, 0x00, // export "idle" = 0
+    0x04, 't',  'r',  'a',  'p',  0x00, 0x01,                   // export "trap" = 1
+    0x0a, 0x08, 0x02, 0x02, 0x00, 0x0b,                         // 0: (empty)
+    0x03, 0x00, 0x00, 0x0b,                                     // 1: unreachable
+});
+
 /// Calls a host function taking no parameter at all:
 /// (module (import "arity" "nop" (func)) (func (export "call-nop") (call 0))).
 constexpr auto ZeroArityModule = std::to_array<std::uint8_t>({
@@ -225,9 +237,7 @@ TEST_CASE("Wamr.registrationsRaceLoads", "[threading]")
     // several threads while each loads and instantiates a module importing its own: no load may walk a node
     // another thread frees (ThreadSanitizer and AddressSanitizer see it if one does), and every load links
     // the import to the function its own runtime registered. (Catch2's assertions are not thread-safe: the
-    // workers count, the test thread checks.) Nothing is called here: clearing an instance's exception walks
-    // WAMR's list of thread clusters, which destroying another instance's environment changes unlocked -- a
-    // race of WAMR's own, apart from this one.
+    // workers count, the test thread checks.) Calls racing unloads are Wamr.callsAndTrapsRaceUnloads'.
     namespace contract = vtextension::wasm::testing::contract;
     using vtextension::wasm::HostFunction;
     constexpr auto Workers = std::size_t { 4 };
@@ -273,6 +283,52 @@ TEST_CASE("Wamr.registrationsRaceLoads", "[threading]")
                         return;
                     auto context = contract::RecordingHostContext {};
                     if (!(*module)->instantiate(context))
+                        return;
+                    ++served.at(worker);
+                }
+            });
+    }
+
+    for (auto const count: served)
+        CHECK(count == Rounds);
+}
+
+TEST_CASE("Wamr.callsAndTrapsRaceUnloads", "[threading]")
+{
+    // Setting or clearing an instance's exception -- every call clears it, every trap sets it -- walks WAMR's
+    // list of every instance's thread cluster, which destroying an instance's execution environment unlinks
+    // from. Instances are called, trap and are dropped on several threads at once: no walk may read a link
+    // another thread writes unlocked (ThreadSanitizer sees it if one does; WAMR is patched for it,
+    // cmake/patches/). Every call returns and every trap is reported. (Catch2's assertions are not
+    // thread-safe: the workers count, the test thread checks.)
+    namespace contract = vtextension::wasm::testing::contract;
+    constexpr auto Workers = std::size_t { 4 };
+    static constexpr auto Rounds = 100;
+
+    auto const backend = makeWamrBackend();
+    auto const runtime = contract::createRuntime(*backend);
+
+    auto served = std::array<int, Workers> {};
+    {
+        auto workers = std::vector<std::jthread> {};
+        for (auto const worker: std::views::iota(std::size_t { 0 }, Workers))
+            workers.emplace_back([&backend, &runtime, &served, worker] {
+                auto const guard = backend->enterThread();
+                if (!guard)
+                    return;
+                for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+                {
+                    auto const module = runtime->load(vtextension::wasm::ModuleIdentity {},
+                                                      vtextension::testing::toModule(TrapModule));
+                    if (!module)
+                        return;
+                    auto context = contract::RecordingHostContext {};
+                    auto const instance = (*module)->instantiate(context);
+                    if (!instance)
+                        return;
+                    auto const idle = (*instance)->function("idle");
+                    auto const trap = (*instance)->function("trap");
+                    if (!idle || !trap || !(*instance)->call(*idle, {}) || (*instance)->call(*trap, {}))
                         return;
                     ++served.at(worker);
                 }

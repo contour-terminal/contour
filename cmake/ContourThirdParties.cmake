@@ -263,7 +263,7 @@ if(CONTOUR_EXTENSIONS)
     set(_wamr_rejected "")
     if(TARGET iwasm::vmlib)
         set(_wamr_target iwasm::vmlib)
-        set(THIRDPARTY_BUILTIN_wamr "embedded")
+        set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's thread-safety patch")
     elseif(NOT CONTOUR_BUILD_STATIC)
         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
         set(_wamr_candidate "")
@@ -282,7 +282,8 @@ if(CONTOUR_EXTENSIONS)
             ContourThirdParties_WamrTerminates(${_wamr_candidate} _wamr_terminates)
             if(_wamr_terminates)
                 set(_wamr_target ${_wamr_candidate})
-                set(THIRDPARTY_BUILTIN_wamr "system package (wasm_runtime_terminate verified)")
+                set(THIRDPARTY_BUILTIN_wamr
+                    "system package, without Contour's thread-safety patch (its interrupt verified)")
             else()
                 set(_wamr_rejected "${_wamr_terminates_REASON}")
                 message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
@@ -304,11 +305,26 @@ if(CONTOUR_EXTENSIONS)
                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
         endif()
         message(STATUS "Using CPM to fetch WAMR")
+        set(_wamr_patch "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch")
+        file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
+        string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
+        # git applies it (cmake/ApplyPatchOnce.cmake); CPM, which clones WAMR, needs git already.
+        find_package(Git REQUIRED)
         CPMAddPackage(
             NAME wamr
             VERSION ${WAMR_MINIMAL_VERSION}
             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
+            # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
+            # while setting or clearing any instance's exception walks every cluster under that lock: a data
+            # race between one extension's call or trap and another's unload. The patch unlinks under the lock.
+            # An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory, as
+            # the cluster and the environment are freed only after the walk's list lock is released. Applied
+            # once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a patched tree succeeds; the
+            # patch's own hash keys the source cache, so that a changed patch is never served an old tree.
+            PATCH_COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
+                          -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake"
+            CUSTOM_CACHE_KEY "25bd7eb63e82-${_wamr_patch_hash}"
             OPTIONS
                 "WAMR_BUILD_INTERP 1"
                 "WAMR_BUILD_FAST_INTERP 1"
@@ -380,7 +396,8 @@ if(CONTOUR_EXTENSIONS)
             target_compile_options(vmlib PRIVATE $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>)
         endif()
         set(_wamr_target vmlib)
-        set(THIRDPARTY_BUILTIN_wamr "CPM (WAMR-${WAMR_MINIMAL_VERSION}, static, fast interpreter)")
+        set(THIRDPARTY_BUILTIN_wamr
+            "CPM (${WAMR_MINIMAL_VERSION}, static, fast interpreter, with Contour's thread-safety patch)")
         if(_wamr_rejected)
             string(APPEND THIRDPARTY_BUILTIN_wamr "; system WAMR rejected: ${_wamr_rejected}")
         endif()
