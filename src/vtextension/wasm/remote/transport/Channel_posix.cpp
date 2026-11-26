@@ -15,6 +15,10 @@
 // in fail. There, a send goes out only once poll() says the socket is writable -- room for at least its
 // send low-water mark -- and is no larger than that mark, which XNU then takes without waiting. Only one
 // thread sends on an end at a time, so the room only grows in between.
+//
+// A send to a peer that shut its end down fails with Closed. macOS takes such a send and drops the bytes
+// (XNU's uipc_send() never asks whether the peer still reads), so there every send first asks poll()
+// whether this end's receiving side saw the peer's stream end.
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -141,12 +145,23 @@ namespace
                   ///< non-blocking state and MSG_NBIO).
     };
 
+    /// What a send to a peer that shut its end down comes to.
+    enum class SendToEndedPeer : uint8_t
+    {
+        Fails,   ///< It fails with EPIPE (Linux, FreeBSD).
+        Dropped, ///< It is taken, and the bytes dropped (macOS: XNU's uipc_send() asks only whether the
+                 ///< sender may still send, and appends to the peer's receive buffer, which shutdown() set to
+                 ///< drop what arrives). The send must ask first whether the peer's stream ended.
+    };
+
 #ifdef __APPLE__
     constexpr auto ThisSystemUnclaimedDescriptors = UnclaimedDescriptors::Installed;
     constexpr auto ThisSystemDontWaitSend = DontWaitSend::Ignored;
+    constexpr auto ThisSystemSendToEndedPeer = SendToEndedPeer::Dropped;
 #else
     constexpr auto ThisSystemUnclaimedDescriptors = UnclaimedDescriptors::Disposed;
     constexpr auto ThisSystemDontWaitSend = DontWaitSend::Honoured;
+    constexpr auto ThisSystemSendToEndedPeer = SendToEndedPeer::Fails;
 #endif
 
     /// How many descriptors a receive takes in at least: one more than a message may carry, so that a peer
@@ -242,10 +257,43 @@ Channel::~Channel() = default;
 Channel::Channel(Channel&&) noexcept = default;
 Channel& Channel::operator=(Channel&&) noexcept = default;
 
+namespace
+{
+    /// Refuses a send on @p descriptor whose peer's stream ended, where the system would take it and drop it
+    /// (SendToEndedPeer::Dropped). The peer's shutdown() or close ends this end's receiving side: its read
+    /// filter reports end of stream, which poll() says as POLLHUP, even with bytes still to be read.
+    ///
+    /// It asks whether this end's receiving side ended, which says the peer's whole stream ended only because
+    /// no end is ever shut one way alone: Channel::shutdown() is the only shutdown, and shuts both ways
+    /// (SHUT_RDWR). A peer that shut only its sending side would make this refuse sends it still reads.
+    /// @return Nothing where the send may go ahead; `Closed` where the peer's stream ended; `Io` where asking
+    ///         failed.
+    [[nodiscard]] std::expected<void, ChannelError> refuseSendToEndedPeer(int descriptor) noexcept
+    {
+        if constexpr (ThisSystemSendToEndedPeer == SendToEndedPeer::Fails)
+            return {};
+        else
+        {
+            auto ready = ::pollfd { .fd = descriptor, .events = POLLIN, .revents = 0 };
+            auto polled = 0;
+            do
+                polled = ::poll(&ready, 1, 0);
+            while (polled == -1 && errno == EINTR);
+            if (polled == -1)
+                return std::unexpected(ChannelError::Io);
+            if ((ready.revents & POLLHUP) != 0)
+                return std::unexpected(ChannelError::Closed);
+            return {};
+        }
+    }
+} // namespace
+
 std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
 {
     while (!bytes.empty())
     {
+        if (auto const refused = refuseSendToEndedPeer(_native->descriptor); !refused)
+            return refused;
         auto const sent = ::send(_native->descriptor, bytes.data(), bytes.size(), SendFlags);
         if (sent == -1)
         {
@@ -263,26 +311,38 @@ namespace
     /// @return How many bytes of @p bytes, from the front, one send on @p descriptor may be given without
     ///         waiting for room: all of them where the send honours MSG_DONTWAIT; elsewhere at most the
     ///         socket's send low-water mark, once poll() says it is writable, and none (0) while it is not.
-    ///         -1, with errno set, where asking failed.
-    [[nodiscard]] ssize_t sendableWithoutWaiting(int descriptor, std::span<uint8_t const> bytes) noexcept
+    ///         `Closed` where the peer's stream ended and the system would drop the send
+    ///         (refuseSendToEndedPeer()); `Io` where asking failed.
+    [[nodiscard]] std::expected<std::size_t, ChannelError> sendableWithoutWaiting(
+        int descriptor, std::span<uint8_t const> bytes) noexcept
     {
         if constexpr (ThisSystemDontWaitSend == DontWaitSend::Honoured)
-            return static_cast<ssize_t>(bytes.size());
+            return refuseSendToEndedPeer(descriptor).transform([&] { return bytes.size(); });
         else
         {
-            auto ready = ::pollfd { .fd = descriptor, .events = POLLOUT, .revents = 0 };
-            auto const polled = ::poll(&ready, 1, 0);
+            // One poll asks both: whether there is room (POLLOUT), and, where the system would drop a send to
+            // a peer whose stream ended, whether it did (the receiving side's end of stream, POLLHUP).
+            constexpr auto AsksForEndedPeer = ThisSystemSendToEndedPeer == SendToEndedPeer::Dropped;
+            constexpr auto Events = static_cast<short>(AsksForEndedPeer ? POLLOUT | POLLIN : POLLOUT);
+            auto ready = ::pollfd { .fd = descriptor, .events = Events, .revents = 0 };
+            auto polled = 0;
+            do
+                polled = ::poll(&ready, 1, 0);
+            while (polled == -1 && errno == EINTR);
             if (polled == -1)
-                return -1;
-            // A peer that is gone, or an error pending, is what the send reports: let it.
+                return std::unexpected(ChannelError::Io);
+            if constexpr (AsksForEndedPeer)
+                if ((ready.revents & POLLHUP) != 0)
+                    return std::unexpected(ChannelError::Closed);
+            // No room, and nothing for the send to report: none now. An error pending, or this end's own
+            // shutdown, is what the send reports, with the errno it fails with: let it.
             if (polled == 0 || (ready.revents & (POLLOUT | POLLHUP | POLLERR)) == 0)
                 return 0;
             auto lowWater = 0;
             auto length = static_cast<socklen_t>(sizeof(lowWater));
             if (::getsockopt(descriptor, SOL_SOCKET, SO_SNDLOWAT, &lowWater, &length) == -1)
-                return -1;
-            return static_cast<ssize_t>(
-                std::min(bytes.size(), static_cast<std::size_t>(std::max(lowWater, 1))));
+                return std::unexpected(ChannelError::Io);
+            return std::min(bytes.size(), static_cast<std::size_t>(std::max(lowWater, 1)));
         }
     }
 } // namespace
@@ -294,16 +354,11 @@ std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t cons
     {
         auto const rest = bytes.subspan(sent);
         auto const sendable = sendableWithoutWaiting(_native->descriptor, rest);
-        if (sendable == -1)
-        {
-            if (errno == EINTR)
-                continue;
-            return std::unexpected(channelErrorOf(errno));
-        }
-        if (sendable == 0)
+        if (!sendable)
+            return std::unexpected(sendable.error());
+        if (*sendable == 0)
             break;
-        auto const count = ::send(
-            _native->descriptor, rest.data(), static_cast<std::size_t>(sendable), SendFlags | MSG_DONTWAIT);
+        auto const count = ::send(_native->descriptor, rest.data(), *sendable, SendFlags | MSG_DONTWAIT);
         if (count == -1)
         {
             if (errno == EINTR)
@@ -483,6 +538,8 @@ std::expected<void, ChannelError> Channel::sendWithHandle(std::span<uint8_t cons
     std::memcpy(CMSG_DATA(header), &handle, sizeof(int));
     while (true)
     {
+        if (auto const refused = refuseSendToEndedPeer(_native->descriptor); !refused)
+            return refused;
         auto const sent = ::sendmsg(_native->descriptor, &message, SendFlags);
         if (sent == -1)
         {
@@ -522,6 +579,8 @@ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::sp
 
 void Channel::shutdown() noexcept
 {
+    // Both ways, always: the peer's refuseSendToEndedPeer() reads its receiving side ending as this end's
+    // whole stream ending.
     if (_native)
         ::shutdown(_native->descriptor, SHUT_RDWR);
 }

@@ -400,6 +400,18 @@ TEST_CASE("Channel.handleTravelsWithItsBytes", "[vtextension]")
     CHECK(none.empty());
 }
 
+TEST_CASE("Channel.sendWithHandleToAShutDownPeerIsClosed", "[vtextension]")
+{
+    // As a plain send: once the peer's end is shut down, a send with a descriptor attached fails Closed --
+    // on macOS, which would take it and drop it, because it asks first.
+    auto pair = makeChannelPair();
+    REQUIRE(pair.has_value());
+    pair->helper.shutdown();
+    auto const pipe = makePipe();
+    auto const bytes = std::array<uint8_t, 4> { 1, 2, 3, 4 };
+    CHECK(pair->parent.sendWithHandle(bytes, pipe.writer.get()) == std::unexpected(ChannelError::Closed));
+}
+
     #ifdef __linux__
 TEST_CASE("Channel.parentEndRefusesDescriptors", "[vtextension]")
 {
