@@ -206,6 +206,13 @@ constexpr auto ForbiddenOperations = std::array {
     Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
     Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = EPERM },
+    // Every socket is refused as it is made, whatever the family, so whatever it would have been used for is.
+    Expectation { .op = "sendto-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "listen-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "bind-unix", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "socket-route", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "list-interfaces", .fate = Fate::Refused, .error = EPERM },
     Expectation { .op = "send-descriptor", .fate = Fate::Killed },
     Expectation { .op = "fork", .fate = Fate::Killed },
     Expectation { .op = "spawn-thread", .fate = Fate::Killed },
@@ -233,6 +240,14 @@ constexpr auto ForbiddenOperations = std::array {
     Expectation { .op = "socket-inet", .fate = Fate::Allowed },
     Expectation { .op = "socket-unix", .fate = Fate::Allowed },
     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "sendto-inet", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "listen-inet", .fate = Fate::Refused, .error = ECAPMODE },
+    Expectation { .op = "bind-unix", .fate = Fate::Refused, .error = ECAPMODE },
+    // What capability mode says of a routing socket, and of listing the interfaces through a socket,
+    // recorded.
+    Expectation { .op = "socket-route", .fate = Fate::Unasserted },
+    Expectation { .op = "list-interfaces", .fate = Fate::Unasserted },
     Expectation { .op = "ioctl-control", .fate = Fate::Refused, .error = ENOTCAPABLE },
     Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
     Expectation { .op = "fork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
@@ -245,24 +260,41 @@ constexpr auto ForbiddenOperations = std::array {
     Expectation { .op = "protect-writable-executable", .fate = Fate::Refused, .error = EACCES },
 };
 #elifdef __APPLE__
-// The profile refuses what it does not allow with EPERM: a file, a socket of any family, a new process, a
-// program, a signal to another process. A Mach service lookup it refuses is refused as unprivileged.
+// The profile refuses what it does not allow with EPERM: a file, an address of any family, a new process, a
+// program, a signal to another process. A Mach service lookup it refuses is refused as unprivileged. It does
+// not refuse a new Internet or Unix-domain socket: the first macOS run made both under the profile that, in
+// the same run, refused every file, connect, fork and lookup above -- so it was in force, and Seatbelt does
+// not ask it about these sockets' creation. What such a socket would be for is refused, and asserted here:
+// reaching an address by connect (by number and by path) or by an unconnected datagram (sendto-inet), and
+// being reached -- bound and listening on a number, or bound to a path. Seatbelt asks the profile at each of
+// these as the kernel's MAC hooks do (network-outbound, network-bind) before the call goes on, as it did for
+// connect-inet in that run. What it says of the sockets other families make -- routing (AF_ROUTE), kernel
+// control (AF_SYSTEM) -- and of listing the interfaces is recorded until a run shows it.
 constexpr auto ForbiddenOperations = std::array {
     Expectation { .op = "open-file", .fate = Fate::Refused, .error = EPERM },
     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EPERM },
-    Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
-    Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "socket-inet", .fate = Fate::Allowed },
+    Expectation { .op = "socket-unix", .fate = Fate::Allowed },
     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "sendto-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "listen-inet", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "bind-unix", .fate = Fate::Refused, .error = EPERM },
+    Expectation { .op = "socket-route", .fate = Fate::Unasserted },
+    Expectation { .op = "socket-system", .fate = Fate::Unasserted },
+    Expectation { .op = "list-interfaces", .fate = Fate::Unasserted },
     Expectation { .op = "fork", .fate = Fate::Refused, .error = EPERM },
     Expectation { .op = "execve", .fate = Fate::Refused, .error = EPERM },
     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = EPERM },
     Expectation { .op = "mach-lookup", .fate = Fate::Refused, .error = BOOTSTRAP_NOT_PRIVILEGED },
     // What the profile leaves to other guards, or the system decides on its own, recorded: a descriptor sent
-    // up (Contour's end discards it), tracing, a thread, and memory both writable and executable.
+    // up (Contour's end discards it), tracing, a thread, memory both writable and executable, and memory for
+    // code made at run time (MAP_JIT), which no engine of the host maps (cmake/patches/).
     Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
     Expectation { .op = "ptrace-traceme", .fate = Fate::Unasserted },
     Expectation { .op = "spawn-thread", .fate = Fate::Unasserted },
     Expectation { .op = "protect-writable-executable", .fate = Fate::Unasserted },
+    Expectation { .op = "map-jit", .fate = Fate::Unasserted },
 };
 #endif
 

@@ -7,13 +7,19 @@
 #include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/un.h>
 #include <sys/wait.h>
+
+#include <net/if.h>
 #ifdef __linux__
     #include <sys/prctl.h>
 #elifdef __FreeBSD__
     #include <sys/procctl.h>
     #include <sys/procdesc.h>
+    #include <sys/sockio.h>
 #elifdef __APPLE__
+    #include <sys/sockio.h>
+    #include <sys/sys_domain.h>
     #include <sys/sysctl.h>
 
     #include <mach/mach.h>
@@ -114,6 +120,18 @@ namespace
     constexpr auto ReadableFile = "/etc/hostname";
 #endif
 
+    /// A program every system has, which no locked-down host may run: macOS has no /bin/true.
+#ifdef __APPLE__
+    constexpr auto RunnableProgram = "/usr/bin/true";
+#else
+    constexpr auto RunnableProgram = "/bin/true";
+#endif
+
+    /// A Unix-domain socket the system listens on, which no locked-down host may reach. Linux and FreeBSD
+    /// refuse before the path is looked at, so it need exist only on macOS, whose profile refuses the
+    /// connect.
+    constexpr auto ListeningSocketPath = std::string_view { "/var/run/syslog" };
+
     /// The type of the sockets the ops make: close-on-exec where the system takes it at creation.
 #ifdef SOCK_CLOEXEC
     constexpr auto StreamSocket = SOCK_STREAM | SOCK_CLOEXEC;
@@ -180,9 +198,9 @@ namespace
         return openPath(std::format("/proc/{}/maps", context.parentProcess).c_str(), O_RDONLY);
     }
 
-    [[nodiscard]] std::string socketOf(int family)
+    [[nodiscard]] std::string socketOf(int family, int type = StreamSocket, int protocol = 0)
     {
-        auto const descriptor = ::socket(family, StreamSocket, 0);
+        auto const descriptor = ::socket(family, type, protocol);
         auto outcome = outcomeOf(descriptor);
         if (descriptor >= 0)
             ::close(descriptor);
@@ -213,6 +231,109 @@ namespace
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         auto const outcome =
             outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+        ::close(descriptor);
+        return outcome;
+    }
+
+    /// Reaches for a Unix-domain socket by its path: where a sandbox lets a socket be made at all (macOS), it
+    /// is the connect that it refuses.
+    [[nodiscard]] std::string connectUnix(OperationContext&)
+    {
+        auto const descriptor = ::socket(AF_UNIX, StreamSocket, 0);
+        if (descriptor < 0)
+            return outcomeOf(descriptor);
+        auto address = sockaddr_un {};
+        address.sun_family = AF_UNIX;
+        std::ranges::copy(ListeningSocketPath, std::begin(address.sun_path));
+        auto const outcome =
+            outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+        ::close(descriptor);
+        return outcome;
+    }
+
+    /// Sends a datagram to an Internet address, on a socket made for it and never connected: what a sandbox
+    /// that lets a socket be made must refuse by the address.
+    [[nodiscard]] std::string sendToInet(OperationContext&)
+    {
+        auto const descriptor = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (descriptor < 0)
+            return outcomeOf(descriptor);
+        constexpr auto DiscardPort = uint16_t { 9 };
+        auto address = sockaddr_in {};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(DiscardPort);
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        auto const byte = std::array<std::byte, 1> {};
+        auto const outcome = outcomeOf(::sendto(descriptor,
+                                                byte.data(),
+                                                byte.size(),
+                                                SendFlags,
+                                                reinterpret_cast<sockaddr const*>(&address),
+                                                sizeof(address)));
+        ::close(descriptor);
+        return outcome;
+    }
+
+    /// Binds an Internet stream socket to the loopback and listens on it: a server of its own.
+    [[nodiscard]] std::string listenInet(OperationContext&)
+    {
+        auto const descriptor = ::socket(AF_INET, StreamSocket, 0);
+        if (descriptor < 0)
+            return outcomeOf(descriptor);
+        auto address = sockaddr_in {};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        auto outcome =
+            outcomeOf(::bind(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+        if (outcome == "ok")
+            outcome = outcomeOf(::listen(descriptor, 1));
+        ::close(descriptor);
+        return outcome;
+    }
+
+    /// Binds a Unix-domain socket to a path of its own: a file made, and a server reachable by it.
+    [[nodiscard]] std::string bindUnix(OperationContext&)
+    {
+        auto const descriptor = ::socket(AF_UNIX, StreamSocket, 0);
+        if (descriptor < 0)
+            return outcomeOf(descriptor);
+        auto const path = std::format("/tmp/contour-sandbox-probe-{}.socket", ::getpid());
+        auto address = sockaddr_un {};
+        address.sun_family = AF_UNIX;
+        std::ranges::copy(path, std::begin(address.sun_path));
+        auto const outcome =
+            outcomeOf(::bind(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+        if (outcome == "ok")
+            ::unlink(path.c_str());
+        ::close(descriptor);
+        return outcome;
+    }
+
+    /// Makes a routing socket, which reads the system's routes and interfaces as they change.
+    [[nodiscard]] std::string socketRoute(OperationContext&)
+    {
+        return socketOf(AF_ROUTE, SOCK_RAW, 0);
+    }
+
+#ifdef __APPLE__
+    /// Makes a kernel control socket (AF_SYSTEM), through which a process talks to kernel extensions.
+    [[nodiscard]] std::string socketSystem(OperationContext&)
+    {
+        return socketOf(AF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+    }
+#endif
+
+    /// Lists the system's network interfaces (SIOCGIFCONF) through an Internet socket made for it.
+    [[nodiscard]] std::string listInterfaces(OperationContext&)
+    {
+        auto const descriptor = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (descriptor < 0)
+            return outcomeOf(descriptor);
+        auto requests = std::array<ifreq, 16> {};
+        auto configuration = ifconf {};
+        configuration.ifc_len = static_cast<int>(sizeof(requests));
+        configuration.ifc_req = requests.data();
+        auto const outcome = outcomeOf(::ioctl(descriptor, SIOCGIFCONF, &configuration));
         ::close(descriptor);
         return outcome;
     }
@@ -277,7 +398,7 @@ namespace
 
     [[nodiscard]] std::string executeProgram(OperationContext&)
     {
-        auto program = std::string { "/bin/true" };
+        auto program = std::string { RunnableProgram };
         auto arguments = std::array<char*, 2> { program.data(), nullptr };
         auto environment = std::array<char*, 1> { nullptr };
         return outcomeOf(::execve(program.c_str(), arguments.data(), environment.data()));
@@ -360,6 +481,15 @@ namespace
     {
         return protectAnonymous(PROT_READ);
     }
+
+#ifdef __APPLE__
+    /// Maps memory for code made at run time (MAP_JIT), writable only, as WAMR maps all of its memory unless
+    /// patched (cmake/patches/): what the sandbox says of it, beside what the hardened runtime says.
+    [[nodiscard]] std::string mapForJit(OperationContext&)
+    {
+        return mapAnonymous(PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_JIT);
+    }
+#endif
 
     [[nodiscard]] std::string mapExecutable(OperationContext&)
     {
@@ -515,6 +645,12 @@ namespace
         Operation { .name = "socket-inet", .run = &socketInet },
         Operation { .name = "socket-unix", .run = &socketUnix },
         Operation { .name = "connect-inet", .run = &connectInet },
+        Operation { .name = "connect-unix", .run = &connectUnix },
+        Operation { .name = "sendto-inet", .run = &sendToInet },
+        Operation { .name = "listen-inet", .run = &listenInet },
+        Operation { .name = "bind-unix", .run = &bindUnix },
+        Operation { .name = "socket-route", .run = &socketRoute },
+        Operation { .name = "list-interfaces", .run = &listInterfaces },
         Operation { .name = "ioctl-control", .run = &ioctlControl },
         Operation { .name = "send-descriptor", .run = &sendDescriptor },
         Operation { .name = "fork", .run = &forkProcess },
@@ -536,6 +672,8 @@ namespace
         Operation { .name = "permitted", .run = &permitted },
 #ifdef __APPLE__
         Operation { .name = "mach-lookup", .run = &lookUpMachService },
+        Operation { .name = "map-jit", .run = &mapForJit },
+        Operation { .name = "socket-system", .run = &socketSystem },
 #endif
     };
 
