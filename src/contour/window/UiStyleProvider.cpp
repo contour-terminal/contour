@@ -23,6 +23,7 @@
 #include <contour/window/SidebarSelection.hpp>
 #include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/SidebarToggle.hpp>
+#include <contour/window/SidebarTree.hpp>
 #include <contour/window/SidebarWorkspaceColor.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -474,6 +475,13 @@ QVariantMap UiStyleProvider::badgeLook(int kind) const
              { QStringLiteral("mark"), nameOf(badgeMarkName(look.mark)) },
              { QStringLiteral("ink"), statusInk(static_cast<int>(look.ink)) },
              { QStringLiteral("name"), nameOf(look.accessibleName) } };
+}
+
+QString UiStyleProvider::sidebarFooterGlyphText(int needYou, int working) const
+{
+    auto const footer = SidebarFooter { .needYou = static_cast<uint32_t>(std::max(needYou, 0)),
+                                        .working = static_cast<uint32_t>(std::max(working, 0)) };
+    return QString::fromStdString(window::sidebarFooterGlyphText(footer, _groups.layout.sidebar));
 }
 
 QVariantMap UiStyleProvider::hostChipLook(int state) const

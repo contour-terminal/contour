@@ -34,6 +34,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtGui/QAccessible>
+#include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>
 #include <QtQml/QQmlEngine>
@@ -84,13 +85,26 @@ namespace
     return rows;
 }
 
+/// The font a scene's chrome is set in.
+enum class SceneFont : uint8_t
+{
+    Application = 0, ///< The application's font, on every row.
+    /// The row's own as a running window sets it: on the Terminal row the profile's terminal font, which is
+    /// monospaced -- in a proportional face its cells would hold words a running window's do not.
+    RowOwn,
+};
+
 /// The setup @p row is loaded under, with the window controls its host shows.
 [[nodiscard]] contour::test::ChromeSetup setupOf(
-    ChromeStyle row, contour::config::MotionPreference motion = contour::config::MotionPreference::Full)
+    ChromeStyle row,
+    contour::config::MotionPreference motion = contour::config::MotionPreference::Full,
+    SceneFont font = SceneFont::Application)
 {
     auto setup = contour::test::ChromeSetup {
         .row = row,
-        .font = QGuiApplication::font(),
+        .font = font == SceneFont::RowOwn && row == ChromeStyle::Terminal
+                    ? QFontDatabase::systemFont(QFontDatabase::FixedFont)
+                    : QGuiApplication::font(),
         .windowControls = contour::config::resolveWindowControlStyle(
             contour::config::WindowControlStyle::Auto, contour::test::snapshot::rowHost(row).host),
     };
@@ -159,7 +173,8 @@ struct SidebarScene
     BillingAsks billing = BillingAsks::Permission; ///< What billing's first pane asks.
     /// When the strip shows: Never with tabs on top hides a band that is not also the window's controls.
     contour::config::TabBarVisibility tabBar = contour::config::TabBarVisibility::Always;
-    PaneTree paneTree = PaneTree::Leaf; ///< Whether the window shows a pane tree.
+    PaneTree paneTree = PaneTree::Leaf;      ///< Whether the window shows a pane tree.
+    SceneFont font = SceneFont::Application; ///< The font the chrome is set in.
     /// The sidebar's width in logical pixels; the row's own default when unset.
     std::optional<int> width = std::nullopt;
     ClaudeTab claudeTab = ClaudeTab::OnePane; ///< Whether claude's tab is split.
@@ -239,7 +254,8 @@ struct SidebarWindow
         controller.setSidebarWorkspaceColorStyle(scene.workspaceColorStyle);
         controller.setSidebarRowSpacing(scene.rowSpacing);
 
-        root = contour::test::loadMainWindow(engine, controller, warnings, setupOf(scene.row, scene.motion));
+        root = contour::test::loadMainWindow(
+            engine, controller, warnings, setupOf(scene.row, scene.motion, scene.font));
         if (scene.visibility == contour::config::SidebarVisibility::Shown)
             controller.showSidebar(scene.width.value_or(static_cast<int>(token("width"))));
         window = qobject_cast<QQuickWindow*>(root.get());
@@ -2169,6 +2185,30 @@ TEST_CASE("at the narrowest sidebar the footer keeps its counts whole, in fewer 
                 CHECK(counts->x() + counts->property("implicitWidth").toReal() <= chord->x() + 0.5);
             }
         }
+    }
+}
+
+TEST_CASE("at the narrowest sidebar in the row's own font the footer's counts are whole, and named in full "
+          "(offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    // The Terminal row's footer is set in the profile's monospaced font, where even the shorter words take
+    // more cells than its narrowest sidebar has: its status glyphs say the counts there.
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row, .font = SceneFont::RowOwn } };
+        scene.controller.showSidebar(static_cast<int>(scene.token("minWidth")));
+        QTest::qWait(50);
+        auto const* counts = scene.item(QStringLiteral("sidebarFooterCounts"));
+        REQUIRE(counts != nullptr);
+        INFO("counts " << counts->property("text").toString().toStdString() << ", width " << counts->width()
+                       << ", implicit " << counts->property("implicitWidth").toReal());
+        CHECK(counts->isVisible());
+        CHECK(!counts->property("truncated").toBool());
+        auto const* attached = accessibleOf(*counts);
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("name").toString() == QStringLiteral("1 needs you · 1 working"));
     }
 }
 

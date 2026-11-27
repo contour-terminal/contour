@@ -1043,9 +1043,12 @@ TEST_CASE("the footer's counts take their shorter wording only when the full one
           "[contour][sidebar][footer]")
 {
     using contour::window::sidebarrows::FooterCounts;
-    CHECK(footerCountsFor(120, 100) == FooterCounts::Full);
-    CHECK(footerCountsFor(100, 100) == FooterCounts::Full);
-    CHECK(footerCountsFor(99, 100) == FooterCounts::Compact);
+    CHECK(footerCountsFor(120, 100, 80) == FooterCounts::Full);
+    CHECK(footerCountsFor(100, 100, 80) == FooterCounts::Full);
+    CHECK(footerCountsFor(99, 100, 80) == FooterCounts::Compact);
+    CHECK(footerCountsFor(80, 100, 80) == FooterCounts::Compact);
+    // Where no words fit, the rows' status glyphs say the counts.
+    CHECK(footerCountsFor(79, 100, 80) == FooterCounts::Glyphs);
 
     auto footer = SidebarFooter { .needYou = 0, .working = 0 };
     CHECK(footerCompactTextOf(footer).isEmpty());
@@ -1053,6 +1056,26 @@ TEST_CASE("the footer's counts take their shorter wording only when the full one
     CHECK(footerCompactTextOf(footer) == "1 waiting · 1 busy");
     footer = { .needYou = 3, .working = 0 };
     CHECK(footerCompactTextOf(footer) == "3 waiting");
+}
+
+TEST_CASE("the footer's glyph counts are the status glyphs its rows draw", "[contour][sidebar][footer]")
+{
+    using contour::config::SidebarLook;
+    // Every look, the last of them the enum's.
+    for (auto const look:
+         std::views::iota(0, std::to_underlying(SidebarLook::CellTree) + 1)
+             | std::views::transform([](int value) { return static_cast<SidebarLook>(value); }))
+    {
+        INFO("look " << static_cast<int>(look));
+        auto const blocked = std::string { tabBadgeGlyph(TabBadgeKind::Blocked, look) };
+        auto const working = std::string { tabBadgeGlyph(TabBadgeKind::Working, look) };
+        CHECK(sidebarFooterGlyphText({ .needYou = 0, .working = 0 }, look).empty());
+        CHECK(sidebarFooterGlyphText({ .needYou = 1, .working = 2 }, look)
+              == std::format("{} 1 · {} 2", blocked, working));
+        CHECK(sidebarFooterGlyphText({ .needYou = 0, .working = 12 }, look) == std::format("{} 12", working));
+        CHECK(sidebarFooterGlyphText({ .needYou = 3, .working = 0 }, look) == std::format("{} 3", blocked));
+    }
+    CHECK(sidebarFooterGlyphText({ .needYou = 1, .working = 2 }, SidebarLook::CellTree) == "! 1 · ◑ 2");
 }
 
 TEST_CASE("SidebarModel: the rows' times run while the sidebar or the switcher over the window shows them",

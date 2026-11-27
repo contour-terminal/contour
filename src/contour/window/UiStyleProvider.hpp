@@ -765,6 +765,12 @@ class UiStyleProvider: public QObject
     ///         status ink and the accessible name; empty for a kind outside the table.
     [[nodiscard]] Q_INVOKABLE QVariantMap badgeLook(int kind) const;
 
+    /// The sidebar footer's counts in this row's status glyphs (window::sidebarFooterGlyphText()).
+    /// @param needYou Panes that need the user.
+    /// @param working Panes at work.
+    /// @return `! 1 · ◑ 2`, counts that are zero left out; empty when both are.
+    [[nodiscard]] Q_INVOKABLE QString sidebarFooterGlyphText(int needYou, int working) const;
+
     /// How the location chip's connection looks in @p state.
     /// @param state A window::HostChipState as its underlying value.
     /// @return `{ dot, status, accessibleState }`: the dot's ink and the two texts; empty for a state

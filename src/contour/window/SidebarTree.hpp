@@ -16,6 +16,7 @@
 #include <contour/window/StatusKinds.hpp>
 #include <contour/window/StatusUrgency.hpp>
 #include <contour/window/TabAttention.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/TabIcon.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
@@ -265,6 +266,13 @@ struct SidebarListing
 /// @return The panes that need the user and that work, counted over the leaves under each workspace row
 ///         (LeafCounts), not over the rolled-up urgencies.
 [[nodiscard]] SidebarFooter sidebarFooter(std::span<SidebarRow const> rows);
+
+/// The footer's counts in the status glyphs @p look's rows draw for them (`! 1 · ◑ 2`), for a footer too
+/// narrow for any wording in words; the words stay its accessible name.
+/// @param footer The counts.
+/// @param look The chrome row, as its sidebar look.
+/// @return The text, counts that are zero left out; empty when no pane needs the user or works.
+[[nodiscard]] std::string sidebarFooterGlyphText(SidebarFooter const& footer, config::SidebarLook look);
 
 /// What the window's chrome says of the workspaces around the rows: which one it shows, and what the others
 /// ask of the user.

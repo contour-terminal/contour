@@ -446,6 +446,35 @@ SidebarFooter sidebarFooter(std::span<SidebarRow const> rows)
     return footer;
 }
 
+namespace
+{
+    /// One of the footer's counts and the status whose glyph says it.
+    struct FooterGlyph
+    {
+        uint32_t SidebarFooter::* count; ///< The count.
+        TabBadgeKind status;             ///< The status a row draws for what it counts.
+    };
+
+    /// The footer's counts in the order its text names them.
+    constexpr auto FooterGlyphs = std::array {
+        FooterGlyph { .count = &SidebarFooter::needYou, .status = TabBadgeKind::Blocked },
+        FooterGlyph { .count = &SidebarFooter::working, .status = TabBadgeKind::Working },
+    };
+} // namespace
+
+std::string sidebarFooterGlyphText(SidebarFooter const& footer, config::SidebarLook look)
+{
+    auto text = std::string {};
+    for (auto const& glyph:
+         FooterGlyphs | std::views::filter([&](FooterGlyph const& g) { return footer.*g.count > 0; }))
+    {
+        if (!text.empty())
+            text += " · ";
+        text += std::format("{} {}", tabBadgeGlyph(glyph.status, look), footer.*glyph.count);
+    }
+    return text;
+}
+
 SidebarSummary sidebarSummary(std::span<SidebarRow const> rows, std::optional<uint64_t> current)
 {
     auto summary = SidebarSummary {};

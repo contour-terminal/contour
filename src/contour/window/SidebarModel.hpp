@@ -119,7 +119,8 @@ Q_ENUM_NS(FooterChord)
 enum class FooterCounts : uint8_t
 {
     Full = 0, ///< `1 needs you · 1 working`.
-    Compact,  ///< `1 waiting · 1 busy`: the same counts in fewer letters, for the narrowest sidebar.
+    Compact,  ///< `1 waiting · 1 busy`: the same counts in fewer letters, for a narrow sidebar.
+    Glyphs,   ///< `! 1 · ◑ 1`: the counts in their rows' status glyphs, where no words fit.
 };
 Q_ENUM_NS(FooterCounts)
 
@@ -342,14 +343,19 @@ struct FooterRoom
     return needed <= room.available ? sidebarrows::FooterChord::Shown : sidebarrows::FooterChord::Dropped;
 }
 
-/// Decides which wording of the counts the footer shows: the full one whenever it fits, so the counts are
-/// never cut short by an ellipsis while a shorter wording of them would fit.
+/// Decides which wording of the counts the footer shows: the longest one that fits, so the counts are never
+/// cut short by an ellipsis while a shorter wording of them would fit.
 /// @param available The width the counts have, with no chord beside them.
 /// @param fullWidth The full wording's width.
-/// @return Full when it fits, Compact otherwise.
-[[nodiscard]] constexpr sidebarrows::FooterCounts footerCountsFor(double available, double fullWidth) noexcept
+/// @param compactWidth The compact wording's width.
+/// @return Full when it fits, else Compact when it fits, else Glyphs.
+[[nodiscard]] constexpr sidebarrows::FooterCounts footerCountsFor(double available,
+                                                                  double fullWidth,
+                                                                  double compactWidth) noexcept
 {
-    return fullWidth <= available ? sidebarrows::FooterCounts::Full : sidebarrows::FooterCounts::Compact;
+    if (fullWidth <= available)
+        return sidebarrows::FooterCounts::Full;
+    return compactWidth <= available ? sidebarrows::FooterCounts::Compact : sidebarrows::FooterCounts::Glyphs;
 }
 
 /// The sidebar tree's own commands for QML (SidebarCommandNames): each name to its window::ChromeCommand
@@ -463,10 +469,13 @@ class SidebarModel: public QAbstractListModel
     /// Decides the footer's counts wording for QML (footerCountsFor()), as a sidebarrows::FooterCounts.
     /// @param available The width the counts have alone.
     /// @param fullWidth The full wording's width.
+    /// @param compactWidth The compact wording's width.
     /// @return The FooterCounts value.
-    [[nodiscard]] Q_INVOKABLE int footerCounts(qreal available, qreal fullWidth) const noexcept
+    [[nodiscard]] Q_INVOKABLE int footerCounts(qreal available,
+                                               qreal fullWidth,
+                                               qreal compactWidth) const noexcept
     {
-        return static_cast<int>(std::to_underlying(footerCountsFor(available, fullWidth)));
+        return static_cast<int>(std::to_underlying(footerCountsFor(available, fullWidth, compactWidth)));
     }
 
     /// Decides the footer's chord for QML (footerChordFor()), as a sidebarrows::FooterChord.
