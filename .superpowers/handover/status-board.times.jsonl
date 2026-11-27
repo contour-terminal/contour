@@ -1,0 +1,368 @@
+{"logged": "2026-11-24 23:25:58", "event": "group", "group": "1", "name": "Wasmtime in-process"}
+{"logged": "2026-11-24 23:25:58", "event": "group", "group": "2", "name": "Protocol and remote backend"}
+{"logged": "2026-11-24 23:25:58", "event": "group", "group": "3", "name": "Helper executable and lifecycle"}
+{"logged": "2026-11-24 23:25:58", "event": "group", "group": "4", "name": "Shared guest memory"}
+{"logged": "2026-11-24 23:25:58", "event": "group", "group": "5", "name": "Sandboxes"}
+{"logged": "2026-11-24 23:25:59", "event": "group", "group": "6", "name": "Cache, packaging, gates"}
+{"logged": "2026-11-24 23:26:04", "event": "start", "task": "1.1", "title": "Pin Wasmtime, verify its C API", "group": "1"}
+{"logged": "2026-11-24 23:29:57", "event": "report", "task": "1.1", "at": "2026-11-24 23:29:20"}
+{"logged": "2026-11-24 23:31:31", "event": "done", "task": "1.1", "fix_rounds": 0}
+{"logged": "2026-11-24 23:31:31", "event": "start", "task": "1.2", "title": "Engine feature table enforced by both engines", "group": "1"}
+{"logged": "2026-11-24 23:41:21", "event": "report", "task": "1.2", "at": "2026-11-24 23:40:44"}
+{"logged": "2026-11-24 23:43:03", "event": "done", "task": "1.2", "fix_rounds": 0}
+{"logged": "2026-11-24 23:43:03", "event": "start", "task": "1.3", "title": "WasmtimeBackend: runtimes, modules, linkage, generations", "group": "1"}
+{"logged": "2026-11-24 23:57:20", "event": "report", "task": "1.3", "at": "2026-11-24 23:48:23"}
+{"logged": "2026-11-25 00:02:50", "event": "step", "task": "1.3", "step": "fix1", "title": "Fix round 1: signal handlers in tests, system probe, WASI signature test"}
+{"logged": "2026-11-25 00:07:10", "event": "step-commits", "task": "1.3", "step": "fix1", "first": "2026-11-25 00:06:27", "last": "2026-11-25 00:06:27", "count": 3}
+{"logged": "2026-11-25 00:07:10", "event": "step-done", "task": "1.3", "step": "fix1", "note": "3 Important + 2 Minor fixed in 3 commits"}
+{"logged": "2026-11-25 00:07:10", "event": "step", "task": "1.3", "step": "review2", "title": "Scoped re-review of fix round 1"}
+{"logged": "2026-11-25 00:07:53", "event": "step-done", "task": "1.3", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 00:07:53", "event": "done", "task": "1.3", "fix_rounds": 1}
+{"logged": "2026-11-25 00:07:53", "event": "start", "task": "1.4", "title": "Instances, calls, host functions, memory, limits", "group": "1"}
+{"logged": "2026-11-25 00:26:12", "event": "report", "task": "1.4", "at": "2026-11-25 00:11:57"}
+{"logged": "2026-11-25 00:29:01", "event": "done", "task": "1.4", "fix_rounds": 0}
+{"logged": "2026-11-25 00:29:01", "event": "start", "task": "1.5", "title": "Our WASI preview-1 shim, shared by every engine", "group": "1"}
+{"logged": "2026-11-25 00:46:00", "event": "report", "task": "1.5", "at": "2026-11-25 00:45:15"}
+{"logged": "2026-11-25 00:48:12", "event": "done", "task": "1.5", "fix_rounds": 0}
+{"logged": "2026-11-25 00:48:13", "event": "start", "task": "1.6", "title": "Sticky interruption by epoch, no ticker", "group": "1"}
+{"logged": "2026-11-25 01:09:07", "event": "report", "task": "1.6", "at": "2026-11-25 00:52:29"}
+{"logged": "2026-11-25 01:14:22", "event": "step", "task": "1.6", "step": "fix1", "title": "Fix round 1: absorbed nested interrupt, TSan in tests, WAMR fault restore"}
+{"logged": "2026-11-25 01:18:39", "event": "step-commits", "task": "1.6", "step": "fix1", "first": "2026-11-25 01:18:14", "last": "2026-11-25 01:18:14", "count": 2}
+{"logged": "2026-11-25 01:18:39", "event": "step-done", "task": "1.6", "step": "fix1", "note": "5 items fixed, TSan 0 reports"}
+{"logged": "2026-11-25 01:18:39", "event": "step", "task": "1.6", "step": "review2", "title": "Scoped re-review of fix round 1"}
+{"logged": "2026-11-25 01:20:26", "event": "step-done", "task": "1.6", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 01:20:26", "event": "done", "task": "1.6", "fix_rounds": 1}
+{"logged": "2026-11-25 01:20:49", "event": "start", "task": "1.7", "title": "Phase 1 gate: sanitizers, speed-up, review", "group": "1"}
+{"logged": "2026-11-25 01:20:49", "event": "step", "task": "1.7", "step": "gate", "title": "Sanitizer runs and WAMR vs Wasmtime measurement"}
+{"logged": "2026-11-25 01:31:45", "event": "step-commits", "task": "1.7", "step": "gate", "first": "2026-11-25 01:24:32", "last": "2026-11-25 01:24:32", "count": 1}
+{"logged": "2026-11-25 01:31:45", "event": "step-done", "task": "1.7", "step": "gate", "note": "WAMR 38.3us vs Wasmtime 2.8us per render (13.7x; 18.5x full redraw); ASan/TSan clean; coverage 96%/98%"}
+{"logged": "2026-11-25 01:31:45", "event": "step", "task": "1.7", "step": "review", "title": "Phase 1 whole-diff code review"}
+{"logged": "2026-11-25 01:32:11", "event": "start", "task": "2.0", "title": "Expand phase 2 to step level", "group": "2"}
+{"logged": "2026-11-25 01:47:41", "event": "step-done", "task": "1.7", "step": "review", "note": "1 Important (unbounded table growth on Wasmtime), 8 Minor"}
+{"logged": "2026-11-25 01:47:41", "event": "step", "task": "1.7", "step": "fixwave", "title": "Fix wave for the phase 1 review"}
+{"logged": "2026-11-25 01:47:41", "event": "done", "task": "2.0", "fix_rounds": 0}
+{"logged": "2026-11-25 02:12:55", "event": "step-commits", "task": "1.7", "step": "fixwave", "first": "2026-11-25 01:59:35", "last": "2026-11-25 02:09:10", "count": 5}
+{"logged": "2026-11-25 02:12:55", "event": "step-done", "task": "1.7", "step": "fixwave", "note": "9 findings fixed in 5 commits"}
+{"logged": "2026-11-25 02:12:55", "event": "step", "task": "1.7", "step": "rereview", "title": "Re-review of the phase 1 fix wave"}
+{"logged": "2026-11-25 02:15:24", "event": "step-done", "task": "1.7", "step": "rereview", "note": "8 addressed + 1 addressed with new Important I1 (rewrite drops trailing bytes)"}
+{"logged": "2026-11-25 02:15:24", "event": "step", "task": "1.7", "step": "fix2", "title": "Fix: table-section trailing bytes, single parse"}
+{"logged": "2026-11-25 02:20:20", "event": "step-commits", "task": "1.7", "step": "fix2", "first": "2026-11-25 02:19:39", "last": "2026-11-25 02:19:39", "count": 1}
+{"logged": "2026-11-25 02:20:20", "event": "step-done", "task": "1.7", "step": "fix2", "note": "one commit; >1 table refused at load on both engines"}
+{"logged": "2026-11-25 02:20:21", "event": "step", "task": "1.7", "step": "rereview2", "title": "Re-review of the table fix"}
+{"logged": "2026-11-25 02:21:15", "event": "step-done", "task": "1.7", "step": "rereview2", "note": "all addressed"}
+{"logged": "2026-11-25 02:21:15", "event": "done", "task": "1.7", "fix_rounds": 2}
+{"logged": "2026-11-25 02:21:15", "event": "start", "task": "2.1", "title": "Wire protocol, codec, channels, framed streams", "group": "2"}
+{"logged": "2026-11-25 02:38:25", "event": "report", "task": "2.1", "at": "2026-11-25 02:37:26"}
+{"logged": "2026-11-25 02:41:42", "event": "step", "task": "2.1", "step": "fix1", "title": "Fix round 1: element caps, Windows shutdown wakes peer"}
+{"logged": "2026-11-25 02:48:59", "event": "step-commits", "task": "2.1", "step": "fix1", "first": "2026-11-25 02:48:16", "last": "2026-11-25 02:48:16", "count": 1}
+{"logged": "2026-11-25 02:48:59", "event": "step-done", "task": "2.1", "step": "fix1", "note": "6 items fixed in one commit"}
+{"logged": "2026-11-25 02:48:59", "event": "step", "task": "2.1", "step": "review2", "title": "Scoped re-review of fix round 1"}
+{"logged": "2026-11-25 02:50:54", "event": "step-done", "task": "2.1", "step": "review2", "note": "6 addressed; new Important N1 (Windows CancelIoEx after close race)"}
+{"logged": "2026-11-25 02:50:54", "event": "step", "task": "2.1", "step": "fix2", "title": "Fix round 2: Windows shutdown race, encoder caps"}
+{"logged": "2026-11-25 02:58:38", "event": "step-commits", "task": "2.1", "step": "fix2", "first": "2026-11-25 02:58:05", "last": "2026-11-25 02:58:05", "count": 1}
+{"logged": "2026-11-25 02:58:38", "event": "step-done", "task": "2.1", "step": "fix2", "note": "N1/N2 + encoder caps"}
+{"logged": "2026-11-25 02:58:38", "event": "step", "task": "2.1", "step": "review3", "title": "Scoped re-review of fix round 2"}
+{"logged": "2026-11-25 03:00:18", "event": "step-done", "task": "2.1", "step": "review3", "note": "all addressed"}
+{"logged": "2026-11-25 03:00:18", "event": "done", "task": "2.1", "fix_rounds": 2}
+{"logged": "2026-11-25 03:00:18", "event": "start", "task": "2.4", "title": "Contract changes at the seam", "group": "2"}
+{"logged": "2026-11-25 03:06:50", "event": "report", "task": "2.4", "at": "2026-11-25 03:06:26"}
+{"logged": "2026-11-25 03:08:04", "event": "done", "task": "2.4", "fix_rounds": 0}
+{"logged": "2026-11-25 03:08:04", "event": "start", "task": "2.2", "title": "IHostedEngine and HostServer", "group": "2"}
+{"logged": "2026-11-25 03:29:13", "event": "report", "task": "2.2", "at": "2026-11-25 03:11:39"}
+{"logged": "2026-11-25 03:33:56", "event": "step", "task": "2.2", "step": "fix1", "title": "Fix round 1: nesting bound, executor stacks, busy-lane test"}
+{"logged": "2026-11-25 03:41:28", "event": "step-commits", "task": "2.2", "step": "fix1", "first": "2026-11-25 03:40:50", "last": "2026-11-25 03:40:50", "count": 1}
+{"logged": "2026-11-25 03:41:28", "event": "step-done", "task": "2.2", "step": "fix1", "note": "7 items, one commit"}
+{"logged": "2026-11-25 03:41:28", "event": "step", "task": "2.2", "step": "review2", "title": "Scoped re-review of fix round 1"}
+{"logged": "2026-11-25 03:43:43", "event": "step-done", "task": "2.2", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 03:43:43", "event": "done", "task": "2.2", "fix_rounds": 1}
+{"logged": "2026-11-25 03:43:43", "event": "start", "task": "2.3", "title": "RemoteBackend over an in-process HostServer", "group": "2"}
+{"logged": "2026-11-25 04:08:04", "event": "report", "task": "2.3", "at": "2026-11-25 03:45:51"}
+{"logged": "2026-11-25 04:11:35", "event": "step", "task": "2.3", "step": "fix1", "title": "Fix round 1: respawn mismatch, stale cache hit, validation tests"}
+{"logged": "2026-11-25 04:16:32", "event": "step-commits", "task": "2.3", "step": "fix1", "first": "2026-11-25 04:16:04", "last": "2026-11-25 04:16:04", "count": 1}
+{"logged": "2026-11-25 04:16:32", "event": "step-done", "task": "2.3", "step": "fix1", "note": "6 items, one commit"}
+{"logged": "2026-11-25 04:16:32", "event": "step", "task": "2.3", "step": "review2", "title": "Scoped re-review of fix round 1"}
+{"logged": "2026-11-25 04:18:02", "event": "step-done", "task": "2.3", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 04:18:02", "event": "done", "task": "2.3", "fix_rounds": 1}
+{"logged": "2026-11-25 04:18:03", "event": "start", "task": "2.5", "title": "makeDefaultBackend(BackendConfig) at every composition root", "group": "2"}
+{"logged": "2026-11-25 04:44:08", "event": "report", "task": "2.5", "at": "2026-11-25 04:21:26"}
+{"logged": "2026-11-25 04:47:52", "event": "step", "task": "2.5", "step": "fix1", "title": "Fix round 1: page-shadow memory cache, engine-neutral hooks"}
+{"logged": "2026-11-25 04:59:44", "event": "step-commits", "task": "2.5", "step": "fix1", "first": "2026-11-25 04:58:42", "last": "2026-11-25 04:59:04", "count": 3}
+{"logged": "2026-11-25 04:59:44", "event": "step-done", "task": "2.5", "step": "fix1", "note": "page shadow; hooks refused engine-neutrally"}
+{"logged": "2026-11-25 04:59:44", "event": "step", "task": "2.5", "step": "review2", "title": "Scoped re-review of fix round 1"}
+{"logged": "2026-11-25 05:01:48", "event": "step-done", "task": "2.5", "step": "review2", "note": "1-3 addressed; snapshot full-size contradicts R16"}
+{"logged": "2026-11-25 05:01:49", "event": "step", "task": "2.5", "step": "fix2", "title": "Fix round 2: per-page snapshots"}
+{"logged": "2026-11-25 05:04:22", "event": "step-commits", "task": "2.5", "step": "fix2", "first": "2026-11-25 05:04:00", "last": "2026-11-25 05:04:00", "count": 2}
+{"logged": "2026-11-25 05:04:22", "event": "step-done", "task": "2.5", "step": "fix2", "note": "per-page snapshots; controller-checked"}
+{"logged": "2026-11-25 05:04:22", "event": "done", "task": "2.5", "fix_rounds": 2}
+{"logged": "2026-11-25 05:04:22", "event": "start", "task": "2.6", "title": "ExtensionRegistry and the per-extension breaker", "group": "2"}
+{"logged": "2026-11-25 05:31:16", "event": "report", "task": "2.6", "at": "2026-11-25 05:30:31"}
+{"logged": "2026-11-25 05:34:47", "event": "step", "task": "2.6", "step": "fix1", "title": "Fix round 1: gated shared-load test, comments, digest memo"}
+{"logged": "2026-11-25 05:40:47", "event": "step-commits", "task": "2.6", "step": "fix1", "first": "2026-11-25 05:40:14", "last": "2026-11-25 05:40:14", "count": 1}
+{"logged": "2026-11-25 05:40:47", "event": "step-done", "task": "2.6", "step": "fix1", "note": "gated shared-load tests; controller-checked"}
+{"logged": "2026-11-25 05:40:47", "event": "done", "task": "2.6", "fix_rounds": 1}
+{"logged": "2026-11-25 05:40:47", "event": "start", "task": "2.7", "title": "Phase 2 gate", "group": "2"}
+{"logged": "2026-11-25 05:40:48", "event": "step", "task": "2.7", "step": "gate", "title": "Sanitizers, IPC overhead, Windows under wine, coverage"}
+{"logged": "2026-11-25 05:41:12", "event": "step", "task": "2.7", "step": "review", "title": "Phase 2 whole-diff code review"}
+{"logged": "2026-11-25 05:51:54", "event": "step-commits", "task": "2.7", "step": "gate", "first": "2026-11-25 05:45:19", "last": "2026-11-25 05:50:51", "count": 2}
+{"logged": "2026-11-25 05:51:54", "event": "step-done", "task": "2.7", "step": "gate", "note": "remote render 18.8us steady / 29.1us uncached vs 2.8/12.4 in-process; round trip 3.3us; sanitizers clean; Windows transport 22/22 under wine (fixed a NOMINMAX build break); coverage 94.9%"}
+{"logged": "2026-11-25 05:57:28", "event": "step-done", "task": "2.7", "step": "review", "note": "1 Important (host death during memory read counted as guest trap), 6 Minor"}
+{"logged": "2026-11-25 05:57:28", "event": "step", "task": "2.7", "step": "fixwave", "title": "Fix wave for the phase 2 review"}
+{"logged": "2026-11-25 06:19:11", "event": "step-commits", "task": "2.7", "step": "fixwave", "first": "2026-11-25 06:03:03", "last": "2026-11-25 06:12:52", "count": 7}
+{"logged": "2026-11-25 06:19:11", "event": "step-done", "task": "2.7", "step": "fixwave", "note": "7 findings, 7 commits"}
+{"logged": "2026-11-25 06:19:11", "event": "step", "task": "2.7", "step": "rereview", "title": "Re-review of the phase 2 fix wave"}
+{"logged": "2026-11-25 06:22:04", "event": "step-done", "task": "2.7", "step": "rereview", "note": "all addressed"}
+{"logged": "2026-11-25 06:22:04", "event": "done", "task": "2.7", "fix_rounds": 1}
+{"logged": "2026-11-25 06:22:04", "event": "start", "task": "3.0", "title": "Expand phase 3 to step level", "group": "3"}
+{"logged": "2026-11-25 06:47:52", "event": "done", "task": "3.0", "fix_rounds": 0}
+{"logged": "2026-11-25 06:47:52", "event": "start", "task": "3.1", "title": "Process launcher, handles, inherited handles", "group": "3"}
+{"logged": "2026-11-25 07:14:40", "event": "report", "task": "3.1", "at": "2026-11-25 07:13:17"}
+{"logged": "2026-11-25 07:20:49", "event": "step", "task": "3.1", "step": "fix1", "title": "Fix round 1: Windows inheritance window, macOS exit race, read-only control page"}
+{"logged": "2026-11-25 07:27:02", "event": "step-commits", "task": "3.1", "step": "fix1", "first": "2026-11-25 07:26:33", "last": "2026-11-25 07:26:33", "count": 1}
+{"logged": "2026-11-25 07:27:02", "event": "step-done", "task": "3.1", "step": "fix1", "note": "9 items, one commit"}
+{"logged": "2026-11-25 07:27:02", "event": "step", "task": "3.1", "step": "review2", "title": "Scoped re-review of fix round 1"}
+{"logged": "2026-11-25 07:29:02", "event": "step-done", "task": "3.1", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 07:29:02", "event": "done", "task": "3.1", "fix_rounds": 1}
+{"logged": "2026-11-25 07:29:02", "event": "start", "task": "3.2", "title": "The contour-extension-host executable", "group": "3"}
+{"logged": "2026-11-25 07:48:25", "event": "report", "task": "3.2", "at": "2026-11-25 07:30:33"}
+{"logged": "2026-11-25 07:51:38", "event": "step", "task": "3.2", "step": "fix1", "title": "Fix round 1: assert the real helper's caps, CMake bundle dependency"}
+{"logged": "2026-11-25 07:56:42", "event": "step-commits", "task": "3.2", "step": "fix1", "first": "2026-11-25 07:56:31", "last": "2026-11-25 07:56:31", "count": 1}
+{"logged": "2026-11-25 07:56:42", "event": "step-done", "task": "3.2", "step": "fix1", "note": "6 items; caps proven in release"}
+{"logged": "2026-11-25 07:56:42", "event": "step", "task": "3.2", "step": "review2", "title": "Scoped re-review"}
+{"logged": "2026-11-25 07:57:47", "event": "step-done", "task": "3.2", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 07:57:47", "event": "done", "task": "3.2", "fix_rounds": 1}
+{"logged": "2026-11-25 07:57:47", "event": "start", "task": "3.3", "title": "Supervisor, process connector, non-call timeouts", "group": "3"}
+{"logged": "2026-11-25 08:34:08", "event": "report", "task": "3.3", "at": "2026-11-25 07:59:22"}
+{"logged": "2026-11-25 08:39:08", "event": "step", "task": "3.3", "step": "fix1", "title": "Fix round 1: hanging tests, clock refresh, kill accounting"}
+{"logged": "2026-11-25 08:44:11", "event": "step-commits", "task": "3.3", "step": "fix1", "first": "2026-11-25 08:44:02", "last": "2026-11-25 08:44:02", "count": 1}
+{"logged": "2026-11-25 08:44:11", "event": "step-done", "task": "3.3", "step": "fix1", "note": "7 items; hangs now fail"}
+{"logged": "2026-11-25 08:44:11", "event": "step", "task": "3.3", "step": "review2", "title": "Scoped re-review"}
+{"logged": "2026-11-25 08:45:49", "event": "step-done", "task": "3.3", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 08:45:49", "event": "done", "task": "3.3", "fix_rounds": 1}
+{"logged": "2026-11-25 08:45:49", "event": "start", "task": "3.4", "title": "Cross-process interruption and the backstop", "group": "3"}
+{"logged": "2026-11-25 09:27:59", "event": "report", "task": "3.4", "at": "2026-11-25 08:46:41"}
+{"logged": "2026-11-25 09:33:37", "event": "step", "task": "3.4", "step": "fix1", "title": "Fix round 1: arm-the-right-frame race, fetch re-check, sanitizer check on real-guest suites"}
+{"logged": "2026-11-25 09:48:29", "event": "step-commits", "task": "3.4", "step": "fix1", "first": "2026-11-25 09:47:48", "last": "2026-11-25 09:47:48", "count": 3}
+{"logged": "2026-11-25 09:48:29", "event": "step-done", "task": "3.4", "step": "fix1", "note": "6 items in 3 commits"}
+{"logged": "2026-11-25 09:48:29", "event": "step", "task": "3.4", "step": "review2", "title": "Scoped re-review"}
+{"logged": "2026-11-25 09:50:48", "event": "step-done", "task": "3.4", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 09:50:48", "event": "done", "task": "3.4", "fix_rounds": 1}
+{"logged": "2026-11-25 09:50:48", "event": "start", "task": "3.5", "title": "Teardown off the owner thread", "group": "3"}
+{"logged": "2026-11-25 10:23:24", "event": "report", "task": "3.5", "at": "2026-11-25 09:51:39"}
+{"logged": "2026-11-25 10:26:51", "event": "step", "task": "3.5", "step": "fix1", "title": "Fix round 1: lost-wakeup release, interface doc"}
+{"logged": "2026-11-25 10:31:02", "event": "step-commits", "task": "3.5", "step": "fix1", "first": "2026-11-25 10:30:50", "last": "2026-11-25 10:30:50", "count": 1}
+{"logged": "2026-11-25 10:31:02", "event": "step-done", "task": "3.5", "step": "fix1", "note": "5 items"}
+{"logged": "2026-11-25 10:31:02", "event": "step", "task": "3.5", "step": "review2", "title": "Scoped re-review"}
+{"logged": "2026-11-25 10:32:04", "event": "step-done", "task": "3.5", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 10:32:05", "event": "done", "task": "3.5", "fix_rounds": 1}
+{"logged": "2026-11-25 10:32:05", "event": "start", "task": "3.6", "title": "Crash and hostility suite", "group": "3"}
+{"logged": "2026-11-25 10:54:13", "event": "report", "task": "3.6", "at": "2026-11-25 10:49:29"}
+{"logged": "2026-11-25 10:58:00", "event": "step", "task": "3.6", "step": "fix1", "title": "Fix round 1: per-row kill reasons so every row discriminates"}
+{"logged": "2026-11-25 11:06:30", "event": "step-commits", "task": "3.6", "step": "fix1", "first": "2026-11-25 11:05:54", "last": "2026-11-25 11:05:54", "count": 2}
+{"logged": "2026-11-25 11:06:30", "event": "step-done", "task": "3.6", "step": "fix1", "note": "6 items, mutations bite"}
+{"logged": "2026-11-25 11:06:31", "event": "step", "task": "3.6", "step": "review2", "title": "Scoped re-review"}
+{"logged": "2026-11-25 11:08:26", "event": "step-done", "task": "3.6", "step": "review2", "note": "all addressed"}
+{"logged": "2026-11-25 11:08:26", "event": "done", "task": "3.6", "fix_rounds": 1}
+{"logged": "2026-11-25 11:08:27", "event": "start", "task": "3.7", "title": "Phase 3 gate", "group": "3"}
+{"logged": "2026-11-25 11:08:27", "event": "step", "task": "3.7", "step": "gate", "title": "Gate checks: sanitizers, real-helper suites, measurement, wine, coverage"}
+{"logged": "2026-11-25 11:30:27", "event": "step-commits", "task": "3.7", "step": "gate", "first": "2026-11-25 11:10:49", "last": "2026-11-25 11:25:46", "count": 3}
+{"logged": "2026-11-25 11:30:27", "event": "step-done", "task": "3.7", "step": "gate", "note": "green; render 18.4 µs steady via real helper"}
+{"logged": "2026-11-25 11:30:27", "event": "step", "task": "3.7", "step": "review", "title": "Whole-phase code review"}
+{"logged": "2026-11-25 11:47:14", "event": "step-done", "task": "3.7", "step": "review", "note": "1 Critical (Apple Silicon shm size), 4 Important"}
+{"logged": "2026-11-25 11:47:14", "event": "step", "task": "3.7", "step": "fixwave", "title": "Fix wave: Apple Silicon, pre-thread confinement + no core dumps, setsid, logging"}
+{"logged": "2026-11-25 12:43:30", "event": "step-commits", "task": "3.7", "step": "fixwave", "first": "2026-11-25 11:54:45", "last": "2026-11-25 12:19:15", "count": 6}
+{"logged": "2026-11-25 12:43:30", "event": "step-done", "task": "3.7", "step": "fixwave", "note": "9 items in 6 commits; ASan/TSan/release/wine green"}
+{"logged": "2026-11-25 12:43:30", "event": "step", "task": "3.7", "step": "fixreview", "title": "Scoped review of the fix wave"}
+{"logged": "2026-11-25 12:47:38", "event": "step-done", "task": "3.7", "step": "fixreview", "note": "all 9 ✅; 0 Critical/Important; 3 Minor carried to phase 4"}
+{"logged": "2026-11-25 12:47:38", "event": "done", "task": "3.7", "fix_rounds": 1}
+{"logged": "2026-11-25 12:47:38", "event": "start", "task": "4.0", "title": "Expand phase 4 to step level", "group": "4"}
+{"logged": "2026-11-25 13:07:06", "event": "done", "task": "4.0", "fix_rounds": 0}
+{"logged": "2026-11-25 13:07:06", "event": "start", "task": "4.1", "title": "Carried minors", "group": "4"}
+{"logged": "2026-11-25 13:23:34", "event": "report", "task": "4.1", "at": "2026-11-25 13:09:27"}
+{"logged": "2026-11-25 13:25:31", "event": "done", "task": "4.1", "fix_rounds": 0}
+{"logged": "2026-11-25 13:25:31", "event": "start", "task": "4.2", "title": "Shared objects, one creation path", "group": "4"}
+{"logged": "2026-11-25 13:46:25", "event": "report", "task": "4.2", "at": "2026-11-25 13:31:24"}
+{"logged": "2026-11-25 13:49:05", "event": "done", "task": "4.2", "fix_rounds": 0}
+{"logged": "2026-11-25 13:49:05", "event": "start", "task": "4.3", "title": "Handing an object to the helper; protocol v3", "group": "4"}
+{"logged": "2026-11-25 14:16:19", "event": "report", "task": "4.3", "at": "2026-11-25 13:51:49"}
+{"logged": "2026-11-25 14:20:22", "event": "step", "task": "4.3", "step": "fix1", "title": "Fix round 1: rejected descriptors Malformed, forged-handle test, release-by-default claim"}
+{"logged": "2026-11-25 14:26:47", "event": "step-commits", "task": "4.3", "step": "fix1", "first": "2026-11-25 14:26:18", "last": "2026-11-25 14:26:18", "count": 2}
+{"logged": "2026-11-25 14:26:48", "event": "step-done", "task": "4.3", "step": "fix1", "note": "6 findings fixed in 2 commits"}
+{"logged": "2026-11-25 14:26:48", "event": "step", "task": "4.3", "step": "rereview", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-25 14:27:55", "event": "step-done", "task": "4.3", "step": "rereview", "note": "all fixed; no new issues"}
+{"logged": "2026-11-25 14:27:55", "event": "done", "task": "4.3", "fix_rounds": 1}
+{"logged": "2026-11-25 14:27:55", "event": "start", "task": "4.4", "title": "Helper side: mapping, memory creator, growth through the parent", "group": "4"}
+{"logged": "2026-11-25 14:52:25", "event": "report", "task": "4.4", "at": "2026-11-25 14:51:05"}
+{"logged": "2026-11-25 14:57:18", "event": "step", "task": "4.4", "step": "fix1", "title": "Fix round 1: FreeBSD flag, grow fault, Signals test in release, dependency"}
+{"logged": "2026-11-25 15:08:46", "event": "step-commits", "task": "4.4", "step": "fix1", "first": "2026-11-25 15:08:03", "last": "2026-11-25 15:08:03", "count": 4}
+{"logged": "2026-11-25 15:08:46", "event": "step-done", "task": "4.4", "step": "fix1", "note": "6 fixed in 4 commits; Signals path runs clean in release"}
+{"logged": "2026-11-25 15:08:46", "event": "step", "task": "4.4", "step": "rereview", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-25 15:10:38", "event": "step-done", "task": "4.4", "step": "rereview", "note": "all fixed; 1 Low + nit carried"}
+{"logged": "2026-11-25 15:10:38", "event": "done", "task": "4.4", "fix_rounds": 1}
+{"logged": "2026-11-25 15:10:38", "event": "start", "task": "4.5", "title": "Parent side: an object per instance, acknowledged size, answered growth", "group": "4"}
+{"logged": "2026-11-25 16:05:53", "event": "report", "task": "4.5", "at": "2026-11-25 15:16:45"}
+{"logged": "2026-11-25 16:10:16", "event": "step", "task": "4.5", "step": "fix1", "title": "Fix round 1: bad growth during setup tests"}
+{"logged": "2026-11-25 16:16:57", "event": "step-commits", "task": "4.5", "step": "fix1", "first": "2026-11-25 16:16:49", "last": "2026-11-25 16:16:49", "count": 1}
+{"logged": "2026-11-25 16:17:36", "event": "step-done", "task": "4.5", "step": "fix1", "note": "addressed; re-review clean"}
+{"logged": "2026-11-25 16:17:37", "event": "done", "task": "4.5", "fix_rounds": 1}
+{"logged": "2026-11-25 16:17:37", "event": "start", "task": "4.6", "title": "Single-fetch decoding", "group": "4"}
+{"logged": "2026-11-25 16:46:47", "event": "report", "task": "4.6", "at": "2026-11-25 16:28:05"}
+{"logged": "2026-11-25 16:49:16", "event": "done", "task": "4.6", "fix_rounds": 0}
+{"logged": "2026-11-25 16:49:49", "event": "start", "task": "4.7", "title": "Phase 4 gate", "group": "4"}
+{"logged": "2026-11-25 17:21:30", "event": "report", "task": "4.7", "at": "2026-11-25 16:56:09"}
+{"logged": "2026-11-25 17:21:30", "event": "step", "task": "4.7", "step": "review", "title": "Phase review of phase 4"}
+{"logged": "2026-11-25 17:33:21", "event": "step-done", "task": "4.7", "step": "review", "note": "1 Important (descriptor sent up can hang a parent thread on close), 2 minors"}
+{"logged": "2026-11-25 17:33:21", "event": "step", "task": "4.7", "step": "fix1", "title": "Phase review fixes"}
+{"logged": "2026-11-25 17:44:54", "event": "step-commits", "task": "4.7", "step": "fix1", "first": "2026-11-25 17:39:10", "last": "2026-11-25 17:41:44", "count": 3}
+{"logged": "2026-11-25 17:46:12", "event": "step-done", "task": "4.7", "step": "fix1", "note": "3 fixed; re-review clean"}
+{"logged": "2026-11-25 17:46:12", "event": "done", "task": "4.7", "fix_rounds": 1}
+{"logged": "2026-11-25 17:46:39", "event": "start", "task": "5.0", "title": "Expand phase 5 to step level", "group": "5"}
+{"logged": "2026-11-25 17:59:31", "event": "done", "task": "5.0", "fix_rounds": 0}
+{"logged": "2026-11-25 17:59:38", "event": "start", "task": "5.1", "title": "Sandbox seam and lockdown order", "group": "5"}
+{"logged": "2026-11-25 18:30:07", "event": "report", "task": "5.1", "at": "2026-11-25 18:28:51"}
+{"logged": "2026-11-25 18:34:16", "event": "step", "task": "5.1", "step": "fix1", "title": "Fix round 1: re-split commits so each builds"}
+{"logged": "2026-11-25 18:39:50", "event": "step-commits", "task": "5.1", "step": "fix1", "first": "2026-11-25 18:36:37", "last": "2026-11-25 18:38:04", "count": 3}
+{"logged": "2026-11-25 18:39:51", "event": "step-done", "task": "5.1", "step": "fix1", "note": "re-split; tree identical; each commit builds"}
+{"logged": "2026-11-25 18:39:51", "event": "done", "task": "5.1", "fix_rounds": 1}
+{"logged": "2026-11-25 18:39:51", "event": "start", "task": "5.2", "title": "Linux sandbox: seccomp, no_new_privs, Landlock", "group": "5"}
+{"logged": "2026-11-25 19:37:52", "event": "report", "task": "5.2", "at": "2026-11-25 18:45:23"}
+{"logged": "2026-11-25 19:45:18", "event": "step", "task": "5.2", "step": "fix1", "title": "Fix round 1: sanitizer exit, Landlock ABI fallback"}
+{"logged": "2026-11-25 19:50:31", "event": "step-commits", "task": "5.2", "step": "fix1", "first": "2026-11-25 19:47:25", "last": "2026-11-25 19:49:43", "count": 2}
+{"logged": "2026-11-25 19:50:56", "event": "step-done", "task": "5.2", "step": "fix1", "note": "2 commits: sanitizer leak-check off in the helper; Landlock steps down an ABI on EINVAL"}
+{"logged": "2026-11-25 19:50:56", "event": "step", "task": "5.2", "step": "rereview1", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-25 19:53:00", "event": "step-done", "task": "5.2", "step": "rereview1", "note": "2 addressed; 1 new Important (test env drops SystemRoot on Windows)"}
+{"logged": "2026-11-25 19:53:00", "event": "step", "task": "5.2", "step": "fix2", "title": "Fix round 2: helper test keeps the default environment"}
+{"logged": "2026-11-25 19:54:50", "event": "step-commits", "task": "5.2", "step": "fix2", "first": "2026-11-25 19:49:43", "last": "2026-11-25 19:49:43", "count": 1}
+{"logged": "2026-11-25 19:54:50", "event": "step-done", "task": "5.2", "step": "fix2", "note": "SystemRoot kept; folded by autosquash; wine passes"}
+{"logged": "2026-11-25 19:54:50", "event": "done", "task": "5.2", "fix_rounds": 2}
+{"logged": "2026-11-25 19:55:32", "event": "start", "task": "5.3", "title": "Interpreter engine in the helper", "group": "5"}
+{"logged": "2026-11-25 20:42:55", "event": "report", "task": "5.3", "at": "2026-11-25 20:01:50"}
+{"logged": "2026-11-25 20:50:45", "event": "step", "task": "5.3", "step": "fix1", "title": "Fix round 1: CPU clock call, JIT-capable WAMR, Fedora packaging"}
+{"logged": "2026-11-25 21:02:01", "event": "step-commits", "task": "5.3", "step": "fix1", "first": "2026-11-25 20:59:05", "last": "2026-11-25 20:59:05", "count": 3}
+{"logged": "2026-11-25 21:02:01", "event": "step-done", "task": "5.3", "step": "fix1", "note": "clocks withheld alike; JIT WAMR refused; Fedora packages helper"}
+{"logged": "2026-11-25 21:02:02", "event": "step", "task": "5.3", "step": "rereview1", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-25 21:06:20", "event": "step-done", "task": "5.3", "step": "rereview1", "note": "all 3 addressed"}
+{"logged": "2026-11-25 21:06:21", "event": "done", "task": "5.3", "fix_rounds": 1}
+{"logged": "2026-11-25 21:06:57", "event": "start", "task": "5.ci1", "title": "CI fixes for the draft PR", "group": "5"}
+{"logged": "2026-11-25 21:15:59", "event": "done", "task": "5.ci1", "fix_rounds": 0}
+{"logged": "2026-11-25 21:16:40", "event": "start", "task": "5.4", "title": "Linux runs extensions out of process by default", "group": "5"}
+{"logged": "2026-11-25 22:00:21", "event": "report", "task": "5.4", "at": "2026-11-25 21:22:37"}
+{"logged": "2026-11-25 22:07:47", "event": "step", "task": "5.4", "step": "fix1", "title": "Fix round 1 + CI fixes 2: .deb helper, AppImage, tidy, MSVC, fork lint"}
+{"logged": "2026-11-25 22:26:30", "event": "step-done", "task": "5.4", "step": "fix1", "note": "deb/AppImage helper, tidy, MSVC, fork lint; pushed 4647dde"}
+{"logged": "2026-11-25 22:26:30", "event": "step", "task": "5.4", "step": "rereview1", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-25 22:29:31", "event": "step-done", "task": "5.4", "step": "rereview1", "note": "6 of 7 addressed; AppImage flag wrong"}
+{"logged": "2026-11-25 22:29:31", "event": "step", "task": "5.4", "step": "fix2", "title": "Fix round 2: AppImage helper patched in place"}
+{"logged": "2026-11-25 22:35:16", "event": "step-commits", "task": "5.4", "step": "fix2", "first": "2026-11-25 21:56:00", "last": "2026-11-25 21:56:00", "count": 1}
+{"logged": "2026-11-25 22:35:17", "event": "step-done", "task": "5.4", "step": "fix2", "note": "AppImage patched in place; pushed 98ebe9f"}
+{"logged": "2026-11-25 22:35:17", "event": "done", "task": "5.4", "fix_rounds": 2}
+{"logged": "2026-11-25 22:36:02", "event": "start", "task": "5.5", "title": "FreeBSD sandbox (dormant)", "group": "5"}
+{"logged": "2026-11-25 23:07:50", "event": "report", "task": "5.5", "at": "2026-11-25 23:04:32"}
+{"logged": "2026-11-25 23:20:01", "event": "step", "task": "5.5", "step": "fix1", "title": "Fix round 1: address-space cap, rights tests, unlimited descriptors"}
+{"logged": "2026-11-25 23:47:42", "event": "step-commits", "task": "5.5", "step": "fix1", "first": "2026-11-25 23:05:12", "last": "2026-11-25 23:05:12", "count": 1}
+{"logged": "2026-11-25 23:47:42", "event": "step-done", "task": "5.5", "step": "fix1", "note": "cap doubled + headroom; every descriptor's rights tested"}
+{"logged": "2026-11-25 23:47:43", "event": "step", "task": "5.5", "step": "rereview1", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-25 23:53:14", "event": "step-done", "task": "5.5", "step": "rereview1", "note": "all addressed"}
+{"logged": "2026-11-25 23:53:14", "event": "done", "task": "5.5", "fix_rounds": 1}
+{"logged": "2026-11-25 23:53:52", "event": "start", "task": "5.6", "title": "macOS sandbox and the helper's entitlement", "group": "5"}
+{"logged": "2026-11-26 00:11:58", "event": "report", "task": "5.6", "at": "2026-11-25 23:55:13"}
+{"logged": "2026-11-26 00:21:40", "event": "step", "task": "5.6", "step": "fix1", "title": "Fix round 1: entitlement proof, profile allow-list test, deny log"}
+{"logged": "2026-11-26 00:33:36", "event": "step-done", "task": "5.6", "step": "fix1", "note": "airtight entitlement proof, exact allow-list test, filtered deny log, GCC fix; pushed 9fb1290"}
+{"logged": "2026-11-26 00:33:36", "event": "step", "task": "5.6", "step": "rereview1", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-26 00:37:44", "event": "step-done", "task": "5.6", "step": "rereview1", "note": "all addressed"}
+{"logged": "2026-11-26 00:37:44", "event": "done", "task": "5.6", "fix_rounds": 1}
+{"logged": "2026-11-26 00:38:23", "event": "start", "task": "5.7", "title": "Windows sandbox (AppContainer)", "group": "5"}
+{"logged": "2026-11-26 01:03:52", "event": "report", "task": "5.7", "at": "2026-11-26 01:01:30"}
+{"logged": "2026-11-26 01:11:50", "event": "step", "task": "5.7", "step": "fix1", "title": "Fix round 1: diagnosable CI, non-vacuous ACL and containment tests"}
+{"logged": "2026-11-26 01:28:07", "event": "step-done", "task": "5.7", "step": "fix1", "note": "diagnosable CI, non-vacuous tests, grant first"}
+{"logged": "2026-11-26 01:28:07", "event": "step", "task": "5.7", "step": "rereview1", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-26 01:31:48", "event": "step-done", "task": "5.7", "step": "rereview1", "note": "all addressed; minors for diagnosability"}
+{"logged": "2026-11-26 01:31:49", "event": "step", "task": "5.7", "step": "fix2", "title": "Fix round 2: diagnosability minors"}
+{"logged": "2026-11-26 01:41:51", "event": "step-done", "task": "5.7", "step": "fix2", "note": "stderr after reap, NO_PROPAGATE, accepting listener, NotGranted"}
+{"logged": "2026-11-26 01:41:52", "event": "done", "task": "5.7", "fix_rounds": 2}
+{"logged": "2026-11-26 01:41:52", "event": "start", "task": "5.ci3", "title": "CI fixes: Windows duplicate engine symbols, interpreter helper on debug builds", "group": "5"}
+{"logged": "2026-11-26 02:07:17", "event": "report", "task": "5.ci3", "at": "2026-11-26 02:03:21"}
+{"logged": "2026-11-26 02:12:01", "event": "done", "task": "5.ci3", "fix_rounds": 0}
+{"logged": "2026-11-26 02:12:37", "event": "start", "task": "5.8", "title": "Phase 5 gate", "group": "5"}
+{"logged": "2026-11-26 02:52:49", "event": "step", "task": "5.8", "step": "review", "title": "Phase review of phase 5"}
+{"logged": "2026-11-26 03:07:51", "event": "step-done", "task": "5.8", "step": "review", "note": "3 Important, 6 Minor; fix wave dispatched"}
+{"logged": "2026-11-26 03:07:51", "event": "step", "task": "5.8", "step": "fixwave", "title": "Phase review fix wave"}
+{"logged": "2026-11-26 04:09:54", "event": "report", "task": "5.8"}
+{"logged": "2026-11-26 04:09:54", "event": "step-done", "task": "5.8", "step": "fixwave", "note": "9 items done, head 75eb4d4a7; second WAMR race left for a ticket"}
+{"logged": "2026-11-26 04:09:54", "event": "step", "task": "5.8", "step": "fixwave-review", "title": "Review of the fix wave"}
+{"logged": "2026-11-26 04:16:56", "event": "step-done", "task": "5.8", "step": "fixwave-review", "note": "spec 9/9, 1 Important (pre-existing WAMR race), 7 minors"}
+{"logged": "2026-11-26 04:16:56", "event": "step", "task": "5.8", "step": "fixwave-fix1", "title": "Fix round 1 of the fix-wave review"}
+{"logged": "2026-11-26 04:31:16", "event": "step-done", "task": "5.8", "step": "fixwave-fix1", "note": "head 4491235ab; WAMR patch for cluster-list race"}
+{"logged": "2026-11-26 04:31:16", "event": "step", "task": "5.8", "step": "fixwave-review2", "title": "Re-review of fix round 1"}
+{"logged": "2026-11-26 04:35:50", "event": "step-done", "task": "5.8", "step": "fixwave-review2", "note": "8/8; 1 Important (priming OOM unreachable)"}
+{"logged": "2026-11-26 04:35:50", "event": "step", "task": "5.8", "step": "fixwave-fix2", "title": "Fix round 2"}
+{"logged": "2026-11-26 04:45:06", "event": "step-done", "task": "5.8", "step": "fixwave-fix2", "note": "head 790ce3259"}
+{"logged": "2026-11-26 04:45:06", "event": "step", "task": "5.8", "step": "fixwave-review3", "title": "Re-review of fix round 2"}
+{"logged": "2026-11-26 04:48:28", "event": "step-done", "task": "5.8", "step": "fixwave-review3", "note": "1 Critical: patch skipped on BSD patch"}
+{"logged": "2026-11-26 04:48:28", "event": "step", "task": "5.8", "step": "fixwave-fix3", "title": "Fix round 3"}
+{"logged": "2026-11-26 04:55:08", "event": "step-done", "task": "5.8", "step": "fixwave-fix3", "note": "head 9aefa2abe"}
+{"logged": "2026-11-26 04:55:08", "event": "step", "task": "5.8", "step": "fixwave-review4", "title": "Re-review of fix round 3"}
+{"logged": "2026-11-26 05:00:00", "event": "step-done", "task": "5.8", "step": "fixwave-review4", "note": "clean; pushed 9aefa2abe"}
+{"logged": "2026-11-26 05:00:00", "event": "step", "task": "5.8", "step": "windows-fix", "title": "Fix the first real Windows CI failures"}
+{"logged": "2026-11-26 05:22:06", "event": "step-done", "task": "5.8", "step": "windows-fix", "note": "trap test fixed; AppContainer refusal instrumented; pushed 8484a0694"}
+{"logged": "2026-11-26 05:22:06", "event": "step", "task": "5.8", "step": "windows-review", "title": "Review of the Windows CI fix"}
+{"logged": "2026-11-26 05:27:01", "event": "step-done", "task": "5.8", "step": "windows-review", "note": "clean, 5 minors"}
+{"logged": "2026-11-26 07:20:18", "event": "step", "task": "5.8", "step": "ci2-fix", "title": "Fix Windows env block + ARM HostServer case"}
+{"logged": "2026-11-26 07:41:11", "event": "step-done", "task": "5.8", "step": "ci2-fix", "note": "head b5732de14 pushed"}
+{"logged": "2026-11-26 07:41:11", "event": "step", "task": "5.8", "step": "ci2-review", "title": "Review of the CI round 2 fix"}
+{"logged": "2026-11-26 07:44:12", "event": "step-done", "task": "5.8", "step": "ci2-review", "note": "1 Important: contained env carries parent's paths"}
+{"logged": "2026-11-26 07:44:12", "event": "step", "task": "5.8", "step": "ci2-fix1", "title": "Contained env from the container folder"}
+{"logged": "2026-11-26 07:54:53", "event": "step-done", "task": "5.8", "step": "ci2-fix1", "note": "785859fbf pushed"}
+{"logged": "2026-11-26 07:54:53", "event": "step", "task": "5.8", "step": "ci2-review2", "title": "Re-review of the container-folder environment"}
+{"logged": "2026-11-26 08:02:19", "event": "step-done", "task": "5.8", "step": "ci2-review2", "note": "1 Important: prefix check"}
+{"logged": "2026-11-26 08:02:19", "event": "step", "task": "5.8", "step": "ci2-fix2", "title": "Exact container-folder checks"}
+{"logged": "2026-11-26 08:02:19", "event": "step-done", "task": "5.8", "step": "ci2-fix2", "note": "ee4d5ba28"}
+{"logged": "2026-11-26 08:02:19", "event": "step", "task": "5.8", "step": "ci2-review3", "title": "Re-review of the exact checks"}
+{"logged": "2026-11-26 08:04:22", "event": "step-done", "task": "5.8", "step": "ci2-review3", "note": "clean"}
+{"logged": "2026-11-26 09:58:04", "event": "step", "task": "5.8", "step": "ci3", "title": "CI round 3: Windows contained DLL init failure"}
+{"logged": "2026-11-26 10:06:07", "event": "step-done", "task": "5.8", "step": "ci3", "note": "ole32 delay-loaded (user32 via window station); import guard test; minors 1,3; exit code named"}
+{"logged": "2026-11-26 10:06:08", "event": "step", "task": "5.8", "step": "ci3-review", "title": "Review CI round 3"}
+{"logged": "2026-11-26 10:09:11", "event": "step-done", "task": "5.8", "step": "ci3-review", "note": "spec pass; 1 Important (LNK4199), 4 minors"}
+{"logged": "2026-11-26 10:09:11", "event": "step", "task": "5.8", "step": "ci3-fix1", "title": "Fix round 1: LNK4199 + minors"}
+{"logged": "2026-11-26 10:17:10", "event": "step-done", "task": "5.8", "step": "ci3-fix1", "note": "run-time lookup replaces delay-load; 4 minors done"}
+{"logged": "2026-11-26 10:17:10", "event": "step", "task": "5.8", "step": "ci3-review2", "title": "Re-review fix round 1"}
+{"logged": "2026-11-26 10:19:06", "event": "step-done", "task": "5.8", "step": "ci3-review2", "note": "clean, 4 minors; pushed c2d8d12e5"}
+{"logged": "2026-11-26 10:19:06", "event": "step", "task": "5.8", "step": "ci3-fix2", "title": "Round 2: lost exit status kind + doc"}
+{"logged": "2026-11-26 10:22:53", "event": "step-done", "task": "5.8", "step": "ci3-fix2", "note": "ExitKind::Lost; doc clause"}
+{"logged": "2026-11-26 10:22:53", "event": "step", "task": "5.8", "step": "ci3-review3", "title": "Re-review round 2"}
+{"logged": "2026-11-26 10:23:41", "event": "step-done", "task": "5.8", "step": "ci3-review3", "note": "pass, 1 minor"}
+{"logged": "2026-11-26 13:08:12", "event": "step", "task": "5.8", "step": "ci4-windows", "title": "CI round 4: Windows DLL init diagnosis"}
+{"logged": "2026-11-26 13:19:43", "event": "step-done", "task": "5.8", "step": "ci4-windows", "note": "DETACHED_PROCESS + loader probe diagnostic"}
+{"logged": "2026-11-26 13:19:43", "event": "step", "task": "5.8", "step": "ci4-windows-review", "title": "Review Windows round 4"}
+{"logged": "2026-11-26 13:23:03", "event": "step-done", "task": "5.8", "step": "ci4-windows-review", "note": "2 Important, 7 minor"}
+{"logged": "2026-11-26 13:23:03", "event": "step", "task": "5.8", "step": "ci4-windows-fix1", "title": "Windows round 4 fixes"}
+{"logged": "2026-11-26 13:27:08", "event": "step-done", "task": "5.8", "step": "ci4-windows-fix1", "note": "2 Important + minors fixed"}
+{"logged": "2026-11-26 13:27:08", "event": "step", "task": "5.8", "step": "ci4-windows-review2", "title": "Re-review Windows round 4 fixes"}
+{"logged": "2026-11-26 13:29:02", "event": "step-done", "task": "5.8", "step": "ci4-windows-review2", "note": "pass, 3 minors folded"}
+{"logged": "2026-11-26 13:30:23", "event": "step", "task": "5.8", "step": "ci4-macos", "title": "CI round 4: macOS sandbox failures"}
+{"logged": "2026-11-26 13:52:28", "event": "step-done", "task": "5.8", "step": "ci4-macos", "note": "4 causes found, 5 commits"}
+{"logged": "2026-11-26 13:52:28", "event": "step", "task": "5.8", "step": "ci4-macos-review", "title": "Review macOS round 4"}
+{"logged": "2026-11-26 13:57:36", "event": "step-done", "task": "5.8", "step": "ci4-macos-review", "note": "pass, 1 Important (unasserted net defences), 5 minor"}
+{"logged": "2026-11-26 13:57:36", "event": "step", "task": "5.8", "step": "ci4-macos-fix1", "title": "macOS round 4 fixes"}
+{"logged": "2026-11-26 14:06:04", "event": "step-done", "task": "5.8", "step": "ci4-macos-fix1", "note": "6 items fixed"}
+{"logged": "2026-11-26 14:06:05", "event": "step", "task": "5.8", "step": "ci4-macos-review2", "title": "Re-review macOS round 4 fixes"}
+{"logged": "2026-11-26 14:09:50", "event": "step-done", "task": "5.8", "step": "ci4-macos-review2", "note": "pass, 3 minors; pushed a954a9112"}
+{"logged": "2026-11-26 14:09:51", "event": "step", "task": "5.8", "step": "ci5-wait", "title": "CI on a954a9112"}
+{"logged": "2026-11-26 16:22:56", "event": "step-done", "task": "5.8", "step": "ci5-wait", "note": "Windows contained launch works; 4 Windows + 2 macOS failures left"}
+{"logged": "2026-11-26 16:22:56", "event": "step", "task": "5.8", "step": "ci5-fix-windows", "title": "CI round 5 fixes: Windows"}
+{"logged": "2026-11-26 16:43:01", "event": "step-done", "task": "5.8", "step": "ci5-fix-windows", "note": "4 fixed; 2 root causes differed (doubled LOCALAPPDATA, spawn 367); head c47cf3330"}
+{"logged": "2026-11-26 16:43:01", "event": "step", "task": "5.8", "step": "ci5-windows-review", "title": "Review CI round 5 Windows fixes"}
+{"logged": "2026-11-26 16:46:15", "event": "step-done", "task": "5.8", "step": "ci5-windows-review", "note": "spec pass; 2 Important, 6 minor"}
+{"logged": "2026-11-26 16:46:15", "event": "step", "task": "5.8", "step": "ci5-windows-fix1", "title": "Fix round 1: Windows review findings"}
+{"logged": "2026-11-26 16:51:41", "event": "step-done", "task": "5.8", "step": "ci5-windows-fix1", "note": "8 fixed; head d403214fa"}
+{"logged": "2026-11-26 16:51:41", "event": "step", "task": "5.8", "step": "ci5-windows-review2", "title": "Re-review Windows fix round 1"}
+{"logged": "2026-11-26 16:52:42", "event": "step-done", "task": "5.8", "step": "ci5-windows-review2", "note": "7/8; #1 partial + 1 minor"}
+{"logged": "2026-11-26 16:52:42", "event": "step", "task": "5.8", "step": "ci5-windows-fix2", "title": "Fix round 2: handle-count test start barrier"}
+{"logged": "2026-11-26 16:54:56", "event": "step-done", "task": "5.8", "step": "ci5-windows-fix2", "note": "head 9c87b6d5d; controller-checked"}
+{"logged": "2026-11-26 16:54:56", "event": "step", "task": "5.8", "step": "ci5-fix-macos", "title": "CI round 5 fixes: macOS"}
+{"logged": "2026-11-26 16:59:56", "event": "step-done", "task": "5.8", "step": "ci5-fix-macos", "note": "send polls POLLHUP on macOS; head 3d8a32406"}
+{"logged": "2026-11-26 16:59:56", "event": "step", "task": "5.8", "step": "ci5-macos-review", "title": "Review CI round 5 macOS fix"}
+{"logged": "2026-11-26 17:02:59", "event": "step-done", "task": "5.8", "step": "ci5-macos-review", "note": "pass; 3 minors"}
+{"logged": "2026-11-26 17:02:59", "event": "step", "task": "5.8", "step": "ci5-macos-fix1", "title": "Fix round 1: macOS minors"}
+{"logged": "2026-11-26 17:05:05", "event": "step-done", "task": "5.8", "step": "ci5-macos-fix1", "note": "3 minors; test misplaced under __linux__"}
+{"logged": "2026-11-26 17:05:05", "event": "step", "task": "5.8", "step": "ci5-macos-fix2", "title": "Fix round 2: run the handle test on macOS"}
+{"logged": "2026-11-26 17:05:49", "event": "step-done", "task": "5.8", "step": "ci5-macos-fix2", "note": "pushed 54387ba81"}
+{"logged": "2026-11-26 17:05:49", "event": "step", "task": "5.8", "step": "ci6-wait", "title": "CI on 54387ba81"}

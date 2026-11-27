@@ -1,0 +1,950 @@
+# Review package: c2bd2249e..HEAD
+
+## Commits
+891522849 test(vtextension): trap through signals in memory Contour provides
+4d1b596be fix(vtextension): end the extension host when granted memory cannot open
+b4fd8271f build(vtextension): give the memory provision a target of its own
+3780e3062 fix(vtextension): reserve guest memory without MAP_NORESERVE
+
+## Files changed
+ src/vtextension/wasm/host/CMakeLists.txt           |  10 +-
+ src/vtextension/wasm/host/HostProcess.cpp          |   4 +
+ src/vtextension/wasm/host/HostProcess.hpp          |   1 +
+ src/vtextension/wasm/host/HostProcess_test.cpp     |   3 +-
+ src/vtextension/wasm/host/HostServer.cpp           |  61 ++++++++---
+ src/vtextension/wasm/host/HostServer.hpp           |   9 ++
+ src/vtextension/wasm/host/HostServer_test.cpp      |  64 ++++++++++-
+ src/vtextension/wasm/host/IHostedEngine.hpp        |   5 +-
+ src/vtextension/wasm/host/MemoryProvision.hpp      |  14 ++-
+ .../remote/transport/GuestMemoryMapping_posix.cpp  |  13 ++-
+ src/vtextension/wasm/wasmtime/CMakeLists.txt       |   7 +-
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          | 121 +++++++++++++++------
+ .../wasm/wasmtime/WasmtimeMemoryCreator.cpp        |   8 +-
+ 13 files changed, 242 insertions(+), 78 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index 13ff7795c..fcedc74eb 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -19,15 +19,21 @@ add_library(vtextension_host STATIC
+     ${_bootstrap_source}
+     HostProcess.cpp
+     HostProcess.hpp
+     HostServer.cpp
+     HostServer.hpp
+     IHostedEngine.hpp
+     InProcessHost.cpp
+     InProcessHost.hpp
+     InterruptListener.cpp
+     InterruptListener.hpp
++    ../remote/HostConnector.hpp
++)
++target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)
++
++# The memory a host hands the engine an instance runs on (MemoryProvision.hpp): a target of its own, so that an
++# engine's backend, which Contour also links to run extensions in its own process, needs it and not the host.
++add_library(vtextension_memory_provision STATIC
+     MemoryProvision.cpp
+     MemoryProvision.hpp
+-    ../remote/HostConnector.hpp
+ )
+-target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire PRIVATE core::base)
++target_link_libraries(vtextension_memory_provision PUBLIC vtextension_remote_wire)
+diff --git a/src/vtextension/wasm/host/HostProcess.cpp b/src/vtextension/wasm/host/HostProcess.cpp
+index 51b652e54..f9fef96e7 100644
+--- a/src/vtextension/wasm/host/HostProcess.cpp
++++ b/src/vtextension/wasm/host/HostProcess.cpp
+@@ -39,20 +39,23 @@ namespace
+                              .text = "the Contour process that started it is gone" },
+         HostProcessExitRow { .exit = HostProcessExit::EngineUnavailable,
+                              .code = 73,
+                              .text = "no extension runtime can be created" },
+         HostProcessExitRow { .exit = HostProcessExit::ProtocolViolation,
+                              .code = 74,
+                              .text = "Contour sent what the protocol does not allow" },
+         HostProcessExitRow { .exit = HostProcessExit::ExecutorUnavailable,
+                              .code = 75,
+                              .text = "a thread to run extensions on cannot be started" },
++        HostProcessExitRow { .exit = HostProcessExit::MemoryUnusable,
++                             .code = 76,
++                             .text = "memory Contour granted an extension could not be opened" },
+     };
+ 
+     /// @return @p exit's row.
+     [[nodiscard]] HostProcessExitRow const& rowOf(HostProcessExit exit) noexcept
+     {
+         // Every enumerator has its row, at its own index.
+         return ExitTable[static_cast<std::size_t>(exit)];
+     }
+ 
+     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ExitTable.size()),
+@@ -83,20 +86,21 @@ int exitCodeOf(HostProcessExit exit) noexcept
+ }
+ 
+ HostProcessExit hostProcessExitOf(ServerExit exit) noexcept
+ {
+     switch (exit)
+     {
+         case ServerExit::PeerClosed:
+         case ServerExit::Stopped: return HostProcessExit::Served;
+         case ServerExit::ProtocolViolation: return HostProcessExit::ProtocolViolation;
+         case ServerExit::ExecutorUnavailable: return HostProcessExit::ExecutorUnavailable;
++        case ServerExit::MemoryUnusable: return HostProcessExit::MemoryUnusable;
+     }
+     return HostProcessExit::ProtocolViolation;
+ }
+ 
+ std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(transport::HelperArguments const& arguments)
+ {
+     auto const unusable = [](auto) {
+         return HostProcessExit::HandlesUnusable;
+     };
+     auto control = transport::Channel::adopt(arguments.control);
+diff --git a/src/vtextension/wasm/host/HostProcess.hpp b/src/vtextension/wasm/host/HostProcess.hpp
+index a8031c24f..b0f493a1c 100644
+--- a/src/vtextension/wasm/host/HostProcess.hpp
++++ b/src/vtextension/wasm/host/HostProcess.hpp
+@@ -28,20 +28,21 @@ namespace vtextension::wasm::host
+ /// How the extension host process ended.
+ enum class HostProcessExit : uint8_t
+ {
+     Served,              ///< It served until Contour closed the connection, or it was stopped.
+     BadArguments,        ///< Its command line is not what it takes.
+     HandlesUnusable,     ///< A handle it was told of cannot be adopted.
+     ParentGone,          ///< It could not bind itself to its parent, or that one ended already.
+     EngineUnavailable,   ///< No engine could be created.
+     ProtocolViolation,   ///< Contour sent what the protocol does not allow.
+     ExecutorUnavailable, ///< A lane's thread could not be started.
++    MemoryUnusable,      ///< Guest memory Contour granted could not be opened.
+ };
+ 
+ /// One way the host process ends.
+ struct HostProcessExitRow
+ {
+     HostProcessExit exit;  ///< The reason.
+     int code;              ///< Its exit code: 0, or 70 and up -- never 1, 23 or 66, which sanitizers use.
+     std::string_view text; ///< What it writes to stderr on the way out; user-readable, naming no engine.
+ };
+ 
+diff --git a/src/vtextension/wasm/host/HostProcess_test.cpp b/src/vtextension/wasm/host/HostProcess_test.cpp
+index b0ae3e366..9fc63589a 100644
+--- a/src/vtextension/wasm/host/HostProcess_test.cpp
++++ b/src/vtextension/wasm/host/HostProcess_test.cpp
+@@ -627,30 +627,31 @@ TEST_CASE("HostProcess.exitCodesAreDistinct", "[vtextension][host]")
+     auto exits = std::set<HostProcessExit> {};
+     for (auto const& row: hostProcessExits())
+     {
+         INFO(row.text);
+         CHECK(codes.insert(row.code).second);
+         CHECK(exits.insert(row.exit).second);
+         CHECK_FALSE(std::set { 1, 23, 66 }.contains(row.code));
+         CHECK_FALSE(row.text.empty());
+         CHECK(exitCodeOf(row.exit) == row.code);
+     }
+-    CHECK(exits.size() == static_cast<std::size_t>(HostProcessExit::ExecutorUnavailable) + 1);
++    CHECK(exits.size() == static_cast<std::size_t>(HostProcessExit::MemoryUnusable) + 1);
+     CHECK(exitCodeOf(HostProcessExit::Served) == 0);
+ }
+ 
+ TEST_CASE("HostProcess.serverExitsMapToProcessExits", "[vtextension][host]")
+ {
+     CHECK(hostProcessExitOf(ServerExit::PeerClosed) == HostProcessExit::Served);
+     CHECK(hostProcessExitOf(ServerExit::Stopped) == HostProcessExit::Served);
+     CHECK(hostProcessExitOf(ServerExit::ProtocolViolation) == HostProcessExit::ProtocolViolation);
+     CHECK(hostProcessExitOf(ServerExit::ExecutorUnavailable) == HostProcessExit::ExecutorUnavailable);
++    CHECK(hostProcessExitOf(ServerExit::MemoryUnusable) == HostProcessExit::MemoryUnusable);
+ }
+ 
+ #if defined(__linux__) || defined(__FreeBSD__)
+ TEST_CASE("HostBootstrap.capResourcesApplies", "[vtextension][host]")
+ {
+     // In a child of its own, as the caps are this process's for good. A sanitizer build's helper applies
+     // none; the policy is named here, so that what it would apply is tested in every build.
+     constexpr auto DataBytes = uint64_t { 256 } * 1024 * 1024;
+     auto const child = ::fork();
+     REQUIRE(child != -1);
+diff --git a/src/vtextension/wasm/host/HostServer.cpp b/src/vtextension/wasm/host/HostServer.cpp
+index a02e5d0ec..1e5c499ff 100644
+--- a/src/vtextension/wasm/host/HostServer.cpp
++++ b/src/vtextension/wasm/host/HostServer.cpp
+@@ -210,26 +210,31 @@ class HostServer::Impl
+         [[nodiscard]] std::expected<void, ExtensionError> callHost(
+             std::size_t functionIndex, std::span<uint32_t const> arguments) noexcept override;
+     };
+ 
+     /// The lane whose call runs on this thread; null outside a call, and on the control thread.
+     static thread_local Lane* CurrentLane;
+ 
+     /// The server whose control thread is instantiating on this thread; null outside an instantiation.
+     static thread_local Impl* CurrentInstantiation;
+ 
+-    /// Asks the parent whether instance @p instanceId's memory may grow to @p bytes, on the channel the guest
+-    /// running on this thread was entered through: the lane of its call, or control while it is being
+-    /// instantiated (a start function). Anywhere else growth is refused.
+-    /// @return The parent's answer; Refused where nobody can be asked, or the channel failed or was answered
+-    ///         with anything but Grown, which ends the connection once the guest returned.
+-    [[nodiscard]] proto::GrowStatus growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept;
++    /// Grows instance @p instanceId's memory to @p bytes (GrowRequest): asks the parent on the channel the
++    /// guest running on this thread was entered through -- the lane of its call, or control while it is being
++    /// instantiated (a start function) -- and opens the bytes once the parent granted them. Anywhere else
++    /// growth is refused.
++    /// @return Granted once the bytes are open. Refused where nobody can be asked; or the channel failed or
++    /// was
++    ///         answered with anything but Grown, or the granted bytes could not be opened, each of which ends
++    ///         the connection once the guest returned.
++    [[nodiscard]] proto::GrowStatus growOnCurrentChannel(uint32_t instanceId,
++                                                         GuestMemoryMapping& memory,
++                                                         uint64_t bytes) noexcept;
+ 
+     /// Sends Grow on @p stream and reads its one answer, which must be Grown.
+     /// @param ended Why the channel stopped serving; set here if it does, and nothing is asked once set.
+     [[nodiscard]] static proto::GrowStatus askToGrow(PduStream& stream,
+                                                      std::optional<ServerExit>& ended,
+                                                      uint32_t instanceId,
+                                                      uint64_t bytes) noexcept;
+ 
+     /// Checks what an Instantiate grants against how this host shares memory, and maps it.
+     /// @return Under MemoryMode::Copy nothing, once the grant is empty and nothing came with it; under
+@@ -557,24 +562,24 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
+     auto provision = provisionOf(request, *module->runtime);
+     if (!provision)
+         return std::unexpected(provision.error());
+ 
+     // A start function runs here, on the control thread, where a host call finds no lane and fails, and
+     // growing its memory asks the parent on control.
+     auto instance = prepare(_controlGuard).and_then([&] {
+         auto scope = std::optional<ProvisionScope> {};
+         if (*provision)
+             scope.emplace(std::move(**provision));
+-        auto const outer = std::exchange(CurrentInstantiation, this);
+-        auto instantiated = module->module->instantiate(_hostContext);
+-        CurrentInstantiation = outer;
+-        return instantiated;
++        auto const instantiating = core::Finally { [outer = std::exchange(CurrentInstantiation, this)] {
++            CurrentInstantiation = outer;
++        } };
++        return module->module->instantiate(_hostContext);
+     });
+     if (auto const ended = std::exchange(_instantiationEnded, std::nullopt))
+         return std::unexpected(*ended);
+     if (!instance)
+         return send(_control,
+                     proto::Instantiated {
+                         .instanceId = request.instanceId, .error = instance.error(), .callableExports = {} });
+ 
+     auto slot = std::make_shared<InstanceSlot>();
+     slot->module = module;
+@@ -640,32 +645,54 @@ std::expected<std::optional<MemoryProvision>, ServerExit> HostServer::Impl::prov
+         return std::unexpected(ServerExit::ProtocolViolation);
+     // What cannot be mapped as the object, writable, is not the object granted: let go of unproven, never
+     // closed on Windows, where the value may name a handle of this process's own.
+     auto mapping = GuestMemoryMapping::map(
+         claimed->get(), grant.objectBytes, grant.initialBytes, _engine.memoryGuardBytes());
+     if (!mapping)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     // Proven, the handle is ours, and closed: the mapping keeps the object alive.
+     std::ignore = std::move(*claimed).adopt();
+     return MemoryProvision { .memory = std::move(*mapping),
+-                             .grow = [this, instanceId = request.instanceId](uint64_t bytes) {
+-                                 return growOnCurrentChannel(instanceId, bytes);
++                             .grow = [this, instanceId = request.instanceId](GuestMemoryMapping& memory,
++                                                                             uint64_t bytes) {
++                                 return growOnCurrentChannel(instanceId, memory, bytes);
+                              } };
+ }
+ 
+-proto::GrowStatus HostServer::Impl::growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept
++proto::GrowStatus HostServer::Impl::growOnCurrentChannel(uint32_t instanceId,
++                                                         GuestMemoryMapping& memory,
++                                                         uint64_t bytes) noexcept
+ {
++    auto* stream = static_cast<PduStream*>(nullptr);
++    auto* ended = static_cast<std::optional<ServerExit>*>(nullptr);
+     if (auto* const lane = CurrentLane; lane != nullptr && lane->server == this)
+-        return askToGrow(lane->stream, lane->ended, instanceId, bytes);
+-    if (CurrentInstantiation == this)
+-        return askToGrow(_control, _instantiationEnded, instanceId, bytes);
+-    return proto::GrowStatus::Refused;
++    {
++        stream = &lane->stream;
++        ended = &lane->ended;
++    }
++    else if (CurrentInstantiation == this)
++    {
++        stream = &_control;
++        ended = &_instantiationEnded;
++    }
++    else
++        return proto::GrowStatus::Refused;
++
++    if (askToGrow(*stream, *ended, instanceId, bytes) != proto::GrowStatus::Granted)
++        return proto::GrowStatus::Refused;
++    // The parent counts the bytes as the memory's now: failing to open them is this host's own failure.
++    if (!_config.openGuestMemory(memory, bytes))
++    {
++        *ended = ServerExit::MemoryUnusable;
++        return proto::GrowStatus::Refused;
++    }
++    return proto::GrowStatus::Granted;
+ }
+ 
+ proto::GrowStatus HostServer::Impl::askToGrow(PduStream& stream,
+                                               std::optional<ServerExit>& ended,
+                                               uint32_t instanceId,
+                                               uint64_t bytes) noexcept
+ {
+     if (ended)
+         return proto::GrowStatus::Refused;
+     if (auto const sent = send(stream, proto::Grow { .instanceId = instanceId, .bytes = bytes }); !sent)
+diff --git a/src/vtextension/wasm/host/HostServer.hpp b/src/vtextension/wasm/host/HostServer.hpp
+index ec5670eb2..3c356f988 100644
+--- a/src/vtextension/wasm/host/HostServer.hpp
++++ b/src/vtextension/wasm/host/HostServer.hpp
+@@ -21,61 +21,70 @@
+ #include <expected>
+ #include <functional>
+ #include <memory>
+ #include <system_error>
+ #include <vector>
+ 
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// What one guest call on a lane may take of its thread's stack besides the guest's own: the engine's entry,
+ /// the host call's way out and the server's frames serving the lane meanwhile, sanitizers included.
+ inline constexpr std::size_t HostFrameBytes = std::size_t { 256 } * 1024;
+ 
+ /// The stack each lane's executor thread runs on: MaxCallDepth guest calls at their largest.
+ inline constexpr std::size_t ExecutorStackBytes =
+     remote::proto::MaxCallDepth * (remote::proto::MaxRuntimeStackBytes + HostFrameBytes);
+ 
+ /// Starts the thread a lane's executor runs on, with the stack it asks for, as ExecutorThread::start does.
+ using ExecutorStarter =
+     std::function<std::expected<ExecutorThread, std::error_code>(std::size_t, std::function<void()>)>;
+ 
++/// Opens a guest memory mapping's first bytes, as GuestMemoryMapping::open() does.
++using GuestMemoryOpener = std::function<std::expected<void, remote::transport::MappingError>(
++    remote::transport::GuestMemoryMapping& memory, uint64_t bytes)>;
++
+ /// How a host server runs.
+ struct HostServerConfig
+ {
+     remote::proto::PduLimits limits {}; ///< The caps of the PDUs it receives, and sends.
+     /// How far the host confined itself, as its Hello states, when there is no confine.
+     remote::proto::LockdownState lockdown = remote::proto::LockdownState::Unsandboxed;
+     /// Confines the host: called once every lane's thread started, before Hello, whose lockdown is what it
+     /// returns. Null: nothing is confined, and Hello states `lockdown`.
+     std::function<remote::proto::LockdownState()> confine {};
+     /// How each lane's executor thread is started: the operating system's threads, but in a test that
+     /// makes one fail.
+     ExecutorStarter startExecutor = &ExecutorThread::start;
+     /// Whether an interrupt slot is raised on the interrupt page, as interruptSlot() asks before it
+     /// interrupts: what tells the instance a slot was raised for from one that holds the slot since. Null:
+     /// every interruptSlot() interrupts.
+     std::function<bool(uint32_t slot)> isInterruptRaised {};
++    /// How the bytes a guest's memory grew into, once the parent granted them, are opened: the operating
++    /// system's way, but in a test that makes it fail.
++    GuestMemoryOpener openGuestMemory = &remote::transport::GuestMemoryMapping::open;
+ };
+ 
+ /// Why a host server stopped serving.
+ enum class ServerExit : uint8_t
+ {
+     ProtocolViolation,   ///< The parent sent what the protocol does not allow, on any channel.
+     PeerClosed,          ///< The parent closed a channel, or a channel failed.
+     Stopped,             ///< stop() was called.
+     ExecutorUnavailable, ///< A lane's executor thread could not be started.
++    MemoryUnusable,      ///< Guest memory the parent granted to grow into could not be opened.
+ };
+ 
+ /// Serves one engine over a control channel and its lanes.
+ class HostServer
+ {
+   public:
+     /// @param engine What runtimes are created on; must outlive the server.
+     /// @param lanes The helper's ends of the lanes, each served by an executor thread of its own.
+     /// @param control The helper's end of the control channel.
+     /// @param config How it runs.
+diff --git a/src/vtextension/wasm/host/HostServer_test.cpp b/src/vtextension/wasm/host/HostServer_test.cpp
+index 4426ba766..1575fd69f 100644
+--- a/src/vtextension/wasm/host/HostServer_test.cpp
++++ b/src/vtextension/wasm/host/HostServer_test.cpp
+@@ -29,20 +29,21 @@
+ #include <vtextension/testing/TestModules.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+ #include <vtextension/wasm/host/HostServer.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/host/InProcessHost.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/DecoratedEngine.hpp>
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ #include <vtextension/wasm/testing/ProcessModules.hpp>
+ 
+ #ifndef _WIN32
+@@ -59,25 +60,27 @@ using vtextension::wasm::host::HostServer;
+ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
+ using vtextension::wasm::host::ServerExit;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ using vtextension::wasm::remote::proto::MaxCallDepth;
+ using vtextension::wasm::remote::proto::MaxRuntimeStackBytes;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
+ using vtextension::wasm::remote::transport::createSharedObject;
+ using vtextension::wasm::remote::transport::grantHandle;
++using vtextension::wasm::remote::transport::GuestMemoryMapping;
+ using vtextension::wasm::remote::transport::HandleGrant;
+ using vtextension::wasm::remote::transport::HandleTarget;
+ using vtextension::wasm::remote::transport::InterruptSlotCount;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+ using vtextension::wasm::remote::transport::MapAccess;
++using vtextension::wasm::remote::transport::MappingError;
+ using vtextension::wasm::remote::transport::OwnedHandle;
+ using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::remote::transport::SharedMapping;
+ using vtextension::wasm::remote::transport::SharedObjectUse;
+ using vtextension::wasm::remote::transport::StreamError;
+ using vtextension::wasm::testing::makeHostedEngine;
+ #ifndef _WIN32
+ using vtextension::wasm::remote::transport::testing::openDescriptorCount;
+ #endif
+ 
+@@ -1215,23 +1218,23 @@ class ParentObject
+         // Contour commits what it grants through its own view (Windows); the host does through its own.
+         REQUIRE(mapping->commit(0, bytes).has_value());
+         return std::move(*mapping);
+     }
+ 
+     OwnedHandle _handle;
+     SharedMapping _mapping;
+ };
+ 
+ /// @return A scripted parent of a host whose engine runs instances in the memory granted to them.
+-[[nodiscard]] std::unique_ptr<ScriptedParent> sharingParent()
++[[nodiscard]] std::unique_ptr<ScriptedParent> sharingParent(HostServerConfig config = {})
+ {
+-    return std::make_unique<ScriptedParent>(makeHostedEngine(proto::MemoryMode::Shared), HostServerConfig {});
++    return std::make_unique<ScriptedParent>(makeHostedEngine(proto::MemoryMode::Shared), std::move(config));
+ }
+ 
+ /// Sends an Instantiate of module 1 as instance 1 on @p parent's control, granting what @p grant grants with
+ /// @p memory's sizes.
+ void sendGranted(ScriptedParent& parent, proto::MemoryGrant memory, HandleGrant const& grant)
+ {
+     auto const sent = parent.control->send(
+         proto::Instantiate { .moduleId = 1, .instanceId = 1, .interruptSlot = 1, .memory = memory }, grant);
+     REQUIRE(sent.has_value());
+ }
+@@ -1245,24 +1248,27 @@ void instantiateGranted(ScriptedParent& parent, ParentObject const& object)
+                     .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
+                 grant);
+     auto const answer = parent.receiveControl();
+     REQUIRE(std::holds_alternative<proto::Instantiated>(answer));
+     REQUIRE_FALSE(std::get<proto::Instantiated>(answer).error.has_value());
+ }
+ 
+ /// A parent with runtime 1 and GrowModule loaded as module 1 on a host that shares memory.
+ struct GrowingParent
+ {
+-    std::unique_ptr<ScriptedParent> parent = sharingParent(); ///< The parent.
+-    proto::Loaded loaded;                                     ///< What GrowModule was described as.
++    std::unique_ptr<ScriptedParent> parent; ///< The parent.
++    proto::Loaded loaded;                   ///< What GrowModule was described as.
+ 
+-    GrowingParent(): loaded { prepared(*parent) } {}
++    explicit GrowingParent(HostServerConfig config = {}):
++        parent { sharingParent(std::move(config)) }, loaded { prepared(*parent) }
++    {
++    }
+ 
+   private:
+     [[nodiscard]] static proto::Loaded prepared(ScriptedParent& parent)
+     {
+         CHECK(parent.receiveControl()
+               == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                              .memoryMode = proto::MemoryMode::Shared,
+                                              .lockdown = proto::LockdownState::Unsandboxed } });
+         parent.createRuntime(1);
+         return parent.loadOk(1, 1, toModule(vtextension::wasm::testing::GrowModule));
+@@ -1361,20 +1367,68 @@ TEST_CASE("HostServer.growDuringInstantiateGoesThroughTheParent", "[vtextension]
+         CHECK(object.wordAt(StartGrowAddress) == StartGrowValue);
+     }
+ 
+     SECTION("refused")
+     {
+         CHECK(answered(proto::GrowStatus::Refused) == std::vector<uint32_t> { 0xFFFF'FFFF });
+         CHECK(object.wordAt(StartGrowAddress) == 0);
+     }
+ }
+ 
++TEST_CASE("HostServer.grantedGrowthThatCannotBeOpenedEndsTheHost", "[vtextension][host]")
++{
++    // The parent counts granted bytes as the memory's: a host that cannot open them fails itself, rather than
++    // let the guest see a refusal the parent never gave.
++    auto const failingToOpen = [] {
++        auto config = HostServerConfig {};
++        config.openGuestMemory = [](GuestMemoryMapping& /*memory*/, uint64_t /*bytes*/) {
++            return std::expected<void, MappingError> { std::unexpected(MappingError::Io) };
++        };
++        return config;
++    };
++
++    SECTION("on a lane")
++    {
++        auto growing = GrowingParent { failingToOpen() };
++        auto& parent = *growing.parent;
++        auto const object = ParentObject {};
++        instantiateGranted(parent, object);
++        parent.send(0,
++                    proto::Call {
++                        .instanceId = 1, .exportOrdinal = ordinalOf(growing.loaded, "grow"), .argv = { 1 } });
++        REQUIRE(std::holds_alternative<proto::Grow>(parent.receive(0)));
++        parent.send(0, proto::Grown { .status = proto::GrowStatus::Granted });
++        CHECK(parent.exitWithinDeadline() == ServerExit::MemoryUnusable);
++        // The call is never answered.
++        CHECK_FALSE(parent.lanes.at(0).receive().has_value());
++    }
++
++    SECTION("in a start function")
++    {
++        auto parent = sharingParent(failingToOpen());
++        parent->skipHello();
++        parent->createRuntime(1);
++        std::ignore = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::StartGrowModule));
++        auto const object = ParentObject {};
++        auto const grant = object.grant();
++        sendGranted(*parent,
++                    proto::MemoryGrant {
++                        .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
++                    grant);
++        REQUIRE(std::holds_alternative<proto::Grow>(parent->receiveControl()));
++        parent->sendControl(proto::Grown { .status = proto::GrowStatus::Granted });
++        CHECK(parent->exitWithinDeadline() == ServerExit::MemoryUnusable);
++        // The instance is never announced.
++        CHECK_FALSE(parent->control->receive().has_value());
++    }
++}
++
+ TEST_CASE("HostServer.wrongGrantIsAViolation", "[vtextension][host]")
+ {
+     /// Whether the object travels with the request.
+     enum class Granted : uint8_t
+     {
+         Nothing, ///< Nothing is granted.
+         Object,  ///< The object the parent made is.
+     };
+     /// One way a grant is not the object it must be.
+     struct WrongGrant
+diff --git a/src/vtextension/wasm/host/IHostedEngine.hpp b/src/vtextension/wasm/host/IHostedEngine.hpp
+index 01efc257d..2b09957cd 100644
+--- a/src/vtextension/wasm/host/IHostedEngine.hpp
++++ b/src/vtextension/wasm/host/IHostedEngine.hpp
+@@ -17,20 +17,19 @@ namespace vtextension::wasm::host
+ 
+ /// A backend a host process drives. The helper's own interface: the parent never sees one.
+ class IHostedEngine: public IWasmBackend
+ {
+   public:
+     /// @return How the engine's instances share their linear memory with the parent: what the host states in
+     ///         its Hello, and so how the parent reaches that memory.
+     [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
+ 
+     /// @return Under MemoryMode::Shared, how many inaccessible bytes must follow each instance's memory
+-    /// object
+-    ///         where the host maps it: the guard the engine's compiled code relies on (MemoryProvision); 0
+-    ///         for an engine that copies memory.
++    ///         object where the host maps it: the guard the engine's compiled code relies on
++    ///         (MemoryProvision). 0 for an engine that copies memory.
+     [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
+ };
+ 
+ /// Creates the engine one host runs on; null if none can be.
+ using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/MemoryProvision.hpp b/src/vtextension/wasm/host/MemoryProvision.hpp
+index 7df95aac6..18bcfcdff 100644
+--- a/src/vtextension/wasm/host/MemoryProvision.hpp
++++ b/src/vtextension/wasm/host/MemoryProvision.hpp
+@@ -13,31 +13,37 @@
+ #include <cstdint>
+ #include <functional>
+ #include <optional>
+ 
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+-/// Asks Contour whether an instance's memory may grow to a size, and waits for the answer.
++/// Grows an instance's memory: asks Contour whether it may grow to a size, waits for the answer, and once
++/// Contour granted it opens the new bytes. Bytes Contour granted that cannot be opened are the host's own
++/// failure: the host ends the connection for it once the guest returns, rather than let Contour believe the
++/// memory spans what the guest cannot reach.
++/// @param memory The memory's mapping, where the bytes are opened.
+ /// @param bytes The size it would grow to: whole guest pages, more than it spans now.
+-/// @return Whether Contour granted it.
+-using GrowRequest = std::function<remote::proto::GrowStatus(uint64_t bytes)>;
++/// @return Granted once the bytes are open; Refused if Contour refused, nobody could be asked, or they could
++///         not be opened.
++using GrowRequest =
++    std::function<remote::proto::GrowStatus(remote::transport::GuestMemoryMapping& memory, uint64_t bytes)>;
+ 
+ /// What one instance's memory is made of.
+ struct MemoryProvision
+ {
+     /// The object Contour granted, mapped, with the bytes its memory spans at first open.
+     remote::transport::GuestMemoryMapping memory;
+-    /// Asks Contour before the memory grows; nothing more is opened unless it grants.
++    /// Grows the memory, asking Contour first; nothing more is opened unless it grants.
+     GrowRequest grow;
+ };
+ 
+ /// Offers a provision to the instantiation the calling thread makes while the scope lives. Whatever is not
+ /// taken by then is dropped, unmapping the object. Scopes nest: an inner one hides an outer one's until it
+ /// ends.
+ class ProvisionScope
+ {
+   public:
+     /// @param provision What the next memory the thread's engine creates is made of.
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_posix.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_posix.cpp
+index f1450916f..84fb6bbbe 100644
+--- a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_posix.cpp
+@@ -1,15 +1,19 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+-// Guest memory on POSIX: an inaccessible reservation of the object and its guard (PROT_NONE, MAP_NORESERVE,
+-// so that it charges nothing), the object mapped shared over its start (MAP_FIXED), writable to prove the
+-// handle grants writing, and every byte past the open ones closed again. Opening more is one mprotect().
++// Guest memory on POSIX: an inaccessible reservation of the object and its guard, the object mapped shared
++// over its start (MAP_FIXED), writable to prove the handle grants writing, and every byte past the open ones
++// closed again. Opening more is one mprotect().
++//
++// The reservation is private and PROT_NONE, which charges nothing without MAP_NORESERVE: Linux accounts only
++// writable private mappings against its commit limit, and the guard never becomes writable. The flag is left
++// out rather than guarded, as FreeBSD 11 and later no longer define it.
+ #include <sys/mman.h>
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ 
+ #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+@@ -29,22 +33,21 @@ std::expected<GuestMemoryMapping, MappingError> GuestMemoryMapping::map(NativeHa
+                                                                         uint64_t initialBytes,
+                                                                         uint64_t guardBytes)
+ {
+     if (!isGuestMemoryLayout(objectBytes, initialBytes, guardBytes))
+         return std::unexpected(MappingError::WrongSize);
+     if (auto const sized = checkSharedObjectSize(object, objectBytes); !sized)
+         return std::unexpected(mappingErrorOf(sized.error()));
+ 
+     auto const objectSize = static_cast<std::size_t>(objectBytes);
+     auto const reservationSize = static_cast<std::size_t>(objectBytes + guardBytes);
+-    auto* const reservation =
+-        ::mmap(nullptr, reservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
++    auto* const reservation = ::mmap(nullptr, reservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+     if (reservation == MAP_FAILED)
+         return std::unexpected(MappingError::Io);
+     // From here on the mapping owns the reservation, and unmaps it on every way out.
+     auto mapping = GuestMemoryMapping { static_cast<std::byte*>(reservation), objectBytes, 0, guardBytes };
+     if (::mmap(reservation, objectSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, object, 0)
+         == MAP_FAILED)
+         return std::unexpected(MappingError::Io);
+     // Writable it proved the handle grants writing; only the initial bytes stay so.
+     auto const closed = objectSize - static_cast<std::size_t>(initialBytes);
+     if (closed != 0 && ::mprotect(mapping._base + initialBytes, closed, PROT_NONE) != 0)
+diff --git a/src/vtextension/wasm/wasmtime/CMakeLists.txt b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+index 2f0842fa0..b42d8aff1 100644
+--- a/src/vtextension/wasm/wasmtime/CMakeLists.txt
++++ b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+@@ -5,22 +5,22 @@
+ add_library(vtextension_wasmtime STATIC
+     WasmtimeEngine.cpp
+     WasmtimeInstance.cpp
+     WasmtimeModule.cpp
+     WasmtimeEngine.hpp
+     WasmtimeHandles.hpp
+     WasmtimeMemoryCreator.cpp
+     WasmtimeMemoryCreator.hpp
+     WasmtimeRuntime.hpp
+ )
+-# vtextension_host for the memory a host provides an instance with (../host/MemoryProvision.hpp).
+-target_link_libraries(vtextension_wasmtime PUBLIC vtextension vtextension_host PRIVATE contour::wasmtime)
++# vtextension_memory_provision for the memory a host provides an instance with (../host/MemoryProvision.hpp).
++target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE vtextension_memory_provision contour::wasmtime)
+ 
+ # The backstop WasmtimeEngine.cpp includes: it stops the build unless the Wasmtime headers have every
+ # feature the backend switches, from the same list the configure-time probe checks an installed Wasmtime
+ # against (cmake/ContourThirdParties.cmake).
+ ContourThirdParties_WasmtimeFeatureChecks(_wasmtime_feature_checks ${_WASMTIME_REQUIRED_FEATURES})
+ file(CONFIGURE
+     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp"
+     CONTENT "// SPDX-License-Identifier: Apache-2.0\n// Generated by CMake from _WASMTIME_REQUIRED_FEATURES (cmake/ContourThirdParties.cmake).\n#pragma once\n\n${_wasmtime_feature_checks}"
+     @ONLY
+ )
+@@ -50,21 +50,22 @@ if(VTEXTENSION_TESTING AND CONTOUR_WASMTIME_MISSING_TEST_FEATURES)
+         "which its tests need.")
+ elseif(VTEXTENSION_TESTING)
+     # The backend's own suite: the contract, and what is Wasmtime's alone, which drives its C API directly.
+     # PreparedGeneration.cpp defines the probe runtime-agnostic tests read (../testing/PreparedGeneration.hpp).
+     add_executable(vtextension_wasmtime_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         PreparedGeneration.cpp
+         WasmtimeEngine_test.cpp
+     )
+     target_link_libraries(vtextension_wasmtime_test PRIVATE
+-        vtextension vtextension_wasmtime contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
++        vtextension vtextension_wasmtime vtextension_memory_provision contour::wasmtime core::testing Catch2::Catch2
++        contour_test_trace)
+     add_test(NAME vtextension_wasmtime_test COMMAND vtextension_wasmtime_test)
+     if(CONTOUR_WASM_GUESTS)
+         # The hidden measurement case renders a bundled extension, read from where vtextension_test reads it.
+         add_dependencies(vtextension_wasmtime_test contour_bundled_extensions)
+         target_compile_definitions(vtextension_wasmtime_test PRIVATE
+             VTEXTENSION_TEST_MODULE_DIR="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release")
+     endif()
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_wasmtime_test PRIVATE -Wno-c2y-extensions)
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index ecd92a297..3c7c97fed 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -285,25 +285,28 @@ class GrantedObject
+         REQUIRE(mapping.has_value());
+         // Contour commits what it grants through its own view (Windows); the helper does through its own.
+         REQUIRE(mapping->commit(0, bytes).has_value());
+         return std::move(*mapping);
+     }
+ 
+     transport::OwnedHandle _handle;
+     transport::SharedMapping _parent;
+ };
+ 
+-/// @return A growth request answering every growth with @p status, and recording the size each asked for.
++/// @return A growth request answering every growth with @p status, opening what it grants, and recording
++///         the size each asked for.
+ [[nodiscard]] host::GrowRequest answering(proto::GrowStatus status, std::vector<uint64_t>& asked)
+ {
+-    return [status, &asked](uint64_t bytes) {
++    return [status, &asked](transport::GuestMemoryMapping& memory, uint64_t bytes) {
+         asked.push_back(bytes);
++        if (status == proto::GrowStatus::Granted && !memory.open(bytes))
++            return proto::GrowStatus::Refused;
+         return status;
+     };
+ }
+ 
+ /// @return What instantiating @p module with @p provision offered is answered with.
+ [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IWasmInstance>, ExtensionError>
+ instantiateWith(vtextension::wasm::IWasmModule& module,
+                 vtextension::wasm::IHostContext& context,
+                 host::MemoryProvision provision)
+ {
+@@ -789,59 +792,109 @@ TEST_CASE("WasmtimeEngine.provisionMismatchFails", "[wasmtime]")
+             *module,
+             context,
+             object.provision(objectBytes, initialBytes, 0, answering(proto::GrowStatus::Granted, asked)));
+         REQUIRE_FALSE(instance.has_value());
+         CHECK(instance.error() == ExtensionError::InvalidComponent);
+     }
+ }
+ 
+ TEST_CASE("WasmtimeEngine.reservationAndGuardAreExplicit", "[wasmtime]")
+ {
++    // Under software traps; signalTrapsOnProvidedMemory checks what signal traps ask for.
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::wasmtime::testing::lastMemoryRequest;
+     using vtextension::wasm::wasmtime::testing::MemoryRequest;
++    auto const engine = makeProvidedEngine();
++    CHECK(engine->memoryGuardBytes() == 0);
++    auto const runtime = contract::createRuntime(*engine);
++    auto const guard = contract::enterThread(*engine);
++    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
++    auto const object = GrantedObject { ContractObjectBytes };
++    auto context = contract::RecordingHostContext {};
++    auto asked = std::vector<uint64_t> {};
++    auto const instance = instantiateWith(
++        *module,
++        context,
++        object.provision(ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Granted, asked)));
++    CHECK(instance.has_value());
++    CHECK(lastMemoryRequest()
++          == MemoryRequest { .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = 0 });
++}
+ 
+-    auto const instantiated = [](TrapMode trapMode) {
+-        auto const engine = makeProvidedEngine(trapMode);
+-        auto const runtime = contract::createRuntime(*engine);
+-        auto const guard = contract::enterThread(*engine);
+-        auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+-        auto const object = GrantedObject { ContractObjectBytes };
+-        auto context = contract::RecordingHostContext {};
+-        auto asked = std::vector<uint64_t> {};
+-        auto const instance = instantiateWith(*module,
+-                                              context,
+-                                              object.provision(ContractObjectBytes,
+-                                                               GuestPage,
+-                                                               engine->memoryGuardBytes(),
+-                                                               answering(proto::GrowStatus::Granted, asked)));
+-        CHECK(instance.has_value());
+-        return engine->memoryGuardBytes();
+-    };
++TEST_CASE("WasmtimeEngine.signalTrapsOnProvidedMemory", "[wasmtime]")
++{
++    // The only case that brings up an engine trapping through signals: Catch2 puts its own handlers back
++    // after every case, over the ones Wasmtime installs once per process, so a second such case would see
++    // its faults end the test binary. Every check of signal traps belongs here.
++    //
++    // Under signal traps Wasmtime checks an access against the reservation (the object), not the memory's
++    // current size: a store past the open bytes faults in the object's closed pages, which is all that stops
++    // it. A store past the object fails the check and is sent to address 0 (Spectre hardening), which faults
++    // too. Both must be traps the instance survives, not faults that end the process.
++    if constexpr (vtextension::wasm::ThisBuildInstrumentation
++                  != vtextension::wasm::BuildInstrumentation::None)
++        SKIP("an instrumented build traps in software only");
++    namespace contract = vtextension::wasm::testing::contract;
++    auto const engine = makeProvidedEngine(TrapMode::Signals);
++    REQUIRE(engine->memoryGuardBytes() == SignalsGuardBytes);
++    auto const runtime = contract::createRuntime(*engine);
++    auto const guard = contract::enterThread(*engine);
++    constexpr auto ObjectPages = ContractObjectBytes / GuestPage;
+ 
+-    SECTION("software traps")
++    struct Fault
+     {
+-        CHECK(instantiated(TrapMode::Software) == 0);
+-        CHECK(lastMemoryRequest()
+-              == MemoryRequest { .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = 0 });
+-    }
+-
+-    SECTION("signals")
++        std::string_view what;
++        uint64_t initialPages; ///< The memory's initial size, all of it open.
++        uint32_t index;        ///< The store's dynamic address; its static offset is 8.
++    };
++    for (auto const& [what, initialPages, index]: {
++             Fault { .what = "past the open bytes",
++                     .initialPages = 1,
++                     .index = static_cast<uint32_t>(GuestPage) },
++             Fault { .what = "past the object",
++                     .initialPages = ObjectPages,
++                     .index = static_cast<uint32_t>(ContractObjectBytes - 4) },
++         })
+     {
+-        // A sanitizer or coverage owns the signal handlers: Wasmtime's must not replace them.
+-        if constexpr (vtextension::wasm::ThisBuildInstrumentation
+-                      != vtextension::wasm::BuildInstrumentation::None)
+-            SKIP("an instrumented build traps in software only");
+-        CHECK(instantiated(TrapMode::Signals) == SignalsGuardBytes);
+-        CHECK(lastMemoryRequest()
+-              == MemoryRequest {
+-                  .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = SignalsGuardBytes });
++        INFO(what);
++        auto const module = runtime->load(ModuleIdentity {},
++                                          assemble(std::format(R"((module
++  (memory (export "memory") {} {})
++  (func (export "store") (param i32 i32) (i32.store (local.get 0) (local.get 1)))
++  (func (export "store-at") (param i32) (i32.store offset=8 (local.get 0) (i32.const 7))))
++)",
++                                                               initialPages,
++                                                               ObjectPages)));
++        REQUIRE(module.has_value());
++        auto const object = GrantedObject { ContractObjectBytes };
++        auto context = contract::RecordingHostContext {};
++        auto asked = std::vector<uint64_t> {};
++        auto instance = instantiateWith(**module,
++                                        context,
++                                        object.provision(ContractObjectBytes,
++                                                         initialPages * GuestPage,
++                                                         SignalsGuardBytes,
++                                                         answering(proto::GrowStatus::Refused, asked)));
++        REQUIRE(instance.has_value());
++        CHECK(vtextension::wasm::wasmtime::testing::lastMemoryRequest()
++              == vtextension::wasm::wasmtime::testing::MemoryRequest { .minimum = initialPages * GuestPage,
++                                                                       .reserved = ContractObjectBytes,
++                                                                       .guard = SignalsGuardBytes });
++
++        auto argv = std::array<uint32_t, 1> { index };
++        auto const called = (*instance)->call(contract::functionOf(**instance, "store-at"), argv);
++        REQUIRE_FALSE(called.has_value());
++        CHECK(called.error() == vtextension::wasm::CallFailure::Trap);
++
++        auto stored = std::array<uint32_t, 2> { 16, 42 };
++        REQUIRE((*instance)->call(contract::functionOf(**instance, "store"), stored).has_value());
++        CHECK(object.wordAt(16) == 42);
+     }
+ }
+ 
+ TEST_CASE("WasmtimeEngine.privateMemoryIsUnchanged", "[wasmtime]")
+ {
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::wasmtime::testing::lastMemoryRequest;
+     auto const engine =
+         makeWasmtimeEngine(WasmtimeTraits::kind(), WasmtimeConfig { .trapMode = TrapMode::Software });
+     CHECK(engine->memoryMode() == proto::MemoryMode::Copy);
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.cpp b/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.cpp
+index d5fa45436..a094a4f5e 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.cpp
+@@ -30,33 +30,33 @@ namespace
+     /// it the guest spans, and the most it may span without moving.
+     uint8_t* memoryOf(void* env, std::size_t* byteSize, std::size_t* byteCapacity) noexcept
+     {
+         auto const& mapping = static_cast<ProvidedMemory const*>(env)->provision.memory;
+         // The mapping's sizes are within size_t: GuestMemoryMapping::map() refused any that is not.
+         *byteSize = static_cast<std::size_t>(mapping.accessibleBytes());
+         *byteCapacity = static_cast<std::size_t>(mapping.objectBytes());
+         return reinterpret_cast<uint8_t*>(mapping.base());
+     }
+ 
+-    /// Wasmtime's LinearMemory::grow_to: asks Contour, and opens the new bytes once it granted them. Any
++    /// Wasmtime's LinearMemory::grow_to: asks Contour, which opens the new bytes once it granted them. Any
+     /// error makes the guest's memory.grow return -1.
+     wasmtime_error_t* growMemory(void* env, std::size_t newBytes) noexcept
+     {
+         auto& provision = static_cast<ProvidedMemory*>(env)->provision;
+         if (newBytes <= provision.memory.accessibleBytes())
+             return nullptr;
+         if (newBytes > provision.memory.objectBytes())
+             return wasmtime_error_new("guest memory cannot grow past its object");
+-        if (!provision.grow || provision.grow(newBytes) != remote::proto::GrowStatus::Granted)
++        // The request opens what Contour granted, and fails the host itself if it cannot.
++        if (!provision.grow
++            || provision.grow(provision.memory, newBytes) != remote::proto::GrowStatus::Granted)
+             return wasmtime_error_new("guest memory growth was refused");
+-        if (!provision.memory.open(newBytes))
+-            return wasmtime_error_new("guest memory could not be opened");
+         return nullptr;
+     }
+ 
+     /// Ends a memory: unmaps its object.
+     void finalizeMemory(void* env) noexcept
+     {
+         std::unique_ptr<ProvidedMemory> { static_cast<ProvidedMemory*>(env) }.reset();
+     }
+ 
+     /// Wasmtime's MemoryCreator::new_memory: the thread's provision, if it is what Wasmtime asks for.

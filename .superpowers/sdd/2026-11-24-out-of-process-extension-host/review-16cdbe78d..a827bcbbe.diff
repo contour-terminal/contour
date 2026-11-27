@@ -1,0 +1,727 @@
+# Review package: 16cdbe78d..HEAD
+
+## Commits
+a827bcbbe fix(vtextension): refuse over-cap PDUs at the sender, and cancel only an open pipe
+
+## Files changed
+ src/vtextension/wasm/remote/CMakeLists.txt         |   4 +
+ src/vtextension/wasm/remote/proto/Codec.cpp        |  34 +++++-
+ src/vtextension/wasm/remote/proto/Codec.hpp        |  16 ++-
+ src/vtextension/wasm/remote/proto/Codec_fuzz.cpp   |   6 +-
+ src/vtextension/wasm/remote/proto/Codec_test.cpp   | 124 +++++++++++++++++----
+ src/vtextension/wasm/remote/transport/Channel.hpp  |   2 +
+ .../wasm/remote/transport/Channel_win32.cpp        |  19 +++-
+ .../wasm/remote/transport/PduStream.cpp            |   8 +-
+ .../wasm/remote/transport/PduStream.hpp            |   9 +-
+ .../wasm/remote/transport/PduStream_test.cpp       |  22 +++-
+ 10 files changed, 203 insertions(+), 41 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 438f8e9ec..0ed6ffbfb 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -36,15 +36,19 @@ if(VTEXTENSION_FUZZING)
+     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+         message(FATAL_ERROR "VTEXTENSION_FUZZING needs Clang, for -fsanitize=fuzzer.")
+     endif()
+     # Decodes its input as every (direction, channel) pair, and checks that what decodes encodes again to
+     # the same PDU. CI runs the fixed-seed mutation case in vtextension_test instead.
+     #
+     # The codec is compiled into the fuzzer itself, with the fuzzer's coverage instrumentation, rather than
+     # linked from vtextension_remote_wire: the fuzzer is guided by the decoder's branches, and the library
+     # every other target links stays uninstrumented (-fsanitize=fuzzer-no-link there would need the
+     # coverage runtime in each of them).
++    #
++    # Not an OBJECT library both share: the fuzzer's copy needs the fuzzer's compile flags, which the
++    # library's must not have. The list below is therefore the codec's sources by hand: proto/Codec.cpp is
++    # the only one (Wire.hpp, Pdu.hpp and PduTable.hpp are header-only); a new codec source joins both lists.
+     add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp proto/Codec.cpp)
+     target_include_directories(vtextension_remote_fuzz PRIVATE ${PROJECT_SOURCE_DIR}/src)
+     target_compile_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+     target_link_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+ endif()
+diff --git a/src/vtextension/wasm/remote/proto/Codec.cpp b/src/vtextension/wasm/remote/proto/Codec.cpp
+index 607047e82..0d5189478 100644
+--- a/src/vtextension/wasm/remote/proto/Codec.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec.cpp
+@@ -235,20 +235,49 @@ namespace
+     }
+     constexpr auto members(Of<MemoryWrite> auto& value) noexcept
+     {
+         return fields(value.instanceId, value.address, value.bytes);
+     }
+ 
+     /// A struct whose fields members() lists.
+     template <typename T>
+     concept Described = requires(T& value) { members(value); };
+ 
++    // Whether every list in a value, however deep, holds at most its cap: what a reader would refuse, an
++    // encoder refuses first. Declared before any is defined, as the writers below are.
++    template <typename T>
++    [[nodiscard]] constexpr bool withinCaps(T const& value) noexcept;
++    template <typename T>
++    [[nodiscard]] constexpr bool withinCaps(Capped<std::vector<T> const> const& field) noexcept;
++    template <Described T>
++    [[nodiscard]] constexpr bool withinCaps(T const& value) noexcept;
++
++    /// Scalars, strings and byte strings hold no capped list.
++    template <typename T>
++    constexpr bool withinCaps(T const& /*value*/) noexcept
++    {
++        return true;
++    }
++
++    template <typename T>
++    constexpr bool withinCaps(Capped<std::vector<T> const> const& field) noexcept
++    {
++        return field.values.size() <= field.maxCount
++               && std::ranges::all_of(field.values, [](T const& element) { return withinCaps(element); });
++    }
++
++    template <Described T>
++    constexpr bool withinCaps(T const& value) noexcept
++    {
++        return std::apply([](auto const&... list) { return (withinCaps(list) && ...); }, members(value));
++    }
++
+     // Writers, declared before any is defined, so that each finds the others whatever it nests.
+     void write(Writer& writer, uint32_t value);
+     void write(Writer& writer, uint64_t value);
+     template <WireEnum E>
+     void write(Writer& writer, E value);
+     template <WireEnum E>
+     void write(Writer& writer, std::optional<E> const& value);
+     void write(Writer& writer, std::string const& value);
+     void write(Writer& writer, std::vector<std::byte> const& value);
+     template <typename T>
+@@ -426,22 +455,25 @@ std::expected<Pdu, DecodeError> decodeBody(std::span<uint8_t const> body)
+             return std::unexpected(DecodeError::TrailingBytes);
+         return Pdu { std::move(value) };
+     });
+ }
+ 
+ PduKind kindOf(Pdu const& pdu) noexcept
+ {
+     return static_cast<PduKind>(pdu.index() + 1);
+ }
+ 
+-std::vector<uint8_t> encodeFrame(Pdu const& pdu)
++std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu)
+ {
++    if (!std::visit([](auto const& value) { return withinCaps(value); }, pdu))
++        return std::unexpected(EncodeError::OverCap);
++
+     // Every kind fits a one-byte varint, so the kind is its value's byte.
+     static_assert(std::to_underlying(PduKind::MemoryWrite) < 0x80);
+     auto body = Writer {};
+     std::visit([&body](auto const& value) { write(body, value); }, pdu);
+     auto const bodyBytes = body.take();
+ 
+     auto frame = Writer {};
+     frame.varint(1 + bodyBytes.size());
+     frame.u8(std::to_underlying(kindOf(pdu)));
+     frame.bytes(std::as_bytes(std::span { bodyBytes }));
+diff --git a/src/vtextension/wasm/remote/proto/Codec.hpp b/src/vtextension/wasm/remote/proto/Codec.hpp
+index cdad39637..e125e1f00 100644
+--- a/src/vtextension/wasm/remote/proto/Codec.hpp
++++ b/src/vtextension/wasm/remote/proto/Codec.hpp
+@@ -20,28 +20,34 @@
+ #include <expected>
+ #include <span>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/proto/Wire.hpp>
+ 
+ namespace vtextension::wasm::remote::proto
+ {
+ 
++/// Why a PDU could not be encoded.
++enum class EncodeError : uint8_t
++{
++    OverCap, ///< A list it carries holds more elements than its cap (Pdu.hpp): a reader would refuse it.
++};
++
+ /// @return The kind of @p pdu.
+ [[nodiscard]] PduKind kindOf(Pdu const& pdu) noexcept;
+ 
+-/// Encodes @p pdu as one frame.
+-/// @param pdu The PDU to encode. Its element counts are the caller's to keep within the caps Pdu.hpp names
+-///            (MaxCallValues, MaxImports, ...); a reader refuses a frame that exceeds them.
+-/// @return The frame's bytes.
+-[[nodiscard]] std::vector<uint8_t> encodeFrame(Pdu const& pdu);
++/// Encodes @p pdu as one frame, unless a reader would refuse it for a list over its cap: a sender learns that
++/// its PDU cannot be sent, rather than its peer that the sender broke the protocol.
++/// @param pdu The PDU to encode.
++/// @return The frame's bytes; `OverCap` if a list exceeds its cap (MaxImports, MaxCallValues, ...).
++[[nodiscard]] std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu);
+ 
+ /// One frame read off the front of a buffer.
+ struct DecodedFrame
+ {
+     Pdu pdu;              ///< The PDU it carries.
+     std::size_t consumed; ///< How many bytes of the buffer the frame spans.
+ };
+ 
+ /// Decodes the frame at the front of @p buffer.
+ /// @param buffer The bytes received so far; the frame starts at its first byte.
+diff --git a/src/vtextension/wasm/remote/proto/Codec_fuzz.cpp b/src/vtextension/wasm/remote/proto/Codec_fuzz.cpp
+index 575bbf7c5..90fe4090d 100644
+--- a/src/vtextension/wasm/remote/proto/Codec_fuzz.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec_fuzz.cpp
+@@ -19,17 +19,21 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t const* data, std::size_t size)
+     auto const limits = PduLimits { .maxModuleBytes = 4096, .maxMemoryBytes = 4096 };
+     for (auto const direction: std::array { Direction::ToHelper, Direction::ToParent })
+     {
+         for (auto const channel: std::array { ChannelKind::Control, ChannelKind::Lane })
+         {
+             auto const decoded = decodeFrame(input, direction, channel, limits);
+             if (!decoded)
+                 continue;
+             if (decoded->consumed > input.size())
+                 __builtin_trap();
+-            auto const again = decodeFrame(encodeFrame(decoded->pdu), direction, channel, limits);
++            // What decoded is within every cap, so it encodes.
++            auto const frame = encodeFrame(decoded->pdu);
++            if (!frame)
++                __builtin_trap();
++            auto const again = decodeFrame(*frame, direction, channel, limits);
+             if (!again || again->pdu != decoded->pdu)
+                 __builtin_trap();
+         }
+     }
+     return 0;
+ }
+diff --git a/src/vtextension/wasm/remote/proto/Codec_test.cpp b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+index f700f50e6..10126728e 100644
+--- a/src/vtextension/wasm/remote/proto/Codec_test.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+@@ -87,20 +87,28 @@ namespace
+         Call { .instanceId = 11, .exportOrdinal = 2, .argv = { 1, 0xFFFFFFFF, 300 } },
+         CallHost { .functionIndex = 4, .arguments = { 1, 2, 3 } },
+         HostResult { .error = ExtensionError::PermissionDenied },
+         CallResult { .failure = CallFailure::HostFailure, .argv = { 42 } },
+         MemoryRead { .instanceId = 11, .address = 0x10000, .size = 256 },
+         MemoryData { .status = MemoryStatus::Ok, .bytes = raw({ 1, 2, 3 }) },
+         MemoryWrite { .instanceId = 11, .address = 0xFFFFFFF0, .bytes = raw({ 9, 8 }) },
+     };
+ }
+ 
++/// @return @p pdu's frame, which the test expects to encode.
++[[nodiscard]] std::vector<uint8_t> encoded(Pdu const& pdu)
++{
++    auto frame = encodeFrame(pdu);
++    REQUIRE(frame.has_value());
++    return std::move(*frame);
++}
++
+ /// @return The table row of @p pdu's kind.
+ [[nodiscard]] PduRow const& rowOf(Pdu const& pdu)
+ {
+     return PduTable.at(std::to_underlying(kindOf(pdu)) - 1);
+ }
+ 
+ /// @return @p value as a varint.
+ [[nodiscard]] std::vector<uint8_t> varint(uint64_t value)
+ {
+     auto writer = Writer {};
+@@ -139,50 +147,50 @@ TEST_CASE("PduCodec.tableHasOneRowPerKind", "[vtextension]")
+     }
+ }
+ 
+ TEST_CASE("PduCodec.roundTrip", "[vtextension]")
+ {
+     for (auto const& sample: samples())
+     {
+         DYNAMIC_SECTION("kind " << static_cast<int>(kindOf(sample)))
+         {
+             auto const& row = rowOf(sample);
+-            auto const frame = encodeFrame(sample);
++            auto const frame = encoded(sample);
+             auto const decoded = decodeFrame(frame, row.direction, row.channel, PduLimits {});
+             REQUIRE(decoded.has_value());
+             CHECK(decoded->pdu == sample);
+             CHECK(decoded->consumed == frame.size());
+         }
+     }
+ }
+ 
+ TEST_CASE("PduCodec.decodesOneFrameOffAStream", "[vtextension]")
+ {
+     auto const first = Pdu { Call { .instanceId = 1, .exportOrdinal = 2, .argv = { 3 } } };
+     auto const second = Pdu { MemoryRead { .instanceId = 4, .address = 5, .size = 6 } };
+-    auto stream = encodeFrame(first);
++    auto stream = encoded(first);
+     auto const firstSize = stream.size();
+-    auto const tail = encodeFrame(second);
++    auto const tail = encoded(second);
+     stream.insert(stream.end(), tail.begin(), tail.end());
+ 
+     auto const decoded = decodeFrame(stream, Direction::ToHelper, ChannelKind::Lane, PduLimits {});
+     REQUIRE(decoded.has_value());
+     CHECK(decoded->pdu == first);
+     CHECK(decoded->consumed == firstSize);
+ }
+ 
+ TEST_CASE("PduCodec.everyPrefixNeedsMoreData", "[vtextension]")
+ {
+     for (auto const& sample: samples())
+     {
+         auto const& row = rowOf(sample);
+-        auto const frame = encodeFrame(sample);
++        auto const frame = encoded(sample);
+         for (auto const size: std::views::iota(std::size_t { 0 }, frame.size()))
+         {
+             INFO("kind " << static_cast<int>(row.kind) << ", " << size << " of " << frame.size() << " bytes");
+             CHECK(errorOf(std::span { frame }.first(size), row) == DecodeError::NeedMoreData);
+         }
+     }
+ }
+ 
+ TEST_CASE("PduCodec.overCapIsRejectedFromTheHeader", "[vtextension]")
+ {
+@@ -203,26 +211,25 @@ TEST_CASE("PduCodec.overCapIsRejectedFromTheHeader", "[vtextension]")
+     }
+ 
+     // A length beyond every kind's cap is refused before the kind arrives.
+     auto const largest = std::ranges::max(
+         PduTable | std::views::transform([](PduRow const& row) { return row.sizeCap(PduLimits {}); }));
+     auto const lengthOnly = varint(largest + MaxVarint32Bytes + 1);
+     CHECK(errorOf(lengthOnly, PduTable.front()) == DecodeError::OverCap);
+ 
+     // The stream's limits move the caps that follow them.
+     auto const small = PduLimits { .maxModuleBytes = 100, .maxMemoryBytes = 200 };
+-    auto const load =
+-        encodeFrame(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(101) });
++    auto const load = encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(101) });
+     auto const& loadRow = PduTable.at(std::to_underlying(PduKind::Load) - 1);
+     CHECK(decodeFrame(load, loadRow.direction, loadRow.channel, small).has_value());
+     auto const tooLarge =
+-        encodeFrame(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(200) });
++        encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(200) });
+     CHECK(decodeFrame(tooLarge, loadRow.direction, loadRow.channel, small).error() == DecodeError::OverCap);
+ }
+ 
+ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
+ {
+     auto const& helloRow = PduTable.at(std::to_underlying(PduKind::Hello) - 1);
+ 
+     SECTION("an inner count beyond the body is Truncated")
+     {
+         // Load: runtime 1, module 2, then a hundred bytes claimed and three present.
+@@ -277,32 +284,105 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
+               == DecodeError::MalformedVarint);
+         auto const beyond32Bits = std::vector<uint8_t> { 0xff, 0xff, 0xff, 0xff, 0x1f, 0, 0 };
+         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), beyond32Bits), helloRow)
+               == DecodeError::MalformedVarint);
+         auto const largest = std::vector<uint8_t> { 0xff, 0xff, 0xff, 0xff, 0x0f, 0, 0 };
+         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), largest), helloRow) == std::nullopt);
+     }
+ 
+     SECTION("more values than a call carries is OverCap")
+     {
++        // instance 1, export 0, then the count and as many zero values.
++        auto const callOf = [](std::size_t count) {
++            auto body = std::vector<uint8_t> { 1, 0, static_cast<uint8_t>(count) };
++            body.resize(body.size() + count, 0);
++            return frameOf(std::to_underlying(PduKind::Call), body);
++        };
+         auto const& callRow = PduTable.at(std::to_underlying(PduKind::Call) - 1);
+-        auto const call = encodeFrame(
+-            Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues + 1) });
+-        CHECK(errorOf(call, callRow) == DecodeError::OverCap);
+-        auto const atMost = encodeFrame(
+-            Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues) });
+-        CHECK(errorOf(atMost, callRow) == std::nullopt);
+-
+-        auto const& hostRow = PduTable.at(std::to_underlying(PduKind::CallHost) - 1);
+-        auto const host = encodeFrame(
+-            CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters + 1) });
+-        CHECK(errorOf(host, hostRow) == DecodeError::OverCap);
++        CHECK(errorOf(callOf(MaxCallValues + 1), callRow) == DecodeError::OverCap);
++        CHECK(errorOf(callOf(MaxCallValues), callRow) == std::nullopt);
++    }
++}
++
++TEST_CASE("PduCodec.encoderRefusesWhatAReaderWould", "[vtextension]")
++{
++    // A list one past its cap is not encoded at all; at its cap, it is, and decodes.
++    struct Case
++    {
++        std::string_view description;
++        Pdu overCap;
++        Pdu atCap;
++    };
++    auto const signatureOf = [](std::size_t parameters) {
++        return Loaded { .moduleId = 1,
++                        .error = std::nullopt,
++                        .imports = { ImportDescription {
++                            .module = "m",
++                            .name = "f",
++                            .kind = ExternKind::Function,
++                            .signature = { .parameters = std::vector<ValueType>(parameters, ValueType::I32),
++                                           .results = {} },
++                            .linkage = Linkage::Satisfied } },
++                        .exports = {} };
++    };
++    auto const cases = std::vector<Case> {
++        { .description = "call values",
++          .overCap =
++              Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues + 1) },
++          .atCap =
++              Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues) } },
++        { .description = "host call arguments",
++          .overCap =
++              CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters + 1) },
++          .atCap = CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters) } },
++        { .description = "call results",
++          .overCap = CallResult { .failure = std::nullopt, .argv = std::vector<uint32_t>(MaxCallValues + 1) },
++          .atCap = CallResult { .failure = std::nullopt, .argv = std::vector<uint32_t>(MaxCallValues) } },
++        { .description = "imports",
++          .overCap = Loaded { .moduleId = 1,
++                              .error = std::nullopt,
++                              .imports = std::vector<ImportDescription>(MaxImports + 1),
++                              .exports = {} },
++          .atCap = Loaded { .moduleId = 1,
++                            .error = std::nullopt,
++                            .imports = std::vector<ImportDescription>(MaxImports),
++                            .exports = {} } },
++        { .description = "a signature, nested in an import",
++          .overCap = signatureOf(MaxSignatureValues + 1),
++          .atCap = signatureOf(MaxSignatureValues) },
++        { .description = "callable exports",
++          .overCap = Instantiated { .instanceId = 1,
++                                    .error = std::nullopt,
++                                    .callableExports = std::vector<uint32_t>(MaxExports + 1) },
++          .atCap = Instantiated { .instanceId = 1,
++                                  .error = std::nullopt,
++                                  .callableExports = std::vector<uint32_t>(MaxExports) } },
++        { .description = "host functions",
++          .overCap = CreateRuntime { .runtimeId = 1,
++                                     .memoryBytes = 0,
++                                     .stackBytes = 0,
++                                     .functions = std::vector<WireHostFunction>(MaxHostFunctions + 1) },
++          .atCap = CreateRuntime { .runtimeId = 1,
++                                   .memoryBytes = 0,
++                                   .stackBytes = 0,
++                                   .functions = std::vector<WireHostFunction>(MaxHostFunctions) } },
++    };
++    for (auto const& [description, overCap, atCap]: cases)
++    {
++        INFO(description);
++        CHECK(encodeFrame(overCap) == std::unexpected(EncodeError::OverCap));
++        auto const frame = encodeFrame(atCap);
++        REQUIRE(frame.has_value());
++        auto const& row = rowOf(atCap);
++        auto const decoded = decodeFrame(*frame, row.direction, row.channel, PduLimits {});
++        REQUIRE(decoded.has_value());
++        CHECK(decoded->pdu == atCap);
+     }
+ }
+ 
+ TEST_CASE("PduCodec.lyingCountsAreRefusedBeforeReading", "[vtextension]")
+ {
+     // Each list's count is checked against its cap before an element is read: a count one past the cap is
+     // OverCap from a body of a few bytes, where at the cap the same body runs short (Truncated).
+     struct Case
+     {
+         std::string_view description;
+@@ -348,33 +428,33 @@ TEST_CASE("PduCodec.lyingCountsAreRefusedBeforeReading", "[vtextension]")
+             writer.varint(count);
+             return writer.take();
+         };
+         CHECK(errorOf(frameOf(std::to_underlying(kind), bodyWith(cap + 1)), row) == DecodeError::OverCap);
+         CHECK(errorOf(frameOf(std::to_underlying(kind), bodyWith(cap)), row) == DecodeError::Truncated);
+     }
+ }
+ 
+ TEST_CASE("PduCodec.directionAndChannelAreChecked", "[vtextension]")
+ {
+-    auto const call = encodeFrame(Call { .instanceId = 1, .exportOrdinal = 2, .argv = {} });
++    auto const call = encoded(Call { .instanceId = 1, .exportOrdinal = 2, .argv = {} });
+     CHECK(decodeFrame(call, Direction::ToParent, ChannelKind::Lane, PduLimits {}).error()
+           == DecodeError::WrongDirection);
+-    auto const load = encodeFrame(Load { .runtimeId = 1, .moduleId = 2, .bytes = {} });
++    auto const load = encoded(Load { .runtimeId = 1, .moduleId = 2, .bytes = {} });
+     CHECK(decodeFrame(load, Direction::ToHelper, ChannelKind::Lane, PduLimits {}).error()
+           == DecodeError::WrongChannel);
+ }
+ 
+ TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
+ {
+     auto const all = samples();
+     auto const frames =
+-        std::ranges::to<std::vector<std::vector<uint8_t>>>(all | std::views::transform(encodeFrame));
++        std::ranges::to<std::vector<std::vector<uint8_t>>>(all | std::views::transform(encoded));
+     constexpr auto Seeds = std::array { uint32_t { 0x5eed } };
+     for (auto const seed: Seeds)
+     {
+         INFO("seed " << seed);
+         // std::mt19937's output is fully specified, unlike the distributions', so every standard library
+         // mutates alike.
+         auto random = std::mt19937 { seed };
+         auto const pick = [&random](std::size_t bound) {
+             return static_cast<std::size_t>(random() % bound);
+         };
+@@ -404,18 +484,18 @@ TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
+             }
+             auto const& row = rowOf(all[index]);
+             auto const decoded = decodeFrame(frame, row.direction, row.channel, PduLimits {});
+             if (!decoded)
+                 continue;
+             // What decodes is a frame of its own: it encodes again to what decodes alike.
+             ++decodes;
+             INFO("iteration " << iteration);
+             CHECK(decoded->consumed <= frame.size());
+             auto const redecoded =
+-                decodeFrame(encodeFrame(decoded->pdu), row.direction, row.channel, PduLimits {});
++                decodeFrame(encoded(decoded->pdu), row.direction, row.channel, PduLimits {});
+             REQUIRE(redecoded.has_value());
+             CHECK(redecoded->pdu == decoded->pdu);
+         }
+         // Byte flips in a field's value leave many frames valid; a run that decoded none tested nothing.
+         CHECK(decodes > 0);
+     }
+ }
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index 6353356c0..194f90aba 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -64,20 +64,22 @@ class Channel
+     /// closed, so that its receives return `Closed` once they drained what was sent before, and its sends
+     /// return `Closed`. Idempotent and thread-safe.
+     ///
+     /// On POSIX the descriptor stays open until the channel is destroyed. On Windows, where nothing short of
+     /// closing a pipe's handle ends the peer's stream, the handle is closed as soon as no transfer on this
+     /// end is in flight, and nativeHandle() no longer names it.
+     void shutdown() noexcept;
+ 
+     /// @return The end's descriptor or handle, still owned by the channel: for handing it to a child
+     ///         process, and for inspecting it. On Windows, INVALID_HANDLE_VALUE once shutdown() closed it.
++    ///         Not to be called, nor its value used, while another thread may call shutdown(): on Windows the
++    ///         handle may be closed, and its value reused, at any moment after shutdown() begins.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     std::unique_ptr<Native> _native;
+ };
+ 
+ /// Two connected ends: what one sends, the other receives.
+ struct ChannelPair
+ {
+     Channel parent; ///< Contour's end.
+diff --git a/src/vtextension/wasm/remote/transport/Channel_win32.cpp b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+index cdbd47b40..3fd8ea1ea 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+@@ -1,21 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The channel on Windows: the two ends of a byte-mode named pipe, opened for overlapped I/O and waited on, so
+ // that shutdown() can cancel a read or write blocked on another thread. The pipe's name is random, the first
+ // instance is demanded (so that a pipe someone else created first fails the pair rather than joins it),
+ // remote clients are refused, only the current user may open it, and neither handle is inheritable.
+ //
+ // A pipe has no half-close: its peer's stream ends only when this end's handle is closed. So shutdown()
+ // cancels what is in flight and closes the handle as soon as the last transfer on it has returned. Every
+-// transfer is counted while it may touch the handle, and whichever of shutdown() and the last transfer finds
+-// the end shut down with nothing in flight closes it, exactly once.
++// transfer, and shutdown()'s own cancel, is counted while it may touch the handle, each counting itself
++// before it reads or changes the state; whichever finds the end shut down with nothing in flight closes the
++// handle, exactly once (a compare-exchange from ShutDown to Closed). All of it is sequentially consistent.
+ #include <algorithm>
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <format>
+ #include <memory>
+ #include <random>
+ #include <span>
+ #include <string>
+@@ -277,24 +278,32 @@ std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t>
+     });
+     if (received && *received == 0)
+         return std::unexpected(ChannelError::Closed);
+     return received;
+ }
+ 
+ void Channel::shutdown() noexcept
+ {
+     if (!_native)
+         return;
++    // Counted, as a transfer is, before the state changes: a closer acts only once it sees the end shut down,
++    // which is after this count is visible, so it finds the count non-zero until the cancel is done. Counting
++    // after the state change would leave a window where a finishing transfer closes the handle, and the
++    // cancel then reaches a closed handle whose value the system may already have handed out again.
++    _native->inFlight.fetch_add(1);
+     auto expected = EndState::Open;
+-    if (!_native->state.compare_exchange_strong(expected, EndState::ShutDown))
+-        return;
+-    ::CancelIoEx(_native->pipe, nullptr);
++    auto const shutsDown = _native->state.compare_exchange_strong(expected, EndState::ShutDown);
++    if (shutsDown)
++        ::CancelIoEx(_native->pipe, nullptr);
++    _native->inFlight.fetch_sub(1);
++    // Even a repeated shutdown() closes if it drained last: a transfer that finished while this one was
++    // counted left the close to it.
+     _native->closeIfDrained();
+ }
+ 
+ NativeHandle Channel::nativeHandle() const noexcept
+ {
+     return _native && _native->state.load() != EndState::Closed ? _native->pipe : INVALID_HANDLE_VALUE;
+ }
+ 
+ std::expected<ChannelPair, ChannelError> makeChannelPair()
+ {
+diff --git a/src/vtextension/wasm/remote/transport/PduStream.cpp b/src/vtextension/wasm/remote/transport/PduStream.cpp
+index 71b7b4620..b64d68a6c 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream.cpp
+@@ -41,23 +41,25 @@ namespace
+ PduStream::PduStream(Channel channel,
+                      proto::ChannelKind kind,
+                      proto::Direction arriving,
+                      proto::PduLimits limits):
+     _channel { std::move(channel) }, _kind { kind }, _arriving { arriving }, _limits { limits }
+ {
+ }
+ 
+ std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu)
+ {
+-    return _channel.send(proto::encodeFrame(pdu)).transform_error([](ChannelError error) {
+-        return streamErrorOf(error);
+-    });
++    // A PDU the peer would refuse is not sent: the stream stays usable, and the caller learns why.
++    auto const frame = proto::encodeFrame(pdu);
++    if (!frame)
++        return std::unexpected(StreamError::OverCap);
++    return _channel.send(*frame).transform_error([](ChannelError error) { return streamErrorOf(error); });
+ }
+ 
+ std::expected<proto::Pdu, StreamError> PduStream::receive()
+ {
+     while (true)
+     {
+         auto decoded = proto::decodeFrame(std::span { _buffer }.first(_buffered), _arriving, _kind, _limits);
+         if (decoded)
+         {
+             // Moves what follows the frame to the front, and lets a buffer a large frame grew go.
+diff --git a/src/vtextension/wasm/remote/transport/PduStream.hpp b/src/vtextension/wasm/remote/transport/PduStream.hpp
+index 8999b1c65..12a944d9d 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream.hpp
++++ b/src/vtextension/wasm/remote/transport/PduStream.hpp
+@@ -8,44 +8,47 @@
+ #include <cstdint>
+ #include <expected>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+-/// Why a stream could not send or receive a PDU. Every one ends the stream.
++/// Why a stream could not send or receive a PDU. Every one ends the stream, except an OverCap from send(),
++/// which sent nothing.
+ enum class StreamError : uint8_t
+ {
+     Closed,    ///< The channel closed, or was shut down.
+     Io,        ///< The channel failed.
+     Malformed, ///< The peer sent a frame the codec refuses: a malformed one, or one of the wrong kind,
+                ///< direction or channel.
+-    OverCap,   ///< The peer sent a frame larger than its kind may be.
++    OverCap,   ///< The peer sent a frame larger than its kind may be; or, from send(), the PDU holds a
++               ///< list over its cap, and was not sent.
+ };
+ 
+ /// One channel's PDUs. Owns the channel and a receive buffer; used by one thread at a time, which may both
+ /// send and receive.
+ class PduStream
+ {
+   public:
+     /// @param channel The channel it reads and writes.
+     /// @param kind Which channel it is: a PDU of the other is refused.
+     /// @param arriving The way PDUs it receives travel: a PDU travelling the other way is refused.
+     /// @param limits The caps of the PDUs whose size follows the stream's limits.
+     PduStream(Channel channel, proto::ChannelKind kind, proto::Direction arriving, proto::PduLimits limits);
+ 
+     /// Sends one PDU.
+     /// @param pdu The PDU.
+-    /// @return Nothing once it is sent; why it was not.
++    /// @return Nothing once it is sent; why it was not. `OverCap` if a list it carries exceeds its cap
++    ///         (Pdu.hpp): nothing was sent, and the stream remains usable.
+     [[nodiscard]] std::expected<void, StreamError> send(proto::Pdu const& pdu);
+ 
+     /// Receives the next PDU, blocking until all of it has arrived. A frame larger than its kind may be fails
+     /// as soon as its header arrives, without waiting for its body.
+     /// @return The PDU; why none could be received.
+     [[nodiscard]] std::expected<proto::Pdu, StreamError> receive();
+ 
+     /// Shuts the channel down: a receive blocked on it, from any thread, fails `Closed`.
+     void shutdown() noexcept;
+ 
+diff --git a/src/vtextension/wasm/remote/transport/PduStream_test.cpp b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+index cea1514f4..db5dcba40 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream_test.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+@@ -84,20 +84,39 @@ TEST_CASE("PduStream.overCapFailsWithoutWaitingForTheBody", "[vtextension]")
+                               proto::PduLimits {} };
+ 
+     // A Hello header claiming a megabyte, and nothing after it: the peer stays connected and silent.
+     auto writer = proto::Writer {};
+     writer.varint(1 + (std::size_t { 1024 } * 1024));
+     writer.u8(std::to_underlying(proto::PduKind::Hello));
+     REQUIRE(channels->helper.send(writer.take()).has_value());
+     CHECK(stream.receive() == std::unexpected(StreamError::OverCap));
+ }
+ 
++TEST_CASE("PduStream.overCapIsNotSent", "[vtextension]")
++{
++    auto pair = makeControlPair();
++
++    // A runtime with more host functions than any reader accepts: refused here, so the helper never sees a
++    // protocol violation, and the stream carries on. Small enough to fit the socket's buffer, so that a
++    // sender that did send it fails the checks below rather than blocks.
++    auto const tooMany = proto::Pdu { proto::CreateRuntime {
++        .runtimeId = 1,
++        .memoryBytes = 0,
++        .stackBytes = 0,
++        .functions = std::vector<proto::WireHostFunction>(proto::MaxHostFunctions + 1) } };
++    CHECK(pair.parent.send(tooMany) == std::unexpected(StreamError::OverCap));
++
++    auto const release = proto::Pdu { proto::Release { .target = proto::ReleaseTarget::Runtime, .id = 1 } };
++    REQUIRE(pair.parent.send(release).has_value());
++    CHECK(pair.helper.receive() == release);
++}
++
+ TEST_CASE("PduStream.peerCloseIsClosed", "[vtextension]")
+ {
+     auto pair = makeControlPair();
+     {
+         auto const helper = std::move(pair.helper);
+     }
+     CHECK(pair.parent.receive() == std::unexpected(StreamError::Closed));
+ }
+ 
+ TEST_CASE("PduStream.garbageIsMalformed", "[vtextension]")
+@@ -111,14 +130,15 @@ TEST_CASE("PduStream.garbageIsMalformed", "[vtextension]")
+ 
+     SECTION("a kind naming no PDU")
+     {
+         REQUIRE(channels->helper.send(std::vector<uint8_t> { 1, 0 }).has_value());
+         CHECK(stream.receive() == std::unexpected(StreamError::Malformed));
+     }
+     SECTION("a PDU travelling the other way")
+     {
+         auto const frame =
+             proto::encodeFrame(proto::Release { .target = proto::ReleaseTarget::Module, .id = 2 });
+-        REQUIRE(channels->helper.send(frame).has_value());
++        REQUIRE(frame.has_value());
++        REQUIRE(channels->helper.send(*frame).has_value());
+         CHECK(stream.receive() == std::unexpected(StreamError::Malformed));
+     }
+ }

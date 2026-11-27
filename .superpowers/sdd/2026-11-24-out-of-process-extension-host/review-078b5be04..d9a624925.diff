@@ -1,0 +1,1534 @@
+# Review package: 078b5be04..HEAD
+
+## Commits
+d9a624925 test(vtextension): crash and hostility suite for the extension host process
+6e7a04e77 test(vtextension): assert nothing from a destructor, and sync past a failed wait
+
+## Files changed
+ src/contour-extension-host/testing/HostileHost.cpp | 461 ++++++++++++++-----
+ .../testing/HostileModes.hpp                       | 153 ++++++-
+ src/vtextension/wasm/remote/CMakeLists.txt         |   1 +
+ src/vtextension/wasm/remote/HelperIncarnation.hpp  |   7 +-
+ src/vtextension/wasm/remote/Hostility_test.cpp     | 509 +++++++++++++++++++++
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp |  17 +-
+ .../process/ExtensionHostSupervisor_test.cpp       |   5 +-
+ .../remote/process/testing/HelperComposition.cpp   |   5 +-
+ .../remote/process/testing/HelperComposition.hpp   |   5 +-
+ 9 files changed, 1010 insertions(+), 153 deletions(-)
+
+## Diff
+diff --git a/src/contour-extension-host/testing/HostileHost.cpp b/src/contour-extension-host/testing/HostileHost.cpp
+index 65f845ef5..b882f7829 100644
+--- a/src/contour-extension-host/testing/HostileHost.cpp
++++ b/src/contour-extension-host/testing/HostileHost.cpp
+@@ -4,267 +4,484 @@
+ // (HostileModes.hpp), and otherwise the real one. Started by the crash and hostility tests only; never
+ // installed.
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+ #include <chrono>
+ #include <csignal>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
++#include <cstdlib>
+ #include <expected>
++#include <memory>
++#include <mutex>
+ #include <optional>
+ #include <print>
++#include <random>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+-#include <tuple>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <contour-extension-host/testing/HostileModes.hpp>
+ #include <vtextension/wasm/host/HelperEngine.hpp>
+ #include <vtextension/wasm/host/HostProcess.hpp>
+ #include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/proto/Wire.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+ #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ 
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#endif
++
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace transport = vtextension::wasm::remote::transport;
+-using contour::extension_host::testing::HostileMode;
++using contour::extension_host::testing::AfterContourEnds;
++using contour::extension_host::testing::HostileAction;
++using contour::extension_host::testing::HostileIncident;
+ using contour::extension_host::testing::hostileModeNamed;
++using contour::extension_host::testing::HostileModeRow;
+ using contour::extension_host::testing::HostileOption;
++using contour::extension_host::testing::WakeSource;
+ 
+ namespace
+ {
+ 
+ /// The exit code of a hostile host whose own command line is wrong: none of the real host's codes.
+ constexpr auto HostileSetupFailed = 76;
+ 
++/// The exit code of a host that ends in the middle of serving (HostileAction::ForwardThenExit).
++constexpr auto AbruptExitCode = 3;
++
++/// How many bytes HostileAction::AnswerGarbage answers, and what they come from.
++constexpr auto GarbageBytes = 64;
++constexpr auto GarbageSeed = std::mt19937::result_type { 0x5eed };
++
++/// The limits both ends apply.
++constexpr auto Limits = proto::PduLimits {};
++
+ /// Ends the hostile host before it served, saying why.
+ [[nodiscard]] int refuse(char const* reason)
+ {
+     std::println(stderr, "contour-extension-host-hostile: {}", reason);
+     return HostileSetupFailed;
+ }
+ 
+ /// Runs the real host on @p arguments.
+ [[nodiscard]] int serve(std::vector<std::string> const& arguments)
+ {
+     auto views = std::vector<std::string_view> {};
+     for (auto const& argument: arguments)
+         views.emplace_back(argument);
+     return vtextension::wasm::host::runExtensionHost(views, &vtextension::wasm::host::makeHelperEngine);
+ }
+ 
+-/// Runs the real host with a wake signal of its own that nobody signals, in place of the one Contour hands
+-/// it: the host's listener never wakes, so the page's flags are never read. Contour's end stays open and
+-/// unread, as a stuck host's would.
+-[[nodiscard]] int ignoreInterrupts(std::vector<std::string_view> const& arguments)
++/// Crashes as std::abort() does, with no dialog on Windows.
++[[noreturn]] void crashByAbort()
+ {
+-    auto parsed = transport::parseHelperArguments(arguments);
+-    if (!parsed)
+-        return serve({ arguments.begin(), arguments.end() });
+-    auto silent = transport::makeWakePair();
+-    if (!silent)
+-        return refuse("no wake signal of its own can be made");
+-    auto const copy = transport::testing::duplicate(silent->helper.nativeHandle());
+-    if (!copy)
+-        return refuse("no wake signal of its own can be handed over");
+-    parsed->wake = *copy;
+-    return serve(transport::formatHelperArguments(*parsed));
++#ifdef _WIN32
++    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
++#endif
++    std::abort();
+ }
+ 
+-/// Relays the control channel between Contour's end and the real host's, frame by frame: Contour's frames
+-/// on to the host until, once the host answered an instantiation, Contour sends a Load, at whose header the
+-/// relay stops reading for good; and the host's frames back as they are.
+-class StoppingRelay
++/// Dies as a segmentation fault does, past any handler a sanitizer runtime installed.
++[[noreturn]] void crashBySegfault()
++{
++#ifdef _WIN32
++    ::TerminateProcess(::GetCurrentProcess(), static_cast<UINT>(STATUS_ACCESS_VIOLATION));
++#else
++    std::signal(SIGSEGV, SIG_DFL);
++    std::raise(SIGSEGV);
++#endif
++    std::abort(); // Not reached.
++}
++
++/// @return The kind of the frame whose header @p buffer starts with; frameSizeOf() accepted it.
++[[nodiscard]] proto::PduKind kindAtFront(std::span<uint8_t const> buffer)
++{
++    auto header = proto::Reader { buffer };
++    std::ignore = header.varint64();
++    return static_cast<proto::PduKind>(header.varint32().value_or(0));
++}
++
++/// @return How many bytes of @p frame its length and kind span.
++[[nodiscard]] std::size_t headerBytesOf(std::span<uint8_t const> frame)
++{
++    auto header = proto::Reader { frame };
++    std::ignore = header.varint64();
++    std::ignore = header.varint32();
++    return header.consumed();
++}
++
++/// @return A MemoryData frame of @p size bytes, all of them zero.
++[[nodiscard]] std::vector<uint8_t> memoryDataOf(std::size_t size)
++{
++    return proto::encodeFrame(
++               proto::MemoryData { .status = proto::MemoryStatus::Ok, .bytes = std::vector<std::byte>(size) })
++        .value_or(std::vector<uint8_t> {});
++}
++
++/// @param seed What the bytes are generated from: the same garbage every run, so that a failure repeats.
++/// @return GarbageBytes pseudo-random bytes.
++[[nodiscard]] std::array<uint8_t, GarbageBytes> garbageOf(std::mt19937::result_type seed)
++{
++    auto engine = std::mt19937 { seed };
++    auto garbage = std::array<uint8_t, GarbageBytes> {};
++    std::ranges::generate(garbage, [&engine] { return static_cast<uint8_t>(engine()); });
++    return garbage;
++}
++
++/// One channel Contour handed over, and the one the real host serves in its place.
++struct RelayedChannel
++{
++    proto::ChannelKind kind;    ///< Control or lane.
++    transport::Channel contour; ///< Contour's end, as this process inherited it.
++    transport::Channel host;    ///< This process's end of the channel the real host serves.
++    std::mutex contourSends;    ///< Serializes what the host's frames and the relay's own answers send.
++};
++
++/// What becomes of a frame once a pump read its header.
++enum class Verdict : uint8_t
++{
++    Forward, ///< It is passed on, as every frame before it.
++    Discard, ///< It is read, and passed on to nobody.
++    Stop,    ///< Nothing more is read this way: not the rest of it, nor anything after.
++    Hold,    ///< It and everything after it this way are read, and passed on to nobody.
++};
++
++/// Relays every channel between Contour's end and the real host's, both ways, frame by frame -- until the
++/// incident's trigger, once, where its action happens.
++class Relay
+ {
+   public:
+-    /// @param contour Contour's control channel, as this process inherited it.
+-    /// @param host This process's end of the channel the real host serves.
+-    StoppingRelay(transport::Channel contour, transport::Channel host):
+-        _contour { std::move(contour) },
+-        _host { std::move(host) },
+-        _toHost { [this] { relayToHost(); } },
+-        _toContour { [this] { relayToContour(); } }
++    /// @param incident What happens, and where.
++    /// @param channels Every channel relayed; the first is the control channel.
++    Relay(HostileIncident incident, std::vector<std::unique_ptr<RelayedChannel>> channels):
++        _incident { incident }, _channels { std::move(channels) }
+     {
++        for (auto const& channel: _channels)
++            for (auto const direction: { proto::Direction::ToHelper, proto::Direction::ToParent })
++                _pumps.emplace_back(
++                    [this, channel = channel.get(), direction] { pump(*channel, direction); });
+     }
+-    StoppingRelay(StoppingRelay const&) = delete;
+-    StoppingRelay(StoppingRelay&&) = delete;
+-    StoppingRelay& operator=(StoppingRelay const&) = delete;
+-    StoppingRelay& operator=(StoppingRelay&&) = delete;
+-    ~StoppingRelay() = default;
++    Relay(Relay const&) = delete;
++    Relay(Relay&&) = delete;
++    Relay& operator=(Relay const&) = delete;
++    Relay& operator=(Relay&&) = delete;
++    ~Relay() = default;
+ 
+   private:
+-    /// Whether the host answered an instantiation yet.
++    /// Whether the incident happened yet.
+     enum class Progress : uint8_t
+     {
+-        NotInstantiated,
+-        Instantiated,
++        Pending,
++        Happened,
++    };
++
++    /// Whether Contour's channels are still read.
++    enum class ContourReads : uint8_t
++    {
++        Open,
++        Stopped,
++    };
++
++    /// One way of one channel: where a pump reads, and where it writes.
++    struct Way
++    {
++        RelayedChannel& channel;
++        proto::Direction direction;
++
++        [[nodiscard]] transport::Channel& source() const noexcept
++        {
++            return direction == proto::Direction::ToHelper ? channel.contour : channel.host;
++        }
++
++        [[nodiscard]] transport::Channel& target() const noexcept
++        {
++            return direction == proto::Direction::ToHelper ? channel.host : channel.contour;
++        }
++
++        /// Sends @p bytes to @p end, which is one of this channel's.
++        [[nodiscard]] bool sendTo(transport::Channel& end, std::span<uint8_t const> bytes) const
++        {
++            if (&end != &channel.contour)
++                return end.send(bytes).has_value();
++            auto const lock = std::scoped_lock { channel.contourSends };
++            return end.send(bytes).has_value();
++        }
+     };
+ 
+-    /// The limits both ends apply.
+-    static constexpr auto Limits = proto::PduLimits {};
++    /// @return Whether the frame of @p kind that @p way carries is where the incident happens: the first
++    ///         that matches its trigger.
++    [[nodiscard]] bool isIncident(Way const& way, proto::PduKind kind)
++    {
++        auto const& trigger = _incident.trigger;
++        if (way.direction != trigger.direction || way.channel.kind != trigger.channel || kind != trigger.kind)
++            return false;
++        if (trigger.after && (_passed.load() & bitOf(*trigger.after)) == 0)
++            return false;
++        return _progress.exchange(Progress::Happened) == Progress::Pending;
++    }
++
++    [[nodiscard]] static uint32_t bitOf(proto::PduKind kind) noexcept
++    {
++        return uint32_t { 1 } << std::to_underlying(kind);
++    }
+ 
+-    /// @return The kind of the frame whose header @p buffer starts with; frameSizeOf() accepted it.
+-    [[nodiscard]] static std::optional<proto::PduKind> kindAtFront(std::span<uint8_t const> buffer)
++    /// Receives on @p way until @p pending holds @p size bytes.
++    /// @return Whether they arrived.
++    [[nodiscard]] static bool complete(Way const& way, std::vector<uint8_t>& pending, std::size_t size)
+     {
+-        auto header = proto::Reader { buffer };
+-        if (!header.varint64())
++        auto chunk = std::array<uint8_t, 4096> {};
++        while (pending.size() < size)
++        {
++            auto const received = way.source().receiveSome(chunk);
++            if (!received)
++                return false;
++            pending.insert(
++                pending.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(*received));
++        }
++        return true;
++    }
++
++    /// @return The MemoryRead whose frame, @p size bytes, @p pending starts with; nothing if it does not
++    ///         arrive.
++    [[nodiscard]] static std::optional<proto::MemoryRead> memoryRead(Way const& way,
++                                                                     std::vector<uint8_t>& pending,
++                                                                     std::size_t size)
++    {
++        if (!complete(way, pending, size))
+             return std::nullopt;
+-        auto const kind = header.u8();
+-        return kind ? std::optional { static_cast<proto::PduKind>(*kind) } : std::nullopt;
++        auto const decoded = proto::decodeFrame(pending, way.direction, way.channel.kind, Limits);
++        auto const* const read = decoded ? std::get_if<proto::MemoryRead>(&decoded->pdu) : nullptr;
++        return read ? std::optional { *read } : std::nullopt;
++    }
++
++    /// Does the incident's action on the frame of @p size bytes that @p pending starts with.
++    /// @return What becomes of the frame.
++    [[nodiscard]] Verdict act(Way const& way, std::vector<uint8_t>& pending, std::size_t size)
++    {
++        // An answer goes back where the frame came from.
++        auto const answer = [&way](std::span<uint8_t const> bytes) {
++            return way.sendTo(way.source(), bytes) ? Verdict::Discard : Verdict::Stop;
++        };
++        switch (_incident.action)
++        {
++            case HostileAction::Abort: crashByAbort();
++            case HostileAction::Segfault: crashBySegfault();
++            case HostileAction::ForwardThenExit:
++                if (complete(way, pending, size))
++                    std::ignore = way.sendTo(way.target(), std::span { pending }.first(size));
++                std::_Exit(AbruptExitCode);
++            case HostileAction::StopReadingChannel: return Verdict::Stop;
++            case HostileAction::StopReadingEveryChannel:
++                _contourReads.store(ContourReads::Stopped);
++                return Verdict::Stop;
++            case HostileAction::AnswerGarbage: return answer(garbageOf(GarbageSeed));
++            case HostileAction::AnswerOverCapMemory: {
++                auto header = proto::Writer {};
++                header.varint(1 + Limits.maxMemoryBytes + 17); // The kind, and 17 bytes past the body's cap.
++                header.varint(std::to_underlying(proto::PduKind::MemoryData));
++                return answer(header.take());
++            }
++            case HostileAction::AnswerShortMemory: {
++                auto const read = memoryRead(way, pending, size);
++                if (!read)
++                    return Verdict::Stop;
++                return answer(memoryDataOf(read->size == 0 ? 1 : read->size - 1));
++            }
++            case HostileAction::AnswerHalfMemory: {
++                auto const read = memoryRead(way, pending, size);
++                if (!read)
++                    return Verdict::Stop;
++                auto const frame = memoryDataOf(read->size);
++                auto const header = headerBytesOf(frame);
++                return answer(std::span { frame }.first(header + ((frame.size() - header) / 2)));
++            }
++            case HostileAction::HoldBack: return Verdict::Hold;
++        }
++        return Verdict::Forward;
++    }
++
++    /// @return Whether @p way is one this process no longer reads.
++    [[nodiscard]] bool isStopped(Way const& way) const noexcept
++    {
++        return way.direction == proto::Direction::ToHelper && _contourReads.load() == ContourReads::Stopped;
++    }
++
++    /// Reads @p way and passes nothing on, until its source ends; then ends its target's stream too.
++    static void hold(Way const& way)
++    {
++        auto chunk = std::array<uint8_t, 4096> {};
++        while (way.source().receiveSome(chunk))
++        {
++        }
++        way.target().shutdown();
+     }
+ 
+-    void relayToHost()
++    /// Relays @p channel the way @p direction says, frame by frame, until either end's stream ends -- then
++    /// the other's ends too -- or the incident stops it.
++    void pump(RelayedChannel& channel, proto::Direction direction)
+     {
+-        auto pending = std::vector<uint8_t> {}; // received, not forwarded yet
+-        auto frameLeft = std::size_t { 0 };     // bytes of the current frame not forwarded yet
++        auto const way = Way { .channel = channel, .direction = direction };
++        auto pending = std::vector<uint8_t> {}; // Received, not passed on yet.
++        auto frameLeft = std::size_t { 0 };     // Bytes of the current frame not passed on yet.
++        auto verdict = Verdict::Forward;        // What becomes of them.
+         auto chunk = std::array<uint8_t, 4096> {};
+         while (true)
+         {
+             if (frameLeft == 0 && !pending.empty())
+             {
+-                auto const size = proto::frameSizeOf(
+-                    pending, proto::Direction::ToHelper, proto::ChannelKind::Control, Limits);
++                auto const size = proto::frameSizeOf(pending, direction, channel.kind, Limits);
+                 if (size)
+                 {
+-                    if (_progress.load() == Progress::Instantiated
+-                        && kindAtFront(pending) == proto::PduKind::Load)
+-                        return; // reads nothing more: Contour's send blocks
++                    auto const kind = kindAtFront(pending);
++                    verdict = isIncident(way, kind) ? act(way, pending, *size) : Verdict::Forward;
++                    _passed.fetch_or(bitOf(kind));
++                    if (verdict == Verdict::Stop)
++                        return;
++                    if (verdict == Verdict::Hold)
++                    {
++                        hold(way);
++                        return;
++                    }
+                     frameLeft = *size;
+                 }
+                 else if (size.error() != proto::DecodeError::NeedMoreData)
+-                    frameLeft = pending.size(); // passed on as it is: the host refuses it
++                {
++                    verdict = Verdict::Forward; // Passed on as it is: the receiver refuses it.
++                    frameLeft = pending.size();
++                }
+             }
+             if (frameLeft > 0 && !pending.empty())
+             {
+                 auto const count = std::min(frameLeft, pending.size());
+-                if (!_host.send(std::span { pending }.first(count)))
++                if (verdict == Verdict::Forward
++                    && !way.sendTo(way.target(), std::span { pending }.first(count)))
+                     return;
+                 pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(count));
+                 frameLeft -= count;
+                 continue;
+             }
+-            auto const received = _contour.receiveSome(chunk);
+-            if (!received)
+-            {
+-                _host.shutdown();
++            if (isStopped(way))
+                 return;
+-            }
+-            pending.insert(
+-                pending.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(*received));
+-        }
+-    }
+-
+-    void relayToContour()
+-    {
+-        auto pending = std::vector<uint8_t> {};
+-        auto chunk = std::array<uint8_t, 4096> {};
+-        while (true)
+-        {
+-            auto decoded =
+-                proto::decodeFrame(pending, proto::Direction::ToParent, proto::ChannelKind::Control, Limits);
+-            if (decoded)
+-            {
+-                auto const frame = std::span { pending }.first(decoded->consumed);
+-                if (!_contour.send(frame))
+-                    return;
+-                if (std::holds_alternative<proto::Instantiated>(decoded->pdu))
+-                    _progress.store(Progress::Instantiated);
+-                pending.erase(pending.begin(),
+-                              pending.begin() + static_cast<std::ptrdiff_t>(decoded->consumed));
+-                continue;
+-            }
+-            auto const received = decoded.error() == proto::DecodeError::NeedMoreData
+-                                      ? _host.receiveSome(chunk)
+-                                      : std::expected<std::size_t, transport::ChannelError> { std::unexpected(
+-                                            transport::ChannelError::Io) };
++            auto const received = way.source().receiveSome(chunk);
+             if (!received)
+             {
+-                _contour.shutdown();
++                way.target().shutdown();
+                 return;
+             }
++            // What arrived once Contour's channels are no longer read is passed on to nobody.
++            if (isStopped(way))
++                return;
+             pending.insert(
+                 pending.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(*received));
+         }
+     }
+ 
+-    transport::Channel _contour;
+-    transport::Channel _host;
+-    std::atomic<Progress> _progress { Progress::NotInstantiated };
+-    std::jthread _toHost; // Last, so that they are joined before the channels go.
+-    std::jthread _toContour;
++    HostileIncident _incident;
++    std::vector<std::unique_ptr<RelayedChannel>> _channels;
++    std::atomic<Progress> _progress { Progress::Pending };
++    std::atomic<ContourReads> _contourReads { ContourReads::Open };
++    std::atomic<uint32_t> _passed { 0 }; ///< One bit per kind of frame passed so far, either way.
++    std::vector<std::jthread> _pumps;    // Last, so that they are joined before the channels go.
+ };
+ 
+-/// Runs the real host behind a StoppingRelay on its control channel; its lanes, page and wake signal are
+-/// Contour's own.
+-[[nodiscard]] int stopReadingAfterInstantiate(std::vector<std::string_view> const& arguments)
++/// Puts a relay between Contour's end of a channel and the real host.
++/// @param kind The channel's kind.
++/// @param handle Contour's end, as this process inherited it; replaced by the end the real host is handed.
++/// @return Contour's end, and this process's end of a fresh channel the real host serves in its place;
++///         nothing if either cannot be had.
++[[nodiscard]] std::unique_ptr<RelayedChannel> relayed(proto::ChannelKind kind,
++                                                      transport::NativeHandle& handle)
+ {
+-    auto parsed = transport::parseHelperArguments(arguments);
+-    if (!parsed)
+-        return serve({ arguments.begin(), arguments.end() });
+-    auto contour = transport::Channel::adopt(parsed->control);
++    auto contour = transport::Channel::adopt(handle);
+     if (!contour)
+-        return refuse("Contour's control channel cannot be adopted");
++        return nullptr;
+     auto inner = transport::makeChannelPair();
+     if (!inner)
+-        return refuse("no channel to relay to can be made");
++        return nullptr;
+     auto const copy = transport::testing::duplicate(inner->helper.nativeHandle());
+     if (!copy)
+-        return refuse("no channel to relay to can be handed over");
+-    parsed->control = *copy;
++        return nullptr;
++    handle = *copy;
+     {
+         // Only the host's copy stays open: its end of stream is the relay's.
+         auto const original = std::move(inner->helper);
+     }
+-    auto const relay = StoppingRelay { *std::move(contour), std::move(inner->parent) };
+-    return serve(transport::formatHelperArguments(*parsed));
++    // Built in place: its mutex moves nowhere.
++    return std::make_unique<RelayedChannel>(kind, *std::move(contour), std::move(inner->parent));
+ }
+ 
+-/// Runs the real host, and once it ended because Contour's channels did, sleeps until killed, SIGTERM
+-/// ignored. A host that ended for another reason ends as the real one does.
+-[[nodiscard]] int ignoreEof(std::vector<std::string_view> const& arguments)
++/// Runs the real host as @p row says, on @p arguments: with the wake signal it names, behind a relay if it
++/// names an incident, and ending as it says once Contour's channels ended.
++[[nodiscard]] int misbehave(HostileModeRow const& row, std::vector<std::string_view> const& arguments)
+ {
+-    if (auto const served = serve({ arguments.begin(), arguments.end() }); served != 0)
++    auto parsed = transport::parseHelperArguments(arguments);
++    if (!parsed)
++        return serve({ arguments.begin(), arguments.end() });
++
++    // Made whether used or not, so that it lives as long as the host it is handed to.
++    auto const silent = transport::makeWakePair();
++    if (row.wake == WakeSource::Silent)
++    {
++        if (!silent)
++            return refuse("no wake signal of its own can be made");
++        auto const copy = transport::testing::duplicate(silent->helper.nativeHandle());
++        if (!copy)
++            return refuse("no wake signal of its own can be handed over");
++        parsed->wake = *copy;
++    }
++
++    auto relay = std::optional<Relay> {};
++    if (row.incident)
++    {
++        auto channels = std::vector<std::unique_ptr<RelayedChannel>> {};
++        channels.push_back(relayed(proto::ChannelKind::Control, parsed->control));
++        for (auto& lane: parsed->lanes)
++            channels.push_back(relayed(proto::ChannelKind::Lane, lane));
++        if (std::ranges::contains(channels, nullptr))
++            return refuse("a channel cannot be relayed");
++        relay.emplace(*row.incident, std::move(channels));
++    }
++
++    auto const served = serve(transport::formatHelperArguments(*parsed));
++    if (served != 0 || row.afterEnd == AfterContourEnds::Exit)
+         return served;
+ #ifndef _WIN32
+     std::signal(SIGTERM, SIG_IGN);
+ #endif
+     while (true)
+         std::this_thread::sleep_for(std::chrono::hours { 1 });
+ }
+ 
+ } // namespace
+ 
+ int main(int argc, char const* argv[])
+ {
+     auto arguments = std::vector<std::string_view> {};
+-    auto mode = std::optional<HostileMode> {};
++    auto const* row = static_cast<HostileModeRow const*>(nullptr);
+     for (auto const argument: std::vector<std::string_view>(argv + 1, argv + argc))
+     {
+         if (!argument.starts_with(HostileOption))
+         {
+             arguments.push_back(argument);
+             continue;
+         }
+-        mode = hostileModeNamed(argument.substr(HostileOption.size()));
+-        if (!mode)
++        row = hostileModeNamed(argument.substr(HostileOption.size()));
++        if (row == nullptr)
+             return refuse("no such hostile mode");
+     }
+-    if (!mode)
+-        return refuse("no hostile mode given");
+-    switch (*mode)
+-    {
+-        case HostileMode::IgnoreInterrupt: return ignoreInterrupts(arguments);
+-        case HostileMode::StopReadingAfterInstantiate: return stopReadingAfterInstantiate(arguments);
+-        case HostileMode::IgnoreEof: return ignoreEof(arguments);
+-    }
+-    return refuse("no such hostile mode");
++    if (row == nullptr)
++        return serve({ arguments.begin(), arguments.end() });
++    return misbehave(*row, arguments);
+ }
+diff --git a/src/contour-extension-host/testing/HostileModes.hpp b/src/contour-extension-host/testing/HostileModes.hpp
+index 8126a53af..2ca7f3f29 100644
+--- a/src/contour-extension-host/testing/HostileModes.hpp
++++ b/src/contour-extension-host/testing/HostileModes.hpp
+@@ -1,58 +1,167 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// The ways the hostile extension host misbehaves, one row each: what the crash and hostility tests start in
+ /// place of the real one, to prove Contour survives a host that does not play by the rules. Never installed.
++///
++/// A row whose misbehaviour is an incident runs the real host behind a relay: every channel Contour handed
++/// over, both ways, is split into frames (proto::frameSizeOf()) and forwarded as it came, until the first
++/// frame the row's trigger names -- once per process, so once per incarnation. There the row's action
++/// happens in place of, or after, forwarding it. Adding a misbehaviour is adding a row; only a new kind of
++/// action needs code (HostileHost.cpp).
+ 
++#include <algorithm>
+ #include <array>
+ #include <cstdint>
+ #include <optional>
+-#include <ranges>
+ #include <string_view>
+ 
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++
+ namespace contour::extension_host::testing
+ {
+ 
+-/// How the hostile host misbehaves.
+-enum class HostileMode : uint8_t
++namespace proto = vtextension::wasm::remote::proto;
++
++/// The wake signal the real host listens on.
++enum class WakeSource : uint8_t
++{
++    Contour, ///< The one Contour handed over: an interrupt reaches the host.
++    Silent,  ///< One of its own that nobody signals: the host never reads the interrupt page.
++};
++
++/// What the host does once it ended because Contour's channels did.
++enum class AfterContourEnds : uint8_t
+ {
+-    /// Serves as the real host does, but never reads the interrupt page: an interrupted call runs on, as a
+-    /// guest stuck where the engine cannot stop it would.
+-    IgnoreInterrupt,
+-    /// Serves through a relay on its control channel until it answered an instantiation; from the next module
+-    /// Contour loads on, it reads nothing more of that channel, as a host wedged mid-request would: Contour's
+-    /// send of that module blocks once the channel's buffer is full.
+-    StopReadingAfterInstantiate,
+-    /// Serves as the real host does, but once Contour's channels end it neither exits nor heeds SIGTERM: it
+-    /// sleeps until it is killed.
+-    IgnoreEof,
++    Exit,             ///< Exits, as the real host does.
++    SleepUntilKilled, ///< Neither exits nor heeds SIGTERM: it sleeps until it is killed.
++};
++
++/// What the hostile host does at the frame its trigger names.
++enum class HostileAction : uint8_t
++{
++    Abort,                   ///< std::abort(): the host crashes.
++    Segfault,                ///< Dies as a segmentation fault does, whatever handler a sanitizer installed.
++    ForwardThenExit,         ///< Forwards the frame, then exits at once with code 3.
++    StopReadingChannel,      ///< Reads nothing more of that channel, the frame included; stays alive.
++    StopReadingEveryChannel, ///< Reads nothing more of any of Contour's channels; stays alive.
++    AnswerGarbage,           ///< Swallows the frame and answers 64 pseudo-random bytes on its channel.
++    AnswerOverCapMemory,     ///< Swallows a MemoryRead and answers a MemoryData header past the size cap.
++    AnswerShortMemory,       ///< Swallows a MemoryRead and answers a well-formed MemoryData one byte short.
++    AnswerHalfMemory,        ///< Swallows a MemoryRead and answers a MemoryData header and half its body.
++    HoldBack,                ///< Holds the frame, and every one after it that way, back forever.
++};
++
++/// The frame an incident happens at: the first one of `kind` travelling `direction` on a channel of kind
++/// `channel`, once a frame of kind `after` passed on any channel either way.
++struct HostileTrigger
++{
++    proto::Direction direction; ///< The way the frame travels.
++    proto::ChannelKind channel; ///< The kind of channel it travels on.
++    proto::PduKind kind;        ///< Its kind.
++    std::optional<proto::PduKind>
++        after {}; ///< Only once a frame of this kind passed; nothing: from the start.
++};
++
++/// One thing the host does wrong, once.
++struct HostileIncident
++{
++    HostileTrigger trigger; ///< Where it happens.
++    HostileAction action;   ///< What happens there.
+ };
+ 
+ /// One way the hostile host misbehaves, and its name on the command line.
+ struct HostileModeRow
+ {
+-    HostileMode mode;      ///< The misbehaviour.
+-    std::string_view name; ///< What `--hostile=<name>` names it.
++    std::string_view name;                              ///< What `--hostile=<name>` names it.
++    WakeSource wake = WakeSource::Contour;              ///< The wake signal the host listens on.
++    AfterContourEnds afterEnd = AfterContourEnds::Exit; ///< What it does once Contour's channels ended.
++    std::optional<HostileIncident> incident {}; ///< What it does wrong in the protocol; nothing to relay.
+ };
+ 
++namespace detail
++{
++    /// @return The trigger of a frame of @p kind, sent by Contour on a lane.
++    [[nodiscard]] constexpr HostileTrigger contourOnLane(proto::PduKind kind) noexcept
++    {
++        return HostileTrigger { .direction = proto::Direction::ToHelper,
++                                .channel = proto::ChannelKind::Lane,
++                                .kind = kind };
++    }
++
++    /// @return The trigger of a frame of @p kind, sent by the host on the control channel.
++    [[nodiscard]] constexpr HostileTrigger hostOnControl(proto::PduKind kind) noexcept
++    {
++        return HostileTrigger { .direction = proto::Direction::ToParent,
++                                .channel = proto::ChannelKind::Control,
++                                .kind = kind };
++    }
++} // namespace detail
++
+ /// Every way the hostile host misbehaves.
+ inline constexpr auto HostileModes = std::array {
+-    HostileModeRow { .mode = HostileMode::IgnoreInterrupt, .name = "ignore-interrupt" },
+-    HostileModeRow { .mode = HostileMode::StopReadingAfterInstantiate,
+-                     .name = "stop-reading-after-instantiate" },
+-    HostileModeRow { .mode = HostileMode::IgnoreEof, .name = "ignore-eof" },
++    HostileModeRow { .name = "ignore-interrupt", .wake = WakeSource::Silent },
++    HostileModeRow { .name = "ignore-eof", .afterEnd = AfterContourEnds::SleepUntilKilled },
++    HostileModeRow {
++        .name = "stop-reading-after-instantiate",
++        .incident = HostileIncident { .trigger = HostileTrigger { .direction = proto::Direction::ToHelper,
++                                                                  .channel = proto::ChannelKind::Control,
++                                                                  .kind = proto::PduKind::Load,
++                                                                  .after = proto::PduKind::Instantiated },
++                                      .action = HostileAction::StopReadingChannel } },
++    HostileModeRow { .name = "abort",
++                     .incident = HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::Call),
++                                                   .action = HostileAction::Abort } },
++    HostileModeRow { .name = "segfault",
++                     .incident = HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::Call),
++                                                   .action = HostileAction::Segfault } },
++    HostileModeRow {
++        .name = "exit-in-callhost",
++        .incident = HostileIncident { .trigger = HostileTrigger { .direction = proto::Direction::ToParent,
++                                                                  .channel = proto::ChannelKind::Lane,
++                                                                  .kind = proto::PduKind::CallHost },
++                                      .action = HostileAction::ForwardThenExit } },
++    HostileModeRow { .name = "stop-reading",
++                     .incident = HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::Call),
++                                                   .action = HostileAction::StopReadingEveryChannel } },
++    HostileModeRow { .name = "garbage",
++                     .incident = HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::Call),
++                                                   .action = HostileAction::AnswerGarbage } },
++    HostileModeRow { .name = "over-cap",
++                     .incident =
++                         HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::MemoryRead),
++                                           .action = HostileAction::AnswerOverCapMemory } },
++    HostileModeRow { .name = "bogus-size",
++                     .incident =
++                         HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::MemoryRead),
++                                           .action = HostileAction::AnswerShortMemory } },
++    HostileModeRow { .name = "stall-after-header",
++                     .incident =
++                         HostileIncident { .trigger = detail::contourOnLane(proto::PduKind::MemoryRead),
++                                           .action = HostileAction::AnswerHalfMemory } },
++    HostileModeRow { .name = "hang-at-handshake",
++                     .incident = HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Hello),
++                                                   .action = HostileAction::HoldBack } },
++    HostileModeRow { .name = "hang-at-load",
++                     .incident = HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Loaded),
++                                                   .action = HostileAction::HoldBack } },
++    HostileModeRow { .name = "hang-at-instantiate",
++                     .incident =
++                         HostileIncident { .trigger = detail::hostOnControl(proto::PduKind::Instantiated),
++                                           .action = HostileAction::HoldBack } },
+ };
+ 
+-/// The only argument the hostile host takes beyond the real one's.
++/// The only argument the hostile host takes beyond the real one's. Without it, it serves as the real host
++/// does: how a test makes the host started after the first one behave.
+ inline constexpr auto HostileOption = std::string_view { "--hostile=" };
+ 
+ /// @param name A mode's name.
+ /// @return The mode of that name; nothing if there is none.
+-[[nodiscard]] constexpr std::optional<HostileMode> hostileModeNamed(std::string_view name) noexcept
++[[nodiscard]] constexpr HostileModeRow const* hostileModeNamed(std::string_view name) noexcept
+ {
+     auto const row = std::ranges::find(HostileModes, name, &HostileModeRow::name);
+-    return row != HostileModes.end() ? std::optional { row->mode } : std::nullopt;
++    return row != HostileModes.end() ? &*row : nullptr;
+ }
+ 
+ } // namespace contour::extension_host::testing
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index ab429bc3f..4e7326a8f 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -213,20 +213,21 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
+     # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host
+     # only for the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
+     #
+     # Beside them, the contract and the suites vtextension_test runs on the default backend, here composed by
+     # testing/ProcessDefaultBackend.cpp as the remote backend over real helper processes: their real guests
+     # run through a process boundary.
+     add_executable(vtextension_helper_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         Helper_test.cpp
+         ProcessBackend_test.cpp
++        Hostility_test.cpp
+         ReviewFocusProcess_test.cpp
+         Teardown_test.cpp
+         process/testing/HelperComposition.cpp
+         process/testing/HelperComposition.hpp
+         process/testing/LaunchedHelper.cpp
+         process/testing/LaunchedHelper.hpp
+         testing/ProcessDefaultBackend.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/ControlImports_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Engine_test.cpp
+diff --git a/src/vtextension/wasm/remote/HelperIncarnation.hpp b/src/vtextension/wasm/remote/HelperIncarnation.hpp
+index ab449fb26..8220c84d4 100644
+--- a/src/vtextension/wasm/remote/HelperIncarnation.hpp
++++ b/src/vtextension/wasm/remote/HelperIncarnation.hpp
+@@ -116,24 +116,23 @@ class HelperIncarnation
+     /// receive, but an over-cap PDU the stream refused to send, kills the incarnation; so does overstaying.
+     /// @param pdu The request.
+     /// @param step The step it is: what its budget is.
+     /// @return The reply; why there is none: `Closed` if the incarnation is dead already, or died meanwhile.
+     [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> request(proto::Pdu const& pdu,
+                                                                             HostStep step);
+ 
+     /// Tells the host a module or an instance is gone, without ever blocking: the release is queued, and
+     /// sent at once only if no other thread holds the control channel and the channel takes it now; if one
+     /// does, that thread sends it once it lets the channel go. What is queued goes out before and after the
+-    /// next request's exchange, in order. Does nothing once the
+-    /// incarnation is dead; a host that lets more than MaxPendingReleases pile up kills it. Queuing
+-    /// allocates: running out of memory there ends the process (std::terminate), as the destructors calling
+-    /// this cannot report it.
++    /// next request's exchange, in order. Does nothing once the incarnation is dead; a host that lets more
++    /// than MaxPendingReleases pile up kills it. Queuing allocates: running out of memory there ends the
++    /// process (std::terminate), as the destructors calling this cannot report it.
+     /// @param release What is gone.
+     void release(proto::Release release) noexcept;
+ 
+     /// Lets the host go at once, as dropping the last reference to the incarnation would, though threads may
+     /// still hold one: the incarnation is dead, its host is let go (IHostHandle::letGo()), and every channel
+     /// is shut down, so that a thread blocked on one returns. Never blocks. Only the first of letGo() and
+     /// markDead() does anything.
+     void letGo() noexcept;
+ 
+     /// @return Lane @p index's stream; used only by the thread holding that lane.
+diff --git a/src/vtextension/wasm/remote/Hostility_test.cpp b/src/vtextension/wasm/remote/Hostility_test.cpp
+new file mode 100644
+index 000000000..9bba61bd9
+--- /dev/null
++++ b/src/vtextension/wasm/remote/Hostility_test.cpp
+@@ -0,0 +1,509 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// What a hostile extension host may do to Contour, and what Contour makes of it: a host that crashes at a
++// step of the protocol, answers garbage or more than it may, stalls mid-answer, stops reading, or holds an
++// answer back. Each is a row of contour-extension-host-hostile's table (HostileModes.hpp), started in place
++// of the real host; each must cost Contour one failed operation reporting the right error within a bound,
++// one host death, and one breaker fault -- and the next operation runs in a host started anew. Each case
++// composes its own supervisor, so that its counts are its own.
++#include <core/platform/Clock.hpp>
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <condition_variable>
++#include <cstddef>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <expected>
++#include <memory>
++#include <mutex>
++#include <optional>
++#include <print>
++#include <span>
++#include <stop_token>
++#include <string>
++#include <string_view>
++#include <thread>
++#include <utility>
++#include <vector>
++
++#include <contour-extension-host/testing/HostileModes.hpp>
++#include <vtextension/CompiledExtension.hpp>
++#include <vtextension/Engine.hpp>
++#include <vtextension/ExtensionError.hpp>
++#include <vtextension/ExtensionHost.hpp>
++#include <vtextension/ExtensionLimits.hpp>
++#include <vtextension/ExtensionRegistry.hpp>
++#include <vtextension/HostBreaker.hpp>
++#include <vtextension/Instance.hpp>
++#include <vtextension/Placement.hpp>
++#include <vtextension/testing/Harness.hpp>
++#include <vtextension/testing/TestModules.hpp>
++#include <vtextension/wasm/BackendConfig.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
++#include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
++#include <vtextension/wasm/testing/BackendContract.hpp>
++
++namespace process = vtextension::wasm::remote::process;
++namespace contract = vtextension::wasm::testing::contract;
++using contour::extension_host::testing::hostileModeNamed;
++using contour::extension_host::testing::HostileOption;
++using process::testing::HelperBackendConfig;
++using process::testing::HelperComposition;
++using process::testing::HelperTeardownGrace;
++using vtextension::ExtensionError;
++using vtextension::wasm::CallFailure;
++using vtextension::wasm::HostTimeouts;
++using vtextension::wasm::IWasmBackend;
++using vtextension::wasm::IWasmInstance;
++using vtextension::wasm::IWasmModule;
++using vtextension::wasm::IWasmRuntime;
++using vtextension::wasm::LockdownRequirement;
++using vtextension::wasm::MemoryFailure;
++using vtextension::wasm::ModuleIdentity;
++using namespace std::chrono_literals;
++
++namespace
++{
++
++/// The budgets the hostile hosts are held to: short, so that a hang costs little.
++constexpr auto Timeouts =
++    HostTimeouts { .load = 200ms, .instantiate = 200ms, .handshake = 200ms, .interruptGrace = 50ms };
++
++/// How long after a call or a read began the watchdog interrupts it, as the pool's would at its deadline.
++constexpr auto WatchdogDelay = 50ms;
++
++/// How long an operation on a hostile host may take to fail.
++constexpr auto FailureBound = 2s;
++
++/// How long any one thing a case waits for may take; it fails, rather than hang, beyond it.
++constexpr auto Patience = 5s;
++
++/// How long a whole case may take; the run ends beyond it (CaseDeadline).
++constexpr auto CaseBound = 60s;
++
++/// Ends the test run once a case ran for longer than CaseBound: whatever a regression made hang -- a call,
++/// a join, a future -- the run fails rather than hang.
++class CaseDeadline
++{
++  public:
++    explicit CaseDeadline(std::string_view name):
++        _timer { [name](std::stop_token const& stop) {
++            auto mutex = std::mutex {};
++            auto woken = std::condition_variable_any {};
++            auto lock = std::unique_lock { mutex };
++            std::ignore = woken.wait_for(lock, stop, CaseBound, [] { return false; });
++            if (stop.stop_requested())
++                return;
++            std::println(stderr, "Hostility: {} ran for longer than {}", name, CaseBound);
++            std::abort();
++        } }
++    {
++    }
++
++  private:
++    std::jthread _timer;
++};
++
++/// Interrupts an instance WatchdogDelay after it was made, unless destroyed before: a call or a read under
++/// the pool's watchdog, whose deadline is up by then.
++class Watchdog
++{
++  public:
++    explicit Watchdog(IWasmInstance& instance):
++        _thread { [&instance](std::stop_token const& stop) {
++            auto mutex = std::mutex {};
++            auto woken = std::condition_variable_any {};
++            auto lock = std::unique_lock { mutex };
++            std::ignore = woken.wait_for(lock, stop, WatchdogDelay, [] { return false; });
++            if (!stop.stop_requested())
++                instance.interrupt();
++        } }
++    {
++    }
++
++  private:
++    std::jthread _thread;
++};
++
++/// @return @p arguments without the hostile mode: the helper started after a hostile one is benign.
++[[nodiscard]] std::vector<std::string> withoutHostileMode(std::vector<std::string> arguments)
++{
++    std::erase_if(arguments, [](std::string const& argument) { return argument.starts_with(HostileOption); });
++    return arguments;
++}
++
++/// @return The hostile helper in mode @p mode, held to Timeouts.
++[[nodiscard]] HelperBackendConfig hostileHelper(std::string_view mode)
++{
++    REQUIRE(hostileModeNamed(mode) != nullptr);
++    return HelperBackendConfig { .helper = VTEXTENSION_HOSTILE_HELPER_PATH,
++                                 .extraArguments = { std::string { HostileOption } + std::string { mode } },
++                                 .lockdown = LockdownRequirement::AcceptUnsandboxed,
++                                 .timeouts = Timeouts };
++}
++
++/// Waits until @p composition's supervisor observed @p deaths helper ends, within Patience.
++/// @return Whether it did.
++[[nodiscard]] bool awaitDeaths(HelperComposition const& composition, std::size_t deaths)
++{
++    auto const deadline = std::chrono::steady_clock::now() + Patience;
++    while (std::chrono::steady_clock::now() < deadline)
++    {
++        composition.supervisor().sync();
++        if (composition.supervisor().counters().deathsObserved >= deaths)
++            return true;
++        std::this_thread::sleep_for(10ms);
++    }
++    return false;
++}
++
++/// What an operation on a hostile host is.
++enum class Operation : uint8_t
++{
++    Add,         ///< `call("add", {2, 3})`, under the watchdog.
++    PingThenAdd, ///< `call("ping-then-add", {2, 3})`, a host call first, under the watchdog.
++    Read,        ///< `memory(16, 5)`, under the watchdog.
++    Load,        ///< `runtime->load(...)`.
++    Instantiate, ///< `module->instantiate(...)`.
++};
++
++/// How an operation failed, of the ways that matter here.
++enum class Failure : uint8_t
++{
++    None,            ///< It did not.
++    CallCrashed,     ///< CallFailure::HostCrashed.
++    ReadCrashed,     ///< MemoryFailure::HostCrashed.
++    HostUnavailable, ///< ExtensionError::HostUnavailable.
++    Other,           ///< Any other way.
++};
++
++/// How the hostile helper ended.
++enum class HelperEnd : uint8_t
++{
++    Killed,   ///< By the supervisor, as Contour stopped it: no unclean exit.
++    OnItsOwn, ///< It crashed or exited: one unclean exit (D57).
++};
++
++/// One hostile mode, what Contour asks of it, and what that must come to.
++struct HostileRow
++{
++    std::string_view mode;
++    Operation operation;
++    Failure failure;
++    HelperEnd end;
++};
++
++constexpr auto HostileRows = std::array {
++    HostileRow { "abort", Operation::Add, Failure::CallCrashed, HelperEnd::OnItsOwn },
++    HostileRow { "segfault", Operation::Add, Failure::CallCrashed, HelperEnd::OnItsOwn },
++    HostileRow { "garbage", Operation::Add, Failure::CallCrashed, HelperEnd::Killed },
++    HostileRow { "stop-reading", Operation::Add, Failure::CallCrashed, HelperEnd::Killed },
++    HostileRow { "exit-in-callhost", Operation::PingThenAdd, Failure::CallCrashed, HelperEnd::OnItsOwn },
++    HostileRow { "over-cap", Operation::Read, Failure::ReadCrashed, HelperEnd::Killed },
++    HostileRow { "bogus-size", Operation::Read, Failure::ReadCrashed, HelperEnd::Killed },
++    HostileRow { "stall-after-header", Operation::Read, Failure::ReadCrashed, HelperEnd::Killed },
++    HostileRow { "hang-at-handshake", Operation::Load, Failure::HostUnavailable, HelperEnd::Killed },
++    HostileRow { "hang-at-load", Operation::Load, Failure::HostUnavailable, HelperEnd::Killed },
++    HostileRow { "hang-at-instantiate", Operation::Instantiate, Failure::HostUnavailable, HelperEnd::Killed },
++};
++
++[[nodiscard]] Failure failureOf(CallFailure failure) noexcept
++{
++    return failure == CallFailure::HostCrashed ? Failure::CallCrashed : Failure::Other;
++}
++
++[[nodiscard]] Failure failureOf(MemoryFailure failure) noexcept
++{
++    return failure == MemoryFailure::HostCrashed ? Failure::ReadCrashed : Failure::Other;
++}
++
++[[nodiscard]] Failure failureOf(ExtensionError error) noexcept
++{
++    return error == ExtensionError::HostUnavailable ? Failure::HostUnavailable : Failure::Other;
++}
++
++/// @return How @p result failed.
++template <typename T, typename E>
++[[nodiscard]] Failure failureOf(std::expected<T, E> const& result) noexcept
++{
++    return result ? Failure::None : failureOf(result.error());
++}
++
++/// @return The instance module's bytes, loaded on @p runtime.
++[[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadInstanceModule(
++    IWasmRuntime& runtime)
++{
++    return runtime.load(ModuleIdentity {}, vtextension::testing::toModule(contract::InstanceModule));
++}
++
++/// @return How @p name, called with {2, 3} on @p instance under the watchdog, on a thread prepared by
++///         @p backend, failed.
++[[nodiscard]] Failure callUnderWatchdog(IWasmBackend& backend, IWasmInstance& instance, std::string_view name)
++{
++    return contract::onPreparedThread(backend,
++                                      [&] {
++                                          auto argv = std::array<uint32_t, 2> { 2, 3 };
++                                          auto const function = contract::functionOf(instance, name);
++                                          auto const watchdog = Watchdog { instance };
++                                          return failureOf(instance.call(function, argv));
++                                      })
++        .value_or(Failure::Other);
++}
++
++/// @return Whether `add(2, 3)` on a fresh instance of @p module, made on a thread prepared by @p backend,
++///         returns 5.
++[[nodiscard]] bool addsOnAFreshInstance(IWasmBackend& backend, IWasmModule& module)
++{
++    auto const sum = contract::onPreparedThread(backend, [&]() -> std::optional<uint32_t> {
++        auto context = contract::RecordingHostContext {};
++        auto instance = module.instantiate(context);
++        if (!instance)
++            return std::nullopt;
++        auto argv = std::array<uint32_t, 2> { 2, 3 };
++        if (!(*instance)->call(contract::functionOf(**instance, "add"), argv))
++            return std::nullopt;
++        return argv[0];
++    });
++    return sum && *sum == std::optional<uint32_t> { 5 };
++}
++
++/// Runs @p row's operation on @p runtime, whose backend is @p backend.
++/// @return How it failed, and the module it leaves to recover with: the one it ran on, or for a load, none.
++[[nodiscard]] std::pair<Failure, std::shared_ptr<IWasmModule>> operate(HostileRow const& row,
++                                                                       IWasmBackend& backend,
++                                                                       IWasmRuntime& runtime)
++{
++    if (row.operation == Operation::Load)
++        return { failureOf(loadInstanceModule(runtime)), nullptr };
++    auto module = loadInstanceModule(runtime);
++    REQUIRE(module.has_value());
++    auto context = contract::RecordingHostContext {};
++    if (row.operation == Operation::Instantiate)
++        return { failureOf((*module)->instantiate(context)), *module };
++    auto const instance = contract::instantiate(**module, context);
++    switch (row.operation)
++    {
++        case Operation::Add: return { callUnderWatchdog(backend, *instance, "add"), *module };
++        case Operation::PingThenAdd:
++            return { callUnderWatchdog(backend, *instance, "ping-then-add"), *module };
++        case Operation::Read:
++            return { contract::onPreparedThread(backend,
++                                                [&] {
++                                                    auto const watchdog = Watchdog { *instance };
++                                                    return failureOf(instance->memory(16, 5));
++                                                })
++                         .value_or(Failure::Other),
++                     *module };
++        case Operation::Load:
++        case Operation::Instantiate: break;
++    }
++    return { Failure::Other, *module };
++}
++
++} // namespace
++
++TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
++{
++    for (auto const& row: HostileRows)
++    {
++        DYNAMIC_SECTION(row.mode)
++        {
++            auto const deadline = CaseDeadline { row.mode };
++            auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
++            auto const expectedUnclean =
++                row.end == HelperEnd::OnItsOwn ? std::size_t { 1 } : std::size_t { 0 };
++            {
++                auto const backend = composition.backend(hostileHelper(row.mode));
++                auto const runtime = contract::createRuntime(*backend);
++
++                auto const began = std::chrono::steady_clock::now();
++                auto [failure, module] = operate(row, *backend, *runtime);
++                auto const elapsed = std::chrono::steady_clock::now() - began;
++                CHECK(failure == row.failure);
++                CHECK(elapsed < FailureBound);
++
++                // One death, whether the helper died on its own or was killed: a kill is reaped and observed
++                // like any end.
++                CHECK(awaitDeaths(composition, 1));
++                composition.supervisor().sync();
++                CHECK(composition.supervisor().counters().deathsObserved == 1);
++                CHECK(composition.recording().launches() == 1);
++                CHECK(composition.supervisor().counters().uncleanExits == expectedUnclean);
++
++                // The next operation runs in a host started anew, which plays by the rules.
++                if (!module)
++                {
++                    auto loaded = loadInstanceModule(*runtime);
++                    REQUIRE(loaded.has_value());
++                    module = *std::move(loaded);
++                }
++                CHECK(addsOnAFreshInstance(*backend, *module));
++                CHECK(composition.recording().launches() == 2);
++            }
++            CHECK(composition.awaitEveryHelperReaped());
++            // The one that misbehaved, if it died on its own; the one started anew exits cleanly.
++            CHECK(composition.supervisor().counters().uncleanExits == expectedUnclean);
++        }
++    }
++}
++
++namespace
++{
++
++/// An extension of the statusline world over a composition of hostile helpers, as a pane builds one: an
++/// engine, a registry with its breakers, and the MinimalModule extension's spec.
++class HostileExtension
++{
++  public:
++    /// @param mode The hostile mode of every helper started.
++    /// @param laterArguments Applied to the command line of every helper after the first.
++    HostileExtension(std::string_view mode, process::testing::ArgumentRewrite laterArguments):
++        _composition { HelperTeardownGrace, std::move(laterArguments) },
++        _backend { _composition.backend(hostileHelper(mode)) },
++        _engine { [this] {
++            auto created = vtextension::Engine::create(*_backend, Limits);
++            REQUIRE(created.has_value());
++            return std::move(*created);
++        }() },
++        _threadGuard { vtextension::testing::preparedThread(*_backend) },
++        _registry { _clock, Limits }
++    {
++    }
++
++    /// @return The extension, loaded or reused by the registry.
++    [[nodiscard]] std::expected<std::shared_ptr<vtextension::CompiledExtension>, ExtensionError> acquire()
++    {
++        return _registry.acquire(
++            *_engine, registryKeyOf(_spec, vtextension::ExtensionWorld::StatusLine), _spec.module);
++    }
++
++    /// @return A pane's instance of @p compiled.
++    [[nodiscard]] std::expected<std::unique_ptr<vtextension::Instance>, ExtensionError> create(
++        vtextension::CompiledExtension& compiled)
++    {
++        return vtextension::Instance::create(*_engine, compiled, _services, _clock, Limits);
++    }
++
++    /// @return What started the helpers.
++    [[nodiscard]] HelperComposition const& composition() const noexcept { return _composition; }
++
++  private:
++    static constexpr auto Limits = vtextension::ExtensionLimits {};
++
++    HelperComposition _composition;
++    std::unique_ptr<IWasmBackend> _backend;
++    std::shared_ptr<vtextension::Engine> _engine;
++    std::unique_ptr<vtextension::wasm::IThreadGuard> _threadGuard;
++    core::platform::ManualClock _clock;
++    vtextension::ExtensionRegistry _registry;
++    vtextension::testing::FakeHostServices _services;
++    vtextension::ExtensionSpec _spec {
++        .name = "clock",
++        .hostId = "clock@/ext/minimal.wasm",
++        .module = vtextension::testing::toModule(vtextension::testing::MinimalModule),
++        .config = {},
++        .placement = vtextension::Placement::Segment,
++        .runCommand = vtextension::CommandPermission::Deny,
++    };
++};
++
++/// @return Whether @p extension renders through a fresh instance of @p compiled.
++[[nodiscard]] bool rendersAfresh(HostileExtension& extension, vtextension::CompiledExtension& compiled)
++{
++    auto instance = extension.create(compiled);
++    return instance && (*instance)->render(vtextension::testing::surface(10, 1)).has_value();
++}
++
++/// @return How a render through a fresh instance of @p compiled failed.
++[[nodiscard]] std::optional<ExtensionError> renderFailure(HostileExtension& extension,
++                                                          vtextension::CompiledExtension& compiled)
++{
++    auto instance = extension.create(compiled);
++    if (!instance)
++        return instance.error();
++    auto const rendered = (*instance)->render(vtextension::testing::surface(10, 1));
++    return rendered ? std::nullopt : std::optional { rendered.error() };
++}
++
++} // namespace
++
++TEST_CASE("Hostility.oneCrashIsOneFault", "[vtextension][process][hostility]")
++{
++    auto const deadline = CaseDeadline { "Hostility.oneCrashIsOneFault" };
++    auto extension = HostileExtension { "abort", &withoutHostileMode };
++    auto const compiled = extension.acquire();
++    REQUIRE(compiled.has_value());
++    CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
++    CHECK((*compiled)->breaker()->faultCount() == 1);
++    CHECK(rendersAfresh(extension, **compiled));
++    CHECK(extension.composition().recording().launches() == 2);
++}
++
++TEST_CASE("Hostility.oneHangIsOneFault", "[vtextension][process][hostility]")
++{
++    auto const deadline = CaseDeadline { "Hostility.oneHangIsOneFault" };
++    auto extension = HostileExtension { "hang-at-instantiate", &withoutHostileMode };
++    auto const compiled = extension.acquire();
++    REQUIRE(compiled.has_value());
++    auto const instance = extension.create(**compiled);
++    REQUIRE_FALSE(instance.has_value());
++    CHECK(instance.error() == ExtensionError::HostUnavailable);
++    CHECK((*compiled)->breaker()->faultCount() == 1);
++    CHECK(rendersAfresh(extension, **compiled));
++}
++
++TEST_CASE("Hostility.oneViolationIsOneFault", "[vtextension][process][hostility]")
++{
++    auto const deadline = CaseDeadline { "Hostility.oneViolationIsOneFault" };
++    auto extension = HostileExtension { "garbage", &withoutHostileMode };
++    auto const compiled = extension.acquire();
++    REQUIRE(compiled.has_value());
++    CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
++    CHECK((*compiled)->breaker()->faultCount() == 1);
++    CHECK(rendersAfresh(extension, **compiled));
++}
++
++TEST_CASE("Hostility.repeatedCrashesOpenTheBreaker", "[vtextension][process][hostility]")
++{
++    // Every helper crashes at its first call: each round is one fault, and the third opens the breaker,
++    // which then starts no helper more.
++    auto const deadline = CaseDeadline { "Hostility.repeatedCrashesOpenTheBreaker" };
++    auto extension = HostileExtension { "abort", {} };
++    auto const compiled = extension.acquire();
++    REQUIRE(compiled.has_value());
++    auto const& breaker = *(*compiled)->breaker();
++    for (auto const round: { 1, 2, 3 })
++    {
++        CHECK(renderFailure(extension, **compiled) == ExtensionError::HostUnavailable);
++        CHECK(breaker.faultCount() == static_cast<std::size_t>(round));
++    }
++    CHECK(breaker.state() == vtextension::BreakerState::Open);
++    auto const fourth = extension.create(**compiled);
++    REQUIRE_FALSE(fourth.has_value());
++    CHECK(fourth.error() == ExtensionError::HostUnavailable);
++    CHECK(extension.composition().recording().launches() == 3);
++}
++
++TEST_CASE("Hostility.hangingLoadOpensTheBreaker", "[vtextension][process][hostility]")
++{
++    // Every helper holds its Loaded back: each acquire times out, and counts as a fault of the extension's
++    // breaker (D53); once it opened, nothing is loaded, nor a helper started.
++    auto const deadline = CaseDeadline { "Hostility.hangingLoadOpensTheBreaker" };
++    auto extension = HostileExtension { "hang-at-load", {} };
++    for ([[maybe_unused]] auto const round: { 1, 2, 3 })
++    {
++        auto const acquired = extension.acquire();
++        REQUIRE_FALSE(acquired.has_value());
++        CHECK(acquired.error() == ExtensionError::HostUnavailable);
++    }
++    auto const fourth = extension.acquire();
++    REQUIRE_FALSE(fourth.has_value());
++    CHECK(fourth.error() == ExtensionError::HostUnavailable);
++    CHECK(extension.composition().recording().launches() == 3);
++}
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index 52983cf14..86fe83496 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -1503,25 +1503,40 @@ TEST_CASE("RemoteBackend.releaseQueuedWhileARequestEndsIsSent", "[vtextension][r
+     auto const connector =
+         std::make_shared<ScriptedConnector>([&](HelperEnds& ends, std::size_t /*connection*/) {
+             serveGated(ends, transcript, 0, arrived, std::shared_future<void> {}, AfterGate::Answers);
+         });
+     auto const backend = makeBackend(connector);
+     auto const runtime = contract::createRuntime(*backend);
+     auto const module = contract::load(*runtime, PeekModule);
+     auto context = contract::RecordingHostContext {};
+     auto older = contract::instantiate(*module, context);
+ 
++    // The hook runs from the watch's destructor, where an assertion that throws would terminate: it only
++    // records how the drop went, and the case checks that once the request returned. A drop that never
++    // returns ends the run, rather than hang in the future's destructor.
++    enum class Drop : uint8_t
++    {
++        NotRun,
++        Returned,
++    };
++    auto drop = Drop::NotRun;
+     connector->onNextDisarm([&] {
+         auto dropping = std::async(std::launch::async, [&] { older.reset(); });
+-        readyWithin(dropping, std::chrono::seconds { 5 }, "dropping an instance waited for the channel");
++        if (dropping.wait_for(std::chrono::seconds { 5 }) != std::future_status::ready)
++        {
++            std::fputs("dropping an instance waited for the channel\n", stderr);
++            std::abort();
++        }
++        drop = Drop::Returned;
+     });
+     auto const newer = contract::instantiate(*module, context);
++    CHECK(drop == Drop::Returned);
+ 
+     // Recorded: Load, Instantiate, Instantiate, and the release, with nothing more asked of the host.
+     auto const pdus = transcript.awaitAtLeast(4);
+     REQUIRE(pdus.size() >= 4);
+     CHECK(releasesInstance(pdus.at(3), std::get<proto::Instantiate>(pdus.at(1)).instanceId));
+ }
+ 
+ TEST_CASE("RemoteBackend.releaseOverflowKillsTheHelper", "[vtextension][remote][threading]")
+ {
+     // A host that stops reading its control channel while a request is outstanding: every drop after it is
+diff --git a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp
+index cc46e8229..91ab86daf 100644
+--- a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp
++++ b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp
+@@ -410,21 +410,24 @@ TEST_CASE("Supervisor.mailboxOutlivesTheSupervisor", "[vtextension]")
+ 
+ TEST_CASE("Supervisor.failedWaitStopsEveryHelper", "[vtextension]")
+ {
+     // The set cannot wait any more: the supervisor says so once, stops every helper and starts no more,
+     // and still processes its commands until it is destroyed.
+     auto rig = Rig {};
+     auto helper = rig.launch();
+     helper.attach(rig.countingDeaths());
+     rig.supervisor->sync();
+     rig.fake->failWaits(LaunchError::Io);
+-    rig.supervisor->sync();
++    // A failed wait is no command, so one sync() need not come after it: a wake the last sync() left
++    // pending can start one more turn, which takes the next sync() before any wait failed. The second
++    // sync() is taken only by the turn after that wait, by then failed.
++    rig.settle();
+     CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
+     CHECK(rig.deaths->load() == 1);
+     CHECK(rig.supervisor->counters().reaped == 1);
+     CHECK(rig.supervisor->counters().uncleanExits == 0);
+     CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Stopped);
+     CHECK(rig.fake->launches().size() == 1);
+ }
+ 
+ TEST_CASE("Supervisor.refusedWatchIsPolledAndReaped", "[vtextension]")
+ {
+diff --git a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+index 2c10111bf..f3cba58cd 100644
+--- a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
++++ b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+@@ -64,23 +64,24 @@ namespace
+ std::vector<std::pair<std::string, std::string>> helperEnvironment()
+ {
+     auto environment = defaultHelperEnvironment();
+     auto const live = core::LiveEnvironment {};
+     for (auto const name: SanitizerVariables)
+         if (auto value = live.get(name))
+             environment.emplace_back(std::string { name }, *std::move(value));
+     return environment;
+ }
+ 
+-HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace):
++HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace, ArgumentRewrite laterArguments):
+     _teardownGrace { teardownGrace },
+-    _recording { std::make_shared<RecordingLauncher>(makeSystemProcessLauncher()) },
++    _recording { std::make_shared<RecordingLauncher>(makeSystemProcessLauncher(),
++                                                     std::move(laterArguments)) },
+     _supervisor { [this] {
+         auto started = ExtensionHostSupervisor::start(SupervisorConfig {
+             .launcher = _recording, .clock = &core::defaultSteadyClock(), .teardownGrace = _teardownGrace });
+         if (!started)
+         {
+             std::fputs("HelperComposition: the supervisor could not start\n", stderr);
+             std::abort();
+         }
+         return std::move(*started);
+     }() },
+diff --git a/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp b/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp
+index 794fe9a8a..584c2283e 100644
+--- a/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp
++++ b/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp
+@@ -40,21 +40,24 @@ struct HelperBackendConfig
+     HostTimeouts timeouts {};                                              ///< Its budgets.
+ };
+ 
+ /// A supervisor over the system's launcher, recorded, waiting a teardown grace for each helper let go (by
+ /// default HelperTeardownGrace), and the kind every remote backend built over it shares.
+ class HelperComposition
+ {
+   public:
+     /// Starts the supervisor; aborts the test run if it cannot start.
+     /// @param teardownGrace How long a helper let go may take to exit on its own before it is killed.
+-    explicit HelperComposition(std::chrono::milliseconds teardownGrace = HelperTeardownGrace);
++    /// @param laterArguments Applied to the command line of every helper started after the first (as
++    ///        RecordingLauncher applies it); none to start every one alike.
++    explicit HelperComposition(std::chrono::milliseconds teardownGrace = HelperTeardownGrace,
++                               ArgumentRewrite laterArguments = {});
+ 
+     /// Destroys the supervisor, as a hosting process that quits does: it kills every helper, reaps within its
+     /// budget, and joins. Afterwards only recording() and kind() may be used.
+     void stopSupervisor() noexcept { _supervisor.reset(); }
+ 
+     /// @return What started every helper, and when.
+     [[nodiscard]] RecordingLauncher& recording() const noexcept { return *_recording; }
+ 
+     /// @return The supervisor.
+     [[nodiscard]] ExtensionHostSupervisor& supervisor() const noexcept { return *_supervisor; }

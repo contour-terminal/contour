@@ -1,0 +1,402 @@
+ffd1e0a77 test(vtextension): the macOS sandbox probe expects what Seatbelt refuses
+ce8697ed4 fix(vtextension): the macOS sandbox lets the extension host learn its page size
+214575c63 fix(vtextension): WAMR maps memory MAP_JIT only where it is to run code
+03ecc070e fix(vtextension): a descriptor that comes unasked is closed on macOS
+7b5d1cbd3 fix(vtextension): an extension host's channel never waits to send on macOS
+
+ cmake/ContourThirdParties.cmake                    | 18 +++++---
+ src/vtextension/wasm/remote/transport/Channel.hpp  | 14 ++++++
+ .../wasm/remote/transport/Channel_posix.cpp        | 51 ++++++++++++++--------
+ .../wasm/remote/transport/Channel_test.cpp         | 50 +++++++++++++++++++++
+ 4 files changed, 109 insertions(+), 24 deletions(-)
+
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index e35588269..e0604d24e 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -254,27 +254,29 @@ function(ContourThirdParties_WamrTerminates target resultVar)
+     endforeach()
+     set(${resultVar}_REASON "${_reason}" PARENT_SCOPE)
+ endfunction()
+ 
+ if(CONTOUR_EXTENSIONS)
+     add_library(contour_wamr INTERFACE)
+     add_library(contour::wamr ALIAS contour_wamr)
+ 
+     set(_wamr_target "")
+     set(_wamr_rejected "")
+-    # On macOS a WAMR without Contour's MAP_JIT patch (cmake/patches/) maps every instance's memory for code
+-    # made at run time, which the hardened runtime refuses the interpreting extension host, which holds no
+-    # allow-jit entitlement: every instantiation would fail. Only the fetched, patched WAMR is usable there.
++    # On Apple silicon a WAMR without Contour's MAP_JIT patch (cmake/patches/) maps every instance's memory
++    # MAP_JIT, for code made at run time, which the hardened runtime refuses the interpreting extension host,
++    # which holds no allow-jit entitlement: every instantiation would fail. An installed or embedded WAMR
++    # cannot be told apart from a patched one, so every Apple build refuses it -- an Intel one too, as the
++    # same package may be built for both -- and uses only the fetched, patched WAMR.
+     set(_wamr_unpatched_refusal "")
+     if(APPLE)
+         set(_wamr_unpatched_refusal "on macOS only a WAMR with Contour's MAP_JIT patch can instantiate under "
+-            "the hardened runtime, and an installed or embedded one has none")
++            "the hardened runtime on Apple silicon, and an installed or embedded one cannot be told to have it")
+     endif()
+     if(TARGET iwasm::vmlib)
+         if(_wamr_unpatched_refusal)
+             message(FATAL_ERROR "The embedded WAMR (iwasm::vmlib) cannot be used: ${_wamr_unpatched_refusal}. "
+                 "Let Contour fetch its own (CONTOUR_USE_CPM=ON), or configure with -DCONTOUR_EXTENSIONS=OFF.")
+         endif()
+         set(_wamr_target iwasm::vmlib)
+         set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's patches")
+     elseif(NOT CONTOUR_BUILD_STATIC)
+         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
+@@ -301,30 +303,36 @@ if(CONTOUR_EXTENSIONS)
+                     "system package, without Contour's patches (its interrupt verified)")
+             else()
+                 set(_wamr_rejected "${_wamr_terminates_REASON}")
+                 message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
+             endif()
+         endif()
+     endif()
+ 
+     if(NOT _wamr_target)
+         if(NOT CONTOUR_USE_CPM)
++            # On macOS no installed WAMR is taken (above): only the fetched one will do.
++            if(_wamr_unpatched_refusal)
++                set(_wamr_remedy "Set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
++            else()
++                set(_wamr_remedy "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
++            endif()
+             if(_wamr_rejected)
+                 set(_wamr_found "The installed WAMR was rejected: ${_wamr_rejected}.")
+             else()
+                 set(_wamr_found "None is installed.")
+             endif()
+             message(FATAL_ERROR "Could not find a usable WAMR >= ${WAMR_MINIMAL_VERSION}: one built with "
+                 "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
+                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
+                 "${_wamr_found} "
+-                "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
++                "${_wamr_remedy}")
+         endif()
+         message(STATUS "Using CPM to fetch WAMR")
+         # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
+         # while setting or clearing any instance's exception walks every cluster under that lock: a data
+         # race between one extension's call or trap and another's unload. The first patch unlinks under the
+         # lock. An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory,
+         # as the cluster and the environment are freed only after the walk's list lock is released.
+         #
+         # On Apple silicon WAMR maps all of its memory MAP_JIT, an instance's linear memory included, which
+         # the hardened runtime refuses an executable without the allow-jit entitlement -- and the
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index 32fd38204..b36caa822 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -131,20 +131,34 @@ class Channel
+     /// @return The end's descriptor or handle, still owned by the channel: for handing it to a child
+     ///         process, and for inspecting it. On Windows, INVALID_HANDLE_VALUE once shutdown() closed it.
+     ///         Not to be called, nor its value used, while another thread may call shutdown(): on Windows the
+     ///         handle may be closed, and its value reused, at any moment after shutdown() begins.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     std::unique_ptr<Native> _native;
+ };
+ 
++#ifndef _WIN32
++/// Receives at least one byte on @p channel, as receiveSome() does where the system installs descriptors
++/// attached to the bytes whether or not the receive asks for them (macOS): every one is taken in, with room
++/// for all a message can carry, and closed at once, and ancillary data that no peer sends -- other than
++/// descriptors, or more than a message carries -- is discarded and told of once in the warning log
++/// (WarningLog.hpp). It is receiveSome() on macOS; elsewhere, where the system disposes of them itself, it is
++/// for tests, which run that path on any POSIX system.
++/// @param channel The end received on.
++/// @param buffer Where the bytes go. Not empty.
++/// @return As receiveSome().
++[[nodiscard]] std::expected<std::size_t, ChannelError> receiveSomeClosingAttachments(
++    Channel& channel, std::span<uint8_t> buffer);
++#endif
++
+ /// What becomes of a descriptor the extension host process attaches to what it sends Contour.
+ ///
+ /// Contour reads its ends with plain receives, so nothing a helper attaches is ever kept. But where the
+ /// system merely discards such a descriptor, or installs it all the same for the receive to close (macOS),
+ /// it is closed in the receiving thread, and a last close can block without bound (a socket lingering on a
+ /// full send buffer): a compromised helper could hang a thread of Contour's. Where the system lets an end
+ /// refuse descriptors outright (Linux 6.16 and later, `SO_PASSRIGHTS`), the helper's send fails instead, and
+ /// no descriptor ever reaches Contour's process.
+ enum class UpwardDescriptors : uint8_t
+ {
+diff --git a/src/vtextension/wasm/remote/transport/Channel_posix.cpp b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+index ac27c82ca..a9ac21d9b 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+@@ -148,32 +148,38 @@ namespace
+     constexpr auto ThisSystemDontWaitSend = DontWaitSend::Honoured;
+ #endif
+ 
+     /// How many descriptors a receive takes in at least: one more than a message may carry, so that a peer
+     /// that attached two is told from one that attached one.
+     constexpr auto MaxReceivedHandles = std::size_t { 2 };
+ 
+     /// The control buffer one attached descriptor is sent in.
+     using SendControlBuffer = std::array<std::byte, CMSG_SPACE(sizeof(int))>;
+ 
++    /// Room for all the control data a message can carry: XNU takes at most MCLBYTES (2048) of it in, once
++    /// each descriptor in it is widened to a pointer, so no message carries more than that out.
++    constexpr auto WholeMessageControlBytes = std::size_t { 2048 };
++
+     /// How many bytes of control data a receive takes in. Where the system disposes of what does not fit
+     /// (Linux, FreeBSD), room for MaxReceivedHandles descriptors. Where it installs every descriptor before
+     /// it truncates what does not fit (macOS), room for all a message can carry, so that each one installed
+-    /// is seen, and closed: XNU takes at most MCLBYTES (2048) of control data in, once each descriptor in it
+-    /// is widened to a pointer, so no message carries more than that out.
++    /// is seen, and closed.
+     constexpr auto ReceiveControlBytes = ThisSystemUnclaimedDescriptors == UnclaimedDescriptors::Installed
+-                                             ? std::size_t { 2048 }
++                                             ? WholeMessageControlBytes
+                                              : std::size_t { CMSG_SPACE(sizeof(int) * MaxReceivedHandles) };
+ 
+     /// The control buffer a receive takes descriptors into.
+     using ReceiveControlBuffer = std::array<std::byte, ReceiveControlBytes>;
+ 
++    /// The control buffer a receive that closes whatever came takes it into.
++    using WholeMessageControlBuffer = std::array<std::byte, WholeMessageControlBytes>;
++
+ #ifdef MSG_CMSG_CLOEXEC
+     /// Installs received descriptors close-on-exec, atomically.
+     constexpr auto ReceiveFlags = MSG_CMSG_CLOEXEC;
+ #else
+     // macOS has no MSG_CMSG_CLOEXEC: each descriptor is made close-on-exec right after recvmsg().
+     constexpr auto ReceiveFlags = 0;
+ #endif
+ } // namespace
+ 
+ namespace
+@@ -334,29 +340,30 @@ namespace
+         static auto told = std::once_flag {};
+         std::call_once(told, [] {
+             warningLog()(
+                 "An extension host channel received data beside its bytes that no peer sends, or more "
+                 "than a message can carry; it was discarded.");
+         });
+     }
+ 
+     /// Receives at least one byte from @p descriptor into @p buffer, blocking until one arrives, with what
+     /// came beside them.
++    /// @param control Where the control data goes, aligned for a cmsghdr: its size is how much is taken in.
+     /// @param arrived Where every descriptor installed is appended, owned at once, so that each is closed
+     ///                however the receive ends.
+     /// @return What arrived; why nothing did otherwise.
+     [[nodiscard]] std::expected<Receipt, ChannelError> receiveMessage(int descriptor,
+                                                                       std::span<uint8_t> buffer,
++                                                                      std::span<std::byte> control,
+                                                                       std::vector<OwnedHandle>& arrived)
+     {
+         auto iov = ::iovec { .iov_base = buffer.data(), .iov_len = buffer.size() };
+-        alignas(::cmsghdr) auto control = ReceiveControlBuffer {};
+         auto message = ::msghdr {};
+         message.msg_iov = &iov;
+         message.msg_iovlen = 1;
+         message.msg_control = control.data();
+         message.msg_controllen = static_cast<ControlLength>(control.size());
+         auto received = ssize_t { 0 };
+         do
+             received = ::recvmsg(descriptor, &message, ReceiveFlags);
+         while (received == -1 && errno == EINTR);
+         if (received == -1)
+@@ -393,37 +400,42 @@ namespace
+         }
+         // Something other than descriptors, or descriptors the buffer had no room for: nothing of the message
+         // can be trusted to carry what its sender meant.
+         if (foreign || (message.msg_flags & MSG_CTRUNC) != 0)
+             return Receipt { .bytes = static_cast<std::size_t>(received), .ancillary = Ancillary::Foreign };
+         return Receipt { .bytes = static_cast<std::size_t>(received),
+                          .ancillary = unconfigured ? Ancillary::Unconfigured : Ancillary::Descriptors };
+     }
+ } // namespace
+ 
++std::expected<std::size_t, ChannelError> receiveSomeClosingAttachments(Channel& channel,
++                                                                       std::span<uint8_t> buffer)
++{
++    // Whatever came beside the bytes is closed as this ends: the bytes are what was asked for. As where the
++    // system discards it, the stream goes on; what no peer sends -- ancillary data other than descriptors, or
++    // more than any message carries -- is told of once.
++    auto discarded = std::vector<OwnedHandle> {};
++    alignas(::cmsghdr) auto control = WholeMessageControlBuffer {};
++    return receiveMessage(channel.nativeHandle(), buffer, control, discarded)
++        .and_then([](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
++            if (receipt.ancillary == Ancillary::Foreign)
++                warnOfForeignAncillaryData();
++            if (receipt.bytes == 0)
++                return std::unexpected(ChannelError::Closed);
++            return receipt.bytes;
++        });
++}
++
+ std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)
+ {
+     if constexpr (ThisSystemUnclaimedDescriptors == UnclaimedDescriptors::Installed)
+-    {
+-        // Whatever came beside the bytes is closed as this ends: the bytes are what was asked for. As where
+-        // the system discards it, the stream goes on; what no peer sends -- ancillary data other than
+-        // descriptors, or more than any message carries -- is told of once.
+-        auto discarded = std::vector<OwnedHandle> {};
+-        return receiveMessage(_native->descriptor, buffer, discarded)
+-            .and_then([](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
+-                if (receipt.ancillary == Ancillary::Foreign)
+-                    warnOfForeignAncillaryData();
+-                if (receipt.bytes == 0)
+-                    return std::unexpected(ChannelError::Closed);
+-                return receipt.bytes;
+-            });
+-    }
++        return receiveSomeClosingAttachments(*this, buffer);
+     else
+     {
+         while (true)
+         {
+             auto const received = ::recv(_native->descriptor, buffer.data(), buffer.size(), 0);
+             if (received > 0)
+                 return static_cast<std::size_t>(received);
+             if (received == 0)
+                 return std::unexpected(ChannelError::Closed);
+             if (errno != EINTR)
+@@ -463,21 +475,22 @@ std::expected<void, ChannelError> Channel::sendWithHandle(std::span<uint8_t cons
+         // The descriptor went with the first byte; the rest are plain bytes.
+         return send(bytes.subspan(static_cast<std::size_t>(sent)));
+     }
+ }
+ 
+ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::span<uint8_t> buffer,
+                                                                          std::vector<OwnedHandle>& handles)
+ {
+     // Owned at once, so that every one is closed should any part of the message be refused.
+     auto arrived = std::vector<OwnedHandle> {};
+-    return receiveMessage(_native->descriptor, buffer, arrived)
++    alignas(::cmsghdr) auto control = ReceiveControlBuffer {};
++    return receiveMessage(_native->descriptor, buffer, control, arrived)
+         .and_then([&](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
+             switch (receipt.ancillary)
+             {
+                 case Ancillary::Foreign: return std::unexpected(ChannelError::Refused);
+                 case Ancillary::Unconfigured: return std::unexpected(ChannelError::Io);
+                 case Ancillary::Descriptors: break;
+             }
+             if (receipt.bytes == 0)
+                 return std::unexpected(ChannelError::Closed);
+             for (auto& handle: arrived)
+diff --git a/src/vtextension/wasm/remote/transport/Channel_test.cpp b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+index 9ec0a8995..37f7c8a4c 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_test.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+@@ -1,28 +1,33 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The byte channel between Contour and its extension host process: both ways, closing, and what a child
+ // process does not inherit.
++#include <core/Utils.hpp>
++#include <core/log/LogStore.hpp>
++
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <expected>
+ #include <future>
+ #include <optional>
+ #include <ranges>
+ #include <span>
++#include <string>
++#include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+@@ -38,20 +43,21 @@
+     #include <vtextension/wasm/remote/proto/Codec.hpp>
+     #include <vtextension/wasm/remote/proto/Pdu.hpp>
+     #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+     #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
+ using vtextension::wasm::remote::transport::ChannelPair;
+ using vtextension::wasm::remote::transport::makeChannelPair;
++using vtextension::wasm::remote::transport::receiveSomeClosingAttachments;
+ using vtextension::wasm::remote::transport::UpwardDescriptors;
+ using vtextension::wasm::remote::transport::testing::closeHandle;
+ using vtextension::wasm::remote::transport::testing::duplicate;
+ 
+ namespace
+ {
+ 
+ /// @return Exactly @p count bytes received off @p channel; nothing if it failed first.
+ [[nodiscard]] std::optional<std::vector<uint8_t>> receiveExactly(Channel& channel, std::size_t count)
+ {
+@@ -398,11 +404,55 @@ TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
+             auto const pipe = makePipe();
+             REQUIRE(pair.helper.sendWithHandle(*frame, pipe.writer.get()).has_value());
+         }
+         auto const received = parent.receive();
+         REQUIRE(received.has_value());
+         CHECK(std::holds_alternative<proto::RuntimeCreated>(*received));
+     }
+     CHECK(openDescriptorCount() == before);
+     CHECK_FALSE(parent.takeAttachedHandle());
+ }
++    #ifdef SO_PASSCRED
++TEST_CASE("Channel.foreignAncillaryDataIsDiscardedAndToldOnce", "[vtextension]")
++{
++    // The receive macOS makes, where the system installs what came beside the bytes whether or not it is
++    // asked for (receiveSomeClosingAttachments()), run here on any system that has it. Credentials, which the
++    // kernel attaches to every message once the reader asks for them, are ancillary data that no peer sends:
++    // the bytes still arrive, nothing stays installed -- a descriptor sent along neither -- and the warning
++    // log tells of it once, however many such messages come.
++    auto pair = makeChannelPair();
++    REQUIRE(pair.has_value());
++    auto const enable = 1;
++    REQUIRE(::setsockopt(pair->helper.nativeHandle(), SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable)) == 0);
++
++    auto& registry = core::log::get();
++    auto const category = std::ranges::find_if(
++        registry, [](core::log::Category const& each) { return each.name() == "vtextension.warning"; });
++    REQUIRE(category != registry.end());
++    auto warnings = std::vector<std::string> {};
++    auto sink = core::log::Sink { true, [&](std::string_view const& text) { warnings.emplace_back(text); } };
++    auto& previous = category->get().sink();
++    category->get().setSink(sink);
++    auto const restore = core::Finally { [&] { category->get().setSink(previous); } };
++
++    auto const before = openDescriptorCount();
++    auto const bytes = std::array<uint8_t, 1> { 0x5a };
++    for (auto const withDescriptor: { true, false })
++    {
++        INFO("with a descriptor: " << withDescriptor);
++        if (withDescriptor)
++        {
++            auto const pipe = makePipe();
++            REQUIRE(pair->parent.sendWithHandle(bytes, pipe.writer.get()).has_value());
++        }
++        else
++            REQUIRE(pair->parent.send(bytes).has_value());
++        auto received = std::array<uint8_t, 1> {};
++        auto const count = receiveSomeClosingAttachments(pair->helper, received);
++        REQUIRE(count == std::expected<std::size_t, ChannelError> { 1 });
++        CHECK(received == bytes);
++        CHECK(openDescriptorCount() == before);
++    }
++    CHECK(warnings.size() == 1);
++}
++    #endif
+ #endif

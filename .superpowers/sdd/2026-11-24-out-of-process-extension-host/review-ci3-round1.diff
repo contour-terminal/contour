@@ -1,0 +1,782 @@
+c2d8d12e5 feat(vtextension): an extension host the loader ends is logged with why
+1bf54e25c fix(vtextension): an instance refused for its answer's size is gone before the refusal is sent
+2ff29f0a2 fix(vtextension): a contained extension host's environment names its container's own folders
+
+ src/vtextension/wasm/remote/CMakeLists.txt         |  29 +++--
+ .../wasm/remote/process/AppContainer_test.cpp      | 132 +++++----------------
+ .../wasm/remote/process/AppContainer_win32.cpp     |  74 +++++++++++-
+ .../wasm/remote/process/ProcessLauncher.hpp        |   8 +-
+ .../wasm/remote/process/ProcessLauncher_test.cpp   |   1 +
+ .../wasm/remote/process/StartupImports_test.cpp    | 118 ++++++++++++++++++
+ .../wasm/remote/process/testing/LaunchProbe.cpp    |  49 ++++++--
+ 7 files changed, 275 insertions(+), 136 deletions(-)
+
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index f5a1ea93c..0601e561c 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -107,31 +107,23 @@ if(_process_source)
+         process/HelperLocation.cpp
+         process/HelperLocation.hpp
+         process/HostTimers.cpp
+         process/HostTimers.hpp
+         process/ProcessHostConnector.cpp
+         process/ProcessHostConnector.hpp
+         process/ProcessLauncher.hpp
+         ${_process_source}
+     )
+     target_link_libraries(vtextension_remote_process PUBLIC core::platform)
+-    if(WIN32)
+-        # The extension host's AppContainer profile and its folder, which CoTaskMemFree() releases
+-        # (process/AppContainer_win32.cpp). Both delay-loaded, into every executable that links the launcher:
+-        # only a launcher preparing a container calls them, and a contained process that merely links it (the
+-        # probe) must not load ole32 as it starts -- ole32 loads user32, whose initialisation connects to a
+-        # window station, and a service's (a CI runner's, an SSH session's) admits no app container: the
+-        # loader then ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) before its main().
+-        target_link_libraries(vtextension_remote_process PRIVATE userenv ole32)
+-        target_link_libraries(vtextension_remote_process INTERFACE delayimp)
+-        target_link_options(vtextension_remote_process INTERFACE /DELAYLOAD:userenv.dll /DELAYLOAD:ole32.dll)
+-    endif()
++    # Windows: no library beyond the default ones. The AppContainer functions beyond advapi32's -- userenv's, and
++    # combase's CoTaskMemFree() -- are looked up at run time (process/AppContainer_win32.cpp), so that no
++    # executable linking the launcher imports a library that loads user32 as it starts.
+     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
+     target_compile_definitions(vtextension_remote_process PUBLIC
+         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
+ 
+     if(VTEXTENSION_TESTING)
+         # The probe the launcher's tests start: it binds itself to its parent and caps itself as the host does,
+         # reports what it was started with -- working directory, environment, caps, open handles -- on its
+         # control channel, and exits once that channel ends. Never installed.
+         # With --parent it is a hosting process instead: it supervises a helper of its own, for the tests of a
+         # helper outliving its parent.
+@@ -186,24 +178,20 @@ if(_process_source)
+                 ../host/linux/Landlock_test.cpp
+                 ../host/linux/SeccompFilter_test.cpp
+                 ../host/linux/testing/BpfEvaluator.hpp
+             )
+         endif()
+         if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
+             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
+         endif()
+         if(WIN32)
+             target_sources(vtextension_process_test PRIVATE process/LaunchSpelling_test.cpp)
+-            # AppContainer.containedExecutablesLoadNoWindowStation reads the extension host's imports.
+-            add_dependencies(vtextension_process_test contour-extension-host)
+-            target_compile_definitions(vtextension_process_test PRIVATE
+-                VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>")
+             # Sandbox.windowsHelperRunsContained listens on loopback for the contained probe.
+             target_link_libraries(vtextension_process_test PRIVATE ws2_32)
+         endif()
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+         add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+         if(NOT WIN32)
+             # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+             target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+@@ -378,20 +366,24 @@ if(VTEXTENSION_TESTING AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND _process
+         VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+     if(CONTOUR_WASM_GUESTS)
+         # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
+         foreach(_guest IN ITEMS echo hostile sleeper spawner)
+             add_dependencies(vtextension_helper_test ${_guest}_wasm)
+         endforeach()
+         add_dependencies(vtextension_helper_test contour_bundled_extensions)
+         target_compile_definitions(vtextension_helper_test PRIVATE
+             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+     endif()
++    if(WIN32)
++        # The startup imports of the extension host and of the probe (process/StartupImports_test.cpp).
++        target_sources(vtextension_helper_test PRIVATE process/StartupImports_test.cpp)
++    endif()
+     add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+ 
+ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_source)
+     # The extension host on WAMR's engine, started as Contour starts it: contour-extension-host where the build
+     # runs WAMR's, its test-only twin contour-extension-host-wamr where it runs another
+@@ -424,16 +416,23 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_so
+         VTEXTENSION_HOSTILE_HELPER_PATH="$<TARGET_FILE:contour-extension-host-hostile>")
+     if(CONTOUR_WASM_GUESTS)
+         # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
+         foreach(_guest IN ITEMS echo hostile sleeper spawner)
+             add_dependencies(vtextension_wamr_helper_test ${_guest}_wasm)
+         endforeach()
+         add_dependencies(vtextension_wamr_helper_test contour_bundled_extensions)
+         target_compile_definitions(vtextension_wamr_helper_test PRIVATE
+             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+     endif()
++    if(WIN32)
++        # The startup imports of this extension host and of the probe (process/StartupImports_test.cpp).
++        target_sources(vtextension_wamr_helper_test PRIVATE process/StartupImports_test.cpp)
++        add_dependencies(vtextension_wamr_helper_test extension_host_probe)
++        target_compile_definitions(vtextension_wamr_helper_test PRIVATE
++            VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
++    endif()
+     add_test(NAME vtextension_wamr_helper_test COMMAND vtextension_wamr_helper_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_wamr_helper_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_test.cpp b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+index 00f41f767..e508ca36a 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_test.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+@@ -25,26 +25,23 @@
+ #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+ #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #include <algorithm>
+     #include <array>
+-    #include <cctype>
+     #include <cstddef>
+-    #include <cstring>
+     #include <format>
+     #include <fstream>
+-    #include <iterator>
+     #include <ranges>
+     #include <thread>
+ 
+     #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
+     #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
+     #include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
+     #include <vtextension/wasm/remote/process/Process_win32.hpp>
+ 
+     #define WIN32_LEAN_AND_MEAN
+     #include <AclAPI.h>
+@@ -751,20 +748,25 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
+         INFO("uncontained");
+         auto const report = probeReportIn(ProcessIsolation::None, profileFile, *listener.port());
+         CHECK(valueOf(report, "container") == "no");
+         CHECK(valueOf(report, "profile-file") == "ok");
+         CHECK(valueOf(report, "connect") == "ok");
+         // Under wine the job's process count is not held: what it says is only recorded.
+         if (!vtextension::wasm::testing::runsOnWine())
+             CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:1816");
+         // Uncontained, it is started with the environment it is given: SystemRoot, and none of these.
+         checkContainerVariables(report, std::nullopt);
++        // Said on every run, passed or failed: a service's window station admits no app container, and a
++        // contained process loading user32 then dies in the loader (STATUS_DLL_INIT_FAILED).
++        auto const station = valueOf(report, "window-station");
++        REQUIRE(station.has_value());
++        WARN("the probe's window station, uncontained: " << *station);
+     }
+ 
+     if (vtextension::wasm::testing::runsOnWine())
+     {
+         // What wine made of the contained launch, for the record; nothing it does proves a container.
+         auto refusals = std::vector<std::string> {};
+         auto const probe = process::testing::launchHelper(
+             recordingLauncher(refusals),
+             process::testing::HelperLaunch { .executable = VTEXTENSION_PROBE_PATH,
+                                              .leading = { "--contained" },
+@@ -830,125 +832,45 @@ TEST_CASE("LaunchRefusal.refusalALaunchErrorLosesIsSaidOnce", "[vtextension]")
+ 
+     // One its text says all of is not logged.
+     auto const missing = launcher->launch(process::LaunchSpec {
+         .executable =
+             std::filesystem::path { VTEXTENSION_PROBE_PATH }.replace_filename("no-such-program.exe") });
+     REQUIRE_FALSE(missing.has_value());
+     CHECK(missing.error() == process::LaunchError::NotFound);
+     CHECK(lines.size() == 1);
+ }
+ 
++namespace
++{
++
++/// What a row expects of two paths.
++enum class PathsAre : uint8_t
++{
++    Different, ///< They name two paths.
++    Same,      ///< They name one.
++};
++
++} // namespace
++
+ TEST_CASE("AppContainer.pathsCompareAsWindowsComparesThem", "[vtextension]")
+ {
+     struct Row
+     {
+         std::wstring_view a;
+         std::wstring_view b;
+-        bool same;
++        PathsAre expected;
+     };
+     auto const rows = std::to_array<Row>({
+-        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC)", .same = true },
+-        { .a = LR"(c:\users\U\ac)", .b = LR"(C:\Users\u\AC)", .same = true },
+-        { .a = LR"(C:\Users\u\AC\)", .b = LR"(C:\Users\u\AC)", .same = true },
+-        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC\)", .same = true },
+-        { .a = LR"(C:\Users\u\AC\Temp)", .b = LR"(C:\Users\u\AC)", .same = false },
+-        { .a = LR"(C:\Users\u\AC\AC)", .b = LR"(C:\Users\u\AC)", .same = false },
+-        { .a = LR"(C:\Users\u\AC\\)", .b = LR"(C:\Users\u\AC)", .same = false },
+-        { .a = L"", .b = LR"(C:\Users\u\AC)", .same = false },
++        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Same },
++        { .a = LR"(c:\users\U\ac)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Same },
++        { .a = LR"(C:\Users\u\AC\)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Same },
++        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC\)", .expected = PathsAre::Same },
++        { .a = LR"(C:\Users\u\AC\Temp)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
++        { .a = LR"(C:\Users\u\AC\AC)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
++        { .a = LR"(C:\Users\u\AC\\)", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
++        { .a = L"", .b = LR"(C:\Users\u\AC)", .expected = PathsAre::Different },
+     });
+     for (auto const& row: rows)
+-        CHECK(isSamePath(row.a, row.b) == row.same);
+-}
+-
+-namespace
+-{
+-
+-/// What a process that may run contained must not load as it starts: user32, whose initialisation connects
+-/// to the process's window station -- which, a service's (a CI runner's, an SSH session's), admits no app
+-/// container, so that the loader ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) -- and the system
+-/// libraries that load it themselves.
+-constexpr auto WindowStationLibraries = std::to_array<std::string_view>({
+-    "user32.dll",
+-    "gdi32.dll",
+-    "ole32.dll",
+-    "oleaut32.dll",
+-    "shell32.dll",
+-    "shlwapi.dll",
+-    "comctl32.dll",
+-});
+-
+-/// @return The libraries the executable @p file imports as it starts, lower-cased: its import directory's,
+-///         not those it delay-loads.
+-[[nodiscard]] std::vector<std::string> startupImportsOf(std::filesystem::path const& file)
+-{
+-    auto stream = std::ifstream { file, std::ios::binary };
+-    REQUIRE(stream.good());
+-    auto const bytes = std::vector<char> { std::istreambuf_iterator<char> { stream }, {} };
+-    auto const read = [&]<typename T>(std::size_t offset) {
+-        REQUIRE(offset + sizeof(T) <= bytes.size());
+-        auto value = T {};
+-        std::memcpy(&value, bytes.data() + offset, sizeof(T));
+-        return value;
+-    };
+-    auto const dos = read.operator()<IMAGE_DOS_HEADER>(0);
+-    REQUIRE(dos.e_magic == IMAGE_DOS_SIGNATURE);
+-    auto const headersAt = static_cast<std::size_t>(dos.e_lfanew);
+-    auto const headers = read.operator()<IMAGE_NT_HEADERS64>(headersAt);
+-    REQUIRE(headers.Signature == IMAGE_NT_SIGNATURE);
+-    REQUIRE(headers.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
+-    auto const sectionsAt =
+-        headersAt + offsetof(IMAGE_NT_HEADERS64, OptionalHeader) + headers.FileHeader.SizeOfOptionalHeader;
+-    // Where in the file the image's address @p rva lies.
+-    auto const fileOffsetOf = [&](DWORD rva) -> std::size_t {
+-        for (auto const index: std::views::iota(WORD { 0 }, headers.FileHeader.NumberOfSections))
+-        {
+-            auto const section =
+-                read.operator()<IMAGE_SECTION_HEADER>(sectionsAt + (index * sizeof(IMAGE_SECTION_HEADER)));
+-            auto const size = std::max<DWORD>(section.Misc.VirtualSize, section.SizeOfRawData);
+-            if (rva >= section.VirtualAddress && rva < section.VirtualAddress + size)
+-                return rva - section.VirtualAddress + section.PointerToRawData;
+-        }
+-        FAIL("address 0x" << std::hex << rva << " lies in no section");
+-        return 0;
+-    };
+-    auto const directory = headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+-    auto imports = std::vector<std::string> {};
+-    if (directory.VirtualAddress == 0)
+-        return imports;
+-    auto const first = fileOffsetOf(directory.VirtualAddress);
+-    for (auto const index: std::views::iota(std::size_t { 0 }))
+-    {
+-        auto const descriptor =
+-            read.operator()<IMAGE_IMPORT_DESCRIPTOR>(first + (index * sizeof(IMAGE_IMPORT_DESCRIPTOR)));
+-        if (descriptor.Name == 0)
+-            break;
+-        auto const nameAt = fileOffsetOf(descriptor.Name);
+-        auto name =
+-            std::string { bytes.data() + nameAt, ::strnlen(bytes.data() + nameAt, bytes.size() - nameAt) };
+-        std::ranges::transform(name, name.begin(), [](char c) {
+-            return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+-        });
+-        imports.push_back(std::move(name));
+-    }
+-    return imports;
++        CHECK((isSamePath(row.a, row.b) ? PathsAre::Same : PathsAre::Different) == row.expected);
+ }
+ 
+-} // namespace
+-
+-TEST_CASE("AppContainer.containedExecutablesLoadNoWindowStation", "[vtextension][appcontainer]")
+-{
+-    // What starts contained -- the extension host, and the probe that stands in for it -- must start without
+-    // a window station: one it may not use ends it in the loader, before it can say why.
+-    for (auto const* const executable: { VTEXTENSION_HELPER_PATH, VTEXTENSION_PROBE_PATH })
+-    {
+-        INFO(executable);
+-        auto const imports = startupImportsOf(executable);
+-        // Read at all: every executable imports kernel32.
+-        CHECK(std::ranges::contains(imports, std::string { "kernel32.dll" }));
+-        for (auto const& library: imports)
+-        {
+-            INFO(library);
+-            CHECK_FALSE(std::ranges::contains(WindowStationLibraries, std::string_view { library }));
+-        }
+-    }
+-}
+ #endif
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+index 15a237a41..bffd63cfd 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+@@ -28,24 +28,77 @@ namespace vtextension::wasm::remote::process
+ 
+ namespace
+ {
+     /// Frees what the system allocated with LocalAlloc().
+     struct LocalMemoryFree
+     {
+         void operator()(void* memory) const noexcept { ::LocalFree(memory); }
+     };
+     using LocalMemory = std::unique_ptr<void, LocalMemoryFree>;
+ 
++    /// The system functions the container is ensured through beyond kernel32's and advapi32's, looked up from
++    /// System32 the first time a launcher prepares a container, and imported by no executable -- neither as
++    /// it starts nor delay-loaded. An executable that links the launcher may itself run contained (the probe
++    /// does), and ole32, CoTaskMemFree()'s usual home, loads user32, whose initialisation connects to a
++    /// window station that a service's (a CI runner's, an SSH session's) does not admit an app container to:
++    /// the loader then ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) before its main().
++    /// Delay-loading would take /DELAYLOAD on exactly the executables that pull this file in, and link.exe
++    /// warns on every other (LNK4199).
++    struct ContainerFunctions
++    {
++        decltype(&::CreateAppContainerProfile) createProfile = nullptr;             ///< userenv's.
++        decltype(&::DeriveAppContainerSidFromAppContainerName) deriveSid = nullptr; ///< userenv's.
++        decltype(&::GetAppContainerFolderPath) folderPath = nullptr;                ///< userenv's.
++        decltype(&::CoTaskMemFree) freeTaskMemory = nullptr; ///< combase's, which loads no user32.
++    };
++
++    /// @return The function @p name of @p library, as @p Function; nothing if either is missing.
++    template <typename Function>
++    [[nodiscard]] Function lookUp(HMODULE library, char const* name) noexcept
++    {
++        if (library == nullptr)
++            return nullptr;
++        return reinterpret_cast<Function>(::GetProcAddress(library, name));
++    }
++
++    /// @return The functions, looked up once; a missing one is null, and what needs it fails with
++    ///         MissingFunction.
++    [[nodiscard]] ContainerFunctions const& containerFunctions() noexcept
++    {
++        static auto const functions = [] {
++            auto* const userenv = ::LoadLibraryExW(L"userenv.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
++            auto* const combase = ::LoadLibraryExW(L"combase.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
++            return ContainerFunctions {
++                .createProfile =
++                    lookUp<decltype(&::CreateAppContainerProfile)>(userenv, "CreateAppContainerProfile"),
++                .deriveSid = lookUp<decltype(&::DeriveAppContainerSidFromAppContainerName)>(
++                    userenv, "DeriveAppContainerSidFromAppContainerName"),
++                .folderPath =
++                    lookUp<decltype(&::GetAppContainerFolderPath)>(userenv, "GetAppContainerFolderPath"),
++                .freeTaskMemory = lookUp<decltype(&::CoTaskMemFree)>(combase, "CoTaskMemFree"),
++            };
++        }();
++        return functions;
++    }
++
++    /// What a call fails with whose system function could not be looked up.
++    constexpr auto MissingFunction = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
++
+     /// Frees what the system allocated with CoTaskMemAlloc().
+     struct TaskMemoryFree
+     {
+-        void operator()(wchar_t* memory) const noexcept { ::CoTaskMemFree(memory); }
++        void operator()(wchar_t* memory) const noexcept
++        {
++            // Only folderPath() allocates, and only with freeTaskMemory found.
++            if (auto const free = containerFunctions().freeTaskMemory; free != nullptr)
++                free(memory);
++        }
+     };
+     using TaskMemory = std::unique_ptr<wchar_t, TaskMemoryFree>;
+ 
+     /// What every AppContainer needs on the helper's directory, and on each file in it: read and execute, as
+     /// FILE_GENERIC_READ | FILE_GENERIC_EXECUTE (`RX`) spells it -- FILE_EXECUTE the one right the second
+     /// adds.
+     constexpr auto ReadAndExecute = DWORD { FILE_GENERIC_READ | FILE_EXECUTE };
+ 
+     /// How the generic rights of a file's ACE map to its specific ones.
+     constexpr auto FileRightsMapping =
+@@ -129,24 +182,32 @@ namespace
+         auto const utf8 = path.u8string();
+         return std::string { utf8.begin(), utf8.end() };
+     }
+ } // namespace
+ 
+ AppContainerApi systemAppContainerApi()
+ {
+     return AppContainerApi {
+         .createProfile =
+             [](PCWSTR name, PCWSTR displayName, PCWSTR description, PSID* sid) {
+-                return ::CreateAppContainerProfile(name, displayName, description, nullptr, 0, sid);
++                auto const create = containerFunctions().createProfile;
++                if (create == nullptr)
++                    return MissingFunction;
++                return create(name, displayName, description, nullptr, 0, sid);
++            },
++        .deriveSid =
++            [](PCWSTR name, PSID* sid) {
++                auto const derive = containerFunctions().deriveSid;
++                if (derive == nullptr)
++                    return MissingFunction;
++                return derive(name, sid);
+             },
+-        .deriveSid = [](PCWSTR name,
+-                        PSID* sid) { return ::DeriveAppContainerSidFromAppContainerName(name, sid); },
+         .readDacl =
+             [](PCWSTR path, PACL* dacl, PSECURITY_DESCRIPTOR* descriptor) {
+                 return ::GetNamedSecurityInfoW(path,
+                                                SE_FILE_OBJECT,
+                                                DACL_SECURITY_INFORMATION,
+                                                nullptr,
+                                                nullptr,
+                                                dacl,
+                                                nullptr,
+                                                descriptor);
+@@ -155,26 +216,29 @@ AppContainerApi systemAppContainerApi()
+             [](PCWSTR path, PACL dacl) {
+                 return ::SetNamedSecurityInfoW(const_cast<PWSTR>(path),
+                                                SE_FILE_OBJECT,
+                                                DACL_SECURITY_INFORMATION,
+                                                nullptr,
+                                                nullptr,
+                                                dacl,
+                                                nullptr);
+             },
+         .folderPath = [](PSID sid) -> std::expected<std::filesystem::path, HRESULT> {
++            auto const& functions = containerFunctions();
++            if (functions.folderPath == nullptr || functions.freeTaskMemory == nullptr)
++                return std::unexpected(MissingFunction);
+             PWSTR spelled = nullptr;
+             if (!::ConvertSidToStringSidW(sid, &spelled))
+                 return std::unexpected(HRESULT_FROM_WIN32(::GetLastError()));
+             auto const ownedSpelled = LocalMemory { spelled };
+             PWSTR folder = nullptr;
+-            auto const result = ::GetAppContainerFolderPath(spelled, &folder);
++            auto const result = functions.folderPath(spelled, &folder);
+             auto const ownedFolder = TaskMemory { folder };
+             if (FAILED(result))
+                 return std::unexpected(result);
+             if (ownedFolder == nullptr)
+                 return std::filesystem::path {};
+             return std::filesystem::path { ownedFolder.get() };
+         },
+     };
+ }
+ 
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+index 8514654bb..10be39f19 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+@@ -156,25 +156,27 @@ struct KnownExitCode
+ /// Every exit code with a reason of its own.
+ inline constexpr auto KnownExitCodes = std::to_array<KnownExitCode>({
+     { .code = 0xC0000022, .reason = "it was denied access to a library it loads (STATUS_ACCESS_DENIED)" },
+     { .code = 0xC0000135, .reason = "a library it needs was not found (STATUS_DLL_NOT_FOUND)" },
+     { .code = 0xC0000142,
+       .reason =
+           "a library it loads failed to initialise (STATUS_DLL_INIT_FAILED); contained, usually one that "
+           "connects to a window station the app container may not use" },
+ });
+ 
+-/// @return How @p status says a process ended, for a log line: `signal N`, `exit code N`, or -- for a
+-///         negative code, an NTSTATUS -- `exit code 0xXXXXXXXX`, with its reason where KnownExitCodes has
+-///         one.
++/// @return How @p status says a process ended, for a log line: `its exit status was lost` for
++///         LostExitStatus, `signal N`, `exit code N`, or -- for a negative code, an NTSTATUS --
++///         `exit code 0xXXXXXXXX`, with its reason where KnownExitCodes has one.
+ [[nodiscard]] inline std::string exitStatusText(ExitStatus status)
+ {
++    if (status == LostExitStatus)
++        return "its exit status was lost";
+     if (status.kind == ExitKind::Signalled)
+         return std::format("signal {}", status.value);
+     if (status.value >= 0)
+         return std::format("exit code {}", status.value);
+     auto const code = static_cast<uint32_t>(status.value);
+     auto const known = std::ranges::find(KnownExitCodes, code, &KnownExitCode::code);
+     if (known == KnownExitCodes.end())
+         return std::format("exit code 0x{:08X}", code);
+     return std::format("exit code 0x{:08X}: {}", code, known->reason);
+ }
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 8c0895d68..483ff5507 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -141,20 +141,21 @@ struct ProbeOptions
+ } // namespace
+ 
+ TEST_CASE("ProcessLauncher.exitStatusSaysWhyWhereItKnows", "[vtextension]")
+ {
+     struct Row
+     {
+         ExitStatus status;
+         std::string_view text;
+     };
+     auto const rows = std::to_array<Row>({
++        { .status = process::LostExitStatus, .text = "its exit status was lost" },
+         { .status = { .kind = ExitKind::Exited, .value = 3 }, .text = "exit code 3" },
+         { .status = { .kind = ExitKind::Signalled, .value = 9 }, .text = "signal 9" },
+         { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000005U) },
+           .text = "exit code 0xC0000005" },
+         { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000142U) },
+           .text = "exit code 0xC0000142: a library it loads failed to initialise (STATUS_DLL_INIT_FAILED); "
+                   "contained, usually one that connects to a window station the app container may not use" },
+     });
+     for (auto const& row: rows)
+         CHECK(process::exitStatusText(row.status) == row.text);
+diff --git a/src/vtextension/wasm/remote/process/StartupImports_test.cpp b/src/vtextension/wasm/remote/process/StartupImports_test.cpp
+new file mode 100644
+index 000000000..16784499e
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/StartupImports_test.cpp
+@@ -0,0 +1,118 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// What starts contained must start without a window station: the extension host, and the probe that stands in
++// for it, import nothing that loads user32 (Windows only). Compiled into both helper suites, each of which
++// reads its own extension host -- Contour's, on the build's engine, and the twin on WAMR's -- and the probe.
++#include <catch2/catch_message.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#ifdef _WIN32
++    #include <algorithm>
++    #include <array>
++    #include <cctype>
++    #include <cstddef>
++    #include <cstring>
++    #include <filesystem>
++    #include <fstream>
++    #include <iterator>
++    #include <ranges>
++    #include <string>
++    #include <string_view>
++    #include <vector>
++
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++
++namespace
++{
++
++/// What a process that may run contained must not load as it starts: user32, whose initialisation connects
++/// to the process's window station -- which, a service's (a CI runner's, an SSH session's), admits no app
++/// container, so that the loader ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) -- and the system
++/// libraries that load it themselves.
++constexpr auto WindowStationLibraries = std::to_array<std::string_view>({
++    "user32.dll",
++    "gdi32.dll",
++    "ole32.dll",
++    "oleaut32.dll",
++    "shell32.dll",
++    "shlwapi.dll",
++    "comctl32.dll",
++});
++
++/// @return The libraries the executable @p file imports as it starts, lower-cased: its import directory's,
++///         not those it delay-loads.
++[[nodiscard]] std::vector<std::string> startupImportsOf(std::filesystem::path const& file)
++{
++    auto stream = std::ifstream { file, std::ios::binary };
++    REQUIRE(stream.good());
++    auto const bytes = std::vector<char> { std::istreambuf_iterator<char> { stream }, {} };
++    auto const read = [&]<typename T>(std::size_t offset) {
++        REQUIRE(offset + sizeof(T) <= bytes.size());
++        auto value = T {};
++        std::memcpy(&value, bytes.data() + offset, sizeof(T));
++        return value;
++    };
++    auto const dos = read.operator()<IMAGE_DOS_HEADER>(0);
++    REQUIRE(dos.e_magic == IMAGE_DOS_SIGNATURE);
++    auto const headersAt = static_cast<std::size_t>(dos.e_lfanew);
++    auto const headers = read.operator()<IMAGE_NT_HEADERS64>(headersAt);
++    REQUIRE(headers.Signature == IMAGE_NT_SIGNATURE);
++    REQUIRE(headers.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
++    auto const sectionsAt =
++        headersAt + offsetof(IMAGE_NT_HEADERS64, OptionalHeader) + headers.FileHeader.SizeOfOptionalHeader;
++    // Where in the file the image's address @p rva lies.
++    auto const fileOffsetOf = [&](DWORD rva) -> std::size_t {
++        for (auto const index: std::views::iota(WORD { 0 }, headers.FileHeader.NumberOfSections))
++        {
++            auto const section =
++                read.operator()<IMAGE_SECTION_HEADER>(sectionsAt + (index * sizeof(IMAGE_SECTION_HEADER)));
++            auto const size = std::max<DWORD>(section.Misc.VirtualSize, section.SizeOfRawData);
++            if (rva >= section.VirtualAddress && rva < section.VirtualAddress + size)
++                return rva - section.VirtualAddress + section.PointerToRawData;
++        }
++        FAIL("address 0x" << std::hex << rva << " lies in no section");
++        return 0;
++    };
++    auto const directory = headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
++    auto imports = std::vector<std::string> {};
++    if (directory.VirtualAddress == 0)
++        return imports;
++    auto const first = fileOffsetOf(directory.VirtualAddress);
++    for (auto const index: std::views::iota(std::size_t { 0 }))
++    {
++        auto const descriptor =
++            read.operator()<IMAGE_IMPORT_DESCRIPTOR>(first + (index * sizeof(IMAGE_IMPORT_DESCRIPTOR)));
++        if (descriptor.Name == 0)
++            break;
++        auto const nameAt = fileOffsetOf(descriptor.Name);
++        auto name =
++            std::string { bytes.data() + nameAt, ::strnlen(bytes.data() + nameAt, bytes.size() - nameAt) };
++        std::ranges::transform(name, name.begin(), [](char c) {
++            return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++        });
++        imports.push_back(std::move(name));
++    }
++    return imports;
++}
++
++} // namespace
++
++TEST_CASE("StartupImports.containedExecutablesLoadNoWindowStation", "[vtextension][appcontainer]")
++{
++    // What starts contained -- the extension host, and the probe that stands in for it -- must start without
++    // a window station: one it may not use ends it in the loader, before it can say why.
++    for (auto const* const executable: { VTEXTENSION_HELPER_PATH, VTEXTENSION_PROBE_PATH })
++    {
++        INFO(executable);
++        auto const imports = startupImportsOf(executable);
++        // Read at all: every executable imports kernel32.
++        CHECK(std::ranges::contains(imports, std::string { "kernel32.dll" }));
++        for (auto const& library: imports)
++        {
++            INFO(library);
++            CHECK_FALSE(std::ranges::contains(WindowStationLibraries, std::string_view { library }));
++        }
++    }
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index fc7e7d50a..649e85156 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -25,22 +25,23 @@
+ // control channel to end.
+ //
+ // With any of --sandboxed, --outer-filter or --sandbox-op (Linux), it locks itself down as the host does and
+ // tries one operation from a thread started before: SandboxProbe.hpp says what it reports.
+ //
+ // With --contained (Windows), it tries what the extension host's AppContainer must refuse it, bound to its
+ // parent likewise, and reports on its control channel: `container=` `yes` or `no` (its token's word) or
+ // `unknown`; `profile-file=`, opening PATH (a file of the user's that the parent made) for reading;
+ // `connect=`, a TCP connection to 127.0.0.1:N (where the parent listens); `spawn=`, starting the system's
+ // cmd.exe. Each is `ok`, or `refused:<what>:<error>` naming the call that failed and its Win32 error. Then,
+-// for each variable that names a container folder (ContainerVariables), `value-NAME=` its value. Then `end`,
+-// and it waits for its control channel to end.
++// for each variable that names a container folder (ContainerVariables), `value-NAME=` its value; and
++// `window-station=` the name of its window station, asked only uncontained (`not-asked` contained). Then
++// `end`, and it waits for its control channel to end.
+ //
+ // With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
+ // --receive-grant does, and flips bytes of the whole object at random on a thread of its own while Contour
+ // reads it. A Mersenne twister seeded with `--seed` picks each flip from its raw output, so a seed names the
+ // same flips on every standard library; how they interleave with Contour's reads is the scheduler's. It
+ // reports `mutating` and `end` on its first lane once the thread runs, or `granted=refused` and `end`; then,
+ // once its control channel ended, `mutations=N` (how many bytes it flipped) and `end`, and exits.
+ //
+ // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
+ // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
+@@ -583,20 +584,49 @@ constexpr auto Port = std::string_view { "--port=" };
+                           nullptr,
+                           &startup,
+                           &info))
+         return refusedBy("CreateProcessW", ::GetLastError());
+     ::TerminateProcess(info.hProcess, 0);
+     ::CloseHandle(info.hThread);
+     ::CloseHandle(info.hProcess);
+     return "ok";
+ }
+ 
++/// @return The name of this process's window station; `not-asked` contained, `unknown` where the system named
++///         none. user32 is loaded only here, at run time, and only uncontained: a contained process may be
++///         refused the window station, and user32 imported would end it before its main()
++///         (STATUS_DLL_INIT_FAILED) -- which is what this tells a CI run about.
++[[nodiscard]] std::string windowStationOf(std::string_view container)
++{
++    if (container != "no")
++        return "not-asked";
++    auto* const user32 = ::LoadLibraryExW(L"user32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
++    if (user32 == nullptr)
++        return refusedBy("LoadLibraryExW", ::GetLastError());
++    auto const getStation = reinterpret_cast<decltype(&::GetProcessWindowStation)>(
++        ::GetProcAddress(user32, "GetProcessWindowStation"));
++    auto const getInformation = reinterpret_cast<decltype(&::GetUserObjectInformationW)>(
++        ::GetProcAddress(user32, "GetUserObjectInformationW"));
++    if (getStation == nullptr || getInformation == nullptr)
++        return "unknown";
++    auto* const station = getStation();
++    auto name = std::wstring(256, L'\0');
++    auto length = DWORD { 0 };
++    if (station == nullptr
++        || !getInformation(
++            station, UOI_NAME, name.data(), static_cast<DWORD>(name.size() * sizeof(wchar_t)), &length))
++        return "unknown";
++    name.resize(::wcsnlen(name.c_str(), name.size()));
++    auto const utf8 = std::filesystem::path { name }.u8string();
++    return std::string { utf8.begin(), utf8.end() };
++}
++
+ /// @return One report line per ContainerVariables row: `value-NAME=` its value, empty if it has none. Where
+ ///         it should point is the parent's to know, not this process's to judge.
+ [[nodiscard]] std::string containerVariablesReport()
+ {
+     auto text = std::string {};
+     for (auto const& variable: vtextension::wasm::remote::process::ContainerVariables)
+     {
+         auto const name = std::wstring { variable.name.begin(), variable.name.end() };
+         auto value = std::wstring(::GetEnvironmentVariableW(name.c_str(), nullptr, 0), L'\0');
+         auto const length =
+@@ -630,26 +660,29 @@ constexpr auto Port = std::string_view { "--port=" };
+             helperArguments.push_back(argument);
+     }
+     auto const parsed = parseHelperArguments(helperArguments);
+     if (!parsed || !profileFile || !port)
+         return ProbeExit::Usage;
+     if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
+         return ProbeExit::ParentGone;
+     auto control = Channel::adopt(parsed->control);
+     if (!control)
+         return ProbeExit::NoControl;
+-    auto const text = std::format("container={}\nprofile-file={}\nconnect={}\nspawn={}\n{}end\n",
+-                                  containerOf(),
+-                                  openFile(*profileFile),
+-                                  connectLoopback(*port),
+-                                  spawnProcess(),
+-                                  containerVariablesReport());
++    auto const container = containerOf();
++    auto const text =
++        std::format("container={}\nprofile-file={}\nconnect={}\nspawn={}\n{}window-station={}\nend\n",
++                    container,
++                    openFile(*profileFile),
++                    connectLoopback(*port),
++                    spawnProcess(),
++                    containerVariablesReport(),
++                    windowStationOf(container));
+     if (!sendText(*control, text))
+         return ProbeExit::ReportFailed;
+     auto buffer = std::array<uint8_t, 64> {};
+     while (control->receiveSome(buffer))
+     {
+     }
+     return ProbeExit::Reported;
+ }
+ #endif
+ 

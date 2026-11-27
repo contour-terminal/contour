@@ -1,0 +1,1576 @@
+# Review package: 71cbaa680..HEAD
+
+## Commits
+71d789007 build: sign the macOS extension host with the one entitlement its compiler needs
+07694d342 feat(vtextension): the extension host runs in a deny-by-default sandbox on macOS
+c0374cb3a build: pick wamr by default where the extension host's sandbox cannot run wasmtime
+
+## Files changed
+ .github/workflows/build.yml                        |  36 ++++++
+ CMakeLists.txt                                     |  25 ++++-
+ docs/internals/macos-code-signing.md               |  16 ++-
+ scripts/macos-bundle.py                            | 122 ++++++++++++++++++---
+ src/vtextension/CMakeLists.txt                     |  17 ++-
+ src/vtextension/wasm/host/CMakeLists.txt           |   6 +-
+ src/vtextension/wasm/host/HostBootstrap.cpp        |  21 ++++
+ src/vtextension/wasm/host/HostBootstrap.hpp        |   2 +-
+ src/vtextension/wasm/host/Sandbox_macos.cpp        | 105 ++++++++++++++++++
+ src/vtextension/wasm/host/Sandbox_test.cpp         |  58 ++++++++++
+ src/vtextension/wasm/host/macos/SandboxProfile.hpp |  69 ++++++++++++
+ src/vtextension/wasm/remote/CMakeLists.txt         |   6 +-
+ .../wasm/remote/process/SandboxProbe_test.cpp      |  20 +++-
+ .../wasm/remote/process/testing/LaunchProbe.cpp    |   6 +-
+ .../wasm/remote/process/testing/SandboxProbe.cpp   |  73 ++++++++++--
+ .../wasm/remote/process/testing/SandboxProbe.hpp   |   8 +-
+ .../wasm/remote/transport/SharedObjectName.hpp     |   8 +-
+ support/macOS/contour-extension-host.entitlements  |   8 ++
+ 18 files changed, 555 insertions(+), 51 deletions(-)
+
+## Diff
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index 9822cfd05..41781a72b 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -1100,27 +1100,63 @@ jobs:
+           # whole install once a port has given up. None of it is a verdict on the commit under
+           # test, and this job is a required check, so a single bad minute upstream otherwise
+           # blocks every pull request. Only a repeated failure fails the job.
+           configure() { cmake --preset macos-ci; }
+           configure || {
+             echo "::warning::configure failed (typically an upstream source download); retrying once"
+             sleep 30
+             configure
+           }
+       - name: "Build"
++        id: build
+         run: cmake --build --preset macos-ci
+       - name: "Tests"
+         # The suite had 30 minutes and the three checks after it none of their own; one bound for all.
+         timeout-minutes: 45
+         uses: ./.github/actions/macos-tests
+         with:
+           preset: macos-ci
++      - name: "Extension host: compiling, signed as it ships, in its sandbox"
++        # The plain configuration runs extensions in process, so its suite starts the extension host only on
++        # the interpreting engine, which needs no entitlement. Here the tree is reconfigured to run them out
++        # of process, which picks the compiling engine (vtextension_helper_test exists only on it), and the
++        # extension host is signed as the bundle signs it: hardened runtime, with its one entitlement. Its
++        # suite then holds every helper to a lockdown (the build has macOS's sandbox). Signed again without
++        # the entitlement, a helper must fail to load and run a module -- after the same case passed with
++        # it, so the signature is the only difference -- or the entitlement would not be what lets it. Run
++        # even when the suite above failed: each result is what the next fix needs.
++        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
++        timeout-minutes: 45
++        env:
++          CONTOUR_TEST_TRACE: "1"
++        run: |
++          set -o pipefail
++          cmake --preset macos-ci -DCONTOUR_EXTENSION_HOST=out-of-process
++          cmake --build --preset macos-ci --target vtextension_helper_test
++          helper=out/macos-ci/src/contour-extension-host/contour-extension-host
++          suite=out/macos-ci/src/vtextension/wasm/remote/vtextension_helper_test
++          codesign --force --sign - --options=runtime \
++              --entitlements support/macOS/contour-extension-host.entitlements "$helper"
++          codesign -d --entitlements - --xml "$helper"
++          "$suite" "~[.measure]"
++          codesign --force --sign - --options=runtime "$helper"
++          if "$suite" "Process.loadsAndCallsThroughARealHelper"; then
++              echo "::error::the extension host loaded and ran a module without its entitlement"
++              exit 1
++          fi
++      - name: "Sandbox deny log"
++        # What the extension host's sandbox profile refused, as the kernel logged it: the operations (and
++        # sysctl names) a failing step above needed and the profile does not allow.
++        if: failure()
++        run: |
++          # The kernel names a process by its first 16 characters (contour-extensio, extension_host_p).
++          log show --last 90m --style compact --predicate 'sender == "Sandbox"' | grep 'deny' | tail -n 400 || true
+   macos_package:
+     name: "macOS (package)"
+     if: github.event_name != 'pull_request'
+     concurrency:
+       group: ${{ github.ref }}-macos_package
+       cancel-in-progress: false
+     runs-on: macos-15
+     steps:
+       - uses: actions/checkout@v4
+       # @see the same step of macOSArm.
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4c3291717..a7168a11d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -199,37 +199,48 @@ set(CONTOUR_EXTENSION_HOST "${_CONTOUR_EXTENSION_HOST_DEFAULT}" CACHE STRING
+     "Where status-line extensions run: out-of-process or in-process [default: out-of-process where the extension host has a sandbox]")
+ set_property(CACHE CONTOUR_EXTENSION_HOST PROPERTY STRINGS ${_CONTOUR_EXTENSION_HOSTS})
+ if(CONTOUR_EXTENSIONS AND NOT CONTOUR_EXTENSION_HOST IN_LIST _CONTOUR_EXTENSION_HOSTS)
+     message(FATAL_ERROR "CONTOUR_EXTENSION_HOST is \"${CONTOUR_EXTENSION_HOST}\", which is not where extensions can "
+                         "run. Known: ${_CONTOUR_EXTENSION_HOSTS}.")
+ endif()
+ # The WebAssembly engine that runs the extensions: in the extension host where they run out of process, in
+ # Contour itself where they run in process. Each value names a backend directory, src/vtextension/wasm/<value>/;
+ # adding an engine is adding that directory and a value here. Empty, the default, picks once the third parties
+ # are resolved (below): wasmtime, which compiles guests to native code, where a Wasmtime was found and
+-# extensions run out of process; wamr, which interprets them, otherwise. Wasmtime runs only in the extension
+-# host, whose sandbox lets it make the code it compiled executable; Contour itself never may. Checked only when
+-# extensions are built: nothing reads it otherwise.
++# extensions run out of process, on a system whose sandbox can run it; wamr, which interprets them, otherwise.
++# Wasmtime runs only in the extension host, whose sandbox lets it make the code it compiled executable; Contour
++# itself never may. Checked only when extensions are built: nothing reads it otherwise.
+ set(CONTOUR_WASM_RUNTIME "" CACHE STRING
+     "WebAssembly engine running status-line extensions: wasmtime or wamr [default: wasmtime where one is found and extensions run out of process, else wamr]")
+ set(_CONTOUR_WASM_RUNTIMES wamr wasmtime)
++# The systems whose extension-host sandbox cannot run wasmtime, a CMAKE_SYSTEM_NAME each: the default picks wamr
++# there, and wasmtime chosen explicitly is refused. FreeBSD's caps the host's whole address space (RLIMIT_AS) at
++# twice the memory its guests may hold and some headroom (src/vtextension/wasm/host/HostBootstrap.hpp,
++# addressSpaceCap()), which fits WAMR; Wasmtime reserves gigabytes of address space for each guest memory and its
++# guard, which no such cap leaves it.
++set(_CONTOUR_SANDBOXES_WITHOUT_WASMTIME FreeBSD)
+ set_property(CACHE CONTOUR_WASM_RUNTIME PROPERTY STRINGS ${_CONTOUR_WASM_RUNTIMES})
+ if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME)
+     if(NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIMES)
+         message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly "
+                             "engine Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
+     endif()
+     if(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND CONTOUR_EXTENSION_HOST STREQUAL "in-process")
+         message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which runs extensions only in the extension host, "
+                             "but CONTOUR_EXTENSION_HOST is in-process. Choose CONTOUR_EXTENSION_HOST=out-of-process, "
+                             "or CONTOUR_WASM_RUNTIME=wamr.")
+     endif()
++    if(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND CMAKE_SYSTEM_NAME IN_LIST _CONTOUR_SANDBOXES_WITHOUT_WASMTIME)
++        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which the extension host's ${CMAKE_SYSTEM_NAME} "
++                            "sandbox cannot run: it caps the host's address space below what Wasmtime reserves "
++                            "for guest memory. Configure with CONTOUR_WASM_RUNTIME=wamr.")
++    endif()
+ endif()
+ # Whether the extension host can run Wasmtime: set ON by cmake/ContourThirdParties.cmake once a Wasmtime
+ # resolves (the pinned prebuilt archive, or an installed one), never by the user.
+ set(CONTOUR_HAVE_WASMTIME OFF)
+ option(CONTOUR_CARGO_OFFLINE "Runs cargo with --offline, for builds from vendored crates [default: OFF]" OFF)
+ option(CONTOUR_TRACY "Compiles Tracy profiler instrumentation into contour [default: OFF]" OFF)
+ option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [default: OFF]" OFF)
+ option(CONTOUR_TRACY_GUI "Builds the Tracy profiler GUI [default: OFF]" OFF)
+ option(CONTOUR_TRACY_GUI_X11 "Builds the Tracy GUI against X11 instead of Wayland [default: OFF]" OFF)
+ option(CONTOUR_TRACY_SAMPLING "Tracy captures call stacks of every thread [default: ON]" ON)
+@@ -348,20 +359,25 @@ if(CONTOUR_TESTING)
+ 
+         # The winget submission of a release: the UpgradeCodes its manifest rows expect must be declared in the
+         # packaging sources, and the rules that plan a release and check Komac's manifest are tested inline.
+         contour_add_lint_gate(check_winget_upgrade_codes winget-release.py)
+         contour_add_lint_gate(check_winget_upgrade_codes_selftest winget-release.py --self-test)
+ 
+         # The production-build check, tested against inline fixtures; the real check, which reads a
+         # build's compile database and binary, is registered beside the binary it reads.
+         contour_add_lint_gate(check_production_build_selftest check-production-build.py --self-test)
+ 
++        # How a macOS bundle is signed (scripts/macos-bundle.py sign): the extension host alone carries its
++        # entitlement, signed before the bundle, which alone carries the app's. Checked against a stand-in
++        # bundle, on every platform, without codesign.
++        contour_add_lint_gate(check_macos_bundle_selftest macos-bundle.py --self-test)
++
+         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
+         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
+         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
+         contour_add_lint_gate(check_spelling check-spelling.py)
+ 
+         # The justification rule in `_typos.toml` is the only thing keeping the exception list from
+         # growing back into the 2,237-entry allow-list it replaced, and its parser has been wrong
+         # before. This case needs no network, so it stays meaningful on an offline clone where the
+         # gate above skips.
+         contour_add_lint_gate(check_spelling_selftest check-spelling.py --self-test)
+@@ -464,21 +480,22 @@ endif()
+ # CMAKE_CXX_CLANG_TIDY is inherited by every target created after it is set, so stash it across the
+ # dependency fetch and restore it only for our own first-party src/ tree.
+ set(_CONTOUR_SAVED_CLANG_TIDY "${CMAKE_CXX_CLANG_TIDY}")
+ unset(CMAKE_CXX_CLANG_TIDY)
+ include(ContourThirdParties)
+ include(Tracy)
+ if(CONTOUR_EXTENSIONS)
+     include(ContourCargo)
+     # The engine, now that it is known whether a Wasmtime was found (CONTOUR_WASM_RUNTIME, above).
+     if(NOT CONTOUR_WASM_RUNTIME)
+-        if(CONTOUR_HAVE_WASMTIME AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
++        if(CONTOUR_HAVE_WASMTIME AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process"
++           AND NOT CMAKE_SYSTEM_NAME IN_LIST _CONTOUR_SANDBOXES_WITHOUT_WASMTIME)
+             set(CONTOUR_WASM_RUNTIME wasmtime)
+         else()
+             set(CONTOUR_WASM_RUNTIME wamr)
+         endif()
+     elseif(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND NOT CONTOUR_HAVE_WASMTIME)
+         message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, but no Wasmtime can be used: "
+                             "${CONTOUR_WASMTIME_STRING}.")
+     endif()
+ endif()
+ # Only the GUI draws text, so only the GUI has any use for a font to fall back to.
+diff --git a/docs/internals/macos-code-signing.md b/docs/internals/macos-code-signing.md
+index 43a88c997..28d68785b 100644
+--- a/docs/internals/macos-code-signing.md
++++ b/docs/internals/macos-code-signing.md
+@@ -184,21 +184,22 @@ Keep the `.p8` somewhere safe. It cannot be downloaded again, and losing it mean
+ generating a new key and updating the secrets.
+ 
+ ## Why not `codesign --deep`
+ 
+ `--deep` is what the earlier attempts here used, and Apple documents it as unsuitable for
+ distribution signing. It applies the *top-level* entitlements to nested code, and it does
+ not guarantee that nested code is sealed before its container — so the outer seal can end
+ up covering a signature that was replaced afterwards. `macos-bundle.py sign` walks the
+ bundle deepest-first instead: loadable dylibs in `Frameworks/`, `PlugIns/` and
+ `Resources/qml/`, then each framework's versioned directory, then helper executables, then
+-the main executable, then the bundle. Only the outermost signature carries entitlements.
++the main executable, then the bundle. The outermost signature carries the app's
++entitlements; of the nested code, only what `NESTED_ENTITLEMENTS` names carries its own.
+ 
+ `--deep` *is* right for verification, where it means "check every nested signature too":
+ 
+ ```sh
+ codesign --verify --deep --strict --verbose=4 contour.app
+ ```
+ 
+ ## Entitlements
+ 
+ [`support/macOS/entitlements.plist`](https://github.com/contour-terminal/contour/blob/master/support/macOS/entitlements.plist) is applied to
+@@ -206,20 +207,33 @@ the app bundle only. It carries no explanatory comments, because the kernel's en
+ parser (AMFI) rejects XML comments outright — `Failed to parse entitlements:
+ AMFIUnserializeXML: syntax error` — so the reasoning lives here:
+ 
+ - `com.apple.security.cs.allow-jit` — the QML engine's V4 JIT needs `MAP_JIT`, which the
+   hardened runtime otherwise denies.
+ - `com.apple.security.cs.disable-library-validation` — insurance for Qt plugin loading.
+   Everything Contour bundles is re-signed with the same Team ID, which library validation
+   already permits, so this is a candidate for removal; verify a notarized build launches
+   and loads its plugins before dropping it.
+ 
++[`support/macOS/contour-extension-host.entitlements`](https://github.com/contour-terminal/contour/blob/master/support/macOS/contour-extension-host.entitlements)
++is applied to `Contents/Helpers/contour-extension-host` only, signed with the hardened runtime
++before the bundle (`NESTED_ENTITLEMENTS` in `macos-bundle.py`):
++
++- `com.apple.security.cs.allow-unsigned-executable-memory` — the extension host compiles
++  extensions to native code and makes it executable, which the hardened runtime otherwise
++  refuses. Contour itself never gets this: extensions it runs in its own process are
++  interpreted. The helper runs inside its sandbox profile, which allows no file, network,
++  process or Mach service.
++
++`macos-bundle.py --self-test` checks the signing commands against a stand-in bundle; it is a
++`lint` ctest, so it runs on every platform.
++
+ ## Inspecting a signature
+ 
+ ```sh
+ # Identity, hardened runtime flag, timestamp, team ID
+ codesign -dv --verbose=4 contour.app
+ 
+ # Hardened runtime shows as flags=0x10000(runtime). Its absence is invisible to --verify
+ # and is a hard notarization rejection.
+ codesign -dv --verbose=4 contour.app 2>&1 | grep -E 'Authority|flags='
+ 
+diff --git a/scripts/macos-bundle.py b/scripts/macos-bundle.py
+index 17153bd9d..ccc30a3ef 100755
+--- a/scripts/macos-bundle.py
++++ b/scripts/macos-bundle.py
+@@ -66,20 +66,32 @@ SYSTEM_PREFIXES = ('/usr/lib/', '/System/', '/Library/Apple/')
+ # Plugin categories `prune` is allowed to delete from. Everything Contour needs to
+ # start or to render is outside this set, so a broken plugin elsewhere surfaces as a
+ # verify failure. Add a row when macdeployqt is found over-deploying another category.
+ PRUNABLE_PLUGIN_CATEGORIES = frozenset((
+     # Deployed wholesale because QtQml pulls in QtQmlLocalStorage -> QtSql, even though
+     # nothing here uses SQL. The Mimer, ODBC and PostgreSQL drivers link against
+     # libraries that are not on an end user's machine (and often not on the builder's).
+     'sqldrivers',
+ ))
+ 
++# Nested code that needs entitlements of its own, by its path inside the bundle: each row's binary is signed
++# with its own file, before the bundle. Nothing else nested carries any; the bundle carries what `sign` is
++# given. The extension host compiles extensions to native code, which the hardened runtime refuses to make
++# executable without allow-unsigned-executable-memory -- and Contour itself must never get that right. The
++# files are relative to the repository, and carry no comments (AMFI rejects them); see
++# docs/internals/macos-code-signing.md.
++_REPOSITORY = Path(__file__).resolve().parent.parent
++NESTED_ENTITLEMENTS = {
++    Path('Contents/Helpers/contour-extension-host'):
++        _REPOSITORY / 'support' / 'macOS' / 'contour-extension-host.entitlements',
++}
++
+ # otool accepts many files per invocation, which turns ~135 process spawns into one.
+ # Chunked so a bundle with very long paths cannot overflow the argument list.
+ _OTOOL_BATCH = 500
+ 
+ # stapler fetches the notarization ticket from Apple's CloudKit, which drops connections
+ # from CI runners often enough to fail a packaging run that did nothing wrong. Those
+ # failures name NSURLErrorDomain and are retried; any other stapler error is a verdict
+ # about the artifact and fails at once.
+ _STAPLER_NETWORK_ERROR = 'NSURLErrorDomain'
+ _STAPLER_ATTEMPTS = 5
+@@ -479,40 +491,62 @@ def signing_targets(bundle: Path) -> Iterator[Path]:
+     # instead of being silently left out of the seal.
+     for framework in sorted(contents.rglob('*.framework')):
+         # Versioned frameworks are signed at Versions/<v>, unversioned at the root.
+         current = framework / 'Versions' / 'Current'
+         yield current.resolve() if current.exists() else framework
+ 
+     yield executable
+     yield bundle  # The bundle itself, last: its seal covers everything above.
+ 
+ 
++def entitlements_of(target: Path, bundle: Path, entitlements: Path | None) -> Path | None:
++    """The entitlements `target` is signed with: the bundle's for the bundle, a row of
++    NESTED_ENTITLEMENTS for the nested code it names, none for everything else."""
++    if target == bundle:
++        return entitlements
++    try:
++        inside = target.resolve().relative_to(bundle.resolve())
++    except ValueError:
++        return None
++    return NESTED_ENTITLEMENTS.get(inside)
++
++
++def signing_commands(bundle: Path, identity: str, entitlements: Path | None) -> list[list[str]]:
++    """The codesign command lines that sign the bundle, inside-out, in order."""
++    commands = []
++    for target in signing_targets(bundle):
++        argv = ['codesign', '--force', '--timestamp', '--options=runtime']
++        # The outermost signature carries the bundle's entitlements, and only the nested
++        # code NESTED_ENTITLEMENTS names carries its own. Applying the bundle's to nested
++        # code is what `--deep` gets wrong.
++        own = entitlements_of(target, bundle, entitlements)
++        if own is not None:
++            argv += ['--entitlements', str(own)]
++        argv += ['--sign', identity, str(target)]
++        commands.append(argv)
++    return commands
++
++
+ def sign(bundle: Path, identity: str, entitlements: Path | None) -> int:
+     """Sign the bundle inside-out with the hardened runtime enabled."""
+-    if entitlements is not None and not entitlements.exists():
+-        raise Failure(f"entitlements file not found: {entitlements}")
++    for required in (entitlements, *NESTED_ENTITLEMENTS.values()):
++        if required is not None and not required.exists():
++            raise Failure(f"entitlements file not found: {required}")
+ 
+     # Extended attributes (notably com.apple.quarantine, and the resource forks
+     # some build steps leave behind) make codesign fail with "resource fork,
+     # Finder information, or similar detritus not allowed".
+     run(['xattr', '-cr', str(bundle)])
+ 
+-    targets = list(signing_targets(bundle))
+-    log(f"sign: signing {len(targets)} items as {identity!r}")
+-
+-    for target in targets:
+-        argv = ['codesign', '--force', '--timestamp', '--options=runtime']
+-        # Only the outermost signature carries entitlements. Applying them to
+-        # nested code is what `--deep` gets wrong.
+-        if target == bundle and entitlements is not None:
+-            argv += ['--entitlements', str(entitlements)]
+-        argv += ['--sign', identity, str(target)]
++    commands = signing_commands(bundle, identity, entitlements)
++    log(f"sign: signing {len(commands)} items as {identity!r}")
++    for argv in commands:
+         run(argv)
+ 
+     # --deep is wrong for *signing* but is exactly right for verification: here it
+     # means "check every nested signature too".
+     run(['codesign', '--verify', '--deep', '--strict', '--verbose=2', str(bundle)])
+     assert_distributable(bundle, identity)
+     log(f"sign: OK, {bundle.name} signed and verified")
+     return 0
+ 
+ 
+@@ -618,25 +652,80 @@ def run_stapler(action: str, artifact: Path) -> None:
+ def parse_submission(output: str) -> tuple[str, str]:
+     try:
+         payload = json.loads(output)
+     except json.JSONDecodeError as error:
+         raise Failure(f"could not parse notarytool output: {error}\n{output}") from error
+     return payload.get('status', 'Unknown'), payload.get('id', '')
+ 
+ # }}}
+ 
+ 
++# {{{ self-test
++
++def self_test() -> int:
++    """Checks the signing commands for a stand-in bundle: the extension host alone gets
++    its entitlements, and is signed before the bundle, which alone gets the app's. Runs
++    anywhere: nothing it does needs macOS."""
++    failures: list[str] = []
++
++    def check(condition: bool, description: str) -> None:
++        if not condition:
++            failures.append(description)
++
++    helper_file = NESTED_ENTITLEMENTS[Path('Contents/Helpers/contour-extension-host')]
++    with helper_file.open('rb') as f:
++        check(plistlib.load(f) == {'com.apple.security.cs.allow-unsigned-executable-memory': True},
++              f"{helper_file.name} holds allow-unsigned-executable-memory and nothing else")
++    check(b'<!--' not in helper_file.read_bytes(), f"{helper_file.name} carries no comment")
++
++    with tempfile.TemporaryDirectory() as scratch:
++        bundle = Path(scratch) / 'contour.app'
++        contents = bundle / 'Contents'
++        (contents / 'MacOS').mkdir(parents=True)
++        with (contents / 'Info.plist').open('wb') as f:
++            plistlib.dump({'CFBundleExecutable': 'contour'}, f)
++        helper = contents / 'Helpers' / 'contour-extension-host'
++        executable = contents / 'MacOS' / 'contour'
++        library = contents / 'Frameworks' / 'libother.dylib'
++        for binary in (helper, executable, library):
++            binary.parent.mkdir(parents=True, exist_ok=True)
++            binary.write_bytes(b'\xcf\xfa\xed\xfe')  # MH_MAGIC_64: what find_binaries() looks for
++        app_file = Path(scratch) / 'app.entitlements'
++
++        commands = signing_commands(bundle, '-', app_file)
++        targets = [Path(argv[-1]) for argv in commands]
++        given = {Path(argv[-1]): argv[argv.index('--entitlements') + 1]
++                 for argv in commands if '--entitlements' in argv}
++        check(sorted(targets) == sorted([helper, executable, library, bundle]), f"signs every item: {targets}")
++        check(all('--options=runtime' in argv for argv in commands), "every signature has the hardened runtime")
++        check(given == {helper: str(helper_file), bundle: str(app_file)},
++              f"only the helper and the bundle carry entitlements, each its own: {given}")
++        check(targets.index(helper) < targets.index(bundle), "the helper is signed before the bundle")
++        check(targets[-1] == bundle, "the bundle is signed last")
++
++    for failure in failures:
++        print(f"macos-bundle self-test: FAILED: {failure}", file=sys.stderr)
++    if failures:
++        return 1
++    print("macos-bundle self-test: 7 cases OK.")
++    return 0
++
++# }}}
++
++
+ def build_parser() -> argparse.ArgumentParser:
+     parser = argparse.ArgumentParser(
+         prog='macos-bundle.py', description=__doc__,
+         formatter_class=argparse.RawDescriptionHelpFormatter)
+-    sub = parser.add_subparsers(dest='command', required=True)
++    parser.add_argument('--self-test', action='store_true',
++                        help='check how a bundle is signed against a stand-in, without macOS')
++    sub = parser.add_subparsers(dest='command')
+ 
+     p_verify = sub.add_parser('verify', help='check that the bundle is self-contained')
+     p_verify.add_argument('bundle', type=Path)
+     p_verify.add_argument('--max-minimum-os', default=None, metavar='VERSION',
+                           help='fail if the bundle needs a macOS newer than this '
+                                '(e.g. 15.0), i.e. the oldest release this build promises')
+ 
+     p_prune = sub.add_parser('prune', help='delete bundled plugins that cannot load')
+     p_prune.add_argument('bundle', type=Path)
+ 
+@@ -648,21 +737,26 @@ def build_parser() -> argparse.ArgumentParser:
+                         help='entitlements plist, applied to the .app only')
+ 
+     p_notarize = sub.add_parser('notarize', help='notarize and staple an .app or .dmg')
+     p_notarize.add_argument('artifact', type=Path)
+     p_notarize.add_argument('--keychain-profile', required=True,
+                             help='profile name from `xcrun notarytool store-credentials`')
+     return parser
+ 
+ 
+ def main(argv: list[str] | None = None) -> int:
+-    args = build_parser().parse_args(argv)
++    parser = build_parser()
++    args = parser.parse_args(argv)
++    if args.self_test:
++        return self_test()
++    if args.command is None:
++        parser.error('a command is required')
+     try:
+         if args.command == 'verify':
+             ceiling = None
+             if args.max_minimum_os:
+                 ceiling = _parse_version(args.max_minimum_os)
+                 if ceiling is None:
+                     raise Failure(f"--max-minimum-os is not a version: {args.max_minimum_os}")
+             return verify(args.bundle, ceiling)
+         if args.command == 'prune':
+             return prune(args.bundle)
+diff --git a/src/vtextension/CMakeLists.txt b/src/vtextension/CMakeLists.txt
+index 17a8fbf7f..b8816dc22 100644
+--- a/src/vtextension/CMakeLists.txt
++++ b/src/vtextension/CMakeLists.txt
+@@ -206,29 +206,28 @@ endif()
+ set(VTEXTENSION_LINUX_SANDBOX OFF)
+ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CONTOUR_SANDBOXED_PLATFORM)
+     set(VTEXTENSION_LINUX_SANDBOX ON)
+ endif()
+ # Whether it locks itself down with FreeBSD's (wasm/host/Sandbox_freebsd.cpp): on FreeBSD, on every architecture,
+ # as Capsicum names no system call by number. Built, tested and run by the extension host there although FreeBSD is
+ # not yet a row of _CONTOUR_SANDBOXED_PLATFORMS: that row is what makes extensions run out of process by default,
+ # and it is added once FreeBSD's CI has run the sandbox's tests green.
+ set(VTEXTENSION_FREEBSD_SANDBOX OFF)
+ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+-    set(VTEXTENSION_FREEBSD_SANDBOX ON)
+-    # That sandbox caps the host's whole address space (RLIMIT_AS) at twice the memory its guests may hold and
+-    # some headroom (wasm/host/HostBootstrap.hpp, addressSpaceCap()), which fits WAMR. Wasmtime reserves
+-    # gigabytes of address space for each guest memory and its guard, which no such cap leaves it.
+-    if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
+-        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which the extension host's FreeBSD sandbox cannot "
+-                            "run: it caps the host's address space below what Wasmtime reserves for guest memory. "
+-                            "Configure with CONTOUR_WASM_RUNTIME=wamr.")
+-    endif()
++    # That sandbox runs no Wasmtime: a row of _CONTOUR_SANDBOXES_WITHOUT_WASMTIME (../../CMakeLists.txt).
++endif()
++# Whether it locks itself down with macOS's (wasm/host/Sandbox_macos.cpp): a Seatbelt profile, on every
++# architecture. Built, tested and run by the extension host there, as FreeBSD's is, although macOS is not yet a row
++# of _CONTOUR_SANDBOXED_PLATFORMS either: that row is added once macOS's CI has run the sandbox's tests green.
++set(VTEXTENSION_MACOS_SANDBOX OFF)
++if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
++    set(VTEXTENSION_MACOS_SANDBOX ON)
+ endif()
+ 
+ # The protocol and channels between Contour and its extension host process, and the host's server; no engine,
+ # always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.
+ add_subdirectory(wasm/remote)
+ add_subdirectory(wasm/host)
+ 
+ # The backend a program runs its extensions on, and the one name every program that composes one links: the
+ # GUI and `contour daemon` (../contour/CMakeLists.txt) and bench-headless. vtextension, vthost and the test
+ # executables do not; a test names the backend it runs on. Its target defines
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index 5a591d255..9e4ee213a 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -5,26 +5,29 @@
+ # engine: whoever composes a host hands it one (IHostedEngine), and its tests live in vtextension_remote_test
+ # (../remote/CMakeLists.txt), which links Wasmtime's.
+ 
+ set(_bootstrap_source HostBootstrap_posix.cpp)
+ if(WIN32)
+     set(_bootstrap_source HostBootstrap_win32.cpp)
+ endif()
+ 
+ # Each system's sandbox (Sandbox.hpp) is a file of its own, and a value of PlatformSandbox; a system that has none
+ # yet runs the host unsandboxed, and its Hello says so. Linux's: where VTEXTENSION_LINUX_SANDBOX; FreeBSD's: where
+-# VTEXTENSION_FREEBSD_SANDBOX (both ../../CMakeLists.txt).
++# VTEXTENSION_FREEBSD_SANDBOX; macOS's: where VTEXTENSION_MACOS_SANDBOX (all ../../CMakeLists.txt).
+ set(_sandbox_source Sandbox_none.cpp)
+ set(_platform_sandbox 0)
+ if(VTEXTENSION_FREEBSD_SANDBOX)
+     set(_sandbox_source Sandbox_freebsd.cpp)
+     set(_platform_sandbox 2)
++elseif(VTEXTENSION_MACOS_SANDBOX)
++    set(_sandbox_source Sandbox_macos.cpp)
++    set(_platform_sandbox 3)
+ elseif(VTEXTENSION_LINUX_SANDBOX)
+     set(_sandbox_source
+         Sandbox_linux.cpp
+         linux/Landlock.cpp
+         linux/Landlock.hpp
+         linux/SeccompFilter.cpp
+         linux/SeccompFilter.hpp
+         linux/SystemCallRows.cpp
+         linux/SystemCallRows.hpp
+     )
+@@ -46,20 +49,21 @@ add_library(vtextension_host STATIC
+     HostServer.cpp
+     HostServer.hpp
+     IHostedEngine.hpp
+     InProcessHost.cpp
+     InProcessHost.hpp
+     InterruptListener.cpp
+     InterruptListener.hpp
+     Sandbox.cpp
+     Sandbox.hpp
+     ${_sandbox_source}
++    macos/SandboxProfile.hpp
+     ../remote/HostConnector.hpp
+ )
+ target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire vtextension_memory_provision PRIVATE core::base)
+ target_compile_definitions(vtextension_host PUBLIC CONTOUR_PLATFORM_SANDBOX=${_platform_sandbox})
+ if(CONTOUR_COVERAGE)
+     # Where a coverage build writes its counters: the one directory its sandboxed host may still write to.
+     target_compile_definitions(vtextension_host PRIVATE CONTOUR_COVERAGE_OBJECT_ROOT="${CMAKE_BINARY_DIR}")
+ endif()
+ 
+ # The memory a host hands the engine an instance runs on (MemoryProvision.hpp): a target of its own, so that an
+diff --git a/src/vtextension/wasm/host/HostBootstrap.cpp b/src/vtextension/wasm/host/HostBootstrap.cpp
+index b876a1384..8b0513e16 100644
+--- a/src/vtextension/wasm/host/HostBootstrap.cpp
++++ b/src/vtextension/wasm/host/HostBootstrap.cpp
+@@ -1,23 +1,44 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // What every system's hardening shares: the steps are its own (HostBootstrap_posix.cpp,
+ // HostBootstrap_win32.cpp), taking them is not.
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ 
++#include <cstdint>
+ #include <expected>
+ #include <optional>
+ #include <span>
+ 
++#include <vtextension/wasm/host/HostServer.hpp>
++#include <vtextension/wasm/host/InterruptListener.hpp>
++#include <vtextension/wasm/remote/transport/HelperArguments.hpp>
++
+ namespace vtextension::wasm::host
+ {
+ 
++namespace
++{
++    /// The host's program text and libraries, as measured for the WAMR host on Linux.
++    constexpr auto ProgramImageBytes = uint64_t { 16 } * 1024 * 1024;
++
++    /// What a host maps beside its guests' memory and its heap: its program and every thread's stack.
++    constexpr auto FixedMappingBytes = ProgramImageBytes
++                                       + (uint64_t { remote::MaxLaneChannels } * ExecutorStackBytes)
++                                       + uint64_t { InterruptListenerStackBytes };
++} // namespace
++
++// The heap gets at least three times what the program and the stacks take: more lanes, or larger executor
++// stacks, must grow the headroom too rather than silently leaving the heap less of it.
++static_assert(FixedMappingBytes * 4 <= AddressSpaceHeadroomBytes,
++              "AddressSpaceHeadroomBytes leaves the heap less than three times the program and its stacks");
++
+ std::expected<void, ConfinementFailure> hardenProcess(std::span<HardeningRow const> steps) noexcept
+ {
+     auto failed = std::optional<ConfinementFailure> {};
+     for (auto const& row: steps)
+         if (auto const applied = row.apply(); !applied && !failed)
+             failed = ConfinementFailure { .step = row.step, .code = applied.error() };
+     if (failed)
+         return std::unexpected(*failed);
+     return {};
+ }
+diff --git a/src/vtextension/wasm/host/HostBootstrap.hpp b/src/vtextension/wasm/host/HostBootstrap.hpp
+index e6a8c8989..904cc2ff3 100644
+--- a/src/vtextension/wasm/host/HostBootstrap.hpp
++++ b/src/vtextension/wasm/host/HostBootstrap.hpp
+@@ -85,21 +85,21 @@ enum class CapPolicy : uint8_t
+ };
+ 
+ /// How this build caps the host: not at all in a sanitizer build.
+ inline constexpr CapPolicy BuildCapPolicy =
+     ThisBuildInstrumentation == BuildInstrumentation::Sanitizers ? CapPolicy::Skip : CapPolicy::Apply;
+ 
+ /// What a host maps beside its guests' memory, under a cap on its whole address space (FreeBSD's
+ /// RLIMIT_AS): its program text and libraries (16 MiB, measured for the WAMR host on Linux), its threads'
+ /// stacks (four executors of ExecutorStackBytes, 10 MiB each, and the interrupt listener's 256 KiB), and what
+ /// its heap maps for itself. That is some 57 MiB before the heap; 256 MiB leaves an allocator that keeps
+-/// address space it freed several times that.
++/// address space it freed several times that, which HostBootstrap.cpp asserts.
+ inline constexpr uint64_t AddressSpaceHeadroomBytes = uint64_t { 256 } * 1024 * 1024;
+ 
+ /// @param dataBytes The data bytes a host's guests may hold; not 0.
+ /// @return The address space such a host may map: twice the data bytes, as a guest memory that grows is
+ ///         mapped anew at its new size and copied before the old one is unmapped (FreeBSD has no mremap, so
+ ///         WAMR moves it so), and AddressSpaceHeadroomBytes. Saturates rather than wrapping.
+ [[nodiscard]] constexpr uint64_t addressSpaceCap(uint64_t dataBytes) noexcept
+ {
+     constexpr auto Most = std::numeric_limits<uint64_t>::max();
+     if (dataBytes > (Most - AddressSpaceHeadroomBytes) / 2)
+diff --git a/src/vtextension/wasm/host/Sandbox_macos.cpp b/src/vtextension/wasm/host/Sandbox_macos.cpp
+new file mode 100644
+index 000000000..9c96a6041
+--- /dev/null
++++ b/src/vtextension/wasm/host/Sandbox_macos.cpp
+@@ -0,0 +1,105 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The extension host's sandbox on macOS: a Seatbelt profile, deny by default (macos/SandboxProfile.hpp),
++// applied once every thread was started and prepared. It is the process's, so it reaches every thread at
++// once. Before any thread there is nothing to take: macOS has no no_new_privs, and the profile refuses fork
++// and exec outright. Nor does a parent-death binding remain: macOS has none, and bindToParent() only checks
++// that the parent is still there (HostBootstrap.hpp).
++//
++// The profile looks up no Mach service, and the engine needs none: Wasmtime's Mach exception port is off
++// (wasmtime_config_macos_use_mach_ports_set(false), wasmtime/WasmtimeEngine.cpp), so its traps arrive as
++// signals and no handler thread of its own runs. Whether the engine makes compiled code executable is the
++// hardened runtime's to allow, through the extension host's one entitlement
++// (support/macOS/contour-extension-host.entitlements), not the profile's.
++#include <cerrno>
++#include <cstdint>
++#include <expected>
++#include <memory>
++#include <string>
++#include <utility>
++
++#include <vtextension/wasm/host/HostProcess.hpp>
++#include <vtextension/wasm/host/Sandbox.hpp>
++#include <vtextension/wasm/host/macos/SandboxProfile.hpp>
++
++// libsystem_sandbox's, declared as Chromium declares them (sandbox/mac/seatbelt.cc) rather than through
++// <sandbox.h>: that header declares no sandbox_init_with_parameters() at all, and sandbox_free_error()
++// deprecated, which -Werror refuses. Mach-O C names carry a leading underscore; the labels name them so, so
++// that the C++ names follow the project's.
++extern "C"
++{
++    /// Applies the profile @p profile, reading its parameters from @p parameters, to this process.
++    /// @return 0 once applied; -1 otherwise, with what is wrong in @p errorbuf.
++    int sandboxInitWithParameters(char const* profile,
++                                  uint64_t flags,
++                                  char const* const parameters[],
++                                  char** errorbuf) __asm__("_sandbox_init_with_parameters");
++    /// Frees what sandboxInitWithParameters() wrote to its errorbuf.
++    void sandboxFreeError(char* errorbuf) __asm__("_sandbox_free_error");
++}
++
++namespace vtextension::wasm::host
++{
++
++namespace
++{
++    /// The flags the profile is applied with: none, as it is profile text rather than a named profile.
++    constexpr auto ProfileTextFlags = uint64_t { 0 };
++
++    class MacSandbox final: public ISandbox
++    {
++      public:
++        /// Takes the profile in as the C string the library reads, so that locking down allocates nothing.
++        /// @param descriptors What the host keeps using.
++        explicit MacSandbox(SandboxDescriptors descriptors):
++            _descriptors { std::move(descriptors) }, _profile { SandboxProfile }
++        {
++        }
++
++        [[nodiscard]] std::expected<void, ConfinementFailure> restrictBeforeThreads() override { return {}; }
++
++        [[nodiscard]] std::expected<void, ConfinementFailure> lockDown() override
++        {
++            constexpr auto Parameters = profileParameterList();
++            char* errorbuf = nullptr;
++            errno = 0;
++            if (sandboxInitWithParameters(_profile.c_str(), ProfileTextFlags, Parameters.data(), &errorbuf)
++                == 0)
++                return {};
++            // The library says why in words, not always in errno: a profile it cannot compile sets none.
++            auto const code = errno != 0 ? errno : EINVAL;
++            if (errorbuf)
++            {
++                tellOnStandardError(std::string { "sandbox profile: " } + errorbuf);
++                sandboxFreeError(errorbuf);
++            }
++            return std::unexpected(
++                ConfinementFailure { .step = remote::proto::LockdownStep::Profile, .code = code });
++        }
++
++        [[nodiscard]] remote::proto::LockdownState lockdownState() const noexcept override
++        {
++            return remote::proto::LockdownState::LockedDown;
++        }
++
++      private:
++        /// What the host keeps using. The profile names no descriptor: it leaves these as they are, and
++        /// refuses the host any new one.
++        SandboxDescriptors _descriptors;
++        std::string _profile; ///< SandboxProfile.
++    };
++} // namespace
++
++DescriptorLimit limitOf([[maybe_unused]] HeldDescriptor descriptor)
++{
++    // Its profile confines operations, not what each descriptor may be used for.
++    return DescriptorLimit::Unlimited;
++}
++
++std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, [[maybe_unused]] GuestCode code)
++{
++    // How the engine runs code changes nothing here (above).
++    return std::make_unique<MacSandbox>(std::move(descriptors));
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/Sandbox_test.cpp b/src/vtextension/wasm/host/Sandbox_test.cpp
+index 99f0ac1a6..846265786 100644
+--- a/src/vtextension/wasm/host/Sandbox_test.cpp
++++ b/src/vtextension/wasm/host/Sandbox_test.cpp
+@@ -5,39 +5,45 @@
+ #include <catch2/catch_message.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cstddef>
+ #include <memory>
+ #include <ranges>
+ #include <set>
+ #include <string>
++#include <string_view>
+ #include <utility>
+ 
+ #include <vtextension/wasm/host/DescriptorRights.hpp>
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ #include <vtextension/wasm/host/Sandbox.hpp>
++#include <vtextension/wasm/host/macos/SandboxProfile.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
+ 
+ using vtextension::wasm::host::ConfinementFailure;
+ using vtextension::wasm::host::confinementFailureText;
+ using vtextension::wasm::host::DescriptorRight;
+ using vtextension::wasm::host::DescriptorRole;
+ using vtextension::wasm::host::descriptorRoleRights;
+ using vtextension::wasm::host::GuestCode;
+ using vtextension::wasm::host::makeSystemSandbox;
+ using vtextension::wasm::host::NullSandbox;
+ using vtextension::wasm::host::PlatformSandbox;
++using vtextension::wasm::host::profileParameterList;
++using vtextension::wasm::host::ProfileParameters;
+ using vtextension::wasm::host::rightsOf;
+ using vtextension::wasm::host::SandboxDescriptors;
++using vtextension::wasm::host::SandboxProfile;
+ using vtextension::wasm::host::systemErrorText;
+ using vtextension::wasm::host::ThisPlatformSandbox;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ 
+ TEST_CASE("Sandbox.nullSandboxTakesBothStepsUnsandboxed", "[vtextension][host]")
+ {
+     auto sandbox = NullSandbox {};
+     CHECK(sandbox.restrictBeforeThreads().has_value());
+     CHECK(sandbox.lockDown().has_value());
+@@ -99,10 +105,62 @@ TEST_CASE("Sandbox.rightsTableCoversEveryRole", "[vtextension][host]")
+     CHECK_FALSE(has(DescriptorRole::StandardError, DescriptorRight::Read));
+     for (auto const right: { DescriptorRight::Write, DescriptorRight::Seek, DescriptorRight::GetStatusFlags })
+         CHECK(has(DescriptorRole::EngineDevice, right));
+     // Standard input and output are only asked what they are; the stop pipe is waited on at one end and
+     // written to at the other.
+     CHECK(std::ranges::equal(rightsOf(DescriptorRole::IdleStream), std::array { DescriptorRight::Fstat }));
+     CHECK(has(DescriptorRole::StopReceiver, DescriptorRight::Event));
+     CHECK_FALSE(has(DescriptorRole::StopReceiver, DescriptorRight::Write));
+     CHECK(std::ranges::equal(rightsOf(DescriptorRole::StopSender), std::array { DescriptorRight::Write }));
+ }
++
++TEST_CASE("Sandbox.profileHasNoNetworkOrMachLookup", "[vtextension][host]")
++{
++    // macOS's profile, read on every system: it denies by default, and allows none of what the host must
++    // never do -- no rule names it at all, so that no filter can widen it by accident.
++    CHECK(SandboxProfile.starts_with("(version 1)\n(deny default)\n"));
++    constexpr auto Forbidden = std::array<std::string_view, 10> {
++        "(allow default",
++        "network",
++        "mach-lookup",
++        "file-read",
++        "file-write",
++        "process-fork",
++        "process-exec",
++        "ipc-posix-shm-write-create",
++        "ipc-posix-shm-write-unlink",
++        "ipc-posix-shm-write-truncate",
++    };
++    for (auto const word: Forbidden)
++    {
++        INFO(word);
++        CHECK_FALSE(SandboxProfile.contains(word));
++    }
++    // Shared memory only by the prefix Contour names its objects with, read from a parameter.
++    CHECK(SandboxProfile.contains("(ipc-posix-name-prefix (param \"SHM_PREFIX\"))"));
++}
++
++TEST_CASE("Sandbox.profileParametersAreWhatTheProfileReads", "[vtextension][host]")
++{
++    // Every parameter the profile reads is passed, and the shared memory prefix is the one every object's
++    // name starts with.
++    for (auto const& parameter: ProfileParameters)
++    {
++        INFO(parameter.name);
++        CHECK(SandboxProfile.contains(std::string { "(param \"" } + std::string { parameter.name } + "\")"));
++    }
++    auto const prefix = std::ranges::find(ProfileParameters,
++                                          std::string_view { "SHM_PREFIX" },
++                                          &vtextension::wasm::host::ProfileParameter::name);
++    REQUIRE(prefix != ProfileParameters.end());
++    CHECK(vtextension::wasm::remote::transport::sharedObjectName(42, 1).starts_with(prefix->value));
++
++    // As the C API takes them: name, value, ..., then a null pointer.
++    constexpr auto List = profileParameterList();
++    REQUIRE(List.size() == (2 * ProfileParameters.size()) + 1);
++    for (auto const index: std::views::iota(std::size_t { 0 }, ProfileParameters.size()))
++    {
++        CHECK(std::string_view { List[2 * index] } == ProfileParameters[index].name);
++        CHECK(std::string_view { List[(2 * index) + 1] } == ProfileParameters[index].value);
++    }
++    CHECK(List.back() == nullptr);
++}
+diff --git a/src/vtextension/wasm/host/macos/SandboxProfile.hpp b/src/vtextension/wasm/host/macos/SandboxProfile.hpp
+new file mode 100644
+index 000000000..b6c01e505
+--- /dev/null
++++ b/src/vtextension/wasm/host/macos/SandboxProfile.hpp
+@@ -0,0 +1,69 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// The extension host's sandbox profile on macOS, in Seatbelt's profile language (SBPL), and the parameters
++/// it reads. Std-only, so that every system's tests read the text the host applies on macOS.
++///
++/// Deny by default; what is allowed is what the locked-down host still does that Seatbelt mediates:
++/// - mapping the guest memory objects Contour created and granted it, and asking their size, by the prefix
++///   their names carry (SharedObjectName.hpp): their data, and their metadata (fstat(), which XNU checks as
++///   such). Never creating, truncating or unlinking one: Contour makes every object.
++/// - signalling itself, as a runtime that raises a signal does;
++/// - reading the CPU feature sysctls, which the code generator reads once, on the first module it compiles.
++///
++/// Nothing else: no network, no Mach service lookup, no file read or write, no new process, no exec.
++
++#include <array>
++#include <cstddef>
++#include <string_view>
++
++#include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
++
++namespace vtextension::wasm::host
++{
++
++/// A parameter the profile reads as `(param "<name>")`: C strings, as the C API takes them.
++struct ProfileParameter
++{
++    char const* name;  ///< Its name.
++    char const* value; ///< Its value.
++};
++
++/// Every parameter the profile reads.
++inline constexpr auto ProfileParameters = std::array {
++    ProfileParameter { .name = "SHM_PREFIX", .value = remote::transport::SharedObjectNamePrefix },
++};
++
++/// The profile: deny by default, and only what the locked-down host does.
++inline constexpr auto SandboxProfile = std::string_view { R"sbpl((version 1)
++(deny default)
++
++; Guest memory: objects Contour created and granted, mapped (data) and fstat()ed (metadata). Never created.
++(allow ipc-posix-shm-read-data ipc-posix-shm-read-metadata ipc-posix-shm-write-data
++    (ipc-posix-name-prefix (param "SHM_PREFIX")))
++
++; A runtime that raises a signal raises it on itself.
++(allow signal (target self))
++
++; The CPU features the code generator reads, once, as it compiles the first module.
++(allow sysctl-read
++    (sysctl-name-prefix "hw.optional."))
++)sbpl" };
++
++/// @return ProfileParameters as sandbox_init_with_parameters() takes them: name, value, name, value, …,
++///         then a null pointer.
++[[nodiscard]] constexpr auto profileParameterList() noexcept
++{
++    auto list = std::array<char const*, (2 * ProfileParameters.size()) + 1> {};
++    auto next = std::size_t { 0 };
++    for (auto const& parameter: ProfileParameters)
++    {
++        list[next++] = parameter.name;
++        list[next++] = parameter.value;
++    }
++    list[next] = nullptr;
++    return list;
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index fdf70abbc..a009bf663 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -117,23 +117,23 @@ if(_process_source)
+     if(VTEXTENSION_TESTING)
+         # The probe the launcher's tests start: it binds itself to its parent and caps itself as the host does,
+         # reports what it was started with -- working directory, environment, caps, open handles -- on its
+         # control channel, and exits once that channel ends. Never installed.
+         # With --parent it is a hosting process instead: it supervises a helper of its own, for the tests of a
+         # helper outliving its parent.
+         add_executable(extension_host_probe process/testing/LaunchProbe.cpp process/testing/RecordingLauncher.hpp
+             process/testing/SandboxProbe.hpp)
+         target_link_libraries(extension_host_probe PRIVATE
+             vtextension_host vtextension_remote_process vtextension_remote_wire)
+-        # Where a sandbox is built (VTEXTENSION_LINUX_SANDBOX, VTEXTENSION_FREEBSD_SANDBOX), the probe also locks
++        # Where a sandbox is built (VTEXTENSION_{LINUX,FREEBSD,MACOS}_SANDBOX), the probe also locks
+         # itself down as the host does, and process_test proves the sandbox with it and tests its pieces.
+-        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX)
++        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
+             target_sources(extension_host_probe PRIVATE process/testing/SandboxProbe.cpp)
+             target_link_libraries(extension_host_probe PRIVATE vtextension_host_sanitizer_options)
+         endif()
+ 
+         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
+         # no engine, so that it cross-builds and runs under wine.
+         add_executable(vtextension_process_test
+             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+             HostRefusals_test.cpp
+             LaneWatch_test.cpp
+@@ -161,21 +161,21 @@ if(_process_source)
+         target_link_libraries(vtextension_process_test PRIVATE
+             vtextension_host vtextension_out_of_process vtextension_remote_process vtextension_remote_wire
+             core::testing Catch2::Catch2 contour_test_trace)
+         if(VTEXTENSION_LINUX_SANDBOX)
+             target_sources(vtextension_process_test PRIVATE
+                 ../host/linux/Landlock_test.cpp
+                 ../host/linux/SeccompFilter_test.cpp
+                 ../host/linux/testing/BpfEvaluator.hpp
+             )
+         endif()
+-        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX)
++        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
+             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
+         endif()
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+         add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+         if(NOT WIN32)
+             # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+             target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+         endif()
+diff --git a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+index 972c0e4f1..ade3ec1e2 100644
+--- a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
++++ b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+@@ -1,24 +1,26 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The system's sandbox, for real: the probe locks itself down as the extension host does, in a process of its
+ // own, and tries one operation from a thread that ran before the lockdown. What is forbidden fails -- on
+ // Linux refused with an errno where a library may ask, the process killed by SIGSYS where nothing honest
+-// asks; on FreeBSD refused by capability mode or by the descriptor's rights -- and what the host does still
+-// works, on Linux also inside an outer sandbox's filter.
++// asks; on FreeBSD refused by capability mode or by the descriptor's rights; on macOS refused by the profile
++// -- and what the host does still works, on Linux also inside an outer sandbox's filter.
+ #include <catch2/catch_message.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #ifdef __linux__
+     #include <sys/syscall.h>
+ #elifdef __FreeBSD__
+     #include <sys/procctl.h>
++#elifdef __APPLE__
++    #include <servers/bootstrap.h>
+ #endif
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <chrono>
+ #include <csignal>
+ #include <cstdint>
+ #include <filesystem>
+ #include <format>
+@@ -231,20 +233,34 @@ constexpr auto ForbiddenOperations = std::array {
+     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "ioctl-control", .fate = Fate::Refused, .error = ENOTCAPABLE },
+     Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
+     Expectation { .op = "fork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+     Expectation {
+         .op = "pdfork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+     Expectation { .op = "execve", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "ptrace-traceme", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = ECAPMODE },
+ };
++#elifdef __APPLE__
++// The profile refuses what it does not allow with EPERM: a file, a socket of any family, a new process, a
++// program, a signal to another process. A Mach service lookup it refuses is refused as unprivileged.
++constexpr auto ForbiddenOperations = std::array {
++    Expectation { .op = "open-file", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "fork", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "execve", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "mach-lookup", .fate = Fate::Refused, .error = BOOTSTRAP_NOT_PRIVILEGED },
++};
+ #endif
+ 
+ /// @return What @p expectation's op comes to in this build, run by this user.
+ [[nodiscard]] Fate fateOf(Expectation const& expectation)
+ {
+     if (expectation.allowedIn == vtextension::wasm::ThisBuildInstrumentation)
+         return Fate::Allowed;
+     auto const uncapped = vtextension::wasm::host::BuildCapPolicy == vtextension::wasm::host::CapPolicy::Skip
+                           || ::geteuid() == 0;
+     if (expectation.exemption == CapExemption::Uncapped && uncapped)
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index 752205bc7..c3b8e7ed9 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -491,23 +491,23 @@ int main(int argc, char const* argv[], char const* envp[])
+     if (arguments.empty())
+         return static_cast<int>(ProbeExit::Usage);
+     auto const rest = std::span { arguments }.subspan(1);
+     auto const exit = [&] {
+         if (arguments.front() == "--report")
+             return report(rest, envp);
+         if (arguments.front() == "--parent")
+             return parent(rest);
+         if (arguments.front() == "--receive-grant")
+         {
+-// Where this build has the Linux or the FreeBSD sandbox (PlatformSandbox::Linux, ::FreeBSD): what the
+-// sandboxed mode is made of.
+-#if CONTOUR_PLATFORM_SANDBOX == 1 || CONTOUR_PLATFORM_SANDBOX == 2
++// Where this build has the Linux, the FreeBSD or the macOS sandbox (PlatformSandbox::Linux, ::FreeBSD,
++// ::MacOS): what the sandboxed mode is made of.
++#if CONTOUR_PLATFORM_SANDBOX == 1 || CONTOUR_PLATFORM_SANDBOX == 2 || CONTOUR_PLATFORM_SANDBOX == 3
+             namespace testing = vtextension::wasm::remote::process::testing;
+             if (testing::asksForSandboxProbe(rest))
+                 return static_cast<ProbeExit>(testing::runSandboxProbe(rest));
+ #endif
+             return receiveGrant(rest);
+         }
+         if (arguments.front() == "--mutate")
+             return mutate(rest);
+         return ProbeExit::Usage;
+     }();
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+index 84c3929e6..24f846743 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+@@ -6,20 +6,23 @@
+ #include <sys/ptrace.h>
+ #include <sys/random.h>
+ #include <sys/socket.h>
+ #include <sys/syscall.h>
+ #include <sys/wait.h>
+ #ifdef __linux__
+     #include <sys/prctl.h>
+ #elifdef __FreeBSD__
+     #include <sys/procctl.h>
+     #include <sys/procdesc.h>
++#elifdef __APPLE__
++    #include <mach/mach.h>
++    #include <servers/bootstrap.h>
+ #endif
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <chrono>
+ #include <condition_variable>
+ #include <csignal>
+ #include <cstddef>
+ #include <cstdint>
+@@ -95,20 +98,42 @@ namespace
+     /// Exit codes of the sandboxed mode, beside the host's for a parent that is gone.
+     enum class SandboxProbeExit : uint8_t
+     {
+         Done = 0,
+         Usage = 2,
+         NoControl = 3,
+         ReportFailed = 4,
+         SetupFailed = 5,
+     };
+ 
++    /// A file the system has, which no locked-down host may read.
++#ifdef __APPLE__
++    constexpr auto ReadableFile = "/etc/hosts";
++#else
++    constexpr auto ReadableFile = "/etc/hostname";
++#endif
++
++    /// The type of the sockets the ops make: close-on-exec where the system takes it at creation.
++#ifdef SOCK_CLOEXEC
++    constexpr auto StreamSocket = SOCK_STREAM | SOCK_CLOEXEC;
++#else
++    constexpr auto StreamSocket = SOCK_STREAM;
++#endif
++
++    /// The flags of a send that must not raise SIGPIPE: none where the system has no MSG_NOSIGNAL (macOS),
++    /// whose channel sockets carry SO_NOSIGPIPE instead (Channel_posix.cpp).
++#ifdef MSG_NOSIGNAL
++    constexpr auto SendFlags = MSG_NOSIGNAL;
++#else
++    constexpr auto SendFlags = 0;
++#endif
++
+     /// The stack of the probe's threads: what the host's executors get is more than enough.
+     constexpr auto ThreadStackBytes = std::size_t { 1024 } * 1024;
+ 
+     /// What the op's thread has to work with.
+     struct OperationContext
+     {
+         PduStream& control;    ///< The control channel, which the permitted op takes a grant off.
+         int controlDescriptor; ///< Its descriptor, which send-descriptor sends on raw.
+         int parentProcess;     ///< The parent, read before the lockdown.
+         /// The descriptors the sandbox was handed beside control, each with its role.
+@@ -126,21 +151,21 @@ namespace
+     {
+         auto const descriptor = ::open(path, flags | O_CLOEXEC);
+         auto outcome = outcomeOf(descriptor);
+         if (descriptor >= 0)
+             ::close(descriptor);
+         return outcome;
+     }
+ 
+     [[nodiscard]] std::string openFile(OperationContext&)
+     {
+-        return openPath("/etc/hostname", O_RDONLY);
++        return openPath(ReadableFile, O_RDONLY);
+     }
+ 
+     [[nodiscard]] std::string openDirectory(OperationContext&)
+     {
+         return openPath("/", O_RDONLY | O_DIRECTORY);
+     }
+ 
+     /// What a sanitizer's report reads: its own process's maps.
+     [[nodiscard]] std::string openOwnProcess(OperationContext&)
+     {
+@@ -148,42 +173,42 @@ namespace
+     }
+ 
+     /// Another process's entry, which no build's host may read.
+     [[nodiscard]] std::string openOtherProcess(OperationContext& context)
+     {
+         return openPath(std::format("/proc/{}/maps", context.parentProcess).c_str(), O_RDONLY);
+     }
+ 
+     [[nodiscard]] std::string socketOf(int family)
+     {
+-        auto const descriptor = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0);
++        auto const descriptor = ::socket(family, StreamSocket, 0);
+         auto outcome = outcomeOf(descriptor);
+         if (descriptor >= 0)
+             ::close(descriptor);
+         return outcome;
+     }
+ 
+     [[nodiscard]] std::string socketInet(OperationContext&)
+     {
+         return socketOf(AF_INET);
+     }
+ 
+     [[nodiscard]] std::string socketUnix(OperationContext&)
+     {
+         return socketOf(AF_UNIX);
+     }
+ 
+     /// Reaches for an address: the loopback's discard port. Where a sandbox lets a socket be made at all, it
+     /// is the address that it refuses.
+     [[nodiscard]] std::string connectInet(OperationContext&)
+     {
+-        auto const descriptor = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
++        auto const descriptor = ::socket(AF_INET, StreamSocket, 0);
+         if (descriptor < 0)
+             return outcomeOf(descriptor);
+         constexpr auto DiscardPort = uint16_t { 9 };
+         auto address = sockaddr_in {};
+         address.sin_family = AF_INET;
+         address.sin_port = htons(DiscardPort);
+         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+         auto const outcome =
+             outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+         ::close(descriptor);
+@@ -208,21 +233,21 @@ namespace
+         message.msg_iov = &vector;
+         message.msg_iovlen = 1;
+         message.msg_control = buffer.data();
+         message.msg_controllen = buffer.size();
+         auto* const header = CMSG_FIRSTHDR(&message);
+         header->cmsg_level = SOL_SOCKET;
+         header->cmsg_type = SCM_RIGHTS;
+         header->cmsg_len = CMSG_LEN(sizeof(int));
+         auto const attached = STDERR_FILENO;
+         std::memcpy(CMSG_DATA(header), &attached, sizeof(attached));
+-        return outcomeOf(::sendmsg(context.controlDescriptor, &message, MSG_NOSIGNAL));
++        return outcomeOf(::sendmsg(context.controlDescriptor, &message, SendFlags));
+     }
+ 
+     [[nodiscard]] std::string forkProcess(OperationContext&)
+     {
+         auto const child = ::fork();
+         if (child == 0)
+             ::_exit(0);
+         if (child > 0)
+             ::waitpid(child, nullptr, 0);
+         return outcomeOf(child);
+@@ -251,21 +276,21 @@ namespace
+     [[nodiscard]] std::string executeProgram(OperationContext&)
+     {
+         auto program = std::string { "/bin/true" };
+         auto arguments = std::array<char*, 2> { program.data(), nullptr };
+         auto environment = std::array<char*, 1> { nullptr };
+         return outcomeOf(::execve(program.c_str(), arguments.data(), environment.data()));
+     }
+ 
+     [[nodiscard]] std::string traceMe(OperationContext&)
+     {
+-#ifdef __FreeBSD__
++#if defined(__FreeBSD__) || defined(__APPLE__)
+         return outcomeOf(::ptrace(PT_TRACE_ME, 0, nullptr, 0));
+ #else
+         return outcomeOf(::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr));
+ #endif
+     }
+ 
+     [[nodiscard]] std::string signalParent(OperationContext& context)
+     {
+         return outcomeOf(::kill(context.parentProcess, 0));
+     }
+@@ -300,21 +325,26 @@ namespace
+     }
+ 
+     /// What an engine that compiles does: maps memory writable, then makes it @p protection.
+     [[nodiscard]] std::string protectAnonymous(int protection)
+     {
+         constexpr auto Bytes = std::size_t { 4096 };
+         auto* const mapped =
+             ::mmap(nullptr, Bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+         if (mapped == MAP_FAILED)
+             return outcomeOf(-1);
++#ifdef __linux__
++        // Through the system call itself, as mapAnonymous() maps.
+         auto outcome = outcomeOf(::syscall(SYS_mprotect, mapped, Bytes, protection));
++#else
++        auto outcome = outcomeOf(::mprotect(mapped, Bytes, protection));
++#endif
+         ::munmap(mapped, Bytes);
+         return outcome;
+     }
+ 
+     [[nodiscard]] std::string protectWritableExecutable(OperationContext&)
+     {
+         return protectAnonymous(PROT_READ | PROT_WRITE | PROT_EXEC);
+     }
+ 
+     /// Compiled code turning executable once written: read and execute, never write.
+@@ -373,20 +403,34 @@ namespace
+ #elif defined(__FreeBSD__) && defined(PROC_NO_NEW_PRIVS_STATUS)
+         auto status = 0;
+         if (::procctl(P_PID, 0, PROC_NO_NEW_PRIVS_STATUS, &status) != 0)
+             return "unknown";
+         return status == PROC_NO_NEW_PRIVS_ENABLE ? "on" : "off";
+ #else
+         return "unknown";
+ #endif
+     }
+ 
++#ifdef __APPLE__
++    /// Looks up the system log's Mach service, as a library that logs does: what no locked-down host may
++    /// reach. `refused:<kern_return_t>` where the lookup failed.
++    [[nodiscard]] std::string lookUpMachService(OperationContext&)
++    {
++        auto port = mach_port_t { MACH_PORT_NULL };
++        auto const result = ::bootstrap_look_up(bootstrap_port, "com.apple.system.logger", &port);
++        if (result != KERN_SUCCESS)
++            return std::format("refused:{}", result);
++        ::mach_port_deallocate(::mach_task_self(), port);
++        return "ok";
++    }
++#endif
++
+     [[nodiscard]] std::string nothing(OperationContext&)
+     {
+         return "ok";
+     }
+ 
+     /// What the locked-down host does: takes a grant off control and maps it over a reservation, opens it,
+     /// writes it, unmaps and closes it; draws random bytes, reads the clock, waits on a condition, asks for
+     /// its alternate signal stack, and (aarch64) flushes the instruction caches.
+     [[nodiscard]] std::string permitted(OperationContext& context)
+     {
+@@ -400,25 +444,37 @@ namespace
+                 return "failed:claim";
+             auto mapping = transport::GuestMemoryMapping::map(
+                 handle->get(), instantiate->memory.objectBytes, instantiate->memory.initialBytes, 0);
+             if (!mapping)
+                 return "failed:map";
+             std::ignore = std::move(*handle).adopt();
+             constexpr auto Mark = std::string_view { "probe" };
+             std::ranges::copy(std::as_bytes(std::span { Mark }), mapping->base());
+         }
+         auto random = std::array<std::byte, 8> {};
++#ifdef __APPLE__
++        // macOS has no getrandom(); getentropy() is what its C++ library draws on.
++        if (::getentropy(random.data(), random.size()) != 0)
++            return "failed:getentropy";
++#else
+         if (::getrandom(random.data(), random.size(), 0) != static_cast<ssize_t>(random.size()))
+             return "failed:getrandom";
++#endif
+         auto now = timespec {};
++#ifdef __linux__
++        // Through the system call itself, as the filter sees it.
+         if (::syscall(SYS_clock_gettime, CLOCK_MONOTONIC, &now) != 0)
+             return "failed:clock";
++#else
++        if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0)
++            return "failed:clock";
++#endif
+         auto mutex = std::mutex {};
+         auto condition = std::condition_variable {};
+         {
+             auto lock = std::unique_lock { mutex };
+             std::ignore = condition.wait_for(lock, std::chrono::milliseconds { 1 });
+         }
+         auto stack = stack_t {};
+         if (::sigaltstack(nullptr, &stack) != 0)
+             return "failed:sigaltstack";
+ #if defined(__linux__) && defined(__aarch64__)
+@@ -456,20 +512,23 @@ namespace
+         Operation { .name = "signal-parent", .run = &signalParent },
+         Operation { .name = "map-writable-executable", .run = &mapWritableExecutable },
+         Operation { .name = "map-shared-unfixed", .run = &mapSharedUnfixed },
+         Operation { .name = "protect-writable-executable", .run = &protectWritableExecutable },
+         Operation { .name = "map-executable", .run = &mapExecutable },
+         Operation { .name = "protect-executable", .run = &protectExecutable },
+         Operation { .name = "protect-readable", .run = &protectReadable },
+         Operation { .name = "channel-pair", .run = &channelPair },
+         Operation { .name = "held-limits", .run = &heldLimits },
+         Operation { .name = "permitted", .run = &permitted },
++#ifdef __APPLE__
++        Operation { .name = "mach-lookup", .run = &lookUpMachService },
++#endif
+     };
+ 
+ #ifdef __linux__
+     /// An outer sandbox's filter: what it refuses, and with which errno; only when the call's arguments pass
+     /// `checks`, if any.
+     struct OuterRefusal
+     {
+         host::SystemCall call;
+         int error;
+         std::span<host::ArgumentCheck const> checks = {};
+@@ -725,21 +784,21 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
+ 
+     // Each thread opens a file once told to, between the restriction and the lockdown, then runs what it is
+     // given once told to go.
+     auto openNow = std::latch { 1 };
+     auto opened = std::latch { 2 };
+     auto finish = std::latch { 1 };
+     auto beforeRestrict = std::string {};
+     auto afterRestrict = std::string {};
+     auto early = host::ExecutorThread::start(ThreadStackBytes, [&] {
+         openNow.wait();
+-        beforeRestrict = openPath("/etc/hostname", O_RDONLY);
++        beforeRestrict = openPath(ReadableFile, O_RDONLY);
+         opened.count_down();
+         finish.wait();
+     });
+     if (!early)
+         return exitWith(SandboxProbeExit::SetupFailed);
+ 
+     // What the host keeps, as it keeps it: control, the lanes it reports on, and its standard streams.
+     auto held = std::vector<host::HeldDescriptor> {
+         host::HeldDescriptor { .role = host::DescriptorRole::Lane, .handle = lane->nativeHandle() },
+         host::HeldDescriptor { .role = host::DescriptorRole::Lane, .handle = opLane->nativeHandle() },
+@@ -755,21 +814,21 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
+     auto const privileges = noNewPrivileges();
+ 
+     auto context = OperationContext {
+         .control = control, .controlDescriptor = controlDescriptor, .parentProcess = ::getppid(), .held = held
+     };
+     auto go = std::latch { 1 };
+     auto reported = std::latch { 1 };
+     auto reportSent = false;
+     auto executor = host::ExecutorThread::start(ThreadStackBytes, [&] {
+         openNow.wait();
+-        afterRestrict = openPath("/etc/hostname", O_RDONLY);
++        afterRestrict = openPath(ReadableFile, O_RDONLY);
+         opened.count_down();
+         go.wait();
+         auto const outcome = request->operation->run(context);
+         reportSent = sendText(*opLane, std::format("op={}\nend\n", outcome));
+         reported.count_down();
+         // Until Contour ends the connection.
+         while (control.receive())
+         {
+         }
+     });
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
+index 178723f7c..4413bf74a 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
+@@ -1,16 +1,16 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+-/// Test-only, Linux and FreeBSD: the probe's sandboxed mode, which locks itself down as the extension host
+-/// does and then tries one operation on a thread that ran before the lockdown.
++/// Test-only, Linux, FreeBSD and macOS: the probe's sandboxed mode, which locks itself down as the extension
++/// host does and then tries one operation on a thread that ran before the lockdown.
+ ///
+ ///   extension_host_probe --receive-grant [--sandboxed] [--guest-code=<code>] [--outer-filter=<kind>]
+ ///   [--sandbox-op=<op>] <helper arguments>
+ ///
+ /// It binds itself to its parent and hardens itself as the host does. An outer filter (Linux), if named, is
+ /// installed first, as an outer sandbox (Flatpak's bwrap) would have: `no-landlock` (Landlock's calls fail
+ /// ENOSYS), `flatpak` (clone3 fails ENOSYS; unshare, setns, mount, personality and ptrace EPERM),
+ /// `passrights` (setting SO_PASSRIGHTS fails EPERM), or `thread` (a thread of its own installs a filter of
+ /// its own). Then it starts a thread, restricts itself (--sandboxed: makeSystemSandbox()'s
+ /// restrictBeforeThreads(), with the rows of an engine whose guest code is `--guest-code=` `compiled`, the
+@@ -18,22 +18,22 @@
+ /// and locks down.
+ ///
+ /// On its first lane it reports `lockdown=` `locked`, `none` (not --sandboxed) or `failed:<step>:<code>`, the
+ /// first of restricting, capping and locking down that failed; `no-new-privs=` `on`, `off` or `unknown`,
+ /// asked after the restriction; `before-restrict=` and `after-restrict=`, what opening a file from each
+ /// thread came to; and `end`. Then the op's thread runs the op and reports, on its second lane, `op=` `ok`,
+ /// `refused:<errno>`, `failed:<what>` or (channel-pair) `upward:<refused|discarded>`, and `end` -- unless the
+ /// op killed the process. It exits 0 once its control channel ended.
+ ///
+ /// The ops: open-file, open-directory, socket-inet, socket-unix, connect-inet, ioctl-control,
+-/// send-descriptor, fork, pdfork (FreeBSD), spawn-thread, execve, ptrace-traceme, signal-parent,
+-/// map-writable-executable, map-shared-unfixed, map-executable, protect-writable-executable,
++/// send-descriptor, fork, pdfork (FreeBSD), mach-lookup (macOS), spawn-thread, execve, ptrace-traceme,
++/// signal-parent, map-writable-executable, map-shared-unfixed, map-executable, protect-writable-executable,
+ /// protect-executable, protect-readable, channel-pair, held-limits (how far the system limits each descriptor
+ /// the sandbox was handed: lanes, then standard input, output and error, `unlimited`, `as-its-role` or
+ /// `otherwise`, comma-separated), none, and permitted, which takes one Instantiate's
+ /// grant off control as the host does and then does what the locked-down host does (see SandboxProbe.cpp).
+ 
+ #include <span>
+ #include <string_view>
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+diff --git a/src/vtextension/wasm/remote/transport/SharedObjectName.hpp b/src/vtextension/wasm/remote/transport/SharedObjectName.hpp
+index 4a3626f09..b70449d3c 100644
+--- a/src/vtextension/wasm/remote/transport/SharedObjectName.hpp
++++ b/src/vtextension/wasm/remote/transport/SharedObjectName.hpp
+@@ -10,35 +10,39 @@
+ #include <cerrno>
+ #include <cstdint>
+ #include <expected>
+ #include <format>
+ #include <ranges>
+ #include <string>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
++/// What every name starts with: what a sandbox that grants objects by name (macOS's profile) grants. A C
++/// string, as such a sandbox's C API takes it.
++inline constexpr auto SharedObjectNamePrefix = "/contour-eh-";
++
+ /// How many names an object is tried under before its creation fails: a taken name is someone else's, and
+ /// eight random ones all taken is someone squatting the namespace, not chance.
+ inline constexpr auto SharedObjectNameAttempts = 8;
+ 
+ /// How many bits of a suffix a name keeps: 12 hex digits, so that `/contour-eh-<pid>-<suffix>` stays within
+ /// macOS's 31 characters (PSHMNAMLEN) for any process id up to 99999.
+ inline constexpr auto SharedObjectNameSuffixBits = 48;
+ 
+ /// @param processId The process making the object.
+ /// @param suffix What tells the name apart; only its low SharedObjectNameSuffixBits bits are used.
+-/// @return The name: `/contour-eh-<processId>-<suffix as 12 hex digits>`.
++/// @return The name: `<SharedObjectNamePrefix><processId>-<suffix as 12 hex digits>`.
+ [[nodiscard]] inline std::string sharedObjectName(int64_t processId, uint64_t suffix)
+ {
+     constexpr auto SuffixMask = (uint64_t { 1 } << SharedObjectNameSuffixBits) - 1;
+-    return std::format("/contour-eh-{}-{:012x}", processId, suffix & SuffixMask);
++    return std::format("{}{}-{:012x}", SharedObjectNamePrefix, processId, suffix & SuffixMask);
+ }
+ 
+ /// Creates an object under a fresh name: tries up to SharedObjectNameAttempts names, each with a new suffix,
+ /// for as long as the name tried is taken.
+ /// @param processId The process making the object.
+ /// @param nextSuffix Gives each attempt's suffix: a random value, never a constant.
+ /// @param create Tries one name: the object, or the `errno` it failed with; `EEXIST` if the name is taken.
+ /// @return What the first attempt not refused for a taken name gave; `EEXIST` if every name was taken.
+ template <typename NextSuffix, typename Create>
+ [[nodiscard]] auto createUnderFreshName(int64_t processId, NextSuffix const& nextSuffix, Create const& create)
+diff --git a/support/macOS/contour-extension-host.entitlements b/support/macOS/contour-extension-host.entitlements
+new file mode 100644
+index 000000000..7b677ae2d
+--- /dev/null
++++ b/support/macOS/contour-extension-host.entitlements
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
++    <true/>
++</dict>
++</plist>

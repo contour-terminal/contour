@@ -1,0 +1,1218 @@
+05046ba58 build: package the extension host in the Fedora RPM
+ffc928a09 build: refuse an installed WAMR that compiles to native code
+0635a4f2b fix(vtextension): every engine withholds the CPU-time clocks alike
+22e9e4e85 build: build the extension host with whichever engine the build selected
+cfb1fb298 feat(vtextension): the extension host can run its modules interpreted
+92d9750e2 fix(vtextension): a sanitizer build's extension host reads only its own process entries
+ccfd77033 fix(vtextension): an outer filter refusing one argument value lets every other value through
+750f0080c fix(vtextension): a crash in the locked-down extension host is no longer taken for a sandbox kill
+
+=== range-diff vs previous review head ===
+1:  750f0080c = 1:  750f0080c fix(vtextension): a crash in the locked-down extension host is no longer taken for a sandbox kill
+2:  ccfd77033 = 2:  ccfd77033 fix(vtextension): an outer filter refusing one argument value lets every other value through
+3:  92d9750e2 = 3:  92d9750e2 fix(vtextension): a sanitizer build's extension host reads only its own process entries
+4:  e8a021e9a ! 4:  cfb1fb298 feat(vtextension): the extension host can run its modules interpreted
+    @@ Commit message
+         fcntl(F_GETFL) on the null device, lseek() for a guest's fd_seek, and sched_getaffinity(), refused,
+         which the C library answers without.
+     
+    +    The engine says it interprets, and the sandbox trusts that word, so it is made only from a WAMR
+    +    with no JIT running mode; one that could compile is refused before anything is opened, its reason
+    +    told on stderr.
+    +
+         Signed-off-by: Christian Parpart <christian@parpart.family>
+     
+      ## src/contour-extension-host/testing/HostileHost.cpp ##
+    @@ src/vtextension/wasm/wamr/CMakeLists.txt: add_library(vtextension_wamr STATIC
+     +    WamrEngine.cpp
+     +    WamrEngine.hpp
+     +)
+    -+target_link_libraries(vtextension_wamr_engine PUBLIC vtextension_wamr vtextension_remote_wire)
+    ++target_link_libraries(vtextension_wamr_engine PUBLIC vtextension_wamr vtextension_remote_wire PRIVATE contour::wamr)
+     +
+     +# The engine the extension host executable runs (../host/HelperEngine.hpp), where it runs WAMR's
+     +# (CONTOUR_EXTENSION_HOST_ENGINE, ../../../CMakeLists.txt).
+    @@ src/vtextension/wasm/wamr/HelperEngine.cpp (new)
+     +// The engine of the extension host executable: WAMR's, where the build selected it.
+     +#include <vtextension/wasm/host/HelperEngine.hpp>
+     +
+    ++#include <format>
+    ++#include <utility>
+    ++
+    ++#include <vtextension/wasm/host/HostProcess.hpp>
+     +#include <vtextension/wasm/wamr/WamrEngine.hpp>
+     +
+     +namespace vtextension::wasm::host
+    @@ src/vtextension/wasm/wamr/HelperEngine.cpp (new)
+     +{
+     +    // WAMR places linear memory where it chooses, so its instances copy memory wherever they run, and its
+     +    // Hello says so. Every engine shares WAMR's one process-wide state.
+    -+    return wamr::makeWamrEngine();
+    ++    auto engine = wamr::makeWamrEngine();
+    ++    if (engine)
+    ++        return std::move(*engine);
+    ++    // Why, before the host ends for the engine it lacks.
+    ++    tellOnStandardError(std::format("no engine: {}", wamr::wamrEngineErrorText(engine.error())));
+    ++    return nullptr;
+     +}
+     +
+     +std::unique_ptr<IHostedEngine> makeCopyingHelperEngine()
+     +{
+    -+    return wamr::makeWamrEngine();
+    ++    return makeHelperEngine();
+     +}
+     +
+     +} // namespace vtextension::wasm::host
+    @@ src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp (new)
+     +        static auto const kind = remote::makeRemoteKindState();
+     +        return remote::makeRemoteBackend(
+     +            kind,
+    -+            BackendConfig { .timeouts = {},
+    -+                            .connector = std::make_shared<host::InProcessHostConnector>(
+    -+                                [] { return wamr::makeWamrEngine(); }, host::HostServerConfig {}),
+    -+                            .lockdown = LockdownRequirement::AcceptUnsandboxed });
+    ++            BackendConfig {
+    ++                .timeouts = {},
+    ++                .connector = std::make_shared<host::InProcessHostConnector>(
+    ++                    [] { return wamr::makeWamrEngine().value_or(nullptr); }, host::HostServerConfig {}),
+    ++                .lockdown = LockdownRequirement::AcceptUnsandboxed });
+     +    }
+     +};
+     +
+    @@ src/vtextension/wasm/wamr/WamrEngine.cpp (new)
+     +// SPDX-License-Identifier: Apache-2.0
+     +#include <vtextension/wasm/wamr/WamrEngine.hpp>
+     +
+    ++#include <algorithm>
+    ++#include <array>
+     +#include <cstdint>
+     +#include <expected>
+     +#include <memory>
+     +#include <optional>
+     +#include <span>
+    ++#include <string_view>
+     +#include <utility>
+     +
+    ++#include <wasm_export.h>
+    ++
+     +#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+     +
+     +namespace vtextension::wasm::wamr
+    @@ src/vtextension/wasm/wamr/WamrEngine.cpp (new)
+     +    /// whose exit ends it there. WAMR's state is the process's, so one per thread serves every engine.
+     +    thread_local std::optional<ThreadEnv> preparedThread;
+     +
+    ++    /// The text of each WamrEngineError.
+    ++    struct ErrorText
+    ++    {
+    ++        WamrEngineError error;
+    ++        std::string_view text;
+    ++    };
+    ++
+    ++    constexpr auto ErrorTexts = std::array {
+    ++        ErrorText { WamrEngineError::CompilesNativeCode,
+    ++                    "its engine was built to compile code at run time, which this extension host's sandbox "
+    ++                    "forbids; it needs one that interprets" },
+    ++        ErrorText { WamrEngineError::RuntimeUnavailable, "its engine could not be initialized" },
+    ++        ErrorText { WamrEngineError::NullDeviceUnavailable, "the null device could not be opened" },
+    ++    };
+    ++
+     +    /// A WAMR backend holding WAMR's runtime up for as long as it lives.
+     +    class WamrEngine final: public host::IHostedEngine
+     +    {
+    @@ src/vtextension/wasm/wamr/WamrEngine.cpp (new)
+     +    };
+     +} // namespace
+     +
+    -+std::unique_ptr<host::IHostedEngine> makeWamrEngine(NullDeviceOpener const& openNullDevice)
+    ++NativeCompilation linkedNativeCompilation() noexcept
+     +{
+    -+    auto engine = NullDevice::openShared(openNullDevice)
+    -+                      .transform([](NullDevice nullDevice) {
+    -+                          return makeWamrBackend(WamrConfig { .nullDevice = std::move(nullDevice) });
+    -+                      })
+    -+                      .and_then(&WamrEngine::create);
+    -+    if (!engine)
+    -+        return nullptr;
+    -+    return std::move(*engine);
+    ++    auto const compiles =
+    ++        std::ranges::any_of(std::array { Mode_Fast_JIT, Mode_LLVM_JIT, Mode_Multi_Tier_JIT },
+    ++                            &wasm_runtime_is_running_mode_supported);
+    ++    return compiles ? NativeCompilation::Present : NativeCompilation::Absent;
+    ++}
+    ++
+    ++std::string_view wamrEngineErrorText(WamrEngineError error) noexcept
+    ++{
+    ++    auto const row = std::ranges::find(ErrorTexts, error, &ErrorText::error);
+    ++    return row != ErrorTexts.end() ? row->text : std::string_view { "the engine could not be made" };
+    ++}
+    ++
+    ++std::expected<std::unique_ptr<host::IHostedEngine>, WamrEngineError> makeWamrEngine(
+    ++    WamrEngineConfig const& config)
+    ++{
+    ++    // Checked before anything is opened: an engine that could compile would hold, or need, executable memory
+    ++    // that its host's sandbox, made for an interpreter, refuses.
+    ++    if (config.nativeCompilation() != NativeCompilation::Absent)
+    ++        return std::unexpected(WamrEngineError::CompilesNativeCode);
+    ++    return NullDevice::openShared(config.openNullDevice)
+    ++        .transform_error([](ExtensionError) { return WamrEngineError::NullDeviceUnavailable; })
+    ++        .transform([](NullDevice nullDevice) {
+    ++            return makeWamrBackend(WamrConfig { .nullDevice = std::move(nullDevice) });
+    ++        })
+    ++        .and_then([](std::unique_ptr<IWasmBackend> backend) {
+    ++            return WamrEngine::create(std::move(backend))
+    ++                .transform([](std::unique_ptr<WamrEngine> engine) -> std::unique_ptr<host::IHostedEngine> {
+    ++                    return engine;
+    ++                })
+    ++                .transform_error([](ExtensionError) { return WamrEngineError::RuntimeUnavailable; });
+    ++        });
+     +}
+     +
+     +} // namespace vtextension::wasm::wamr
+    @@ src/vtextension/wasm/wamr/WamrEngine.hpp (new)
+     +// modules, set up for a host that locks itself down once its threads are prepared.
+     +#pragma once
+     +
+    ++#include <cstdint>
+    ++#include <expected>
+    ++#include <functional>
+     +#include <memory>
+    ++#include <string_view>
+     +
+     +#include <vtextension/wasm/host/IHostedEngine.hpp>
+     +#include <vtextension/wasm/wamr/WamrBackend.hpp>
+    @@ src/vtextension/wasm/wamr/WamrEngine.hpp (new)
+     +namespace vtextension::wasm::wamr
+     +{
+     +
+    ++/// Whether a WAMR can compile guest code to native code.
+    ++enum class NativeCompilation : uint8_t
+    ++{
+    ++    Absent,  ///< It interprets only.
+    ++    Present, ///< It has a JIT running mode: Fast JIT, LLVM JIT, or both tiered.
+    ++};
+    ++
+    ++/// @return Whether the WAMR this process links has a JIT running mode.
+    ++[[nodiscard]] NativeCompilation linkedNativeCompilation() noexcept;
+    ++
+    ++/// Why no WAMR engine was made.
+    ++enum class WamrEngineError : uint8_t
+    ++{
+    ++    CompilesNativeCode,    ///< The WAMR can compile to native code, which the engine claims never to run.
+    ++    RuntimeUnavailable,    ///< WAMR could not initialize.
+    ++    NullDeviceUnavailable, ///< The null device could not be opened.
+    ++};
+    ++
+    ++/// @param error Why no engine was made.
+    ++/// @return The reason, user-readable: it names the extension host's engine, never the runtime.
+    ++[[nodiscard]] std::string_view wamrEngineErrorText(WamrEngineError error) noexcept;
+    ++
+    ++/// How a WAMR engine is made.
+    ++struct WamrEngineConfig
+    ++{
+    ++    /// Opens the null device, once.
+    ++    NullDeviceOpener openNullDevice = systemNullDeviceOpener();
+    ++    /// Says whether the linked WAMR compiles to native code.
+    ++    std::function<NativeCompilation()> nativeCompilation = &linkedNativeCompilation;
+    ++};
+    ++
+     +/// Creates the WAMR engine of an extension host process.
+     +///
+     +/// Everything it needs of the system it takes here, before the host locks itself down: one null device,
+     +/// which every runtime it creates shares, and a hold on WAMR's process-wide runtime for as long as it lives,
+     +/// so that its threads can be prepared before any runtime exists. Its instances' memory is copied to the
+     +/// parent (MemoryMode::Copy), as WAMR places a linear memory where it chooses, and it needs no guard
+    -+/// (memoryGuardBytes() is 0). prepareThread() enters WAMR's thread environment on the calling thread, which
+    -+/// keeps it until it ends.
+    -+/// @param openNullDevice Opens the null device, once.
+    -+/// @return The engine; null if WAMR could not initialize or the null device could not be opened.
+    -+[[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWamrEngine(
+    -+    NullDeviceOpener const& openNullDevice = systemNullDeviceOpener());
+    ++/// (memoryGuardBytes() is 0). It interprets (GuestCode::Interpreted), and so refuses a WAMR that could
+    ++/// compile. prepareThread() enters WAMR's thread environment on the calling thread, which keeps it until it
+    ++/// ends.
+    ++/// @param config How it is made.
+    ++/// @return The engine; why none was made otherwise.
+    ++[[nodiscard]] std::expected<std::unique_ptr<host::IHostedEngine>, WamrEngineError> makeWamrEngine(
+    ++    WamrEngineConfig const& config = {});
+     +
+     +} // namespace vtextension::wasm::wamr
+     
+    @@ src/vtextension/wasm/wamr/WamrEngine_test.cpp (new)
+     +
+     +namespace contract = vtextension::wasm::testing::contract;
+     +using vtextension::wasm::IWasmRuntime;
+    ++using vtextension::wasm::host::GuestCode;
+     +using vtextension::wasm::remote::proto::MemoryMode;
+    ++using vtextension::wasm::wamr::linkedNativeCompilation;
+     +using vtextension::wasm::wamr::makeWamrEngine;
+    ++using vtextension::wasm::wamr::NativeCompilation;
+     +using vtextension::wasm::wamr::NullDeviceOpener;
+     +using vtextension::wasm::wamr::systemNullDeviceOpener;
+     +using vtextension::wasm::wamr::ThreadEnv;
+    ++using vtextension::wasm::wamr::WamrEngineConfig;
+    ++using vtextension::wasm::wamr::WamrEngineError;
+    ++using vtextension::wasm::wamr::wamrEngineErrorText;
+     +
+     +namespace
+     +{
+    @@ src/vtextension/wasm/wamr/WamrEngine_test.cpp (new)
+     +
+     +TEST_CASE("WamrEngine.copiesMemory", "[vtextension][wamr]")
+     +{
+    -+    auto const engine = makeWamrEngine();
+    -+    REQUIRE(engine != nullptr);
+    ++    auto const made = makeWamrEngine();
+    ++    REQUIRE(made.has_value());
+    ++    auto const& engine = *made;
+     +    CHECK(engine->memoryMode() == MemoryMode::Copy);
+     +    CHECK(engine->memoryGuardBytes() == 0);
+    ++    CHECK(engine->guestCode() == GuestCode::Interpreted);
+     +}
+     +
+     +TEST_CASE("WamrEngine.runtimesShareOneNullDevice", "[vtextension][wamr]")
+    @@ src/vtextension/wasm/wamr/WamrEngine_test.cpp (new)
+     +    auto const before = openDescriptors();
+     +    auto opened = std::size_t { 0 };
+     +    {
+    -+        auto const engine = makeWamrEngine(countingOpener(opened));
+    -+        REQUIRE(engine != nullptr);
+    ++        auto const made = makeWamrEngine(WamrEngineConfig { .openNullDevice = countingOpener(opened) });
+    ++        REQUIRE(made.has_value());
+    ++        auto const& engine = *made;
+     +        CHECK(opened == 1);
+     +        auto const afterEngine = openDescriptors();
+     +
+    @@ src/vtextension/wasm/wamr/WamrEngine_test.cpp (new)
+     +
+     +TEST_CASE("WamrEngine.prepareThreadIsIdempotent", "[vtextension][wamr]")
+     +{
+    -+    auto const engine = makeWamrEngine();
+    -+    REQUIRE(engine != nullptr);
+    ++    auto const made = makeWamrEngine();
+    ++    REQUIRE(made.has_value());
+    ++    auto const& engine = *made;
+     +    // Before any runtime exists, as a host prepares its threads before it locks itself down: on a thread
+     +    // that did not bring the runtime up, and on the one that did.
+     +    auto prepared = std::vector<bool> {};
+    @@ src/vtextension/wasm/wamr/WamrEngine_test.cpp (new)
+     +    CHECK(engine->prepareThread().has_value());
+     +    CHECK(engine->prepareThread().has_value());
+     +    CHECK(engine->isCurrentThreadPrepared());
+    ++}
+    ++
+    ++TEST_CASE("WamrEngine.refusesAWamrThatCompiles", "[vtextension][wamr]")
+    ++{
+    ++    // The build's WAMR interprets only; one that could compile is refused before anything is opened, as its
+    ++    // host's sandbox would otherwise kill it, or leave its code cache executable.
+    ++    CHECK(linkedNativeCompilation() == NativeCompilation::Absent);
+    ++    auto opened = std::size_t { 0 };
+    ++    auto const made =
+    ++        makeWamrEngine(WamrEngineConfig { .openNullDevice = countingOpener(opened),
+    ++                                          .nativeCompilation = [] { return NativeCompilation::Present; } });
+    ++    REQUIRE_FALSE(made.has_value());
+    ++    CHECK(made.error() == WamrEngineError::CompilesNativeCode);
+    ++    CHECK(opened == 0);
+    ++    CHECK_FALSE(wamrEngineErrorText(made.error()).empty());
+     +}
+     
+      ## src/vtextension/wasm/wamr/WamrRuntime.hpp ##
+5:  5fdb8bfdf = 5:  22e9e4e85 build: build the extension host with whichever engine the build selected
+-:  --------- > 6:  0635a4f2b fix(vtextension): every engine withholds the CPU-time clocks alike
+-:  --------- > 7:  ffc928a09 build: refuse an installed WAMR that compiles to native code
+-:  --------- > 8:  05046ba58 build: package the extension host in the Fedora RPM
+
+=== tree diff 5fdb8bfdf..HEAD ===
+ .github/fedora/contour.spec                        |   3 +
+ cmake/ContourThirdParties.cmake                    |   6 +-
+ cmake/WamrTerminateProbe.cpp                       |   7 ++
+ src/vtextension/wasm/testing/BackendContract.hpp   |  58 +++++++++++
+ src/vtextension/wasm/wamr/CMakeLists.txt           |   4 +-
+ src/vtextension/wasm/wamr/HelperEngine.cpp         |  13 ++-
+ .../wasm/wamr/RemoteWamrEngine_test.cpp            |   9 +-
+ src/vtextension/wasm/wamr/WamrBackend.cpp          |   6 ++
+ src/vtextension/wasm/wamr/WamrEngine.cpp           |  61 ++++++++++--
+ src/vtextension/wasm/wamr/WamrEngine.hpp           |  48 +++++++--
+ src/vtextension/wasm/wamr/WamrEngine_test.cpp      |  37 +++++--
+ src/vtextension/wasm/wamr/WasiOverrides.cpp        | 110 +++++++++++++++++++++
+ src/vtextension/wasm/wamr/WasiOverrides.hpp        |  37 +++++++
+ 13 files changed, 369 insertions(+), 30 deletions(-)
+diff --git a/.github/fedora/contour.spec b/.github/fedora/contour.spec
+index 03dea8c59..6fbf44e69 100644
+--- a/.github/fedora/contour.spec
++++ b/.github/fedora/contour.spec
+@@ -156,20 +156,23 @@ cd build
+ %check
+ ./build/src/crispy/crispy_test
+ ./build/src/vtbackend/vtbackend_test
+ 
+ 
+ %files
+ %license LICENSE.txt
+ %doc README.md docs/CONTRIBUTING.md
+ %{_bindir}/*
+ %{_datadir}/*
++# The extension host, a private executable Contour starts to run extensions apart from itself: in both
++# packages, as both build extensions.
++%{_libexecdir}/contour/
+ # The daemon as a systemd user service: shipped in both packages, enabled by neither.
+ %{_prefix}/lib/systemd/user/contour-daemon.service
+ %if %{without daemon}
+ # The systemd user drop-ins that keep Contour's own unit running through an out-of-memory kill inside it:
+ # one directory per unit name the desktops' launchers use (systemd reads lib, never lib64). Desktop-only,
+ # so the daemon package has none.
+ %{_prefix}/lib/systemd/user/app-*org.contourterminal.Contour*.d/
+ %endif
+ 
+ 
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index 8c7cb1ac7..56cc3ee5b 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -201,27 +201,29 @@ set(_WAMR_PROBE_REASONS
+     "2|its runtime does not initialize"
+     "3|it does not load the probe's module"
+     "4|it does not instantiate the probe's module"
+     "5|it does not set up a call into the probe's module"
+     "6|wasm_runtime_terminate() did not stop a call (built without WAMR_BUILD_THREAD_MGR?)"
+     "7|wasm_runtime_terminate() did not stop a call (built without WAMR_BUILD_THREAD_MGR?)"
+     "8|it installs a SIGSEGV handler (built with hardware bounds checks)"
+     "9|it installs a SIGUSR1 handler (built with wakeup of blocking operations)"
+     "10|it loads a module using @FEATURE@, which extensions may not use"
+     "11|it refuses a module using @FEATURE@, which extensions may use"
++    "12|it compiles guest code to native code (built with a JIT; the extension host interprets)"
+ )
+ 
+ # ContourThirdParties_WamrTerminates(<target> <result-variable>)
+ #
+ # Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
+ # when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
+-# SIGSEGV or SIGUSR1 handler and it loads exactly the WebAssembly features extensions may use, FALSE
++# SIGSEGV or SIGUSR1 handler, it has no JIT running mode, and it loads exactly the WebAssembly features
++# extensions may use, FALSE
+ # otherwise (including when the probe cannot run, as when cross-compiling).
+ # Sets <result-variable>_REASON to why a WAMR was rejected.
+ function(ContourThirdParties_WamrTerminates target resultVar)
+     set(${resultVar} FALSE PARENT_SCOPE)
+     if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+         set(${resultVar}_REASON "it cannot be probed when cross-compiling without an emulator" PARENT_SCOPE)
+         return()
+     endif()
+     find_package(Threads QUIET)
+     try_run(_wamr_probe_run _wamr_probe_compile
+@@ -289,21 +291,21 @@ if(CONTOUR_EXTENSIONS)
+     endif()
+ 
+     if(NOT _wamr_target)
+         if(NOT CONTOUR_USE_CPM)
+             if(_wamr_rejected)
+                 set(_wamr_found "The installed WAMR was rejected: ${_wamr_rejected}.")
+             else()
+                 set(_wamr_found "None is installed.")
+             endif()
+             message(FATAL_ERROR "Could not find a usable WAMR >= ${WAMR_MINIMAL_VERSION}: one built with "
+-                "WAMR_BUILD_THREAD_MGR=1, without hardware bounds checks or wakeup of blocking operations, "
++                "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
+                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
+                 "${_wamr_found} "
+                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+         endif()
+         message(STATUS "Using CPM to fetch WAMR")
+         CPMAddPackage(
+             NAME wamr
+             VERSION ${WAMR_MINIMAL_VERSION}
+             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
+             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
+diff --git a/cmake/WamrTerminateProbe.cpp b/cmake/WamrTerminateProbe.cpp
+index a6a52c747..5903b35cd 100644
+--- a/cmake/WamrTerminateProbe.cpp
++++ b/cmake/WamrTerminateProbe.cpp
+@@ -4,20 +4,24 @@
+ // call that loops forever when another thread calls wasm_runtime_terminate(). That needs a WAMR built
+ // with WAMR_BUILD_THREAD_MGR=1; without it the interpreter never polls for termination, and the
+ // probe gives up after a few seconds instead of hanging the configure.
+ //
+ // It also rejects (exit code 8) a WAMR whose wasm_runtime_init() installs a SIGSEGV handler: one
+ // built with hardware bounds checks, which takes over the process's SIGSEGV and records process-wide
+ // signal state from every thread that prepares to run guests; and (exit code 9) one whose init
+ // installs a SIGUSR1 handler: one built with wakeup of blocking operations, which takes over SIGUSR1
+ // for the whole process. POSIX only; Windows has no sigaction.
+ //
++// It rejects (exit code 12) a WAMR with any JIT running mode (Fast JIT, LLVM JIT, multi-tier): one that
++// compiles guest code to native code, whose code cache the extension host's sandbox, made for an
++// interpreter, would either kill it for or leave executable.
++//
+ // It rejects (exit code 10) a WAMR that loads a module using a feature extensions may not use, and
+ // (exit code 11) one that refuses a feature they may use, naming the feature on standard output:
+ // src/vtextension/wasm/EngineFeatures.hpp is the table, and the modules are the ones the backend
+ // contract checks (src/vtextension/wasm/testing/FeatureModules.hpp).
+ #include <array>
+ #include <chrono>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <span>
+@@ -75,20 +79,23 @@ int main()
+ #ifndef _WIN32
+     struct sigaction after {};
+     sigaction(SIGSEGV, nullptr, &after);
+     if (after.sa_handler != before.sa_handler || after.sa_flags != before.sa_flags)
+         return 8;
+     struct sigaction usr1After {};
+     sigaction(SIGUSR1, nullptr, &usr1After);
+     if (usr1After.sa_handler != usr1Before.sa_handler || usr1After.sa_flags != usr1Before.sa_flags)
+         return 9;
+ #endif
++    for (auto const mode: { Mode_Fast_JIT, Mode_LLVM_JIT, Mode_Multi_Tier_JIT })
++        if (wasm_runtime_is_running_mode_supported(mode))
++            return 12;
+     // The first feature module WAMR gets wrong is named on standard output, for the configure's reason.
+     for (auto const& [feature, module]: vtextension::wasm::testing::FeatureModules)
+     {
+         auto const& row = vtextension::wasm::featureRow(feature);
+         if (loads(module) != (row.state == vtextension::wasm::FeatureState::On))
+         {
+             std::printf("%.*s", static_cast<int>(row.name.size()), row.name.data());
+             return row.state == vtextension::wasm::FeatureState::On ? 11 : 10;
+         }
+     }
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index a0ee5bd3d..82cb04bc5 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -1575,20 +1575,77 @@ void everyAllowedWasiFunctionWorks()
+             REQUIRE_FALSE(called.has_value());
+             CHECK(called.error() == CallFailure::Trap);
+             continue;
+         }
+         auto error = std::array<uint32_t, 1> { 0xFFFF'FFFF };
+         REQUIRE(instance->call(entry, error).has_value());
+         CHECK(error[0] == static_cast<uint32_t>(expected.error));
+     }
+ }
+ 
++/// Asks WASI's clocks: `time(clock)` calls clock_time_get(clock, 1, 64), `resolution(clock)` calls
++/// clock_res_get(clock, 64); each returns the errno.
++///
++///     (module
++///       (import "wasi_snapshot_preview1" "clock_time_get" (func $time (param i32 i64 i32) (result i32)))
++///       (import "wasi_snapshot_preview1" "clock_res_get" (func $res (param i32 i32) (result i32)))
++///       (memory (export "memory") 1)
++///       (func (export "time") (param i32) (result i32)
++///         (call $time (local.get 0) (i64.const 1) (i32.const 64)))
++///       (func (export "resolution") (param i32) (result i32)
++///         (call $res (local.get 0) (i32.const 64))))
++inline constexpr auto ClockModule = std::to_array<uint8_t>(
++    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x13, 0x03, 0x60, 0x03, 0x7f, 0x7e, 0x7f, 0x01,
++      0x7f, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x02, 0x50, 0x02, 0x16, 0x77,
++      0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76,
++      0x69, 0x65, 0x77, 0x31, 0x0e, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x67,
++      0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f,
++      0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0d, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f,
++      0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x01, 0x03, 0x03, 0x02, 0x02, 0x02, 0x05, 0x03, 0x01,
++      0x00, 0x01, 0x07, 0x1e, 0x03, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x74, 0x69,
++      0x6d, 0x65, 0x00, 0x02, 0x0a, 0x72, 0x65, 0x73, 0x6f, 0x6c, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x00, 0x03,
++      0x0a, 0x17, 0x02, 0x0b, 0x00, 0x20, 0x00, 0x42, 0x01, 0x41, 0xc0, 0x00, 0x10, 0x00, 0x0b, 0x09, 0x00,
++      0x20, 0x00, 0x41, 0xc0, 0x00, 0x10, 0x01, 0x0b });
++
++/// What clock_time_get and clock_res_get answer for each clock id of preview 1, and one past them: the
++/// realtime and monotonic clocks are provided; the CPU-time clocks are withheld (`Nosys`), as the time an
++/// instance's process or thread spent running tells of every other guest it runs beside; an unknown id is
++/// `Inval`.
++inline constexpr auto ClockOutcomes = std::to_array<std::pair<uint32_t, wasi::Errno>>({
++    { 0, wasi::Errno::Success },
++    { 1, wasi::Errno::Success },
++    { 2, wasi::Errno::Nosys },
++    { 3, wasi::Errno::Nosys },
++    { 4, wasi::Errno::Inval },
++});
++
++/// Every engine answers the same for every clock id: the CPU-time clocks withheld, whatever its own WASI
++/// would read.
++template <typename T>
++void clocksAnswerAlike()
++{
++    auto const backend = T::make();
++    auto const runtime = createRuntime(*backend);
++    auto const guard = enterThread(*backend);
++    auto const module = load(*runtime, ClockModule);
++    auto context = RecordingHostContext {};
++    auto const instance = instantiate(*module, context);
++    for (auto const& [clock, expected]: ClockOutcomes)
++        for (auto const* function: { "time", "resolution" })
++        {
++            INFO(function << "(" << clock << ")");
++            auto argv = std::array<uint32_t, 1> { clock };
++            REQUIRE(instance->call(functionOf(*instance, function), argv).has_value());
++            CHECK(argv[0] == static_cast<uint32_t>(expected));
++        }
++}
++
+ #ifndef _WIN32
+ /// The signals whose disposition a backend must leave alone.
+ inline constexpr auto GuardedSignals = std::array { SIGSEGV, SIGUSR1 };
+ 
+ /// @return The disposition of @p signal.
+ [[nodiscard]] inline struct sigaction dispositionOf(int signal)
+ {
+     struct sigaction action {};
+     REQUIRE(sigaction(signal, nullptr, &action) == 0);
+     return action;
+@@ -1675,20 +1732,21 @@ void wasiStdioGoesNowhere()
+ #define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                          \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                   \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)                \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)        \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)          \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, clocksAnswerAlike)                      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                       \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                       \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                   \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                            \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)       \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)              \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)          \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)   \
+diff --git a/src/vtextension/wasm/wamr/CMakeLists.txt b/src/vtextension/wasm/wamr/CMakeLists.txt
+index 5abcc0cb1..734e4c086 100644
+--- a/src/vtextension/wasm/wamr/CMakeLists.txt
++++ b/src/vtextension/wasm/wamr/CMakeLists.txt
+@@ -4,36 +4,38 @@
+ # scripts/check-wasm-runtime-containment.py keeps it that way.
+ 
+ add_library(vtextension_wamr STATIC
+     DefaultBackend.cpp
+     HiddenExports.cpp
+     TableCaps.cpp
+     WamrBackend.cpp
+     WamrInstance.cpp
+     WamrModule.cpp
+     WamrThreadEnv.cpp
++    WasiOverrides.cpp
+     HiddenExports.hpp
+     TableCaps.hpp
+     WamrBackend.hpp
+     WamrHandles.hpp
+     WamrRuntime.hpp
+     WamrThreadEnv.hpp
++    WasiOverrides.hpp
+ )
+ target_link_libraries(vtextension_wamr PUBLIC vtextension PRIVATE contour::wamr)
+ 
+ # The engine an extension host process drives (WamrEngine.hpp): the backend, holding the null device and the
+ # runtime it needs before the host locks itself down.
+ add_library(vtextension_wamr_engine STATIC
+     WamrEngine.cpp
+     WamrEngine.hpp
+ )
+-target_link_libraries(vtextension_wamr_engine PUBLIC vtextension_wamr vtextension_remote_wire)
++target_link_libraries(vtextension_wamr_engine PUBLIC vtextension_wamr vtextension_remote_wire PRIVATE contour::wamr)
+ 
+ # The engine the extension host executable runs (../host/HelperEngine.hpp), where it runs WAMR's
+ # (CONTOUR_EXTENSION_HOST_ENGINE, ../../../CMakeLists.txt).
+ add_library(vtextension_wamr_helper_engine STATIC
+     HelperEngine.cpp
+     ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/host/HelperEngine.hpp
+ )
+ target_link_libraries(vtextension_wamr_helper_engine PUBLIC vtextension_host PRIVATE vtextension_wamr_engine)
+ 
+ if(TARGET vtextension_test)
+diff --git a/src/vtextension/wasm/wamr/HelperEngine.cpp b/src/vtextension/wasm/wamr/HelperEngine.cpp
+index 0e981873e..3bdcf373a 100644
+--- a/src/vtextension/wasm/wamr/HelperEngine.cpp
++++ b/src/vtextension/wasm/wamr/HelperEngine.cpp
+@@ -1,23 +1,32 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The engine of the extension host executable: WAMR's, where the build selected it.
+ #include <vtextension/wasm/host/HelperEngine.hpp>
+ 
++#include <format>
++#include <utility>
++
++#include <vtextension/wasm/host/HostProcess.hpp>
+ #include <vtextension/wasm/wamr/WamrEngine.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ std::unique_ptr<IHostedEngine> makeHelperEngine()
+ {
+     // WAMR places linear memory where it chooses, so its instances copy memory wherever they run, and its
+     // Hello says so. Every engine shares WAMR's one process-wide state.
+-    return wamr::makeWamrEngine();
++    auto engine = wamr::makeWamrEngine();
++    if (engine)
++        return std::move(*engine);
++    // Why, before the host ends for the engine it lacks.
++    tellOnStandardError(std::format("no engine: {}", wamr::wamrEngineErrorText(engine.error())));
++    return nullptr;
+ }
+ 
+ std::unique_ptr<IHostedEngine> makeCopyingHelperEngine()
+ {
+-    return wamr::makeWamrEngine();
++    return makeHelperEngine();
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp b/src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp
+index 733ce996a..ebf272509 100644
+--- a/src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp
++++ b/src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp
+@@ -20,20 +20,21 @@ namespace
+ /// Hosts in this process on the WAMR engine, whose memory is copied to the parent.
+ struct RemoteWamrTraits
+ {
+     [[nodiscard]] static std::unique_ptr<vtextension::wasm::IWasmBackend> make()
+     {
+         using namespace vtextension::wasm;
+         // One kind for every backend made here, as a program composes one.
+         static auto const kind = remote::makeRemoteKindState();
+         return remote::makeRemoteBackend(
+             kind,
+-            BackendConfig { .timeouts = {},
+-                            .connector = std::make_shared<host::InProcessHostConnector>(
+-                                [] { return wamr::makeWamrEngine(); }, host::HostServerConfig {}),
+-                            .lockdown = LockdownRequirement::AcceptUnsandboxed });
++            BackendConfig {
++                .timeouts = {},
++                .connector = std::make_shared<host::InProcessHostConnector>(
++                    [] { return wamr::makeWamrEngine().value_or(nullptr); }, host::HostServerConfig {}),
++                .lockdown = LockdownRequirement::AcceptUnsandboxed });
+     }
+ };
+ 
+ } // namespace
+ 
+ CONTOUR_WASM_BACKEND_CONTRACT(RemoteWamrTraits)
+diff --git a/src/vtextension/wasm/wamr/WamrBackend.cpp b/src/vtextension/wasm/wamr/WamrBackend.cpp
+index 0c3ce6c4a..d36ec14bc 100644
+--- a/src/vtextension/wasm/wamr/WamrBackend.cpp
++++ b/src/vtextension/wasm/wamr/WamrBackend.cpp
+@@ -14,20 +14,21 @@
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <wasm_export.h>
+ 
+ #include <vtextension/wasm/wamr/WamrHandles.hpp>
+ #include <vtextension/wasm/wamr/WamrRuntime.hpp>
+ #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
++#include <vtextension/wasm/wamr/WasiOverrides.hpp>
+ 
+ #ifdef _WIN32
+     #include <Windows.h>
+ #else
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ namespace vtextension::wasm::wamr
+ {
+@@ -203,20 +204,25 @@ std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> WamrRuntime::create(
+     // WAMR caps a table at MaxTableElements at the least (TableCaps.hpp): a higher cap it would not keep.
+     if (limits.tableElements > MaxTableElements)
+         return std::unexpected(ExtensionError::RuntimeUnavailable);
+     auto device = nullDevice.forRuntime();
+     if (!device)
+         return std::unexpected(device.error());
+     if (auto acquired = acquireRuntime(); !acquired)
+         return std::unexpected(acquired.error());
+ 
+     detail::installMemoryGrowthHandler();
++    if (!detail::registerWasiOverrides())
++    {
++        releaseRuntime();
++        return std::unexpected(ExtensionError::RuntimeUnavailable);
++    }
+     auto hostRegistrations = HostRegistrations::create(hostFunctions);
+     if (!hostRegistrations)
+     {
+         releaseRuntime();
+         return std::unexpected(ExtensionError::RuntimeUnavailable);
+     }
+ 
+     try
+     {
+         return std::make_shared<WamrRuntime>(
+diff --git a/src/vtextension/wasm/wamr/WamrEngine.cpp b/src/vtextension/wasm/wamr/WamrEngine.cpp
+index d3afa5c96..62de2eee0 100644
+--- a/src/vtextension/wasm/wamr/WamrEngine.cpp
++++ b/src/vtextension/wasm/wamr/WamrEngine.cpp
+@@ -1,31 +1,51 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/wamr/WamrEngine.hpp>
+ 
++#include <algorithm>
++#include <array>
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <optional>
+ #include <span>
++#include <string_view>
+ #include <utility>
+ 
++#include <wasm_export.h>
++
+ #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+ 
+ namespace vtextension::wasm::wamr
+ {
+ 
+ namespace
+ {
+     /// The thread environment prepareThread() entered on the calling thread: kept until the thread ends,
+     /// whose exit ends it there. WAMR's state is the process's, so one per thread serves every engine.
+     thread_local std::optional<ThreadEnv> preparedThread;
+ 
++    /// The text of each WamrEngineError.
++    struct ErrorText
++    {
++        WamrEngineError error;
++        std::string_view text;
++    };
++
++    constexpr auto ErrorTexts = std::array {
++        ErrorText { WamrEngineError::CompilesNativeCode,
++                    "its engine was built to compile code at run time, which this extension host's sandbox "
++                    "forbids; it needs one that interprets" },
++        ErrorText { WamrEngineError::RuntimeUnavailable, "its engine could not be initialized" },
++        ErrorText { WamrEngineError::NullDeviceUnavailable, "the null device could not be opened" },
++    };
++
+     /// A WAMR backend holding WAMR's runtime up for as long as it lives.
+     class WamrEngine final: public host::IHostedEngine
+     {
+         struct PrivateTag
+         {
+         };
+ 
+       public:
+         /// Takes a hold on WAMR's runtime for the engine.
+         /// @param backend The backend it is a facade over.
+@@ -114,23 +134,46 @@ namespace
+             preparedThread.reset();
+             return ThreadEnv::enter().transform(
+                 [](ThreadEnv entered) { preparedThread.emplace(std::move(entered)); });
+         }
+ 
+       private:
+         std::unique_ptr<IWasmBackend> _backend;
+     };
+ } // namespace
+ 
+-std::unique_ptr<host::IHostedEngine> makeWamrEngine(NullDeviceOpener const& openNullDevice)
++NativeCompilation linkedNativeCompilation() noexcept
++{
++    auto const compiles =
++        std::ranges::any_of(std::array { Mode_Fast_JIT, Mode_LLVM_JIT, Mode_Multi_Tier_JIT },
++                            &wasm_runtime_is_running_mode_supported);
++    return compiles ? NativeCompilation::Present : NativeCompilation::Absent;
++}
++
++std::string_view wamrEngineErrorText(WamrEngineError error) noexcept
++{
++    auto const row = std::ranges::find(ErrorTexts, error, &ErrorText::error);
++    return row != ErrorTexts.end() ? row->text : std::string_view { "the engine could not be made" };
++}
++
++std::expected<std::unique_ptr<host::IHostedEngine>, WamrEngineError> makeWamrEngine(
++    WamrEngineConfig const& config)
+ {
+-    auto engine = NullDevice::openShared(openNullDevice)
+-                      .transform([](NullDevice nullDevice) {
+-                          return makeWamrBackend(WamrConfig { .nullDevice = std::move(nullDevice) });
+-                      })
+-                      .and_then(&WamrEngine::create);
+-    if (!engine)
+-        return nullptr;
+-    return std::move(*engine);
++    // Checked before anything is opened: an engine that could compile would hold, or need, executable memory
++    // that its host's sandbox, made for an interpreter, refuses.
++    if (config.nativeCompilation() != NativeCompilation::Absent)
++        return std::unexpected(WamrEngineError::CompilesNativeCode);
++    return NullDevice::openShared(config.openNullDevice)
++        .transform_error([](ExtensionError) { return WamrEngineError::NullDeviceUnavailable; })
++        .transform([](NullDevice nullDevice) {
++            return makeWamrBackend(WamrConfig { .nullDevice = std::move(nullDevice) });
++        })
++        .and_then([](std::unique_ptr<IWasmBackend> backend) {
++            return WamrEngine::create(std::move(backend))
++                .transform([](std::unique_ptr<WamrEngine> engine) -> std::unique_ptr<host::IHostedEngine> {
++                    return engine;
++                })
++                .transform_error([](ExtensionError) { return WamrEngineError::RuntimeUnavailable; });
++        });
+ }
+ 
+ } // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrEngine.hpp b/src/vtextension/wasm/wamr/WamrEngine.hpp
+index 9be96be0b..97a76266a 100644
+--- a/src/vtextension/wasm/wamr/WamrEngine.hpp
++++ b/src/vtextension/wasm/wamr/WamrEngine.hpp
+@@ -1,28 +1,64 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The WAMR engine an extension host process drives (host::IHostedEngine): the WAMR backend, interpreting its
+ // modules, set up for a host that locks itself down once its threads are prepared.
+ #pragma once
+ 
++#include <cstdint>
++#include <expected>
++#include <functional>
+ #include <memory>
++#include <string_view>
+ 
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/wamr/WamrBackend.hpp>
+ 
+ namespace vtextension::wasm::wamr
+ {
+ 
++/// Whether a WAMR can compile guest code to native code.
++enum class NativeCompilation : uint8_t
++{
++    Absent,  ///< It interprets only.
++    Present, ///< It has a JIT running mode: Fast JIT, LLVM JIT, or both tiered.
++};
++
++/// @return Whether the WAMR this process links has a JIT running mode.
++[[nodiscard]] NativeCompilation linkedNativeCompilation() noexcept;
++
++/// Why no WAMR engine was made.
++enum class WamrEngineError : uint8_t
++{
++    CompilesNativeCode,    ///< The WAMR can compile to native code, which the engine claims never to run.
++    RuntimeUnavailable,    ///< WAMR could not initialize.
++    NullDeviceUnavailable, ///< The null device could not be opened.
++};
++
++/// @param error Why no engine was made.
++/// @return The reason, user-readable: it names the extension host's engine, never the runtime.
++[[nodiscard]] std::string_view wamrEngineErrorText(WamrEngineError error) noexcept;
++
++/// How a WAMR engine is made.
++struct WamrEngineConfig
++{
++    /// Opens the null device, once.
++    NullDeviceOpener openNullDevice = systemNullDeviceOpener();
++    /// Says whether the linked WAMR compiles to native code.
++    std::function<NativeCompilation()> nativeCompilation = &linkedNativeCompilation;
++};
++
+ /// Creates the WAMR engine of an extension host process.
+ ///
+ /// Everything it needs of the system it takes here, before the host locks itself down: one null device,
+ /// which every runtime it creates shares, and a hold on WAMR's process-wide runtime for as long as it lives,
+ /// so that its threads can be prepared before any runtime exists. Its instances' memory is copied to the
+ /// parent (MemoryMode::Copy), as WAMR places a linear memory where it chooses, and it needs no guard
+-/// (memoryGuardBytes() is 0). prepareThread() enters WAMR's thread environment on the calling thread, which
+-/// keeps it until it ends.
+-/// @param openNullDevice Opens the null device, once.
+-/// @return The engine; null if WAMR could not initialize or the null device could not be opened.
+-[[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWamrEngine(
+-    NullDeviceOpener const& openNullDevice = systemNullDeviceOpener());
++/// (memoryGuardBytes() is 0). It interprets (GuestCode::Interpreted), and so refuses a WAMR that could
++/// compile. prepareThread() enters WAMR's thread environment on the calling thread, which keeps it until it
++/// ends.
++/// @param config How it is made.
++/// @return The engine; why none was made otherwise.
++[[nodiscard]] std::expected<std::unique_ptr<host::IHostedEngine>, WamrEngineError> makeWamrEngine(
++    WamrEngineConfig const& config = {});
+ 
+ } // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrEngine_test.cpp b/src/vtextension/wasm/wamr/WamrEngine_test.cpp
+index 88db77721..b2c2b5b32 100644
+--- a/src/vtextension/wasm/wamr/WamrEngine_test.cpp
++++ b/src/vtextension/wasm/wamr/WamrEngine_test.cpp
+@@ -18,25 +18,31 @@
+ 
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/wamr/WamrBackend.hpp>
+ #include <vtextension/wasm/wamr/WamrEngine.hpp>
+ #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+ 
+ namespace contract = vtextension::wasm::testing::contract;
+ using vtextension::wasm::IWasmRuntime;
++using vtextension::wasm::host::GuestCode;
+ using vtextension::wasm::remote::proto::MemoryMode;
++using vtextension::wasm::wamr::linkedNativeCompilation;
+ using vtextension::wasm::wamr::makeWamrEngine;
++using vtextension::wasm::wamr::NativeCompilation;
+ using vtextension::wasm::wamr::NullDeviceOpener;
+ using vtextension::wasm::wamr::systemNullDeviceOpener;
+ using vtextension::wasm::wamr::ThreadEnv;
++using vtextension::wasm::wamr::WamrEngineConfig;
++using vtextension::wasm::wamr::WamrEngineError;
++using vtextension::wasm::wamr::wamrEngineErrorText;
+ 
+ namespace
+ {
+ 
+ /// @return An opener of the system's null device that counts its calls in @p opened.
+ [[nodiscard]] NullDeviceOpener countingOpener(std::size_t& opened)
+ {
+     return [&opened, open = systemNullDeviceOpener()] {
+         ++opened;
+         return open();
+@@ -51,33 +57,36 @@ namespace
+     return std::distance(std::filesystem::begin(entries), std::filesystem::end(entries));
+ #else
+     return std::nullopt;
+ #endif
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("WamrEngine.copiesMemory", "[vtextension][wamr]")
+ {
+-    auto const engine = makeWamrEngine();
+-    REQUIRE(engine != nullptr);
++    auto const made = makeWamrEngine();
++    REQUIRE(made.has_value());
++    auto const& engine = *made;
+     CHECK(engine->memoryMode() == MemoryMode::Copy);
+     CHECK(engine->memoryGuardBytes() == 0);
++    CHECK(engine->guestCode() == GuestCode::Interpreted);
+ }
+ 
+ TEST_CASE("WamrEngine.runtimesShareOneNullDevice", "[vtextension][wamr]")
+ {
+     auto const before = openDescriptors();
+     auto opened = std::size_t { 0 };
+     {
+-        auto const engine = makeWamrEngine(countingOpener(opened));
+-        REQUIRE(engine != nullptr);
++        auto const made = makeWamrEngine(WamrEngineConfig { .openNullDevice = countingOpener(opened) });
++        REQUIRE(made.has_value());
++        auto const& engine = *made;
+         CHECK(opened == 1);
+         auto const afterEngine = openDescriptors();
+ 
+         // Three runtimes, each instantiating a module that imports WASI, which binds the device: none opens
+         // another, so a host that can no longer open one still runs them.
+         auto runtimes = std::vector<std::shared_ptr<IWasmRuntime>> {};
+         auto context = contract::RecordingHostContext {};
+         for ([[maybe_unused]] auto const index: { 0, 1, 2 })
+         {
+             auto const& runtime = runtimes.emplace_back(contract::createRuntime(*engine));
+@@ -86,29 +95,45 @@ TEST_CASE("WamrEngine.runtimesShareOneNullDevice", "[vtextension][wamr]")
+         }
+         CHECK(opened == 1);
+         CHECK(openDescriptors() == afterEngine);
+     }
+     // ... and it is closed with the engine and the last runtime.
+     CHECK(openDescriptors() == before);
+ }
+ 
+ TEST_CASE("WamrEngine.prepareThreadIsIdempotent", "[vtextension][wamr]")
+ {
+-    auto const engine = makeWamrEngine();
+-    REQUIRE(engine != nullptr);
++    auto const made = makeWamrEngine();
++    REQUIRE(made.has_value());
++    auto const& engine = *made;
+     // Before any runtime exists, as a host prepares its threads before it locks itself down: on a thread
+     // that did not bring the runtime up, and on the one that did.
+     auto prepared = std::vector<bool> {};
+     auto worker = std::thread { [&] {
+         for ([[maybe_unused]] auto const index: { 0, 1 })
+         {
+             auto const result = engine->prepareThread();
+             prepared.push_back(result.has_value() && engine->isCurrentThreadPrepared());
+         }
+         prepared.push_back(ThreadEnv::preparedGeneration() == engine->runtimeGeneration());
+     } };
+     worker.join();
+     CHECK(prepared == std::vector { true, true, true });
+     CHECK(engine->prepareThread().has_value());
+     CHECK(engine->prepareThread().has_value());
+     CHECK(engine->isCurrentThreadPrepared());
+ }
++
++TEST_CASE("WamrEngine.refusesAWamrThatCompiles", "[vtextension][wamr]")
++{
++    // The build's WAMR interprets only; one that could compile is refused before anything is opened, as its
++    // host's sandbox would otherwise kill it, or leave its code cache executable.
++    CHECK(linkedNativeCompilation() == NativeCompilation::Absent);
++    auto opened = std::size_t { 0 };
++    auto const made =
++        makeWamrEngine(WamrEngineConfig { .openNullDevice = countingOpener(opened),
++                                          .nativeCompilation = [] { return NativeCompilation::Present; } });
++    REQUIRE_FALSE(made.has_value());
++    CHECK(made.error() == WamrEngineError::CompilesNativeCode);
++    CHECK(opened == 0);
++    CHECK_FALSE(wamrEngineErrorText(made.error()).empty());
++}
+diff --git a/src/vtextension/wasm/wamr/WasiOverrides.cpp b/src/vtextension/wasm/wamr/WasiOverrides.cpp
+new file mode 100644
+index 000000000..e3e2507b9
+--- /dev/null
++++ b/src/vtextension/wasm/wamr/WasiOverrides.cpp
+@@ -0,0 +1,110 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/wamr/WasiOverrides.hpp>
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <mutex>
++#include <ranges>
++#include <span>
++#include <utility>
++
++#include <wasm_export.h>
++
++#include <vtextension/wasm/WasiAllowList.hpp>
++#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
++#include <vtextension/wasm/wasi/Preview1Signatures.hpp>
++#include <vtextension/wasm/wasi/SystemEnvironment.hpp>
++
++namespace vtextension::wasm::wamr
++{
++
++namespace
++{
++    /// @return Where the overrides read clocks and random bytes: the system's, as the shim's every caller.
++    [[nodiscard]] wasi::ShimEnvironment const& environment()
++    {
++        static auto const system = wasi::systemEnvironment();
++        return system;
++    }
++
++    /// @return The linear memory of the instance @p execEnv runs; empty if it has none.
++    [[nodiscard]] std::span<std::byte> guestMemory(wasm_exec_env_t execEnv) noexcept
++    {
++        auto* const memory = wasm_runtime_get_default_memory(wasm_runtime_get_module_inst(execEnv));
++        if (!memory)
++            return {};
++        auto const bytes = wasm_memory_get_cur_page_count(memory) * wasm_memory_get_bytes_per_page(memory);
++        return { static_cast<std::byte*>(wasm_memory_get_base_address(memory)),
++                 static_cast<std::size_t>(bytes) };
++    }
++
++    /// The raw native WasiOverrides[Index] is registered as: its arguments in WAMR's 64-bit slots, each
++    /// zero-extended to its type as the shim takes them, and its errno written back into the first slot,
++    /// where WAMR reads an i32 result.
++    template <std::size_t Index>
++    void shimTrampoline(wasm_exec_env_t execEnv, uint64_t* rawArguments) noexcept
++    {
++        static auto const* const function = wasi::findShimFunction(WasiOverrides.at(Index).name);
++        auto const parameters = function->preview1.parameters();
++        uint64_t* const first = rawArguments; // WAMR's slots, of WAMR's type.
++        auto const slots = std::span { first, parameters.size() };
++        auto arguments = std::array<uint64_t, wasi::MaxPreview1Parameters> {};
++        std::ranges::transform(slots, parameters, arguments.begin(), [](uint64_t slot, ValueType type) {
++            return type == ValueType::I32 ? (slot & 0xFFFF'FFFF) : slot;
++        });
++        auto const result = function->call(
++            environment(), guestMemory(execEnv), std::span { arguments }.first(parameters.size()));
++        auto const error = static_cast<uint32_t>(result.error);
++        std::memcpy(first, &error, sizeof(error));
++    }
++
++    /// A raw native, of the very type WAMR calls it through.
++    using RawNative = void (*)(wasm_exec_env_t, uint64_t*);
++
++    template <std::size_t... Indices>
++    [[nodiscard]] consteval auto makeTrampolines(std::index_sequence<Indices...> /*indices*/)
++    {
++        return std::array<RawNative, sizeof...(Indices)> { &shimTrampoline<Indices>... };
++    }
++
++    /// The trampolines, indexed as WasiOverrides.
++    constexpr auto Trampolines = makeTrampolines(std::make_index_sequence<WasiOverrides.size()> {});
++
++    /// What WAMR holds while registered, which it sorts in place: lives as long as the process.
++    [[nodiscard]] std::array<NativeSymbol, WasiOverrides.size()>& symbols()
++    {
++        static auto table = [] {
++            auto entries = std::array<NativeSymbol, WasiOverrides.size()> {};
++            for (auto const index: std::views::iota(std::size_t { 0 }, WasiOverrides.size()))
++                entries.at(index) = NativeSymbol { .symbol = WasiOverrides.at(index).name.data(),
++                                                   .func_ptr = reinterpret_cast<void*>(Trampolines.at(index)),
++                                                   .signature = WasiOverrides.at(index).signature,
++                                                   .attachment = nullptr };
++            return entries;
++        }();
++        return table;
++    }
++} // namespace
++
++namespace detail
++{
++    bool registerWasiOverrides()
++    {
++        static auto mutex = std::mutex {};
++        static auto registeredFor = uint64_t { 0 };
++        auto const lock = std::scoped_lock { mutex };
++        if (registeredFor == runtimeGeneration())
++            return true;
++        auto& table = symbols();
++        if (!wasm_runtime_register_natives_raw(
++                WasiModule.data(), table.data(), static_cast<uint32_t>(table.size())))
++            return false;
++        registeredFor = runtimeGeneration();
++        return true;
++    }
++} // namespace detail
++
++} // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WasiOverrides.hpp b/src/vtextension/wasm/wamr/WasiOverrides.hpp
+new file mode 100644
+index 000000000..452aba955
+--- /dev/null
++++ b/src/vtextension/wasm/wamr/WasiOverrides.hpp
+@@ -0,0 +1,37 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Internal to the WAMR backend: the WASI functions whose answer WAMR's own WASI would give otherwise than
++// every engine must, answered by the shim (../wasi/Preview1Shim.hpp) instead.
++#pragma once
++
++#include <array>
++#include <string_view>
++
++namespace vtextension::wasm::wamr
++{
++
++/// One WASI function the shim answers in WAMR's place, and its signature in WAMR's notation.
++struct WasiOverride
++{
++    std::string_view name; ///< The function, as AllowedWasiFunctions names it.
++    char const* signature; ///< Its signature in WAMR's notation, NUL-terminated.
++};
++
++/// The overridden functions. WAMR reads the CPU-time clocks (preview 1's ids 2 and 3) where the shim
++/// withholds them, as the time a process or thread spent running tells of every guest it runs beside, and the
++/// extension host's filter refuses clock_getres() for them.
++inline constexpr auto WasiOverrides = std::array {
++    WasiOverride { .name = "clock_time_get", .signature = "(iIi)i" },
++    WasiOverride { .name = "clock_res_get", .signature = "(ii)i" },
++};
++
++namespace detail
++{
++    /// Registers the overrides with the running runtime, once per bring-up (WAMR drops every registration as
++    /// it goes): newer than WAMR's own WASI, so that a module importing one links to the shim's. Call while
++    /// holding the runtime up.
++    /// @return Whether WAMR took them.
++    [[nodiscard]] bool registerWasiOverrides();
++} // namespace detail
++
++} // namespace vtextension::wasm::wamr

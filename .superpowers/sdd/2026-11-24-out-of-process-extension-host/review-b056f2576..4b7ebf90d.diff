@@ -1,0 +1,1005 @@
+# Review package: b056f2576..HEAD
+
+## Commits
+4b7ebf90d fix(vtextension): refuse a forged grant without closing what it names
+ec5bd6e2d fix(vtextension): size no memory object at 0 for a cap near the top
+
+## Files changed
+ .../wasm/remote/process/testing/LaunchProbe.cpp    |  24 ++--
+ src/vtextension/wasm/remote/proto/Codec_test.cpp   |   6 +
+ src/vtextension/wasm/remote/proto/Pdu.hpp          |  11 +-
+ src/vtextension/wasm/remote/transport/Channel.hpp  |   9 +-
+ .../wasm/remote/transport/Channel_posix.cpp        |   5 +-
+ .../wasm/remote/transport/HandleGrant.hpp          | 133 +++++++++++++++++----
+ .../wasm/remote/transport/HandleGrant_posix.cpp    |  21 ++--
+ .../wasm/remote/transport/HandleGrant_test.cpp     | 101 +++++++++++++++-
+ .../wasm/remote/transport/HandleGrant_win32.cpp    |  46 ++++---
+ .../wasm/remote/transport/PduStream.cpp            |   1 +
+ .../wasm/remote/transport/PduStream.hpp            |   2 +-
+ .../wasm/remote/transport/PduStream_test.cpp       |  83 +++++++++++++
+ 12 files changed, 374 insertions(+), 68 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index 6c847694d..4280f4708 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -11,21 +11,22 @@
+ // as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
+ //
+ // With --parent, it is a hosting process of its own instead: bound to its parent likewise, it starts a
+ // supervisor and has it start the helper executable, as Contour does, and once the helper said Hello sends
+ // `helper=<pid>` and `end` lines on its control channel, and then waits for that channel to end -- or to be
+ // killed, which is what the tests of a helper outliving its parent do.
+ //
+ // With --receive-grant, it is the helper side of a handle grant: bound to its parent likewise, it reads one
+ // Instantiate off its control channel, claims the handle it names, maps it as the object it promises, and
+ // writes `probe` at its start. It reports `granted=ok`, or `granted=refused` if any of that failed, and `end`
+-// on its first lane, then waits for its control channel to end.
++// on its first lane; then `heard` and `end` there once another PDU arrives on control, and waits for its
++// control channel to end.
+ //
+ // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
+ // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
+ // `other`; (POSIX) `pid=` its process id and `sid=` its session's; `caps=` `apply` or `skip` as
+ // the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
+ // descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+ #include <core/Clock.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+@@ -313,28 +314,26 @@ constexpr auto GrantMark = std::string_view { "probe" };
+ [[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> takeGrant(
+     vtextension::wasm::remote::transport::PduStream& control,
+     vtextension::wasm::remote::proto::Instantiate const& request)
+ {
+     namespace transport = vtextension::wasm::remote::transport;
+     auto handle = transport::claimGrantedHandle(control, request.memory.handle);
+     if (!handle)
+         return std::nullopt;
+     auto mapping = transport::SharedMapping::map(
+         handle->get(), request.memory.objectBytes, transport::MapAccess::ReadWrite);
++    // A claim that is not the object is let go as the claim lets go: on Windows never closed, as it may name
++    // a handle of this process's own.
+     if (!mapping)
+-    {
+-#ifdef _WIN32
+-        // A value that names no such object may name a handle of this process's own: let go, never closed.
+-        std::ignore = handle->release();
+-#endif
+         return std::nullopt;
+-    }
++    // The object, proved: the mapping keeps it, and the handle is closed.
++    std::ignore = std::move(*handle).adopt();
+     auto const first =
+         std::min<uint64_t>(request.memory.objectBytes, vtextension::wasm::remote::proto::WasmPageBytes);
+     if (GrantMark.size() > first || !mapping->commit(0, first))
+         return std::nullopt;
+     std::ranges::copy(std::as_bytes(std::span { GrantMark }), mapping->bytes().begin());
+     return *std::move(mapping);
+ }
+ 
+ /// Takes one grant, reports how it went on the first lane, then waits for its control channel to end.
+ [[nodiscard]] ProbeExit receiveGrant(std::span<std::string_view const> arguments)
+@@ -356,23 +355,30 @@ constexpr auto GrantMark = std::string_view { "probe" };
+                                                   remote::proto::Direction::ToHelper,
+                                                   remote::proto::PduLimits {} };
+ 
+     auto const request = control.receive();
+     auto const* const instantiate = request ? std::get_if<remote::proto::Instantiate>(&*request) : nullptr;
+     auto const mapping =
+         instantiate ? takeGrant(control, *instantiate) : std::optional<remote::transport::SharedMapping> {};
+     auto const text = std::format("granted={}\nend\n", mapping ? "ok" : "refused");
+     if (!lane->send(std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() }))
+         return ProbeExit::ReportFailed;
+-    // Mapped until the parent is done with it: whatever arrives is ignored.
+-    while (control.receive())
++    // Mapped until the parent is done with it. The first PDU that arrives next is reported as heard: the
++    // control channel survived the grant, whatever it named.
++    if (control.receive())
+     {
++        constexpr auto Heard = std::string_view { "heard\nend\n" };
++        if (!lane->send(std::span { reinterpret_cast<uint8_t const*>(Heard.data()), Heard.size() }))
++            return ProbeExit::ReportFailed;
++        while (control.receive())
++        {
++        }
+     }
+     return ProbeExit::Reported;
+ }
+ 
+ } // namespace
+ 
+ // The third parameter is what POSIX systems pass and Windows' C runtime passes too: the environment, read
+ // without a global.
+ int main(int argc, char const* argv[], char const* envp[])
+ {
+diff --git a/src/vtextension/wasm/remote/proto/Codec_test.cpp b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+index 1bafd45d4..15b16bdaa 100644
+--- a/src/vtextension/wasm/remote/proto/Codec_test.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+@@ -548,20 +548,26 @@ TEST_CASE("PduCodec.memoryObjectBytes", "[vtextension]")
+ {
+     constexpr auto KiB = uint64_t { 1024 };
+     constexpr auto MiB = 1024 * KiB;
+     STATIC_CHECK(WasmPageBytes == 64 * KiB);
+     STATIC_CHECK(memoryObjectBytes(0) == 64 * KiB);
+     STATIC_CHECK(memoryObjectBytes(1) == 64 * KiB);
+     STATIC_CHECK(memoryObjectBytes(64 * KiB) == 64 * KiB);
+     STATIC_CHECK(memoryObjectBytes((64 * KiB) + 1) == 128 * KiB);
+     STATIC_CHECK(memoryObjectBytes(32 * MiB) == 32 * MiB);
+     STATIC_CHECK(memoryObjectBytes((32 * MiB) + 1) == (32 * MiB) + (64 * KiB));
++    // No cap wraps around to 0, which names a copy-mode host.
++    STATIC_CHECK(memoryObjectBytes(UINT64_MAX) == MaxMemoryObjectBytes);
++    STATIC_CHECK(memoryObjectBytes(MaxMemoryObjectBytes + 1) == MaxMemoryObjectBytes);
++    STATIC_CHECK(memoryObjectBytes(MaxMemoryObjectBytes) == MaxMemoryObjectBytes);
++    STATIC_CHECK(MaxMemoryObjectBytes % WasmPageBytes == 0);
++    STATIC_CHECK(MaxMemoryObjectBytes > UINT64_MAX - WasmPageBytes);
+ }
+ 
+ TEST_CASE("PduCodec.mutatedFramesNeverCrash", "[vtextension]")
+ {
+     auto const all = samples();
+     auto const frames =
+         std::ranges::to<std::vector<std::vector<uint8_t>>>(all | std::views::transform(encoded));
+     constexpr auto Seeds = std::array { uint32_t { 0x5eed } };
+     for (auto const seed: Seeds)
+     {
+diff --git a/src/vtextension/wasm/remote/proto/Pdu.hpp b/src/vtextension/wasm/remote/proto/Pdu.hpp
+index 6e6ab835b..bbeca4a98 100644
+--- a/src/vtextension/wasm/remote/proto/Pdu.hpp
++++ b/src/vtextension/wasm/remote/proto/Pdu.hpp
+@@ -22,27 +22,32 @@
+ 
+ namespace vtextension::wasm::remote::proto
+ {
+ 
+ /// The protocol version both ends must speak; the helper states it in its Hello.
+ inline constexpr uint32_t ProtocolVersion = 3;
+ 
+ /// The size of a guest's memory page: what guest memory grows by, and what its object is rounded up to.
+ inline constexpr uint64_t WasmPageBytes = uint64_t { 64 } * 1024;
+ 
++/// The largest object memoryObjectBytes() sizes: the most whole guest pages a 64-bit size holds.
++inline constexpr uint64_t MaxMemoryObjectBytes = (UINT64_MAX / WasmPageBytes) * WasmPageBytes;
++
+ /// The size of the shared object that holds an instance's memory under a cap of @p capBytes: the cap rounded
+ /// up to a whole guest page, and at least one page, so that an instance without memory still has an object.
+-/// @param capBytes The most bytes the instance's memory may grow to; below 2^64 - WasmPageBytes.
+-/// @return The object's size in bytes.
++/// A cap past MaxMemoryObjectBytes sizes it at that, rather than wrap to 0, which names no object.
++/// @param capBytes The most bytes the instance's memory may grow to.
++/// @return The object's size in bytes: a whole number of guest pages, never 0.
+ [[nodiscard]] constexpr uint64_t memoryObjectBytes(uint64_t capBytes) noexcept
+ {
+-    auto const pages = (capBytes / WasmPageBytes) + (capBytes % WasmPageBytes != 0 ? 1 : 0);
++    auto const cap = capBytes < MaxMemoryObjectBytes ? capBytes : MaxMemoryObjectBytes;
++    auto const pages = (cap / WasmPageBytes) + (cap % WasmPageBytes != 0 ? 1 : 0);
+     return (pages == 0 ? 1 : pages) * WasmPageBytes;
+ }
+ 
+ /// The most values a Call carries as arguments, or a CallResult as results.
+ inline constexpr std::size_t MaxCallValues = 64;
+ 
+ /// The most arguments a CallHost carries: the most parameters a host function takes, on every engine.
+ inline constexpr std::size_t MaxHostParameters = wasm::MaxHostParameters;
+ 
+ // The most elements each list a PDU carries may hold, checked against its count before any element is read:
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index 4e7b9037f..e4263ff74 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -16,20 +16,23 @@
+ #include <vector>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ /// Why a channel operation failed.
+ enum class ChannelError : uint8_t
+ {
+     Closed, ///< The peer closed its end, or this end was shut down.
+     Io,     ///< The operating system reported any other failure.
++    /// The peer attached what no message carries: more descriptors than a receive takes in, or ancillary
++    /// data other than descriptors (receiveSomeWithHandles()).
++    Refused,
+ };
+ 
+ #ifdef _WIN32
+ /// The operating system's name for one end: a pipe HANDLE.
+ using NativeHandle = void*;
+ #else
+ /// The operating system's name for one end: a socket descriptor.
+ using NativeHandle = int;
+ #endif
+ 
+@@ -91,23 +94,23 @@ class Channel
+     /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
+     [[nodiscard]] std::expected<void, ChannelError> sendWithHandle(std::span<uint8_t const> bytes,
+                                                                    NativeHandle handle);
+ 
+     /// Receives at least one byte, as receiveSome() does, and installs the descriptors attached to them,
+     /// close-on-exec. At most two are taken in at once, so that a reader tells a peer that attached one
+     /// more than a message may carry from one that did not; past that, the system truncates them, and the
+     /// receive fails.
+     /// @param buffer Where the bytes go. Not empty.
+     /// @param handles Where the descriptors that arrived are appended, now the caller's.
+-    /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Io` if the system truncated
+-    ///         what was attached, or something other than descriptors was, every descriptor received then
+-    ///         closed.
++    /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Refused` if the system
++    ///         truncated what was attached, or something other than descriptors was, every descriptor
++    ///         received then closed; `Io` if a received descriptor could not be made close-on-exec.
+     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSomeWithHandles(
+         std::span<uint8_t> buffer, std::vector<OwnedHandle>& handles);
+ #endif
+ 
+     /// Ends the stream, both ways and for both ends: a receive or send blocked on this end now, from any
+     /// thread, returns `Closed`, as does every later one; and the peer's stream ends as if this end were
+     /// closed, so that its receives return `Closed` once they drained what was sent before, and its sends
+     /// return `Closed`. Idempotent and thread-safe.
+     ///
+     /// On POSIX the descriptor stays open until the channel is destroyed. On Windows, where nothing short of
+diff --git a/src/vtextension/wasm/remote/transport/Channel_posix.cpp b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+index 73e7b1763..6a267807b 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+@@ -229,43 +229,46 @@ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::sp
+     auto received = ssize_t { 0 };
+     do
+         received = ::recvmsg(_native->descriptor, &message, ReceiveFlags);
+     while (received == -1 && errno == EINTR);
+     if (received == -1)
+         return std::unexpected(channelErrorOf(errno));
+ 
+     // Owned at once, so that every one is closed should any part of the message be refused.
+     auto arrived = std::vector<OwnedHandle> {};
+     auto foreign = false;
++    auto unconfigured = false;
+     for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header))
+     {
+         if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
+             || header->cmsg_len < CMSG_LEN(0))
+         {
+             foreign = true;
+             continue;
+         }
+         auto const count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+         for (auto const index: std::views::iota(std::size_t { 0 }, std::min(count, MaxReceivedHandles)))
+         {
+             auto descriptor = -1;
+             std::memcpy(&descriptor, CMSG_DATA(header) + (index * sizeof(int)), sizeof(int));
+             arrived.emplace_back(descriptor);
+ #ifndef MSG_CMSG_CLOEXEC
+             if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1)
+-                foreign = true;
++                unconfigured = true;
+ #endif
+         }
+     }
+     // Something other than descriptors, or descriptors the buffer had no room for: nothing of the message
+     // can be trusted to carry what its sender meant.
+     if (foreign || (message.msg_flags & MSG_CTRUNC) != 0)
++        return std::unexpected(ChannelError::Refused);
++    if (unconfigured)
+         return std::unexpected(ChannelError::Io);
+     if (received == 0)
+         return std::unexpected(ChannelError::Closed);
+     for (auto& handle: arrived)
+         handles.push_back(std::move(handle));
+     return static_cast<std::size_t>(received);
+ }
+ 
+ void Channel::shutdown() noexcept
+ {
+diff --git a/src/vtextension/wasm/remote/transport/HandleGrant.hpp b/src/vtextension/wasm/remote/transport/HandleGrant.hpp
+index 13abaac5e..3ec118f3b 100644
+--- a/src/vtextension/wasm/remote/transport/HandleGrant.hpp
++++ b/src/vtextension/wasm/remote/transport/HandleGrant.hpp
+@@ -9,89 +9,180 @@
+ /// Windows Contour duplicates the handle into the helper (DuplicateHandle), through a handle on the helper
+ /// with PROCESS_DUP_HANDLE access that the launcher hands out, and the PDU carries the duplicate's value.
+ ///
+ /// A grant whose request is never sent is lost with the helper: a failed send ends the incarnation. A forged
+ /// one is the helper's to refuse: what it cannot map as the object it was promised is a protocol violation,
+ /// and on Windows a value it cannot map is released rather than closed, as it may name a handle of its own.
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <optional>
++#include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+-/// The process a handle is granted to. On POSIX it names nothing: a descriptor travels with its frame and is
+-/// installed by whichever process reads it, so that every target is currentProcess(). On Windows it is the
+-/// process the handle is duplicated into. Move-only.
++/// The process a handle is granted to. On POSIX it names nothing but whether a handle may be granted: a
++/// descriptor travels with its frame and is installed by whichever process reads it. On Windows it is the
++/// process the handle is duplicated into. Move-only: a moved-from target is none(), which grants nothing.
+ class HandleTarget
+ {
+   public:
+-    HandleTarget(HandleTarget&&) noexcept = default;
+-    HandleTarget& operator=(HandleTarget&&) noexcept = default;
++    HandleTarget(HandleTarget&& other) noexcept:
++        _kind { std::exchange(other._kind, Kind::None) }
++#ifdef _WIN32
++        ,
++        _process { std::move(other._process) }
++#endif
++    {
++    }
++
++    HandleTarget& operator=(HandleTarget&& other) noexcept
++    {
++        if (this != &other)
++        {
++            _kind = std::exchange(other._kind, Kind::None);
++#ifdef _WIN32
++            _process = std::move(other._process);
++#endif
++        }
++        return *this;
++    }
++
+     HandleTarget(HandleTarget const&) = delete;
+     HandleTarget& operator=(HandleTarget const&) = delete;
+     ~HandleTarget() = default;
+ 
+-    /// @return This process: what a host serving in this process is granted handles as.
+-    [[nodiscard]] static HandleTarget currentProcess() noexcept;
++    /// This process: what a host serving in this process is granted handles as, and on POSIX every helper.
++    /// On Windows a handle granted to it is a duplicate in this process, which nothing but a claim
++    /// (claimGrantedHandle()) closes: whoever grants to it must see the grant claimed, or close the duplicate
++    /// itself.
++    /// @return The target.
++    [[nodiscard]] static HandleTarget currentProcess() noexcept
++    {
++        return HandleTarget { Kind::CurrentProcess };
++    }
++
++    /// @return No process: grantHandle() refuses it. What a moved-from target is.
++    [[nodiscard]] static HandleTarget none() noexcept { return HandleTarget { Kind::None }; }
++
++    /// @return Whether it is none(): whether no handle can be granted to it.
++    [[nodiscard]] bool isNone() const noexcept { return _kind == Kind::None; }
+ 
+ #ifdef _WIN32
+     /// @param process A handle on the process, with PROCESS_DUP_HANDLE access; the target's own.
+     /// @return That process.
+     [[nodiscard]] static HandleTarget ofProcess(OwnedHandle process) noexcept;
+ 
+     /// @return The handle a duplicate is made into the target through: this process's pseudo-handle for
+-    ///         currentProcess().
+-    [[nodiscard]] NativeHandle process() const noexcept;
++    ///         currentProcess(); nothing for none().
++    [[nodiscard]] std::optional<NativeHandle> process() const noexcept;
+ #endif
+ 
+   private:
++    /// Which process it names.
++    enum class Kind : uint8_t
++    {
++        None,           ///< None: nothing is granted.
++        CurrentProcess, ///< This process.
++#ifdef _WIN32
++        OtherProcess, ///< The process _process is a handle on.
++#endif
++    };
++
++    explicit HandleTarget(Kind kind) noexcept: _kind { kind } {}
++
+ #ifdef _WIN32
+-    /// @param process The process's handle; none for this process.
++    /// @param process A handle on another process.
+     explicit HandleTarget(OwnedHandle process) noexcept;
++#endif
+ 
+-    OwnedHandle _process; ///< A handle on the target; none for this process.
+-#else
+-    HandleTarget() noexcept = default;
++    Kind _kind; ///< Which process it names.
++#ifdef _WIN32
++    OwnedHandle _process; ///< A handle on the target, for OtherProcess.
+ #endif
+ };
+ 
+ /// A handle granted to a target, ready to travel with the PDU that names it.
+ struct HandleGrant
+ {
+     /// What the PDU names the handle by: on Windows the duplicate's value in the target; on POSIX 0.
+     uint64_t wireValue = 0;
+     /// What travels with the PDU's frame: on POSIX the descriptor, still the granter's; nothing on Windows.
+     std::optional<NativeHandle> attached;
+ };
+ 
+ /// Why a handle could not be granted.
+ enum class GrantError : uint8_t
+ {
+-    Io, ///< The system refused to duplicate it into the target (Windows).
++    Io, ///< The target is none(), or the system refused to duplicate it into the target (Windows).
+ };
+ 
+ /// Grants @p object to @p target. On Windows the duplicate has FILE_MAP_READ | FILE_MAP_WRITE access and is
+ /// the target's from now on, whether or not the PDU naming it is sent; on POSIX nothing happens before the
+ /// PDU is sent (PduStream::send(pdu, grant)).
+ /// @param target Who it is granted to.
+ /// @param object The handle; still the caller's.
+-/// @return The grant; `Io` if the system refused.
++/// @return The grant; `Io` if @p target is none(), or the system refused.
+ [[nodiscard]] std::expected<HandleGrant, GrantError> grantHandle(HandleTarget const& target,
+                                                                  NativeHandle object);
+ 
++class GrantedHandle;
++
+ /// Claims the handle a PDU just received from @p stream names by @p wireValue: on POSIX the descriptor that
+-/// arrived with it, which @p stream held; on Windows the value itself, which the caller must check by using
+-/// it, and release rather than close if it cannot.
++/// arrived with it, which @p stream held; on Windows the value itself, unchecked but for its shape.
+ /// @param stream The helper's control stream, which received the PDU.
+ /// @param wireValue What the PDU names the handle by.
+-/// @return The handle, now the caller's; `Malformed` if no handle came with the PDU, or (POSIX) the value is
+-///         not 0, or (Windows) it is 0 or names no handle this process could have.
+-[[nodiscard]] std::expected<OwnedHandle, StreamError> claimGrantedHandle(PduStream& stream,
+-                                                                         uint64_t wireValue);
++/// @return The claim; `Malformed` if no handle came with the PDU, or (POSIX) the value is not 0, or (Windows)
++///         it names no handle this process could have: 0, not a multiple of 4, or a pseudo-handle.
++[[nodiscard]] std::expected<GrantedHandle, StreamError> claimGrantedHandle(PduStream& stream,
++                                                                           uint64_t wireValue);
++
++/// A handle claimed off a stream, not yet known to be the object it was granted as. On POSIX a descriptor
++/// this process was given, closed when the claim is destroyed. On Windows a value a peer chose, which may
++/// name a handle of this process's own: let go, never closed, when the claim is destroyed, until adopt()
++/// takes it as this process's once it proved to be the object. Move-only.
++class GrantedHandle
++{
++  public:
++    GrantedHandle(GrantedHandle&& other) noexcept: _handle { std::exchange(other._handle, NoNativeHandle) } {}
++    GrantedHandle& operator=(GrantedHandle&& other) noexcept
++    {
++        if (this != &other)
++        {
++            letGo();
++            _handle = std::exchange(other._handle, NoNativeHandle);
++        }
++        return *this;
++    }
++    GrantedHandle(GrantedHandle const&) = delete;
++    GrantedHandle& operator=(GrantedHandle const&) = delete;
++    ~GrantedHandle() { letGo(); }
++
++    /// @return The handle, still the claim's: to map, or otherwise use, as the object it was granted as.
++    [[nodiscard]] NativeHandle get() const noexcept { return _handle; }
++
++    /// Takes the handle as this process's own, once using it proved it is the object it was granted as.
++    /// @return The handle, closed when its owner is destroyed.
++    [[nodiscard]] OwnedHandle adopt() && noexcept
++    {
++        return OwnedHandle { std::exchange(_handle, NoNativeHandle) };
++    }
++
++  private:
++    friend std::expected<GrantedHandle, StreamError> claimGrantedHandle(PduStream& stream,
++                                                                        uint64_t wireValue);
++
++    /// @param handle What was claimed.
++    explicit GrantedHandle(NativeHandle handle) noexcept: _handle { handle } {}
++
++    /// Lets go of what it holds as this system does: closes a descriptor (POSIX), forgets a value (Windows).
++    void letGo() noexcept;
++
++    NativeHandle _handle = NoNativeHandle; ///< What was claimed; NoNativeHandle once adopted or moved from.
++};
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/HandleGrant_posix.cpp b/src/vtextension/wasm/remote/transport/HandleGrant_posix.cpp
+index 5751ae1f7..83bb30df5 100644
+--- a/src/vtextension/wasm/remote/transport/HandleGrant_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/HandleGrant_posix.cpp
+@@ -3,31 +3,34 @@
+ // Grants on POSIX: the descriptor itself travels with the frame of the PDU that names it, and the reader's
+ // stream holds it until it is claimed.
+ #include <cstdint>
+ #include <expected>
+ 
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+-HandleTarget HandleTarget::currentProcess() noexcept
+-{
+-    return HandleTarget {};
+-}
+-
+-std::expected<HandleGrant, GrantError> grantHandle([[maybe_unused]] HandleTarget const& target,
+-                                                   NativeHandle object)
++std::expected<HandleGrant, GrantError> grantHandle(HandleTarget const& target, NativeHandle object)
+ {
++    if (target.isNone())
++        return std::unexpected(GrantError::Io);
+     return HandleGrant { .wireValue = 0, .attached = object };
+ }
+ 
+-std::expected<OwnedHandle, StreamError> claimGrantedHandle(PduStream& stream, uint64_t wireValue)
++std::expected<GrantedHandle, StreamError> claimGrantedHandle(PduStream& stream, uint64_t wireValue)
+ {
+     auto handle = stream.takeAttachedHandle();
+     // Taken before the value is looked at, so that a refused claim leaves nothing behind for the next one.
+     if (wireValue != 0 || !handle)
+         return std::unexpected(StreamError::Malformed);
+-    return handle;
++    return GrantedHandle { handle.release() };
++}
++
++void GrantedHandle::letGo() noexcept
++{
++    // A descriptor this process was given: its own to close, whatever it names.
++    if (_handle != NoNativeHandle)
++        closeNativeHandle(std::exchange(_handle, NoNativeHandle));
+ }
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/HandleGrant_test.cpp b/src/vtextension/wasm/remote/transport/HandleGrant_test.cpp
+index e56951265..01b6f5cc3 100644
+--- a/src/vtextension/wasm/remote/transport/HandleGrant_test.cpp
++++ b/src/vtextension/wasm/remote/transport/HandleGrant_test.cpp
+@@ -23,20 +23,23 @@
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ #ifdef _WIN32
+     #include <bit>
++
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
+ #endif
+ 
+ using namespace vtextension::wasm::remote;
+ using process::testing::ChildPatience;
+ using process::testing::endAndReap;
+ using process::testing::LaunchedHelper;
+ using process::testing::readReport;
+ 
+ namespace
+ {
+@@ -115,25 +118,117 @@ TEST_CASE("HandleGrant.reachesAChild", "[vtextension]")
+     endProbe(probe, control);
+ }
+ 
+ TEST_CASE("HandleGrant.forgedValueIsRefused", "[vtextension]")
+ {
+     auto probe = launchGrantProbe();
+     auto control = transport::PduStream {
+         std::move(probe.control), proto::ChannelKind::Control, proto::Direction::ToParent, proto::PduLimits {}
+     };
+ #ifdef _WIN32
+-    // A value the probe holds a handle under, of no section: its own control pipe. Released, not closed: the
+-    // probe still hears its control channel end below.
++    // A value the probe holds a handle under, of no section: its own control pipe. Let go, never closed: the
++    // probe still hears the next PDU on that pipe.
+     REQUIRE_FALSE(probe.childHandles->empty());
+     auto const forged = static_cast<uint64_t>(std::bit_cast<uintptr_t>(probe.childHandles->front()));
+ #else
+-    // The descriptor the request names never came.
++    // The descriptor the request names never came. This pins only the end-to-end outcome: no value a POSIX
++    // helper is sent can name a descriptor of its own, so there is nothing it could close by mistake.
+     auto const forged = uint64_t { 0 };
+ #endif
+     REQUIRE(control.send(instantiateNaming(forged)).has_value());
+ 
+     auto const report = readReport(probe.lanes.front());
+     REQUIRE(report.has_value());
+     CHECK(*report == std::vector<std::string> { "granted=refused", "end" });
++
++    // Its control channel survived the refusal: had the forged value been closed, the probe would hear
++    // nothing.
++    REQUIRE(control.send(proto::Release { .target = proto::ReleaseTarget::Instance, .id = 1 }).has_value());
++    auto const heard = readReport(probe.lanes.front());
++    REQUIRE(heard.has_value());
++    CHECK(*heard == std::vector<std::string> { "heard", "end" });
+     endProbe(probe, control);
+ }
++
++TEST_CASE("HandleGrant.noTargetGrantsNothing", "[vtextension]")
++{
++    auto const object = transport::createSharedObject(ObjectBytes, transport::SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    CHECK(transport::HandleTarget::none().isNone());
++    CHECK(transport::grantHandle(transport::HandleTarget::none(), object->get())
++          == std::unexpected(transport::GrantError::Io));
++
++    // A target moved on grants as it did; the one it was moved from is none().
++    auto source = transport::HandleTarget::currentProcess();
++    auto const moved = std::move(source);
++    CHECK_FALSE(moved.isNone());
++    auto const grant = transport::grantHandle(moved, object->get());
++    REQUIRE(grant.has_value());
++#ifdef _WIN32
++    // Granted to this process: the duplicate is the test's to close.
++    ::CloseHandle(std::bit_cast<HANDLE>(static_cast<uintptr_t>(grant->wireValue)));
++#endif
++}
++
++#ifdef _WIN32
++namespace
++{
++
++/// @return The helper's end of a fresh control channel, as the helper reads it.
++[[nodiscard]] transport::PduStream helperControl(transport::ChannelPair& pair)
++{
++    return transport::PduStream {
++        std::move(pair.helper), proto::ChannelKind::Control, proto::Direction::ToHelper, proto::PduLimits {}
++    };
++}
++
++/// @return Whether @p handle names a handle of this process.
++[[nodiscard]] bool isOpen(HANDLE handle)
++{
++    auto flags = DWORD { 0 };
++    return ::GetHandleInformation(handle, &flags) != FALSE;
++}
++
++} // namespace
++
++TEST_CASE("HandleGrant.claimRefusesWhatNamesNoHandle", "[vtextension]")
++{
++    auto pair = transport::makeChannelPair();
++    REQUIRE(pair.has_value());
++    auto stream = helperControl(*pair);
++    // Not a multiple of 4; this process's and this thread's pseudo-handles; the process token's, a multiple
++    // of 4.
++    for (auto const value: { uint64_t { 0 }, uint64_t { 0x1F5 }, UINT64_MAX, UINT64_MAX - 1, UINT64_MAX - 3 })
++    {
++        INFO(value);
++        CHECK(transport::claimGrantedHandle(stream, value)
++              == std::unexpected(transport::StreamError::Malformed));
++    }
++}
++
++TEST_CASE("HandleGrant.unprovedClaimIsNeverClosed", "[vtextension]")
++{
++    auto pair = transport::makeChannelPair();
++    REQUIRE(pair.has_value());
++    auto stream = helperControl(*pair);
++    auto* const own = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
++    REQUIRE(own != nullptr);
++    auto const value = static_cast<uint64_t>(std::bit_cast<uintptr_t>(own));
++
++    // A claim let go unproved forgets the value: it may name a handle of this process's own.
++    {
++        auto claim = transport::claimGrantedHandle(stream, value);
++        REQUIRE(claim.has_value());
++        CHECK(claim->get() == own);
++    }
++    CHECK(isOpen(own));
++
++    // Adopted, once proved, it is this process's to close.
++    {
++        auto claim = transport::claimGrantedHandle(stream, value);
++        REQUIRE(claim.has_value());
++        auto const adopted = std::move(*claim).adopt();
++        CHECK(adopted.get() == own);
++    }
++    CHECK_FALSE(isOpen(own));
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/transport/HandleGrant_win32.cpp b/src/vtextension/wasm/remote/transport/HandleGrant_win32.cpp
+index 58af53a0f..3c869bfe3 100644
+--- a/src/vtextension/wasm/remote/transport/HandleGrant_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/HandleGrant_win32.cpp
+@@ -1,62 +1,72 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // Grants on Windows: the handle is duplicated into the target, and the PDU carries the duplicate's value.
+ #include <bit>
+ #include <cstdint>
+ #include <expected>
+ #include <limits>
++#include <optional>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+-HandleTarget::HandleTarget(OwnedHandle process) noexcept: _process { std::move(process) }
++HandleTarget::HandleTarget(OwnedHandle process) noexcept:
++    _kind { Kind::OtherProcess }, _process { std::move(process) }
+ {
+ }
+ 
+-HandleTarget HandleTarget::currentProcess() noexcept
+-{
+-    return HandleTarget { OwnedHandle {} };
+-}
+-
+ HandleTarget HandleTarget::ofProcess(OwnedHandle process) noexcept
+ {
+     return HandleTarget { std::move(process) };
+ }
+ 
+-NativeHandle HandleTarget::process() const noexcept
++std::optional<NativeHandle> HandleTarget::process() const noexcept
+ {
+-    return _process ? _process.get() : ::GetCurrentProcess();
++    switch (_kind)
++    {
++        case Kind::None: return std::nullopt;
++        case Kind::CurrentProcess: return ::GetCurrentProcess();
++        case Kind::OtherProcess: return _process.get();
++    }
++    return std::nullopt;
+ }
+ 
+ std::expected<HandleGrant, GrantError> grantHandle(HandleTarget const& target, NativeHandle object)
+ {
++    auto const process = target.process();
++    if (!process)
++        return std::unexpected(GrantError::Io);
+     auto duplicate = HANDLE { nullptr };
+-    if (!::DuplicateHandle(::GetCurrentProcess(),
+-                           object,
+-                           target.process(),
+-                           &duplicate,
+-                           FILE_MAP_READ | FILE_MAP_WRITE,
+-                           FALSE,
+-                           0))
++    if (!::DuplicateHandle(
++            ::GetCurrentProcess(), object, *process, &duplicate, FILE_MAP_READ | FILE_MAP_WRITE, FALSE, 0))
+         return std::unexpected(GrantError::Io);
+     return HandleGrant { .wireValue = static_cast<uint64_t>(std::bit_cast<uintptr_t>(duplicate)),
+                          .attached = std::nullopt };
+ }
+ 
+-std::expected<OwnedHandle, StreamError> claimGrantedHandle(PduStream& stream, uint64_t wireValue)
++std::expected<GrantedHandle, StreamError> claimGrantedHandle(PduStream& stream, uint64_t wireValue)
+ {
+     // Nothing travels beside a frame on Windows; a stream that holds something was not given it by a peer.
+     if (stream.takeAttachedHandle())
+         return std::unexpected(StreamError::Malformed);
+-    if (wireValue == 0 || wireValue > std::numeric_limits<uintptr_t>::max())
++    // A handle's value is a multiple of 4, and positive: the negative ones are pseudo-handles (this process,
++    // this thread, their tokens), which name no object granted.
++    if (wireValue == 0 || wireValue % 4 != 0 || wireValue > std::numeric_limits<uintptr_t>::max()
++        || static_cast<intptr_t>(static_cast<uintptr_t>(wireValue)) < 0)
+         return std::unexpected(StreamError::Malformed);
+-    return OwnedHandle { std::bit_cast<HANDLE>(static_cast<uintptr_t>(wireValue)) };
++    return GrantedHandle { std::bit_cast<HANDLE>(static_cast<uintptr_t>(wireValue)) };
++}
++
++void GrantedHandle::letGo() noexcept
++{
++    // A value a peer chose may name a handle of this process's own: forgotten, never closed.
++    _handle = NoNativeHandle;
+ }
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/PduStream.cpp b/src/vtextension/wasm/remote/transport/PduStream.cpp
+index 0b7b15d4b..d25403b64 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream.cpp
+@@ -29,20 +29,21 @@ namespace
+     /// module does not pin its size; the frames of a busy instance's memory reads, up to this, reuse it.
+     constexpr auto RetainedBufferBytes = (std::size_t { 1024 } * 1024) + ReceiveChunk;
+ 
+     /// @return The stream's reason for a channel's failure.
+     [[nodiscard]] StreamError streamErrorOf(ChannelError error) noexcept
+     {
+         switch (error)
+         {
+             case ChannelError::Closed: return StreamError::Closed;
+             case ChannelError::Io: return StreamError::Io;
++            case ChannelError::Refused: return StreamError::Malformed;
+         }
+         return StreamError::Io;
+     }
+ 
+     /// @return How many bytes of @p frame, one encodeFrame() made, its body spans: its length less the kind's
+     ///         one byte.
+     [[nodiscard]] uint64_t bodySizeOf(std::span<uint8_t const> frame) noexcept
+     {
+         auto header = proto::Reader { frame };
+         return header.varint64().value_or(1) - 1;
+diff --git a/src/vtextension/wasm/remote/transport/PduStream.hpp b/src/vtextension/wasm/remote/transport/PduStream.hpp
+index 3539087e6..dc73ddef1 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream.hpp
++++ b/src/vtextension/wasm/remote/transport/PduStream.hpp
+@@ -23,21 +23,21 @@
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ /// Why a stream could not send or receive a PDU. Every one ends the stream, except an OverCap from send() or
+ /// trySend(), which sent nothing.
+ enum class StreamError : uint8_t
+ {
+     Closed,    ///< The channel closed, or was shut down.
+     Io,        ///< The channel failed.
+     Malformed, ///< The peer sent a frame the codec refuses: a malformed one, or one of the wrong kind,
+-               ///< direction or channel.
++               ///< direction or channel; or attached to its frames what none carries.
+     OverCap,   ///< The peer sent a frame larger than its kind may be; or, from send(), the PDU holds a
+                ///< list over its cap or is larger than its kind may be, and was not sent.
+ };
+ 
+ struct HandleGrant;
+ 
+ /// What became of a PDU a stream was asked to send without blocking.
+ enum class SendOutcome : uint8_t
+ {
+     WouldBlock, ///< Nothing of it was sent: the channel takes nothing now, or a frame sent before is not all
+diff --git a/src/vtextension/wasm/remote/transport/PduStream_test.cpp b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+index d4446c366..138b338be 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream_test.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+@@ -6,30 +6,36 @@
+ 
+ #include <array>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <expected>
+ #include <future>
+ #include <ranges>
++#include <span>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ #ifndef _WIN32
++    #include <sys/socket.h>
++    #include <sys/uio.h>
++
++    #include <cstring>
++
+     #include <unistd.h>
+ 
+     #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+     #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+     #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ #endif
+ 
+ using namespace vtextension::wasm::remote;
+ using transport::makeChannelPair;
+ using transport::PduStream;
+@@ -305,20 +311,50 @@ namespace
+ }
+ 
+ /// @return A grant of @p object to this process.
+ [[nodiscard]] transport::HandleGrant grantOf(transport::OwnedHandle const& object)
+ {
+     auto grant = transport::grantHandle(transport::HandleTarget::currentProcess(), object.get());
+     REQUIRE(grant.has_value());
+     return *grant;
+ }
+ 
++/// Sends a Release frame on @p socket with every one of @p objects in one SCM_RIGHTS message, as no honest
++/// parent does; none of them with no objects.
++/// @return Whether all of the frame was sent.
++[[nodiscard]] bool sendWithDescriptors(int socket, std::span<transport::OwnedHandle const> objects)
++{
++    auto frame = proto::encodeFrame(proto::Release { .target = proto::ReleaseTarget::Instance, .id = 1 });
++    REQUIRE(frame.has_value());
++    auto iov = ::iovec { .iov_base = frame->data(), .iov_len = frame->size() };
++    alignas(::cmsghdr) auto control = std::array<std::byte, CMSG_SPACE(sizeof(int) * 3)> {};
++    auto message = ::msghdr {};
++    message.msg_iov = &iov;
++    message.msg_iovlen = 1;
++    if (!objects.empty())
++    {
++        auto const bytes = sizeof(int) * objects.size();
++        message.msg_control = control.data();
++        message.msg_controllen = static_cast<decltype(message.msg_controllen)>(CMSG_SPACE(bytes));
++        auto* const header = CMSG_FIRSTHDR(&message);
++        header->cmsg_level = SOL_SOCKET;
++        header->cmsg_type = SCM_RIGHTS;
++        header->cmsg_len = static_cast<decltype(header->cmsg_len)>(CMSG_LEN(bytes));
++        for (auto const index: std::views::iota(std::size_t { 0 }, objects.size()))
++        {
++            auto const descriptor = objects[index].get();
++            std::memcpy(CMSG_DATA(header) + (index * sizeof(int)), &descriptor, sizeof(int));
++        }
++    }
++    return ::sendmsg(socket, &message, 0) == static_cast<ssize_t>(frame->size());
++}
++
+ } // namespace
+ 
+ TEST_CASE("PduStream.instantiateCarriesItsDescriptor", "[vtextension]")
+ {
+     auto pair = makeControlPair();
+     auto const object = makeObject();
+     auto const grant = grantOf(object);
+     CHECK(grant.wireValue == 0);
+     REQUIRE(pair.parent.send(instantiateWith(grant), grant).has_value());
+ 
+@@ -345,20 +381,67 @@ TEST_CASE("PduStream.secondUnclaimedDescriptorIsMalformed", "[vtextension]")
+     REQUIRE(received.has_value());
+     CHECK(std::holds_alternative<proto::Instantiate>(*received));
+     REQUIRE(pair.parent.send(instantiateWith(grantOf(second), 2), grantOf(second)).has_value());
+     auto const before = transport::testing::openDescriptorCount();
+     CHECK(pair.helper.receive() == std::unexpected(StreamError::Malformed));
+     // The second was closed at once; the first is still the stream's.
+     CHECK(transport::testing::openDescriptorCount() == before);
+     CHECK(pair.helper.takeAttachedHandle());
+ }
+ 
++TEST_CASE("PduStream.tooManyDescriptorsAreMalformed", "[vtextension]")
++{
++    // One SCM_RIGHTS message with two descriptors: both taken in, then refused and closed by the stream. With
++    // three: more than a receive takes in, truncated by the system, refused and closed by the channel.
++    for (auto const count: { std::size_t { 2 }, std::size_t { 3 } })
++    {
++        INFO(count << " descriptors");
++        auto channels = makeChannelPair();
++        REQUIRE(channels.has_value());
++        auto helper = PduStream { std::move(channels->helper),
++                                  proto::ChannelKind::Control,
++                                  proto::Direction::ToHelper,
++                                  proto::PduLimits {} };
++        auto const before = transport::testing::openDescriptorCount();
++        {
++            auto objects = std::vector<transport::OwnedHandle> {};
++            for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, count))
++                objects.push_back(makeObject());
++            REQUIRE(sendWithDescriptors(channels->parent.nativeHandle(), objects));
++        }
++        CHECK(helper.receive() == std::unexpected(StreamError::Malformed));
++        CHECK_FALSE(helper.takeAttachedHandle());
++        CHECK(transport::testing::openDescriptorCount() == before);
++    }
++}
++
++    #ifdef SO_PASSCRED
++TEST_CASE("PduStream.foreignAncillaryDataIsMalformed", "[vtextension]")
++{
++    // Credentials, which the kernel attaches to every message once the reader asks for them: ancillary data
++    // that is no descriptor.
++    auto channels = makeChannelPair();
++    REQUIRE(channels.has_value());
++    auto const enable = 1;
++    REQUIRE(::setsockopt(channels->helper.nativeHandle(), SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable))
++            == 0);
++    auto helper = PduStream { std::move(channels->helper),
++                              proto::ChannelKind::Control,
++                              proto::Direction::ToHelper,
++                              proto::PduLimits {} };
++    auto const before = transport::testing::openDescriptorCount();
++    REQUIRE(sendWithDescriptors(channels->parent.nativeHandle(), {}));
++    CHECK(helper.receive() == std::unexpected(StreamError::Malformed));
++    CHECK(transport::testing::openDescriptorCount() == before);
++}
++    #endif
++
+ TEST_CASE("PduStream.lanesNeverInstallADescriptor", "[vtextension]")
+ {
+     auto channels = makeChannelPair();
+     REQUIRE(channels.has_value());
+     auto lane = PduStream {
+         std::move(channels->helper), proto::ChannelKind::Lane, proto::Direction::ToHelper, proto::PduLimits {}
+     };
+     auto const frame = proto::encodeFrame(proto::Call { .instanceId = 1, .exportOrdinal = 0, .argv = {} });
+     REQUIRE(frame.has_value());
+     auto const before = transport::testing::openDescriptorCount();

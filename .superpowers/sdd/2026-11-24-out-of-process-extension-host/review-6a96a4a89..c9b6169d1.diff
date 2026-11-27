@@ -1,0 +1,1906 @@
+# Review package: 6a96a4a89..HEAD
+
+## Commits
+c9b6169d1 feat(vtextension): our own WASI preview-1 functions, identical under every engine
+
+## Files changed
+ src/vtextension/CMakeLists.txt                     |   9 +
+ src/vtextension/wasm/testing/BackendContract.hpp   | 174 +++++++++
+ src/vtextension/wasm/wasi/Preview1Shim.cpp         | 343 ++++++++++++++++++
+ src/vtextension/wasm/wasi/Preview1Shim.hpp         |  89 +++++
+ src/vtextension/wasm/wasi/Preview1Shim_test.cpp    | 395 +++++++++++++++++++++
+ src/vtextension/wasm/wasi/SystemEnvironment.cpp    |  87 +++++
+ src/vtextension/wasm/wasi/SystemEnvironment.hpp    |  17 +
+ src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp  | 118 +++---
+ src/vtextension/wasm/wasmtime/WasmtimeBackend.hpp  |   4 +
+ .../wasm/wasmtime/WasmtimeBackend_test.cpp         |  48 ++-
+ src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp |   4 +-
+ src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp  |   9 +-
+ 12 files changed, 1244 insertions(+), 53 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/CMakeLists.txt b/src/vtextension/CMakeLists.txt
+index 3de68af68..4734d3efa 100644
+--- a/src/vtextension/CMakeLists.txt
++++ b/src/vtextension/CMakeLists.txt
+@@ -17,20 +17,22 @@ set(vtextension_SOURCES
+     ExtensionGrantStore.cpp
+     ExtensionHost.cpp
+     ExtensionWorkerPool.cpp
+     HostState.cpp
+     Instance.cpp
+     Manifest.cpp
+     Runner.cpp
+     SessionExtensions.cpp
+     StatusLineAdapter.cpp
+     Surface.cpp
++    wasm/wasi/Preview1Shim.cpp
++    wasm/wasi/SystemEnvironment.cpp
+ )
+ 
+ set(vtextension_HEADERS
+     AtomicSharedPtr.hpp
+     BundledExtensions.hpp
+     CanonicalAbi.hpp
+     CommandLine.hpp
+     CommandPolicy.hpp
+     CompiledExtension.hpp
+     ControlCodec.hpp
+@@ -57,35 +59,41 @@ set(vtextension_HEADERS
+     SessionExtensions.hpp
+     StatusLineAdapter.hpp
+     StatuslineWorld.hpp
+     Surface.hpp
+     Utf8.hpp
+     wasm/DefaultBackend.hpp
+     wasm/EngineFeatures.hpp
+     wasm/WasiAllowList.hpp
+     wasm/WasmBinary.hpp
+     wasm/WasmRuntime.hpp
++    wasm/wasi/Preview1Shim.hpp
+     wasm/wasi/Preview1Signatures.hpp
++    wasm/wasi/SystemEnvironment.hpp
+ )
+ 
+ add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
+ target_compile_definitions(vtextension PUBLIC CONTOUR_EXTENSIONS=1)
+ target_include_directories(vtextension PUBLIC
+     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+ )
+ # vtpty for PageSize, the render call's surface size, and the CommandCapture extensions run commands through;
+ # vtbackend for the Surface's private terminal; core::async for the thread a session's modules are loaded on.
+ target_link_libraries(vtextension PUBLIC vtbackend vtcontrol vtpty core::async core::base core::log core::platform)
+ # Private, as in vtcontrol: ControlCodec.hpp reflects the control vocabulary through glaze, and it is included
+ # from vtextension's .cpp files only. vtextension_public_headers_test below pins that no public header leaks it.
+ target_link_libraries(vtextension PRIVATE glaze::glaze)
++if(WIN32)
++    # BCryptGenRandom: the random source of the WASI shim's system environment (wasm/wasi/SystemEnvironment.cpp).
++    target_link_libraries(vtextension PRIVATE bcrypt)
++endif()
+ 
+ option(VTEXTENSION_TESTING "Enables building of unittests for vtextension [default: ON]" ${CONTOUR_TESTING})
+ if(VTEXTENSION_TESTING)
+     enable_testing()
+ 
+     add_executable(vtextension_test
+         test_main.cpp
+         Bundled_test.cpp
+         BundledExtensions_test.cpp
+         CanonicalAbi_test.cpp
+@@ -104,20 +112,21 @@ if(VTEXTENSION_TESTING)
+         HostState_test.cpp
+         Instance_test.cpp
+         Isolation_test.cpp
+         Manifest_test.cpp
+         Runner_test.cpp
+         SessionExtensions_test.cpp
+         StatusLineAdapter_test.cpp
+         Surface_test.cpp
+         Wit_test.cpp
+         wasm/WasmBinary_test.cpp
++        wasm/wasi/Preview1Shim_test.cpp
+         testing/FakeGuestMemory.hpp
+         testing/FakeWasmBackend.hpp
+         testing/Harness.hpp
+         testing/LaneReport.hpp
+         testing/ManualScheduler.hpp
+         testing/QueuedOwner.hpp
+         testing/RunnerHarness.hpp
+         testing/StandardStreamsCapture.hpp
+         testing/TestModules.hpp
+         wasm/testing/BackendContract.hpp
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index 0f827075a..6adfedd01 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -34,20 +34,21 @@
+ 
+ #include <core/Utils.hpp>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/testing/StandardStreamsCapture.hpp>
+ #include <vtextension/testing/TestModules.hpp>
+ #include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/WasiAllowList.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/testing/FeatureModules.hpp>
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
+ 
+ namespace vtextension::wasm::testing::contract
+ {
+ 
+ /// The import module the contract's host functions are provided under.
+ inline constexpr auto HostModule = std::string_view { "contract:test/host@0" };
+ 
+ /// The host functions every contract runtime is created with: `ping`, taking one i32, and `pair`,
+ /// taking two.
+ inline constexpr auto HostFunctions = std::array {
+@@ -165,20 +166,140 @@ inline constexpr auto AllowedWasiModule = std::to_array<uint8_t>({
+     0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77,
+     0x31, 0x0a, 0x72, 0x61, 0x6e, 0x64, 0x6f, 0x6d, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61,
+     0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69,
+     0x65, 0x77, 0x31, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x00, 0x06, 0x16, 0x77,
+     0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76,
+     0x69, 0x65, 0x77, 0x31, 0x0b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x5f, 0x79, 0x69, 0x65, 0x6c, 0x64, 0x00,
+     0x07, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02,
+     0x00,
+ });
+ 
++/// Imports every allowed WASI preview 1 function, and exports one function per import, named after it,
++/// that calls it with arguments in bounds and returns its errno (`proc_exit` returns nothing). The
++/// pointers point at address 64; `fd_write` writes one empty buffer to standard output, `fd_close` closes
++/// a descriptor that is not open (closing a standard stream could reach the host's), and the prestat
++/// functions ask about descriptor 3, the first a preopened directory would have.
++///
++///     (module
++///       (import "wasi_snapshot_preview1" "args_get" (func $args_get (param i32 i32) (result i32)))
++///       (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes_get (param i32 i32) (result
++///       i32))) (import "wasi_snapshot_preview1" "environ_get" (func $environ_get (param i32 i32) (result
++///       i32))) (import "wasi_snapshot_preview1" "environ_sizes_get" (func $environ_sizes_get (param i32 i32)
++///       (result i32))) (import "wasi_snapshot_preview1" "clock_time_get" (func $clock_time_get (param i32
++///       i64 i32) (result i32))) (import "wasi_snapshot_preview1" "clock_res_get" (func $clock_res_get (param
++///       i32 i32) (result i32))) (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32
++///       i32 i32) (result i32))) (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (param i32)
++///       (result i32))) (import "wasi_snapshot_preview1" "fd_fdstat_get" (func $fd_fdstat_get (param i32 i32)
++///       (result i32))) (import "wasi_snapshot_preview1" "fd_prestat_get" (func $fd_prestat_get (param i32
++///       i32) (result i32))) (import "wasi_snapshot_preview1" "fd_prestat_dir_name" (func
++///       $fd_prestat_dir_name (param i32 i32 i32) (result i32))) (import "wasi_snapshot_preview1" "fd_seek"
++///       (func $fd_seek (param i32 i64 i32 i32) (result i32))) (import "wasi_snapshot_preview1" "random_get"
++///       (func $random_get (param i32 i32) (result i32))) (import "wasi_snapshot_preview1" "proc_exit" (func
++///       $proc_exit (param i32))) (import "wasi_snapshot_preview1" "sched_yield" (func $sched_yield (result
++///       i32))) (memory (export "memory") 1) (func (export "args_get") (result i32) (call $args_get
++///       (i32.const 64) (i32.const 128))) (func (export "args_sizes_get") (result i32) (call $args_sizes_get
++///       (i32.const 64) (i32.const 68))) (func (export "environ_get") (result i32) (call $environ_get
++///       (i32.const 64) (i32.const 128))) (func (export "environ_sizes_get") (result i32) (call
++///       $environ_sizes_get (i32.const 64) (i32.const 68))) (func (export "clock_time_get") (result i32)
++///       (call $clock_time_get (i32.const 0) (i64.const 1) (i32.const 64))) (func (export "clock_res_get")
++///       (result i32) (call $clock_res_get (i32.const 0) (i32.const 64))) (func (export "fd_write") (result
++///       i32)
++///         (i32.store (i32.const 64) (i32.const 96))
++///         (i32.store (i32.const 68) (i32.const 0))
++///         (call $fd_write (i32.const 1) (i32.const 64) (i32.const 1) (i32.const 80)))
++///       (func (export "fd_close") (result i32) (call $fd_close (i32.const 9)))
++///       (func (export "fd_fdstat_get") (result i32) (call $fd_fdstat_get (i32.const 1) (i32.const 64)))
++///       (func (export "fd_prestat_get") (result i32) (call $fd_prestat_get (i32.const 3) (i32.const 64)))
++///       (func (export "fd_prestat_dir_name") (result i32) (call $fd_prestat_dir_name (i32.const 3)
++///       (i32.const 64) (i32.const 8))) (func (export "fd_seek") (result i32) (call $fd_seek (i32.const 1)
++///       (i64.const 0) (i32.const 0) (i32.const 64))) (func (export "random_get") (result i32) (call
++///       $random_get (i32.const 64) (i32.const 16))) (func (export "proc_exit") (call $proc_exit (i32.const
++///       0))) (func (export "sched_yield") (result i32) (call $sched_yield)))
++inline constexpr auto EveryWasiFunctionModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x35, 0x09, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
++    0x60, 0x03, 0x7f, 0x7e, 0x7f, 0x01, 0x7f, 0x60, 0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x01,
++    0x7f, 0x01, 0x7f, 0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x04, 0x7f, 0x7e, 0x7f, 0x7f, 0x01,
++    0x7f, 0x60, 0x01, 0x7f, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x00, 0x00, 0x02, 0xb7, 0x04, 0x0f, 0x16,
++    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
++    0x76, 0x69, 0x65, 0x77, 0x31, 0x08, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16,
++    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
++    0x76, 0x69, 0x65, 0x77, 0x31, 0x0e, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f,
++    0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68,
++    0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0b, 0x65, 0x6e, 0x76, 0x69, 0x72,
++    0x6f, 0x6e, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61,
++    0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x11, 0x65, 0x6e,
++    0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00,
++    0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72,
++    0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0e, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65,
++    0x5f, 0x67, 0x65, 0x74, 0x00, 0x01, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73,
++    0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0d, 0x63, 0x6c, 0x6f, 0x63,
++    0x6b, 0x5f, 0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f,
++    0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
++    0x08, 0x66, 0x64, 0x5f, 0x77, 0x72, 0x69, 0x74, 0x65, 0x00, 0x02, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f,
++    0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
++    0x08, 0x66, 0x64, 0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x00, 0x03, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f,
++    0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
++    0x0d, 0x66, 0x64, 0x5f, 0x66, 0x64, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00, 0x16,
++    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
++    0x76, 0x69, 0x65, 0x77, 0x31, 0x0e, 0x66, 0x64, 0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f,
++    0x67, 0x65, 0x74, 0x00, 0x00, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68,
++    0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x13, 0x66, 0x64, 0x5f, 0x70, 0x72,
++    0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x64, 0x69, 0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x00, 0x04, 0x16,
++    0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65,
++    0x76, 0x69, 0x65, 0x77, 0x31, 0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x00, 0x05, 0x16, 0x77,
++    0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76,
++    0x69, 0x65, 0x77, 0x31, 0x0a, 0x72, 0x61, 0x6e, 0x64, 0x6f, 0x6d, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x00,
++    0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72,
++    0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x00,
++    0x06, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70,
++    0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x0b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x5f, 0x79, 0x69, 0x65,
++    0x6c, 0x64, 0x00, 0x07, 0x03, 0x10, 0x0f, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
++    0x07, 0x07, 0x07, 0x08, 0x07, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0xe7, 0x01, 0x10, 0x06, 0x6d, 0x65,
++    0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x08, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x0f,
++    0x0e, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x10,
++    0x0b, 0x65, 0x6e, 0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x11, 0x11, 0x65, 0x6e,
++    0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x12,
++    0x0e, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x13,
++    0x0d, 0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x14, 0x08,
++    0x66, 0x64, 0x5f, 0x77, 0x72, 0x69, 0x74, 0x65, 0x00, 0x15, 0x08, 0x66, 0x64, 0x5f, 0x63, 0x6c, 0x6f,
++    0x73, 0x65, 0x00, 0x16, 0x0d, 0x66, 0x64, 0x5f, 0x66, 0x64, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65,
++    0x74, 0x00, 0x17, 0x0e, 0x66, 0x64, 0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65,
++    0x74, 0x00, 0x18, 0x13, 0x66, 0x64, 0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x64, 0x69,
++    0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x00, 0x19, 0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x00,
++    0x1a, 0x0a, 0x72, 0x61, 0x6e, 0x64, 0x6f, 0x6d, 0x5f, 0x67, 0x65, 0x74, 0x00, 0x1b, 0x09, 0x70, 0x72,
++    0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x00, 0x1c, 0x0b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x5f, 0x79,
++    0x69, 0x65, 0x6c, 0x64, 0x00, 0x1d, 0x0a, 0xae, 0x01, 0x0f, 0x0a, 0x00, 0x41, 0xc0, 0x00, 0x41, 0x80,
++    0x01, 0x10, 0x00, 0x0b, 0x0a, 0x00, 0x41, 0xc0, 0x00, 0x41, 0xc4, 0x00, 0x10, 0x01, 0x0b, 0x0a, 0x00,
++    0x41, 0xc0, 0x00, 0x41, 0x80, 0x01, 0x10, 0x02, 0x0b, 0x0a, 0x00, 0x41, 0xc0, 0x00, 0x41, 0xc4, 0x00,
++    0x10, 0x03, 0x0b, 0x0b, 0x00, 0x41, 0x00, 0x42, 0x01, 0x41, 0xc0, 0x00, 0x10, 0x04, 0x0b, 0x09, 0x00,
++    0x41, 0x00, 0x41, 0xc0, 0x00, 0x10, 0x05, 0x0b, 0x1f, 0x00, 0x41, 0xc0, 0x00, 0x41, 0xe0, 0x00, 0x36,
++    0x02, 0x00, 0x41, 0xc4, 0x00, 0x41, 0x00, 0x36, 0x02, 0x00, 0x41, 0x01, 0x41, 0xc0, 0x00, 0x41, 0x01,
++    0x41, 0xd0, 0x00, 0x10, 0x06, 0x0b, 0x06, 0x00, 0x41, 0x09, 0x10, 0x07, 0x0b, 0x09, 0x00, 0x41, 0x01,
++    0x41, 0xc0, 0x00, 0x10, 0x08, 0x0b, 0x09, 0x00, 0x41, 0x03, 0x41, 0xc0, 0x00, 0x10, 0x09, 0x0b, 0x0b,
++    0x00, 0x41, 0x03, 0x41, 0xc0, 0x00, 0x41, 0x08, 0x10, 0x0a, 0x0b, 0x0d, 0x00, 0x41, 0x01, 0x42, 0x00,
++    0x41, 0x00, 0x41, 0xc0, 0x00, 0x10, 0x0b, 0x0b, 0x09, 0x00, 0x41, 0xc0, 0x00, 0x41, 0x10, 0x10, 0x0c,
++    0x0b, 0x06, 0x00, 0x41, 0x00, 0x10, 0x0d, 0x0b, 0x04, 0x00, 0x10, 0x0e, 0x0b, 0x00, 0xd7, 0x01, 0x04,
++    0x6e, 0x61, 0x6d, 0x65, 0x01, 0xcf, 0x01, 0x0f, 0x00, 0x08, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x67, 0x65,
++    0x74, 0x01, 0x0e, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74,
++    0x02, 0x0b, 0x65, 0x6e, 0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x67, 0x65, 0x74, 0x03, 0x11, 0x65, 0x6e,
++    0x76, 0x69, 0x72, 0x6f, 0x6e, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x04, 0x0e,
++    0x63, 0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x5f, 0x67, 0x65, 0x74, 0x05, 0x0d, 0x63,
++    0x6c, 0x6f, 0x63, 0x6b, 0x5f, 0x72, 0x65, 0x73, 0x5f, 0x67, 0x65, 0x74, 0x06, 0x08, 0x66, 0x64, 0x5f,
++    0x77, 0x72, 0x69, 0x74, 0x65, 0x07, 0x08, 0x66, 0x64, 0x5f, 0x63, 0x6c, 0x6f, 0x73, 0x65, 0x08, 0x0d,
++    0x66, 0x64, 0x5f, 0x66, 0x64, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65, 0x74, 0x09, 0x0e, 0x66, 0x64,
++    0x5f, 0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x67, 0x65, 0x74, 0x0a, 0x13, 0x66, 0x64, 0x5f,
++    0x70, 0x72, 0x65, 0x73, 0x74, 0x61, 0x74, 0x5f, 0x64, 0x69, 0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x0b,
++    0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x0c, 0x0a, 0x72, 0x61, 0x6e, 0x64, 0x6f, 0x6d, 0x5f,
++    0x67, 0x65, 0x74, 0x0d, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x5f, 0x65, 0x78, 0x69, 0x74, 0x0e, 0x0b, 0x73,
++    0x63, 0x68, 0x65, 0x64, 0x5f, 0x79, 0x69, 0x65, 0x6c, 0x64,
++});
++
+ /// What the instance cases run: calls `ping`, adds, stores, grows its memory, recurses, spins and
+ /// prints. `ping-then-store` calls `ping(42)`, then stores 1 at address 0; `grow` traps if its memory
+ /// refuses to grow by 4 pages; `print` writes "hello" (at address 16) to standard output.
+ ///
+ ///     (module
+ ///       (import "contract:test/host@0" "ping" (func $ping (param i32)))
+ ///       (import "wasi_snapshot_preview1" "fd_write" (func $fdWrite (param i32 i32 i32 i32) (result i32)))
+ ///       (memory (export "memory") 1)
+ ///       (data (i32.const 16) "hello")
+ ///       (func (export "add") (param i32 i32) (result i32) (i32.add (local.get 0) (local.get 1)))
+@@ -952,20 +1073,72 @@ void instanceCrossesThreads()
+         auto const add = instance->function("add");
+         if (!add)
+             return std::unexpected(CallFailure::Trap);
+         auto argv = std::array<uint32_t, 2> { 2, 3 };
+         return instance->call(*add, argv).transform([&] { return argv[0]; });
+     });
+     REQUIRE(sum.has_value());
+     CHECK(*sum == std::expected<uint32_t, CallFailure> { 5 });
+ }
+ 
++/// What each export of EveryWasiFunctionModule, named after the WASI function it calls, ends with: the
++/// errno it returns, or ShimOutcome::Exit for a call that ends as a trap.
++inline constexpr auto EveryWasiFunctionOutcomes =
++    std::to_array<std::pair<std::string_view, wasi::ShimResult>>({
++        { "args_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "args_sizes_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "environ_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "environ_sizes_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "clock_time_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "clock_res_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "fd_write", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "fd_close", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Badf } },
++        { "fd_fdstat_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "fd_prestat_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Badf } },
++        { "fd_prestat_dir_name", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Badf } },
++        { "fd_seek", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "random_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++        { "proc_exit", { .outcome = wasi::ShimOutcome::Exit, .error = wasi::Errno::Success } },
++        { "sched_yield", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
++    });
++
++static_assert(std::ranges::equal(EveryWasiFunctionOutcomes | std::views::keys, AllowedWasiFunctions),
++              "EveryWasiFunctionOutcomes covers AllowedWasiFunctions, in its order");
++
++/// Every allowed WASI function can be called, and answers as preview 1 says: each export of
++/// EveryWasiFunctionModule, on an instance of its own, returns its errno or traps (proc_exit).
++template <typename T>
++void everyAllowedWasiFunctionWorks()
++{
++    auto const backend = T::make();
++    auto const runtime = createRuntime(*backend);
++    auto const guard = enterThread(*backend);
++    auto const module = load(*runtime, EveryWasiFunctionModule);
++    for (auto const& [function, expected]: EveryWasiFunctionOutcomes)
++    {
++        INFO(function);
++        auto context = RecordingHostContext {};
++        auto const instance = instantiate(*module, context);
++        auto const entry = functionOf(*instance, function);
++        if (expected.outcome == wasi::ShimOutcome::Exit)
++        {
++            auto const called = instance->call(entry, {});
++            REQUIRE_FALSE(called.has_value());
++            CHECK(called.error() == CallFailure::Trap);
++            continue;
++        }
++        auto error = std::array<uint32_t, 1> { 0xFFFF'FFFF };
++        REQUIRE(instance->call(entry, error).has_value());
++        CHECK(error[0] == static_cast<uint32_t>(expected.error));
++    }
++}
++
+ #ifndef _WIN32
+ /// The signals whose disposition a backend must leave alone.
+ inline constexpr auto GuardedSignals = std::array { SIGSEGV, SIGUSR1 };
+ 
+ /// @return The disposition of @p signal.
+ [[nodiscard]] inline struct sigaction dispositionOf(int signal)
+ {
+     struct sigaction action {};
+     REQUIRE(sigaction(signal, nullptr, &action) == 0);
+     return action;
+@@ -1044,20 +1217,21 @@ void wasiStdioGoesNowhere()
+ /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
+ #define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                        \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)              \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)           \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)        \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)            \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder) \
+diff --git a/src/vtextension/wasm/wasi/Preview1Shim.cpp b/src/vtextension/wasm/wasi/Preview1Shim.cpp
+new file mode 100644
+index 000000000..45e885422
+--- /dev/null
++++ b/src/vtextension/wasm/wasi/Preview1Shim.cpp
+@@ -0,0 +1,343 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
++
++#include <algorithm>
++#include <array>
++#include <concepts>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <limits>
++#include <ranges>
++#include <span>
++#include <string_view>
++
++#include <vtextension/wasm/WasiAllowList.hpp>
++
++namespace vtextension::wasm::wasi
++{
++
++namespace
++{
++    /// The standard streams are file descriptors 0 to 2; there is no other.
++    constexpr auto StandardStreamCount = uint32_t { 3 };
++
++    /// The size of a WASI `ciovec`: a u32 buffer address, then a u32 length.
++    constexpr auto CiovecBytes = uint64_t { 8 };
++
++    /// The size of a WASI `fdstat`, and where its fields lie.
++    constexpr auto FdstatBytes = uint32_t { 24 };
++    constexpr auto FdstatRightsBaseOffset = std::size_t { 8 };
++
++    /// The `filetype` of a character device, which every standard stream is.
++    constexpr auto CharacterDevice = std::byte { 2 };
++
++    /// The `rights` of a standard stream: fd_seek (bit 2) and fd_write (bit 6), the operations the
++    /// shim implements on it.
++    constexpr auto StandardStreamRights = uint64_t { 0b0100'0100 };
++
++    /// The highest `whence` of fd_seek: set (0), cur (1) and end (2).
++    constexpr auto HighestWhence = uint64_t { 2 };
++
++    /// The resolution every provided clock reports, in nanoseconds.
++    constexpr auto ClockResolution = uint64_t { 1 };
++
++    /// Whether the shim provides a clock of preview 1.
++    enum class ClockProvision : uint8_t
++    {
++        Withheld, ///< Not provided: reading it gives Errno::Nosys.
++        Provided, ///< Read from ShimEnvironment::clock.
++    };
++
++    /// One clock of preview 1, and whether it is provided.
++    struct ClockRow
++    {
++        ClockId id;               ///< The clock.
++        ClockProvision provision; ///< Whether it is provided.
++    };
++
++    /// Every clock of preview 1. The CPU-time clocks are withheld: an instance's CPU time is the host's
++    /// business, and preview 1 lets a host answer `nosys` for a clock it does not support.
++    constexpr auto Clocks = std::to_array<ClockRow>({
++        { .id = ClockId::Realtime, .provision = ClockProvision::Provided },
++        { .id = ClockId::Monotonic, .provision = ClockProvision::Provided },
++        { .id = ClockId::ProcessCputime, .provision = ClockProvision::Withheld },
++        { .id = ClockId::ThreadCputime, .provision = ClockProvision::Withheld },
++    });
++
++    /// @return The i32 argument @p arg, as the guest passed it.
++    [[nodiscard]] constexpr uint32_t asU32(uint64_t arg) noexcept
++    {
++        return static_cast<uint32_t>(arg);
++    }
++
++    /// @return The @p size bytes of @p memory at @p address; `Fault` if they do not all lie in it.
++    [[nodiscard]] std::expected<std::span<std::byte>, Errno> range(std::span<std::byte> memory,
++                                                                   uint32_t address,
++                                                                   uint64_t size) noexcept
++    {
++        if (uint64_t { address } + size > memory.size())
++            return std::unexpected(Errno::Fault);
++        return memory.subspan(address, static_cast<std::size_t>(size));
++    }
++
++    /// Stores @p value into @p bytes, little-endian, in as many bytes as @p bytes has.
++    template <std::unsigned_integral T>
++    void storeLittleEndian(std::span<std::byte> bytes, T value) noexcept
++    {
++        for (auto& byte: bytes)
++        {
++            byte = std::byte { static_cast<uint8_t>(value) };
++            value = static_cast<T>(value >> 8U);
++        }
++    }
++
++    /// @return The little-endian u32 at the start of @p bytes, which holds at least four.
++    [[nodiscard]] uint32_t loadU32(std::span<std::byte const> bytes) noexcept
++    {
++        auto value = uint32_t { 0 };
++        for (auto const byte: bytes.first(4) | std::views::reverse)
++            value = (value << 8U) | std::to_integer<uint32_t>(byte);
++        return value;
++    }
++
++    /// Stores @p value as a little-endian u32 at @p address.
++    /// @return Nothing; `Fault` if the four bytes do not lie in @p memory.
++    [[nodiscard]] std::expected<void, Errno> storeU32(std::span<std::byte> memory,
++                                                      uint32_t address,
++                                                      uint32_t value) noexcept
++    {
++        return range(memory, address, sizeof(value)).transform([&](std::span<std::byte> bytes) {
++            storeLittleEndian(bytes, value);
++        });
++    }
++
++    /// Stores @p value as a little-endian u64 at @p address.
++    /// @return Nothing; `Fault` if the eight bytes do not lie in @p memory.
++    [[nodiscard]] std::expected<void, Errno> storeU64(std::span<std::byte> memory,
++                                                      uint32_t address,
++                                                      uint64_t value) noexcept
++    {
++        return range(memory, address, sizeof(value)).transform([&](std::span<std::byte> bytes) {
++            storeLittleEndian(bytes, value);
++        });
++    }
++
++    /// @return The result of a function that returned @p outcome's errno.
++    [[nodiscard]] ShimResult returned(std::expected<void, Errno> const& outcome) noexcept
++    {
++        return ShimResult { .outcome = ShimOutcome::Returned,
++                            .error = outcome ? Errno::Success : outcome.error() };
++    }
++
++    /// @return The standard stream @p fd names; `Badf` if it names none.
++    [[nodiscard]] std::expected<uint32_t, Errno> standardStream(uint64_t fd) noexcept
++    {
++        if (asU32(fd) >= StandardStreamCount)
++            return std::unexpected(Errno::Badf);
++        return asU32(fd);
++    }
++
++    /// @return The provided clock @p clockId names; `Nosys` if it is withheld, `Inval` if it names none.
++    [[nodiscard]] std::expected<ClockId, Errno> providedClock(uint64_t clockId) noexcept
++    {
++        auto const row = std::ranges::find(
++            Clocks, asU32(clockId), [](ClockRow const& clock) { return static_cast<uint32_t>(clock.id); });
++        if (row == Clocks.end())
++            return std::unexpected(Errno::Inval);
++        if (row->provision == ClockProvision::Withheld)
++            return std::unexpected(Errno::Nosys);
++        return row->id;
++    }
++
++    /// args_get and environ_get, of an empty list: (list, buffer) -> errno. Writes nothing.
++    ShimResult emptyListGet(ShimEnvironment const& /*environment*/,
++                            std::span<std::byte> memory,
++                            std::span<uint64_t const> args)
++    {
++        return returned(range(memory, asU32(args[0]), 0)
++                            .and_then([&](auto) { return range(memory, asU32(args[1]), 0); })
++                            .transform([](auto) {}));
++    }
++
++    /// args_sizes_get and environ_sizes_get, of an empty list: (count, size) -> errno. Stores 0 into both,
++    /// or into neither.
++    ShimResult emptyListSizesGet(ShimEnvironment const& /*environment*/,
++                                 std::span<std::byte> memory,
++                                 std::span<uint64_t const> args)
++    {
++        return returned(range(memory, asU32(args[0]), sizeof(uint32_t)).and_then([&](auto count) {
++            return range(memory, asU32(args[1]), sizeof(uint32_t)).transform([&](auto size) {
++                storeLittleEndian(count, uint32_t { 0 });
++                storeLittleEndian(size, uint32_t { 0 });
++            });
++        }));
++    }
++
++    /// clock_time_get: (clock, precision, time) -> errno. The precision is a hint, and ignored.
++    ShimResult clockTimeGet(ShimEnvironment const& environment,
++                            std::span<std::byte> memory,
++                            std::span<uint64_t const> args)
++    {
++        return returned(providedClock(args[0]).and_then([&](ClockId clock) {
++            return range(memory, asU32(args[2]), sizeof(uint64_t)).transform([&](auto bytes) {
++                storeLittleEndian(bytes, environment.clock(static_cast<uint32_t>(clock)));
++            });
++        }));
++    }
++
++    /// clock_res_get: (clock, resolution) -> errno.
++    ShimResult clockResGet(ShimEnvironment const& /*environment*/,
++                           std::span<std::byte> memory,
++                           std::span<uint64_t const> args)
++    {
++        return returned(providedClock(args[0]).and_then(
++            [&](ClockId) { return storeU64(memory, asU32(args[1]), ClockResolution); }));
++    }
++
++    /// @return The total length of the `ciovec`s @p iovs, each of whose buffers lies in @p memory;
++    ///         `Fault` if one does not, `Inval` if the total does not fit a u32.
++    [[nodiscard]] std::expected<uint32_t, Errno> totalLength(std::span<std::byte> memory,
++                                                             std::span<std::byte const> iovs) noexcept
++    {
++        auto total = uint64_t { 0 };
++        for (auto const index: std::views::iota(uint64_t { 0 }, iovs.size() / CiovecBytes))
++        {
++            auto const iov = iovs.subspan(static_cast<std::size_t>(index * CiovecBytes), CiovecBytes);
++            auto const length = loadU32(iov.subspan(4));
++            if (!range(memory, loadU32(iov), length))
++                return std::unexpected(Errno::Fault);
++            total += length;
++        }
++        if (total > std::numeric_limits<uint32_t>::max())
++            return std::unexpected(Errno::Inval);
++        return static_cast<uint32_t>(total);
++    }
++
++    /// fd_write: (fd, iovs, iovsLength, written) -> errno. Writes nowhere, and reports every byte written.
++    ShimResult fdWrite(ShimEnvironment const& /*environment*/,
++                       std::span<std::byte> memory,
++                       std::span<uint64_t const> args)
++    {
++        return returned(
++            standardStream(args[0])
++                .and_then(
++                    [&](uint32_t) { return range(memory, asU32(args[1]), asU32(args[2]) * CiovecBytes); })
++                .and_then([&](std::span<std::byte> iovs) { return totalLength(memory, iovs); })
++                .and_then([&](uint32_t total) { return storeU32(memory, asU32(args[3]), total); }));
++    }
++
++    /// fd_close: (fd) -> errno. A standard stream stays open: it never held anything to release.
++    ShimResult fdClose(ShimEnvironment const& /*environment*/,
++                       std::span<std::byte> /*memory*/,
++                       std::span<uint64_t const> args)
++    {
++        return returned(standardStream(args[0]).transform([](uint32_t) {}));
++    }
++
++    /// fd_fdstat_get: (fd, stat) -> errno. A standard stream is a character device with no flags.
++    ShimResult fdFdstatGet(ShimEnvironment const& /*environment*/,
++                           std::span<std::byte> memory,
++                           std::span<uint64_t const> args)
++    {
++        return returned(standardStream(args[0])
++                            .and_then([&](uint32_t) { return range(memory, asU32(args[1]), FdstatBytes); })
++                            .transform([](std::span<std::byte> stat) {
++                                std::ranges::fill(stat, std::byte {});
++                                stat.front() = CharacterDevice;
++                                storeLittleEndian(stat.subspan(FdstatRightsBaseOffset, sizeof(uint64_t)),
++                                                  StandardStreamRights);
++                            }));
++    }
++
++    /// fd_prestat_get and fd_prestat_dir_name: there is no preopened directory, so no descriptor has one.
++    ShimResult noPreopenedDirectory(ShimEnvironment const& /*environment*/,
++                                    std::span<std::byte> /*memory*/,
++                                    std::span<uint64_t const> /*args*/)
++    {
++        return returned(std::unexpected(Errno::Badf));
++    }
++
++    /// fd_seek: (fd, offset, whence, newOffset) -> errno. A standard stream stays at offset 0.
++    ShimResult fdSeek(ShimEnvironment const& /*environment*/,
++                      std::span<std::byte> memory,
++                      std::span<uint64_t const> args)
++    {
++        return returned(standardStream(args[0]).and_then([&](uint32_t) -> std::expected<void, Errno> {
++            if (asU32(args[2]) > HighestWhence)
++                return std::unexpected(Errno::Inval);
++            return storeU64(memory, asU32(args[3]), 0);
++        }));
++    }
++
++    /// random_get: (buffer, length) -> errno.
++    ShimResult randomGet(ShimEnvironment const& environment,
++                         std::span<std::byte> memory,
++                         std::span<uint64_t const> args)
++    {
++        return returned(
++            range(memory, asU32(args[0]), asU32(args[1])).transform([&](std::span<std::byte> bytes) {
++                environment.random(bytes);
++            }));
++    }
++
++    /// proc_exit: (code). Does not return; the exit code is not kept.
++    ShimResult procExit(ShimEnvironment const& /*environment*/,
++                        std::span<std::byte> /*memory*/,
++                        std::span<uint64_t const> /*args*/)
++    {
++        return ShimResult { .outcome = ShimOutcome::Exit, .error = Errno::Success };
++    }
++
++    /// sched_yield: () -> errno. An instance is single-threaded: there is nothing to yield to.
++    ShimResult schedYield(ShimEnvironment const& /*environment*/,
++                          std::span<std::byte> /*memory*/,
++                          std::span<uint64_t const> /*args*/)
++    {
++        return returned({});
++    }
++
++    /// @return The row implementing @p name by @p call, with its signature from Preview1Functions.
++    [[nodiscard]] consteval ShimFunction shim(std::string_view name, ShimCall call)
++    {
++        return ShimFunction { .preview1 = *findPreview1Function(name), .call = call };
++    }
++
++    constexpr auto ShimTable = std::to_array<ShimFunction>({
++        shim("args_get", &emptyListGet),
++        shim("args_sizes_get", &emptyListSizesGet),
++        shim("environ_get", &emptyListGet),
++        shim("environ_sizes_get", &emptyListSizesGet),
++        shim("clock_time_get", &clockTimeGet),
++        shim("clock_res_get", &clockResGet),
++        shim("fd_write", &fdWrite),
++        shim("fd_close", &fdClose),
++        shim("fd_fdstat_get", &fdFdstatGet),
++        shim("fd_prestat_get", &noPreopenedDirectory),
++        shim("fd_prestat_dir_name", &noPreopenedDirectory),
++        shim("fd_seek", &fdSeek),
++        shim("random_get", &randomGet),
++        shim("proc_exit", &procExit),
++        shim("sched_yield", &schedYield),
++    });
++
++    static_assert(std::ranges::equal(ShimTable | std::views::transform([](ShimFunction const& function) {
++                                         return function.preview1.name;
++                                     }),
++                                     AllowedWasiFunctions),
++                  "ShimTable implements AllowedWasiFunctions, in its order");
++} // namespace
++
++std::span<ShimFunction const> shimFunctions() noexcept
++{
++    return ShimTable;
++}
++
++ShimFunction const* findShimFunction(std::string_view name) noexcept
++{
++    auto const row = std::ranges::find_if(
++        ShimTable, [name](ShimFunction const& function) { return function.preview1.name == name; });
++    return row != ShimTable.end() ? &*row : nullptr;
++}
++
++} // namespace vtextension::wasm::wasi
+diff --git a/src/vtextension/wasm/wasi/Preview1Shim.hpp b/src/vtextension/wasm/wasi/Preview1Shim.hpp
+new file mode 100644
+index 000000000..1f61bdf2d
+--- /dev/null
++++ b/src/vtextension/wasm/wasi/Preview1Shim.hpp
+@@ -0,0 +1,89 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The host's own implementation of every allowed WASI preview 1 function, written against guest memory
++// and an injected environment alone, so that every engine binding it behaves the same: no arguments,
++// no environment variables, no preopened directory, and three standard streams that write nowhere.
++// Engine-independent: an engine binds each row under wasm::WasiModule and does nothing but translate.
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <functional>
++#include <span>
++#include <string_view>
++
++#include <vtextension/wasm/wasi/Preview1Signatures.hpp>
++
++namespace vtextension::wasm::wasi
++{
++
++/// A WASI preview 1 clock, by its `clockid` value (a u32 on the wire; every value fits a byte).
++enum class ClockId : uint8_t
++{
++    Realtime = 0,       ///< Wall-clock time, since the Unix epoch.
++    Monotonic = 1,      ///< A clock that never goes back, from an unspecified start.
++    ProcessCputime = 2, ///< The CPU time of the process; not provided (Errno::Nosys).
++    ThreadCputime = 3,  ///< The CPU time of the thread; not provided (Errno::Nosys).
++};
++
++/// What the shim reads from outside guest memory: injected, so that tests are deterministic.
++/// Neither function may throw: an engine calls the shim from code an exception must not unwind through.
++struct ShimEnvironment
++{
++    /// @return The time of the clock @p clockId (ClockId::Realtime or ClockId::Monotonic only), in
++    ///         nanoseconds.
++    std::function<uint64_t(uint32_t clockId)> clock;
++    /// Fills its argument with random bytes.
++    std::function<void(std::span<std::byte>)> random;
++};
++
++/// A WASI preview 1 errno, by its value; only those the shim returns (a u16 on the wire; every value of
++/// preview 1 fits a byte).
++enum class Errno : uint8_t
++{
++    Success = 0, ///< The function succeeded.
++    Badf = 8,    ///< No such file descriptor.
++    Fault = 21,  ///< A pointer the guest passed lies outside its memory.
++    Inval = 28,  ///< An argument is out of range.
++    Nosys = 52,  ///< The function, or the clock asked for, is not provided.
++};
++
++/// How a shim function ended.
++enum class ShimOutcome : uint8_t
++{
++    Returned, ///< It returns its errno to the guest.
++    Exit,     ///< proc_exit: it does not return, and the engine ends the call as a trap.
++};
++
++/// What a shim function ended with.
++struct ShimResult
++{
++    ShimOutcome outcome = ShimOutcome::Returned; ///< How it ended.
++    Errno error = Errno::Success;                ///< Its errno, when it returned.
++
++    bool operator==(ShimResult const&) const = default;
++};
++
++/// Runs one shim function.
++/// @param environment Where clocks and random bytes come from.
++/// @param memory The guest's linear memory; every guest pointer is checked against it.
++/// @param args The guest's arguments, in order, each zero-extended to 64 bits (i32 and i64 alike).
++/// @return How the function ended.
++using ShimCall = ShimResult (*)(ShimEnvironment const& environment,
++                                std::span<std::byte> memory,
++                                std::span<uint64_t const> args);
++
++/// One allowed WASI preview 1 function and its implementation.
++struct ShimFunction
++{
++    Preview1Function preview1; ///< Its name and signature, the row of Preview1Functions.
++    ShimCall call = nullptr;   ///< What a call to it runs.
++};
++
++/// @return One row per entry of AllowedWasiFunctions, in its order.
++[[nodiscard]] std::span<ShimFunction const> shimFunctions() noexcept;
++
++/// @return The shim function named @p name; nullptr if it is not an allowed WASI function.
++[[nodiscard]] ShimFunction const* findShimFunction(std::string_view name) noexcept;
++
++} // namespace vtextension::wasm::wasi
+diff --git a/src/vtextension/wasm/wasi/Preview1Shim_test.cpp b/src/vtextension/wasm/wasi/Preview1Shim_test.cpp
+new file mode 100644
+index 000000000..136f56894
+--- /dev/null
++++ b/src/vtextension/wasm/wasi/Preview1Shim_test.cpp
+@@ -0,0 +1,395 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The WASI preview 1 shim, function by function, against a plain 64 KiB memory and a deterministic
++// environment; and the environment a process runs it with.
++#include <catch2/catch_test_macros.hpp>
++
++#include <algorithm>
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <initializer_list>
++#include <limits>
++#include <ranges>
++#include <span>
++#include <string_view>
++#include <vector>
++
++#include <vtextension/wasm/WasiAllowList.hpp>
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
++#include <vtextension/wasm/wasi/SystemEnvironment.hpp>
++
++using vtextension::wasm::AllowedWasiFunctions;
++using vtextension::wasm::wasi::ClockId;
++using vtextension::wasm::wasi::Errno;
++using vtextension::wasm::wasi::findShimFunction;
++using vtextension::wasm::wasi::ShimEnvironment;
++using vtextension::wasm::wasi::ShimFunction;
++using vtextension::wasm::wasi::shimFunctions;
++using vtextension::wasm::wasi::ShimOutcome;
++using vtextension::wasm::wasi::ShimResult;
++using vtextension::wasm::wasi::systemEnvironment;
++
++namespace
++{
++
++/// The size of the guest memory every case runs against: one WebAssembly page.
++constexpr auto MemoryBytes = uint32_t { 64 } * 1024;
++
++/// A byte the memory is filled with, so that what a function leaves alone shows.
++constexpr auto Untouched = std::byte { 0xEE };
++
++/// The first byte the test environment's random source produces; each next one is one more.
++constexpr auto FirstRandomByte = uint8_t { 0xA0 };
++
++/// @return Nanoseconds from the test environment's clock @p clockId: 1000 plus its id.
++[[nodiscard]] uint64_t testClock(uint32_t clockId)
++{
++    return 1000 + uint64_t { clockId };
++}
++
++/// Fills @p bytes with FirstRandomByte, FirstRandomByte + 1, and so on.
++void testRandom(std::span<std::byte> bytes)
++{
++    auto next = FirstRandomByte;
++    for (auto& byte: bytes)
++        byte = std::byte { next++ };
++}
++
++/// @return An environment whose clocks and random source give the same values on every run.
++[[nodiscard]] ShimEnvironment testEnvironment()
++{
++    return ShimEnvironment { .clock = &testClock, .random = &testRandom };
++}
++
++/// One guest memory, filled with Untouched, and the shim functions called on it.
++class Guest
++{
++  public:
++    /// Calls the shim function @p name with @p args.
++    /// @return What it returned.
++    [[nodiscard]] ShimResult call(std::string_view name, std::initializer_list<uint64_t> args)
++    {
++        auto const* const function = findShimFunction(name);
++        REQUIRE(function != nullptr);
++        auto const arguments = std::vector<uint64_t>(args);
++        REQUIRE(arguments.size() == function->preview1.parameterCount);
++        return function->call(_environment, _memory, arguments);
++    }
++
++    /// @return The errno of a call to @p name with @p args, which must have returned.
++    [[nodiscard]] Errno errnoOf(std::string_view name, std::initializer_list<uint64_t> args)
++    {
++        auto const result = call(name, args);
++        REQUIRE(result.outcome == ShimOutcome::Returned);
++        return result.error;
++    }
++
++    /// @return The little-endian unsigned integer of @p size bytes at @p address.
++    [[nodiscard]] uint64_t load(uint32_t address, uint32_t size) const
++    {
++        auto value = uint64_t { 0 };
++        for (auto const offset: std::views::iota(uint32_t { 0 }, size) | std::views::reverse)
++            value = (value << 8U) | std::to_integer<uint64_t>(_memory.at(address + offset));
++        return value;
++    }
++
++    /// Stores @p value as a little-endian u32 at @p address.
++    void store32(uint32_t address, uint32_t value)
++    {
++        for (auto const offset: std::views::iota(uint32_t { 0 }, uint32_t { 4 }))
++            _memory.at(address + offset) = std::byte { static_cast<uint8_t>(value >> (offset * 8U)) };
++    }
++
++    /// @return Whether the @p size bytes at @p address are all still Untouched.
++    [[nodiscard]] bool isUntouched(uint32_t address, uint32_t size) const
++    {
++        return std::ranges::all_of(std::span { _memory }.subspan(address, size),
++                                   [](std::byte byte) { return byte == Untouched; });
++    }
++
++    /// @return Whether the whole memory is still Untouched.
++    [[nodiscard]] bool isUntouched() const { return isUntouched(0, MemoryBytes); }
++
++  private:
++    ShimEnvironment _environment = testEnvironment();
++    std::vector<std::byte> _memory = std::vector<std::byte>(MemoryBytes, Untouched);
++};
++
++/// The address the last two bytes of the memory start at: no u32 or u64 fits there.
++constexpr auto NearEnd = uint64_t { MemoryBytes - 2 };
++
++/// File descriptors 0 to 2, the standard streams.
++constexpr auto StandardStreams = std::to_array<uint64_t>({ 0, 1, 2 });
++
++/// The rights a standard stream has: fd_seek (bit 2) and fd_write (bit 6), the two the shim implements.
++constexpr auto StandardStreamRights = uint64_t { 0b0100'0100 };
++
++/// The filetype of a character device.
++constexpr auto CharacterDevice = uint64_t { 2 };
++
++} // namespace
++
++TEST_CASE("Preview1Shim.tableMatchesAllowList")
++{
++    auto const functions = shimFunctions();
++    REQUIRE(functions.size() == AllowedWasiFunctions.size());
++    CHECK(std::ranges::equal(functions | std::views::transform([](ShimFunction const& function) {
++                                 return function.preview1.name;
++                             }),
++                             AllowedWasiFunctions));
++    for (auto const& function: functions)
++    {
++        INFO(function.preview1.name);
++        CHECK(function.call != nullptr);
++        CHECK(findShimFunction(function.preview1.name) == &function);
++    }
++    CHECK(findShimFunction("poll_oneoff") == nullptr);
++}
++
++TEST_CASE("Preview1Shim.args_get")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("args_get", { 100, 200 }) == Errno::Success);
++    CHECK(guest.isUntouched()); // There is no argument to write.
++}
++
++TEST_CASE("Preview1Shim.args_sizes_get")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("args_sizes_get", { 100, 104 }) == Errno::Success);
++    CHECK(guest.load(100, 4) == 0); // argc
++    CHECK(guest.load(104, 4) == 0); // the size of the argument strings
++    CHECK(guest.isUntouched(108, 4));
++}
++
++TEST_CASE("Preview1Shim.environ_get")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("environ_get", { 100, 200 }) == Errno::Success);
++    CHECK(guest.isUntouched()); // There is no variable to write.
++}
++
++TEST_CASE("Preview1Shim.environ_sizes_get")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("environ_sizes_get", { 100, 104 }) == Errno::Success);
++    CHECK(guest.load(100, 4) == 0); // the count of variables
++    CHECK(guest.load(104, 4) == 0); // the size of their strings
++    CHECK(guest.isUntouched(108, 4));
++}
++
++TEST_CASE("Preview1Shim.clock_time_get")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("clock_time_get", { 0, 1, 200 }) == Errno::Success);
++    CHECK(guest.load(200, 8) == 1000); // the environment's realtime clock
++    CHECK(guest.errnoOf("clock_time_get", { 1, 1, 208 }) == Errno::Success);
++    CHECK(guest.load(208, 8) == 1001); // its monotonic clock
++    CHECK(guest.isUntouched(216, 4));
++
++    auto fresh = Guest {};
++    // The CPU-time clocks are clocks of preview 1, but the shim keeps an instance's CPU time to itself.
++    CHECK(fresh.errnoOf("clock_time_get", { 2, 1, 200 }) == Errno::Nosys);
++    CHECK(fresh.errnoOf("clock_time_get", { 3, 1, 200 }) == Errno::Nosys);
++    CHECK(fresh.errnoOf("clock_time_get", { 4, 1, 200 }) == Errno::Inval);
++    CHECK(fresh.errnoOf("clock_time_get", { std::numeric_limits<uint32_t>::max(), 1, 200 }) == Errno::Inval);
++    CHECK(fresh.isUntouched());
++}
++
++TEST_CASE("Preview1Shim.clock_res_get")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("clock_res_get", { 0, 200 }) == Errno::Success);
++    CHECK(guest.load(200, 8) == 1);
++    CHECK(guest.errnoOf("clock_res_get", { 1, 208 }) == Errno::Success);
++    CHECK(guest.load(208, 8) == 1);
++
++    auto fresh = Guest {};
++    CHECK(fresh.errnoOf("clock_res_get", { 2, 200 }) == Errno::Nosys);
++    CHECK(fresh.errnoOf("clock_res_get", { 3, 200 }) == Errno::Nosys);
++    CHECK(fresh.errnoOf("clock_res_get", { 4, 200 }) == Errno::Inval);
++    CHECK(fresh.isUntouched());
++}
++
++TEST_CASE("Preview1Shim.fd_write")
++{
++    auto guest = Guest {};
++    // Two buffers, of 5 and 7 bytes; nothing reads what they hold.
++    guest.store32(300, 400);
++    guest.store32(304, 5);
++    guest.store32(308, 500);
++    guest.store32(312, 7);
++    for (auto const fd: StandardStreams)
++    {
++        INFO("fd " << fd);
++        CHECK(guest.errnoOf("fd_write", { fd, 300, 2, 320 }) == Errno::Success);
++        CHECK(guest.load(320, 4) == 12);
++    }
++    CHECK(guest.errnoOf("fd_write", { 1, 300, 0, 324 }) == Errno::Success);
++    CHECK(guest.load(324, 4) == 0);
++    CHECK(guest.isUntouched(400, 5));
++    CHECK(guest.isUntouched(500, 7));
++
++    CHECK(guest.errnoOf("fd_write", { 3, 300, 2, 328 }) == Errno::Badf);
++    CHECK(guest.isUntouched(328, 4));
++
++    // A buffer reaching past the end of the memory.
++    guest.store32(304, MemoryBytes);
++    CHECK(guest.errnoOf("fd_write", { 1, 300, 2, 328 }) == Errno::Fault);
++    CHECK(guest.isUntouched(328, 4));
++}
++
++TEST_CASE("Preview1Shim.fd_write.totalBeyondU32IsInval")
++{
++    // 4100 buffers, each the whole 1 MiB memory: every one lies in the memory, but their total of
++    // 4100 MiB is more than the u32 nwritten holds.
++    constexpr auto Bytes = uint32_t { 1 } << 20U;
++    constexpr auto Buffers = uint32_t { 4100 };
++    auto memory = std::vector<std::byte>(Bytes, std::byte {});
++    for (auto const index: std::views::iota(uint32_t { 0 }, Buffers))
++        for (auto const offset: std::views::iota(uint32_t { 0 }, uint32_t { 4 }))
++            memory.at((index * 8) + 4 + offset) = std::byte { static_cast<uint8_t>(Bytes >> (offset * 8U)) };
++    auto const* const function = findShimFunction("fd_write");
++    REQUIRE(function != nullptr);
++    auto const environment = testEnvironment();
++    auto const args = std::to_array<uint64_t>({ 1, 0, Buffers, Bytes - 4 });
++    CHECK(function->call(environment, memory, args) == ShimResult { ShimOutcome::Returned, Errno::Inval });
++}
++
++TEST_CASE("Preview1Shim.fd_close")
++{
++    auto guest = Guest {};
++    for (auto const fd: StandardStreams)
++        CHECK(guest.errnoOf("fd_close", { fd }) == Errno::Success);
++    // Closing a standard stream leaves the stream: writing to it still succeeds.
++    guest.store32(300, 400);
++    guest.store32(304, 1);
++    CHECK(guest.errnoOf("fd_write", { 1, 300, 1, 320 }) == Errno::Success);
++    CHECK(guest.errnoOf("fd_close", { 3 }) == Errno::Badf);
++}
++
++TEST_CASE("Preview1Shim.fd_fdstat_get")
++{
++    auto guest = Guest {};
++    for (auto const fd: StandardStreams)
++    {
++        INFO("fd " << fd);
++        CHECK(guest.errnoOf("fd_fdstat_get", { fd, 200 }) == Errno::Success);
++        CHECK(guest.load(200, 1) == CharacterDevice); // fs_filetype
++        CHECK(guest.load(202, 2) == 0);               // fs_flags
++        CHECK(guest.load(208, 8) == StandardStreamRights);
++        CHECK(guest.load(216, 8) == 0); // fs_rights_inheriting
++    }
++    CHECK(guest.isUntouched(224, 4));
++
++    auto fresh = Guest {};
++    CHECK(fresh.errnoOf("fd_fdstat_get", { 3, 200 }) == Errno::Badf);
++    CHECK(fresh.isUntouched());
++}
++
++TEST_CASE("Preview1Shim.fd_prestat_get")
++{
++    auto guest = Guest {};
++    // There is no preopened directory, so no descriptor has a prestat.
++    for (auto const fd: { 0, 1, 2, 3, 4 })
++        CHECK(guest.errnoOf("fd_prestat_get", { static_cast<uint64_t>(fd), 200 }) == Errno::Badf);
++    CHECK(guest.isUntouched());
++}
++
++TEST_CASE("Preview1Shim.fd_prestat_dir_name")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("fd_prestat_dir_name", { 3, 200, 16 }) == Errno::Badf);
++    CHECK(guest.isUntouched());
++}
++
++TEST_CASE("Preview1Shim.fd_seek")
++{
++    auto guest = Guest {};
++    for (auto const fd: StandardStreams)
++        for (auto const whence: { 0, 1, 2 })
++        {
++            INFO("fd " << fd << ", whence " << whence);
++            CHECK(guest.errnoOf("fd_seek", { fd, 10, static_cast<uint64_t>(whence), 200 }) == Errno::Success);
++            CHECK(guest.load(200, 8) == 0);
++        }
++    CHECK(guest.isUntouched(208, 4));
++
++    auto fresh = Guest {};
++    CHECK(fresh.errnoOf("fd_seek", { 1, 0, 3, 200 }) == Errno::Inval);
++    CHECK(fresh.errnoOf("fd_seek", { 3, 0, 0, 200 }) == Errno::Badf);
++    CHECK(fresh.isUntouched());
++}
++
++TEST_CASE("Preview1Shim.random_get")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("random_get", { 600, 16 }) == Errno::Success);
++    for (auto const offset: std::views::iota(uint32_t { 0 }, uint32_t { 16 }))
++        CHECK(guest.load(600 + offset, 1) == FirstRandomByte + offset);
++    CHECK(guest.isUntouched(616, 4));
++    CHECK(guest.isUntouched(596, 4));
++    CHECK(guest.errnoOf("random_get", { 700, 0 }) == Errno::Success);
++    CHECK(guest.isUntouched(700, 4));
++}
++
++TEST_CASE("Preview1Shim.proc_exit")
++{
++    auto guest = Guest {};
++    CHECK(guest.call("proc_exit", { 0 }).outcome == ShimOutcome::Exit);
++    CHECK(guest.call("proc_exit", { 3 }).outcome == ShimOutcome::Exit);
++    CHECK(guest.isUntouched());
++}
++
++TEST_CASE("Preview1Shim.sched_yield")
++{
++    auto guest = Guest {};
++    CHECK(guest.errnoOf("sched_yield", {}) == Errno::Success);
++}
++
++TEST_CASE("Preview1Shim.outOfBoundsPointerFaults")
++{
++    auto guest = Guest {};
++    guest.store32(300, 400);
++    guest.store32(304, 1);
++    // Each pointer a function writes or reads, two bytes before the end; the other pointers in bounds.
++    CHECK(guest.errnoOf("args_sizes_get", { NearEnd, 100 }) == Errno::Fault);
++    CHECK(guest.errnoOf("args_sizes_get", { 100, NearEnd }) == Errno::Fault);
++    CHECK(guest.errnoOf("environ_sizes_get", { NearEnd, 100 }) == Errno::Fault);
++    CHECK(guest.errnoOf("environ_sizes_get", { 100, NearEnd }) == Errno::Fault);
++    CHECK(guest.errnoOf("clock_time_get", { 0, 1, NearEnd }) == Errno::Fault);
++    CHECK(guest.errnoOf("clock_res_get", { 0, NearEnd }) == Errno::Fault);
++    CHECK(guest.errnoOf("fd_write", { 1, NearEnd, 1, 100 }) == Errno::Fault);
++    CHECK(guest.errnoOf("fd_write", { 1, 300, 1, NearEnd }) == Errno::Fault);
++    CHECK(guest.errnoOf("fd_fdstat_get", { 1, NearEnd }) == Errno::Fault);
++    CHECK(guest.errnoOf("fd_seek", { 1, 0, 0, NearEnd }) == Errno::Fault);
++    CHECK(guest.errnoOf("random_get", { NearEnd, 4 }) == Errno::Fault);
++    // Functions that write nothing still check where they would: past the end, not even zero bytes fit.
++    CHECK(guest.errnoOf("args_get", { MemoryBytes + 1, 100 }) == Errno::Fault);
++    CHECK(guest.errnoOf("args_get", { 100, MemoryBytes + 1 }) == Errno::Fault);
++    CHECK(guest.errnoOf("environ_get", { MemoryBytes + 1, 100 }) == Errno::Fault);
++    CHECK(guest.errnoOf("environ_get", { 100, MemoryBytes + 1 }) == Errno::Fault);
++    CHECK(guest.errnoOf("random_get", { MemoryBytes + 1, 0 }) == Errno::Fault);
++    // An address that wraps around 32 bits.
++    CHECK(guest.errnoOf("random_get", { std::numeric_limits<uint32_t>::max(), 2 }) == Errno::Fault);
++    // fd_prestat_get and fd_prestat_dir_name find no descriptor first, and never reach their pointer.
++    CHECK(guest.isUntouched(0, 300));
++    CHECK(guest.isUntouched(308, MemoryBytes - 308));
++}
++
++TEST_CASE("Preview1Shim.systemEnvironment")
++{
++    auto const environment = systemEnvironment();
++    auto const realtime = environment.clock(static_cast<uint32_t>(ClockId::Realtime));
++    // 2020-01-01, in nanoseconds since the epoch: any real clock reads later.
++    CHECK(realtime > uint64_t { 1'577'836'800 } * 1'000'000'000);
++    auto const before = environment.clock(static_cast<uint32_t>(ClockId::Monotonic));
++    auto const after = environment.clock(static_cast<uint32_t>(ClockId::Monotonic));
++    CHECK(after >= before);
++
++    // 64 random bytes are all zero with a chance of 2^-512.
++    auto bytes = std::array<std::byte, 64> {};
++    environment.random(bytes);
++    CHECK(std::ranges::any_of(bytes, [](std::byte byte) { return byte != std::byte {}; }));
++}
+diff --git a/src/vtextension/wasm/wasi/SystemEnvironment.cpp b/src/vtextension/wasm/wasi/SystemEnvironment.cpp
+new file mode 100644
+index 000000000..85f5f5a04
+--- /dev/null
++++ b/src/vtextension/wasm/wasi/SystemEnvironment.cpp
+@@ -0,0 +1,87 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/wasi/SystemEnvironment.hpp>
++
++#include <algorithm>
++#include <chrono>
++#include <cstddef>
++#include <cstdint>
++#include <exception>
++#include <span>
++
++#ifdef _WIN32
++// clang-format off
++    #include <windows.h>
++    #include <bcrypt.h>
++// clang-format on
++#elifdef __linux__
++    #include <sys/random.h>
++
++    #include <cerrno>
++#else
++    #include <stdlib.h> // arc4random_buf
++#endif
++
++namespace vtextension::wasm::wasi
++{
++
++namespace
++{
++    /// @return The time of @p clock since its epoch, in nanoseconds.
++    template <typename Clock>
++    [[nodiscard]] uint64_t nanosecondsOf() noexcept
++    {
++        auto const elapsed = Clock::now().time_since_epoch();
++        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
++    }
++
++    /// @return The time of the clock @p clockId, ClockId::Realtime or ClockId::Monotonic, in nanoseconds.
++    [[nodiscard]] uint64_t readClock(uint32_t clockId) noexcept
++    {
++        // The shim asks for no other clock (Preview1Shim.cpp, Clocks).
++        if (clockId == static_cast<uint32_t>(ClockId::Realtime))
++            return nanosecondsOf<std::chrono::system_clock>();
++        return nanosecondsOf<std::chrono::steady_clock>();
++    }
++
++    /// Fills @p bytes from the system's cryptographic random source. A source that refuses is a process
++    /// that forbids the call (a sandbox): a guest's random bytes are never quietly predictable, so that
++    /// terminates.
++    void fillRandom(std::span<std::byte> bytes) noexcept
++    {
++#ifdef _WIN32
++        // A guest's request is at most its memory, 4 GiB: ULONG holds every length but that one.
++        while (!bytes.empty())
++        {
++            auto const chunk = std::min<std::size_t>(bytes.size(), ULONG { 1 } << 30U);
++            if (!BCRYPT_SUCCESS(BCryptGenRandom(nullptr,
++                                                reinterpret_cast<PUCHAR>(bytes.data()),
++                                                static_cast<ULONG>(chunk),
++                                                BCRYPT_USE_SYSTEM_PREFERRED_RNG)))
++                std::terminate();
++            bytes = bytes.subspan(chunk);
++        }
++#elifdef __linux__
++        // getrandom fills at most 32 MiB per call, and a signal can interrupt it.
++        while (!bytes.empty())
++        {
++            auto const filled = ::getrandom(bytes.data(), bytes.size(), 0);
++            if (filled < 0)
++            {
++                if (errno == EINTR)
++                    continue;
++                std::terminate();
++            }
++            bytes = bytes.subspan(static_cast<std::size_t>(filled));
++        }
++#else
++        ::arc4random_buf(bytes.data(), bytes.size());
++#endif
++    }
++} // namespace
++
++ShimEnvironment systemEnvironment()
++{
++    return ShimEnvironment { .clock = &readClock, .random = &fillRandom };
++}
++
++} // namespace vtextension::wasm::wasi
+diff --git a/src/vtextension/wasm/wasi/SystemEnvironment.hpp b/src/vtextension/wasm/wasi/SystemEnvironment.hpp
+new file mode 100644
+index 000000000..5459efe7c
+--- /dev/null
++++ b/src/vtextension/wasm/wasi/SystemEnvironment.hpp
+@@ -0,0 +1,17 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The environment the WASI preview 1 shim runs with in a process: the system's clocks and its random
++// source. The one place the shim reaches the operating system.
++#pragma once
++
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
++
++namespace vtextension::wasm::wasi
++{
++
++/// @return An environment reading the system's realtime and monotonic clocks, and filling bytes from the
++///         system's cryptographic random source (getrandom on Linux, arc4random_buf on the BSDs and
++///         macOS, BCryptGenRandom on Windows).
++[[nodiscard]] ShimEnvironment systemEnvironment();
++
++} // namespace vtextension::wasm::wasi
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
+index f4a63998a..c34435df1 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
+@@ -15,20 +15,21 @@
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <wasmtime.h>
+ 
+ #include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/WasiAllowList.hpp>
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
+ #include <vtextension/wasm/wasi/Preview1Signatures.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+ // Every feature switch the table drives must exist: a Wasmtime built without one of these could neither
+ // be told to refuse what the table forbids nor be trusted to accept what it allows. Generated from the
+ // list the configure-time probe checks too (cmake/ContourThirdParties.cmake).
+ #include <vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
+ 
+ namespace vtextension::wasm::wasmtime
+ {
+@@ -134,21 +135,21 @@ namespace
+                             | std::views::transform(&FeatureRow::feature);
+         return std::ranges::equal(configurable,
+                                   FeatureSetters | std::views::transform(&FeatureSetterRow::feature))
+                && std::ranges::none_of(FeatureSetters,
+                                        [](FeatureSetterRow const& row) { return row.setter == nullptr; });
+     }
+     static_assert(featureSettersMatchTheTable(),
+                   "FeatureSetters drives every switchable row of EngineFeatures");
+ 
+     /// @return A configuration for one runtime's engine, from EngineFeatures, @p config and @p limits.
+-    [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig config, RuntimeLimits limits)
++    [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig const& config, RuntimeLimits limits)
+     {
+         auto* const engineConfig = wasm_config_new();
+         for (auto const& [feature, setter]: FeatureSetters)
+             setter(engineConfig, featureRow(feature).state == FeatureState::On);
+         wasmtime_config_max_wasm_stack_set(engineConfig, limits.stackBytes);
+         // Epoch interruption is how a call is stopped from another thread. A store's epoch deadline
+         // starts at 0 ticks, so a guest would trap at its first epoch check: WasmtimeInstance.cpp sets the
+         // store's deadline (wasmtime_context_set_epoch_deadline) before every entry into guest code.
+         wasmtime_config_epoch_interruption_set(engineConfig, true);
+         wasmtime_config_signals_based_traps_set(engineConfig, config.trapMode == TrapMode::Signals);
+@@ -181,63 +182,73 @@ namespace
+             return static_cast<uint32_t>(value.of.i32);
+         });
+         auto const called = data.context.callHost(binding.index, std::span { arguments }.first(argCount));
+         if (called)
+             return nullptr;
+         data.hostFailure = called.error();
+         static constexpr auto Message = std::string_view { "host function failed" };
+         return wasmtime_trap_new(Message.data(), Message.size());
+     }
+ 
+-    /// Stands in for a WASI function the backend does not implement: the module importing it
+-    /// instantiates, and a call to it traps.
+-    wasm_trap_t* unimplementedWasiFunction(void* /*env*/,
+-                                           wasmtime_caller_t* /*caller*/,
+-                                           wasmtime_val_t const* /*args*/,
+-                                           std::size_t /*argCount*/,
+-                                           wasmtime_val_t* /*results*/,
+-                                           std::size_t /*resultCount*/) noexcept
++    /// @return The memory the calling instance exports as "memory", where WASI preview 1 looks for it;
++    ///         empty if it exports none, so that every pointer a WASI function is passed faults.
++    [[nodiscard]] std::span<std::byte> callerMemory(wasmtime_caller_t* caller) noexcept
+     {
+-        static constexpr auto Message = std::string_view { "WASI function not implemented" };
+-        return wasmtime_trap_new(Message.data(), Message.size());
++        static constexpr auto Name = std::string_view { "memory" };
++        auto item = wasmtime_extern_t {};
++        if (!wasmtime_caller_export_get(caller, Name.data(), Name.size(), &item)
++            || item.kind != WASMTIME_EXTERN_MEMORY)
++            return {};
++        auto* const context = wasmtime_caller_context(caller);
++        return { reinterpret_cast<std::byte*>(wasmtime_memory_data(context, &item.of.memory)),
++                 wasmtime_memory_data_size(context, &item.of.memory) };
+     }
+ 
+-    /// One row of the WASI table: an allowed WASI preview 1 function and what implements it.
+-    struct WasiBinding
++    /// Runs an allowed WASI function on behalf of the guest, through the host's own implementation
++    /// (wasi/Preview1Shim.hpp), never Wasmtime's: hands it the guest's arguments, memory and the store's
++    /// environment, and returns its errno. proc_exit ends the call as a trap, which the call reports as
++    /// CallFailure::Trap: nothing is stashed in the store's data.
++    /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
++    /// @return Null when the function returned; a trap when it ended the call.
++    wasm_trap_t* callShimFunction(void* env,
++                                  wasmtime_caller_t* caller,
++                                  wasmtime_val_t const* args,
++                                  std::size_t argCount,
++                                  wasmtime_val_t* results,
++                                  std::size_t resultCount) noexcept
+     {
+-        std::string_view name;                             ///< The function's name.
+-        wasmtime_func_callback_t implementation = nullptr; ///< What a call to it runs.
+-    };
+-
+-    /// What implements each allowed WASI preview 1 function, in the order of wasi::Preview1Functions,
+-    /// whose signature each is provided with. A row not implemented yet traps when called.
+-    constexpr auto WasiBindings = std::to_array<WasiBinding>({
+-        { .name = "args_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "args_sizes_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "environ_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "environ_sizes_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "clock_time_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "clock_res_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "fd_write", .implementation = &unimplementedWasiFunction },
+-        { .name = "fd_close", .implementation = &unimplementedWasiFunction },
+-        { .name = "fd_fdstat_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "fd_prestat_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "fd_prestat_dir_name", .implementation = &unimplementedWasiFunction },
+-        { .name = "fd_seek", .implementation = &unimplementedWasiFunction },
+-        { .name = "random_get", .implementation = &unimplementedWasiFunction },
+-        { .name = "proc_exit", .implementation = &unimplementedWasiFunction },
+-        { .name = "sched_yield", .implementation = &unimplementedWasiFunction },
+-    });
+-    static_assert(std::ranges::equal(WasiBindings | std::views::transform(&WasiBinding::name),
+-                                     wasi::Preview1Functions
+-                                         | std::views::transform(&wasi::Preview1Function::name)),
+-                  "WasiBindings implements every allowed WASI function, in the order of Preview1Functions");
++        auto const& function = *static_cast<wasi::ShimFunction const*>(env);
++        auto const& data =
++            *static_cast<StoreData const*>(wasmtime_context_get_data(wasmtime_caller_context(caller)));
++        // The linker gave the function its preview 1 signature: at most MaxPreview1Parameters, each an i32
++        // or an i64.
++        auto arguments = std::array<uint64_t, wasi::MaxPreview1Parameters> {};
++        std::ranges::transform(
++            std::span { args, argCount }, arguments.begin(), [](wasmtime_val_t const& value) {
++                return value.kind == WASMTIME_I64 ? static_cast<uint64_t>(value.of.i64)
++                                                  : uint64_t { static_cast<uint32_t>(value.of.i32) };
++            });
++        auto const result = function.call(
++            data.wasiEnvironment, callerMemory(caller), std::span { arguments }.first(argCount));
++        if (result.outcome == wasi::ShimOutcome::Exit)
++        {
++            static constexpr auto Message = std::string_view { "proc_exit" };
++            return wasmtime_trap_new(Message.data(), Message.size());
++        }
++        // Every function that returns has one result, its errno.
++        for (auto& value: std::span { results, resultCount })
++        {
++            value.kind = WASMTIME_I32;
++            value.of.i32 = static_cast<int32_t>(result.error);
++        }
++        return nullptr;
++    }
+ 
+     /// Defines one function on @p linker.
+     /// @return Nothing on success; `RuntimeUnavailable` if Wasmtime refused the definition.
+     [[nodiscard]] std::expected<void, ExtensionError> defineFunction(wasmtime_linker_t* linker,
+                                                                      std::string_view module,
+                                                                      std::string_view name,
+                                                                      FunctionSignature const& signature,
+                                                                      wasmtime_func_callback_t callback,
+                                                                      void* env)
+     {
+@@ -266,36 +277,41 @@ namespace
+             return std::nullopt;
+         for (auto& binding: hostBindings)
+         {
+             auto const signature =
+                 FunctionSignature { .parameters = std::vector(binding.parameterCount, ValueType::I32),
+                                     .results = {} };
+             if (!defineFunction(
+                     linker.get(), binding.module, binding.name, signature, &callHostFunction, &binding))
+                 return std::nullopt;
+         }
+-        for (auto const [index, function]: core::views::enumerate(wasi::Preview1Functions))
++        // Our own WASI, never Wasmtime's (wasmtime_linker_define_wasi), which would bring threads of its own.
++        for (auto const& function: wasi::shimFunctions())
+         {
+-            auto const implementation = WasiBindings.at(static_cast<std::size_t>(index)).implementation;
+-            if (!defineFunction(
+-                    linker.get(), WasiModule, function.name, function.signature(), implementation, nullptr))
++            // Wasmtime hands the callback a mutable env; the shim's table is constant, and never written.
++            if (!defineFunction(linker.get(),
++                                WasiModule,
++                                function.preview1.name,
++                                function.preview1.signature(),
++                                &callShimFunction,
++                                const_cast<wasi::ShimFunction*>(&function)))
+                 return std::nullopt;
+         }
+         return linker;
+     }
+ 
+     /// A Wasmtime backend: a facade over the kind's shared state.
+     class WasmtimeBackend final: public IWasmBackend
+     {
+       public:
+         WasmtimeBackend(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
+-            _kind { std::move(kind) }, _config { config }
++            _kind { std::move(kind) }, _config { std::move(config) }
+         {
+         }
+ 
+         [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
+             RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
+         {
+             return WasmtimeRuntime::create(_kind, _config, limits, hostFunctions)
+                 .transform([](std::shared_ptr<WasmtimeRuntime> runtime) -> std::shared_ptr<IWasmRuntime> {
+                     return runtime;
+                 });
+@@ -382,31 +398,37 @@ std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> WasmtimeRuntime:
+     hostBindings.reserve(hostFunctions.size());
+     for (auto const [index, function]: core::views::enumerate(hostFunctions))
+         hostBindings.push_back(HostBinding { .module = std::string { function.module },
+                                              .name = std::string { function.name },
+                                              .index = static_cast<std::size_t>(index),
+                                              .parameterCount = function.parameterCount });
+     // The linker's callbacks point into hostBindings' buffer, which moving the vector keeps.
+     auto linker = makeLinker(engine.get(), hostBindings);
+     if (!linker)
+         return std::unexpected(ExtensionError::RuntimeUnavailable);
+-    return std::make_shared<WasmtimeRuntime>(
+-        std::move(kind), limits, std::move(engine), std::move(hostBindings), std::move(*linker));
++    return std::make_shared<WasmtimeRuntime>(std::move(kind),
++                                             limits,
++                                             std::move(config.wasiEnvironment),
++                                             std::move(engine),
++                                             std::move(hostBindings),
++                                             std::move(*linker));
+ }
+ 
+ WasmtimeRuntime::WasmtimeRuntime(std::shared_ptr<KindState> kind,
+                                  RuntimeLimits limits,
++                                 wasi::ShimEnvironment wasiEnvironment,
+                                  detail::EngineHandle engine,
+                                  std::vector<HostBinding> hostBindings,
+                                  detail::LinkerHandle linker) noexcept:
+     _kind { std::move(kind) },
+     _limits { limits },
++    _wasiEnvironment { std::move(wasiEnvironment) },
+     _engine { std::move(engine) },
+     _hostBindings { std::move(hostBindings) },
+     _linker { std::move(linker) }
+ {
+     _kind->acquireRuntime();
+ }
+ 
+ WasmtimeRuntime::~WasmtimeRuntime()
+ {
+     // The engine goes before the runtime stops counting alive, so that no bring-up overlaps it.
+@@ -421,14 +443,14 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WasmtimeRuntime::loa
+     return loadModule(shared_from_this(), _engine.get(), bytes);
+ }
+ 
+ std::shared_ptr<KindState> makeKindState()
+ {
+     return std::make_shared<KindState>();
+ }
+ 
+ std::unique_ptr<IWasmBackend> makeWasmtimeBackend(std::shared_ptr<KindState> kind, WasmtimeConfig config)
+ {
+-    return std::make_unique<WasmtimeBackend>(std::move(kind), config);
++    return std::make_unique<WasmtimeBackend>(std::move(kind), std::move(config));
+ }
+ 
+ } // namespace vtextension::wasm::wasmtime
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend.hpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend.hpp
+index 879830476..c0c855004 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend.hpp
+@@ -1,20 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The Wasmtime backend of the WebAssembly runtime interface: extensions compiled to native code by
+ // Cranelift, one engine per runtime, configured from the one feature table (../EngineFeatures.hpp).
+ #pragma once
+ 
+ #include <cstdint>
+ #include <memory>
+ 
+ #include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
++#include <vtextension/wasm/wasi/SystemEnvironment.hpp>
+ 
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ /// The most i32 parameters a host function can take; createRuntime() refuses a table holding one taking
+ /// more. The same cap as the WAMR backend's: the Canonical ABI passes at most 16 flat parameters, and a
+ /// result that does not flatten to one value adds its address.
+ inline constexpr auto MaxHostParameters = uint32_t { 17 };
+ 
+ /// How compiled guest code detects an out-of-bounds access or a stack overflow.
+@@ -22,20 +24,22 @@ enum class TrapMode : uint8_t
+ {
+     Software, ///< Explicit bounds and stack checks in the compiled code; no signal handler is installed.
+     Signals,  ///< Guard pages and a process signal handler, as Wasmtime does by default.
+ };
+ 
+ /// How every Wasmtime backend of a process is set up.
+ struct WasmtimeConfig
+ {
+     /// How traps are detected. Software keeps the contract's promise of no process signal handler.
+     TrapMode trapMode = TrapMode::Software;
++    /// Where the WASI functions every instance imports read clocks and random bytes from.
++    wasi::ShimEnvironment wasiEnvironment = wasi::systemEnvironment();
+ };
+ 
+ /// What all Wasmtime backends of a process share: the bring-up generation and the count of runtimes
+ /// alive. Created once by the composition root and handed to every backend it makes, so that they
+ /// behave as one (@see IWasmBackend).
+ class KindState;
+ 
+ /// Creates the state Wasmtime backends of one process share.
+ /// @return The state, with no runtime alive and generation 0.
+ [[nodiscard]] std::shared_ptr<KindState> makeKindState();
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+index 9f2b88fb3..7a0b16033 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+@@ -1,65 +1,74 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The Wasmtime backend: the backend contract every runtime must meet, and what is Wasmtime's alone,
+ // the features it enables unless told otherwise, checked with its C API directly.
+ #include <catch2/catch_message.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <algorithm>
+ #include <array>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <format>
+ #include <memory>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <thread>
++#include <utility>
+ #include <vector>
+ 
+ #include <wasmtime.h>
+ 
+ #ifndef _WIN32
+     #include <csignal>
+ #endif
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/FeatureModules.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::wasm::FeatureState;
+ using vtextension::wasm::IWasmBackend;
+ using vtextension::wasm::MemoryGrowthReporting;
+ using vtextension::wasm::RuntimeLimits;
++using vtextension::wasm::wasmtime::KindState;
+ using vtextension::wasm::wasmtime::makeKindState;
+ using vtextension::wasm::wasmtime::makeWasmtimeBackend;
+ using vtextension::wasm::wasmtime::TrapMode;
+ using vtextension::wasm::wasmtime::WasmtimeConfig;
+ 
+ namespace
+ {
+ 
+ /// Makes the backend under test, for the contract suite.
+ struct WasmtimeTraits
+ {
+     /// @return A Wasmtime backend of the one kind state this test binary shares, as a process would.
+     [[nodiscard]] static std::unique_ptr<IWasmBackend> make()
+     {
+-        static auto const kind = makeKindState();
+-        return makeWasmtimeBackend(kind, WasmtimeConfig { .trapMode = TrapMode::Software });
++        return makeWasmtimeBackend(kind(), WasmtimeConfig { .trapMode = TrapMode::Software });
++    }
++
++    /// @return The one kind state this test binary shares.
++    [[nodiscard]] static std::shared_ptr<KindState> const& kind()
++    {
++        static auto const state = makeKindState();
++        return state;
+     }
+ };
+ 
+ /// @return Whether an engine left at Wasmtime's feature defaults compiles @p bytes. Its traps are checked
+ ///         in software all the same: an engine with signal-based traps would install Wasmtime's handlers
+ ///         for the rest of this process, over the sanitizer's, and blind the signal-handler case.
+ [[nodiscard]] bool defaultEngineAccepts(std::span<std::uint8_t const> bytes)
+ {
+     namespace detail = vtextension::wasm::wasmtime::detail;
+     auto* const config = wasm_config_new();
+@@ -230,10 +239,45 @@ TEST_CASE("WasmtimeBackend.refusesAZeroStack", "[wasmtime]")
+                         .stackBytes = 0 },
+         vtextension::wasm::testing::contract::HostFunctions);
+     REQUIRE_FALSE(runtime.has_value());
+     CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
+ }
+ 
+ TEST_CASE("WasmtimeBackend.leavesMemoryGrowthUnreported", "[wasmtime]")
+ {
+     CHECK(WasmtimeTraits::make()->capabilities().memoryGrowth == MemoryGrowthReporting::Unreported);
+ }
++
++TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
++{
++    namespace contract = vtextension::wasm::testing::contract;
++    // A clock reading 7 seconds past its id, and random bytes that are all 0x5A.
++    auto config = WasmtimeConfig {
++        .trapMode = TrapMode::Software,
++        .wasiEnvironment = {
++            .clock = [](uint32_t clockId) { return 7'000'000'000 + uint64_t { clockId }; },
++            .random = [](std::span<std::byte> bytes) { std::ranges::fill(bytes, std::byte { 0x5A }); } },
++    };
++    auto const backend = makeWasmtimeBackend(WasmtimeTraits::kind(), std::move(config));
++    auto const runtime = contract::createRuntime(*backend);
++    auto const guard = contract::enterThread(*backend);
++    auto const module = contract::load(*runtime, contract::EveryWasiFunctionModule);
++    auto context = contract::RecordingHostContext {};
++    auto const instance = contract::instantiate(*module, context);
++
++    // Both write at address 64: clock_time_get reads the realtime clock (id 0), random_get fills 16 bytes.
++    auto error = std::array<uint32_t, 1> {};
++    REQUIRE(instance->call(contract::functionOf(*instance, "clock_time_get"), error).has_value());
++    CHECK(error[0] == 0);
++    auto const time = instance->memory(64, 8);
++    REQUIRE(time.has_value());
++    auto nanoseconds = uint64_t { 0 };
++    for (auto const byte: *time | std::views::reverse)
++        nanoseconds = (nanoseconds << 8U) | std::to_integer<uint64_t>(byte);
++    CHECK(nanoseconds == 7'000'000'000);
++
++    REQUIRE(instance->call(contract::functionOf(*instance, "random_get"), error).has_value());
++    CHECK(error[0] == 0);
++    auto const random = instance->memory(64, 16);
++    REQUIRE(random.has_value());
++    CHECK(std::ranges::all_of(*random, [](std::byte byte) { return byte == std::byte { 0x5A }; }));
++}
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+index aeb6bf191..d4fb30426 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+@@ -215,22 +215,22 @@ namespace
+         std::span<ExportDescription const> exports,
+         IHostContext& context)
+     {
+         auto const capBytes = runtime.limits().memoryBytes;
+         auto const exceedsCap = [&](ExportDescription const& entry) {
+             return entry.kind == ExternKind::Memory && entry.initialPages * PageBytes > capBytes;
+         };
+         if (std::ranges::any_of(exports, exceedsCap))
+             return std::unexpected(ExtensionError::OutOfMemory);
+ 
+-        auto data =
+-            std::make_unique<StoreData>(StoreData { .context = context, .hostFailure = std::nullopt });
++        auto data = std::make_unique<StoreData>(StoreData {
++            .context = context, .wasiEnvironment = runtime.wasiEnvironment(), .hostFailure = std::nullopt });
+         auto store = detail::StoreHandle { wasmtime_store_new(runtime.engine(), data.get(), nullptr) };
+         if (!store)
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         // Memory grows up to the cap and no further (memory.grow returns -1); one instance and one memory
+         // per store. A memory the exports did not show and whose initial size exceeds the cap fails the
+         // instantiation below.
+         auto const memoryCap = static_cast<int64_t>(
+             std::min<uint64_t>(capBytes, static_cast<uint64_t>(std::numeric_limits<int64_t>::max())));
+         wasmtime_store_limiter(store.get(), memoryCap, -1, 1, -1, 1);
+ 
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+index f43d42a84..33f170235 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+@@ -10,20 +10,21 @@
+ #include <expected>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <span>
+ #include <string>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/wasi/Preview1Shim.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+ 
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ class KindState
+ {
+   public:
+     /// Counts one more runtime alive, bringing the engine up anew if it is the first.
+@@ -50,21 +51,22 @@ class KindState
+     std::mutex _mutex;                    ///< Guards _liveRuntimes and each bring-up.
+     std::size_t _liveRuntimes = 0;        ///< How many runtimes are alive.
+     std::atomic<uint64_t> _generation {}; ///< The current bring-up generation.
+ };
+ 
+ /// The data of an instance's store: what a host function the guest calls reaches, and how it failed.
+ ///
+ /// Lives at a stable address for as long as the store, which hands it to every host function call.
+ struct StoreData
+ {
+-    IHostContext& context; ///< What the instance's host function calls reach.
++    IHostContext& context;                        ///< What the instance's host function calls reach.
++    wasi::ShimEnvironment const& wasiEnvironment; ///< What the instance's WASI function calls read.
+     /// The error the latest host function call failed with, if it failed; it is what tells a call stopped
+     /// by a failing host function apart from one the guest trapped in.
+     std::optional<ExtensionError> hostFailure;
+ };
+ 
+ /// One host function as a runtime provides it, at a stable address its linker callback is handed.
+ struct HostBinding
+ {
+     std::string module;          ///< The import module name it is provided under.
+     std::string name;            ///< The import field name it is provided under.
+@@ -86,20 +88,21 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
+     ///         more than MaxHostParameters, or the engine or the linker could not be set up.
+     [[nodiscard]] static std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> create(
+         std::shared_ptr<KindState> kind,
+         WasmtimeConfig config,
+         RuntimeLimits limits,
+         std::span<HostFunction const> hostFunctions);
+ 
+     /// Use create(). Public for std::make_shared only.
+     WasmtimeRuntime(std::shared_ptr<KindState> kind,
+                     RuntimeLimits limits,
++                    wasi::ShimEnvironment wasiEnvironment,
+                     detail::EngineHandle engine,
+                     std::vector<HostBinding> hostBindings,
+                     detail::LinkerHandle linker) noexcept;
+ 
+     WasmtimeRuntime(WasmtimeRuntime const&) = delete;
+     WasmtimeRuntime(WasmtimeRuntime&&) = delete;
+     WasmtimeRuntime& operator=(WasmtimeRuntime const&) = delete;
+     WasmtimeRuntime& operator=(WasmtimeRuntime&&) = delete;
+     ~WasmtimeRuntime() override;
+ 
+@@ -111,23 +114,27 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
+ 
+     /// @return The linker providing the host functions and WASI to every instance.
+     [[nodiscard]] wasmtime_linker const* linker() const noexcept { return _linker.get(); }
+ 
+     /// @return The host functions the runtime provides.
+     [[nodiscard]] std::span<HostBinding const> hostBindings() const noexcept { return _hostBindings; }
+ 
+     /// @return The limits every instance is held to.
+     [[nodiscard]] RuntimeLimits limits() const noexcept { return _limits; }
+ 
++    /// @return Where the WASI functions of every instance read clocks and random bytes from.
++    [[nodiscard]] wasi::ShimEnvironment const& wasiEnvironment() const noexcept { return _wasiEnvironment; }
++
+   private:
+     std::shared_ptr<KindState> _kind;
+     RuntimeLimits _limits;
++    wasi::ShimEnvironment _wasiEnvironment;
+     detail::EngineHandle _engine;
+     // The linker's callbacks point into _hostBindings, so the linker goes first.
+     std::vector<HostBinding> _hostBindings;
+     detail::LinkerHandle _linker;
+ };
+ 
+ /// A compiled module, described once at load time.
+ class WasmtimeModule final: public IWasmModule, public std::enable_shared_from_this<WasmtimeModule>
+ {
+   public:

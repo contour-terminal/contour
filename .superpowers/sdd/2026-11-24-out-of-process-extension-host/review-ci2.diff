@@ -1,0 +1,1549 @@
+b5732de14 fix(vtextension): an instance refused for its answer's size is gone before the refusal is sent
+7842a084d fix(vtextension): a contained extension host is given the variables Windows points into its container
+b1929a72c fix(vtextension): a host short of memory as it starts is retried, and a lacking sandbox is a warning
+77695a0c7 fix(vtextension): unlink a WAMR execution environment under its thread cluster's lock
+
+ cmake/ApplyPatchOnceTest.cmake                     |  32 +++--
+ src/vtextension/wasm/host/HostServer.cpp           |  40 ++++--
+ src/vtextension/wasm/remote/CMakeLists.txt         |   4 +-
+ src/vtextension/wasm/remote/WamrHelper_test.cpp    |   3 +-
+ .../wasm/remote/process/AppContainer_test.cpp      |   5 +-
+ .../wasm/remote/process/LaunchSpelling_test.cpp    | 124 +++++++++++++++++
+ .../wasm/remote/process/LaunchSpelling_win32.cpp   | 118 +++++++++++++++++
+ .../wasm/remote/process/LaunchSpelling_win32.hpp   |  51 +++++++
+ .../wasm/remote/process/ProcessLauncher.hpp        |   3 +-
+ .../wasm/remote/process/ProcessLauncher_test.cpp   |   3 +-
+ .../wasm/remote/process/Process_win32.cpp          | 146 +++++++--------------
+ .../remote/process/testing/HelperComposition.cpp   |   3 +-
+ .../wasm/remote/process/testing/LaunchedHelper.cpp |  13 +-
+ .../wasm/remote/process/testing/LaunchedHelper.hpp |   4 -
+ .../remote/transport/GuestMemoryMapping_test.cpp   |  16 +--
+ .../wasm/remote/transport/SharedObject_test.cpp    |  15 +--
+ src/vtextension/wasm/testing/Wine.hpp              |  26 ++++
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          |  13 +-
+ 18 files changed, 442 insertions(+), 177 deletions(-)
+
+diff --git a/cmake/ApplyPatchOnceTest.cmake b/cmake/ApplyPatchOnceTest.cmake
+index ac5c60c2d..535df40c0 100644
+--- a/cmake/ApplyPatchOnceTest.cmake
++++ b/cmake/ApplyPatchOnceTest.cmake
+@@ -40,34 +40,42 @@ function(_apply status output)
+         INPUT_FILE "${_null}"
+         RESULT_VARIABLE _status
+         OUTPUT_VARIABLE _output
+         ERROR_VARIABLE _output
+         TIMEOUT 60
+     )
+     set(${status} "${_status}" PARENT_SCOPE)
+     set(${output} "${_output}" PARENT_SCOPE)
+ endfunction()
+ 
++# Runs git with the arguments given in the scratch tree, which must succeed.
++function(_git)
++    execute_process(COMMAND "${GIT_EXECUTABLE}" ${ARGN} WORKING_DIRECTORY "${_tree}"
++                    INPUT_FILE "${_null}" RESULT_VARIABLE _git_status OUTPUT_QUIET ERROR_QUIET)
++    if(NOT _git_status EQUAL 0)
++        message(FATAL_ERROR "apply-patch-once: could not make the clone (git ${ARGN}: ${_git_status})")
++    endif()
++endfunction()
++
+ # Runs the script on a fresh scratch tree holding @p content; @p status and @p output what it came to. With a
+-# fourth argument CLONE, the tree is a repository of its own, its content committed.
++# fourth argument CLONE, the tree is a repository of its own, its content committed, and checked out again as a
++# Windows runner's git does (core.autocrlf=true): with CRLF line ends, which the LF patch must still match.
+ function(_run_on content status output)
+     file(REMOVE_RECURSE "${_tree}")
+     file(WRITE "${_tree}/file.txt" "${content}")
+-    if(ARGV3 STREQUAL "CLONE")
+-        foreach(_git_step IN ITEMS "init;--quiet" "add;file.txt"
+-                                   "-c;user.name=test;-c;user.email=test@invalid;-c;commit.gpgsign=false;commit;--quiet;-m;tree")
+-            execute_process(COMMAND "${GIT_EXECUTABLE}" ${_git_step} WORKING_DIRECTORY "${_tree}"
+-                            INPUT_FILE "${_null}" RESULT_VARIABLE _git_status OUTPUT_QUIET ERROR_QUIET)
+-            if(NOT _git_status EQUAL 0)
+-                message(FATAL_ERROR "apply-patch-once: could not make the clone (git ${_git_step}: ${_git_status})")
+-            endif()
+-        endforeach()
++    if(ARGC GREATER 3 AND ARGV3 STREQUAL "CLONE")
++        _git(init --quiet)
++        _git(config core.autocrlf true)
++        _git(add file.txt)
++        _git(-c user.name=test -c user.email=test@invalid -c commit.gpgsign=false commit --quiet -m tree)
++        file(REMOVE "${_tree}/file.txt")
++        _git(checkout -- file.txt)
+     endif()
+     _apply(_status _output)
+     set(${status} "${_status}" PARENT_SCOPE)
+     set(${output} "${_output}" PARENT_SCOPE)
+ endfunction()
+ 
+ # Fails the test, naming what was expected, unless the condition (given as if() takes it) holds.
+ macro(_expect description)
+     if(NOT (${ARGN}))
+         message(SEND_ERROR "apply-patch-once: FAILED: ${description}")
+@@ -88,19 +96,23 @@ _expect("a patched tree is left as it was" _after STREQUAL _both)
+ _expect("a patched tree is said to be patched" _output MATCHES "Already applied")
+ 
+ # Half applied: fails, and changes nothing.
+ _run_on("${_first}" _status _output)
+ file(READ "${_tree}/file.txt" _after)
+ _expect("a half-patched tree fails" NOT _status EQUAL 0)
+ _expect("a half-patched tree is left as it was" _after STREQUAL _first)
+ 
+ # A clone of its own, as CPM fetches a dependency: patched, and left alone once patched.
+ _run_on("${_original}" _status _output CLONE)
++# Its line ends read as hex: file(READ) as text drops the carriage returns.
++file(READ "${_tree}/file.txt" _after_hex HEX)
+ file(READ "${_tree}/file.txt" _after)
++string(REPLACE "\r\n" "\n" _after "${_after}")
+ _expect("an unpatched clone is patched (exit ${_status}: ${_output})" _status EQUAL 0)
+ _expect("an unpatched clone ends up with both hunks" _after STREQUAL _both)
++_expect("an unpatched clone keeps its CRLF line ends" _after_hex MATCHES "0d0a$")
+ _apply(_status _output)
+ _expect("a patched clone passes (exit ${_status}: ${_output})" _status EQUAL 0)
+ _expect("a patched clone is said to be patched" _output MATCHES "Already applied")
+ 
+ file(REMOVE_RECURSE "${WORK_DIR}")
+ message(STATUS "apply-patch-once: 4 states checked")
+diff --git a/src/vtextension/wasm/host/HostServer.cpp b/src/vtextension/wasm/host/HostServer.cpp
+index e39c82810..14cc5e439 100644
+--- a/src/vtextension/wasm/host/HostServer.cpp
++++ b/src/vtextension/wasm/host/HostServer.cpp
+@@ -1,17 +1,18 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/host/HostServer.hpp>
+ 
+ #include <core/Utils.hpp>
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <concepts>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <latch>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <span>
+ #include <string>
+ #include <tuple>
+@@ -86,33 +87,48 @@ namespace
+ 
+     /// Sends @p pdu on @p stream.
+     /// @return Nothing once it is sent; why the connection ends if it could not be.
+     [[nodiscard]] Served send(PduStream& stream, proto::Pdu const& pdu)
+     {
+         return stream.send(pdu).transform_error(exitOf);
+     }
+ 
+     /// Sends @p pdu on @p stream, unless it is larger than its caps allow: @p refusal is sent instead, so
+     /// that a reply too large to carry fails its request rather than the connection.
++    /// @param withdraw Undoes what @p pdu would have announced, before @p refusal goes out: a peer acting on
++    ///        the refusal at once -- on another channel, served by another thread -- finds nothing of it.
+     /// @return Whether @p pdu itself was sent; why the connection ends if neither could be.
++    template <std::invocable Withdraw>
+     [[nodiscard]] std::expected<proto::Pdu const*, ServerExit> sendOrRefuse(PduStream& stream,
+                                                                             proto::Pdu const& pdu,
+-                                                                            proto::Pdu const& refusal)
++                                                                            proto::Pdu const& refusal,
++                                                                            Withdraw&& withdraw)
+     {
+         auto const sent = stream.send(pdu);
+         if (sent)
+             return &pdu;
+         if (sent.error() != StreamError::OverCap)
+             return std::unexpected(exitOf(sent.error()));
++        std::forward<Withdraw>(withdraw)();
+         return send(stream, refusal).transform([&] { return &refusal; });
+     }
+ 
++    /// Sends @p pdu on @p stream, or @p refusal if @p pdu is larger than its caps allow, with nothing to
++    /// withdraw first.
++    /// @return Whether @p pdu itself was sent; why the connection ends if neither could be.
++    [[nodiscard]] std::expected<proto::Pdu const*, ServerExit> sendOrRefuse(PduStream& stream,
++                                                                            proto::Pdu const& pdu,
++                                                                            proto::Pdu const& refusal)
++    {
++        return sendOrRefuse(stream, pdu, refusal, [] {});
++    }
++
+     /// @return Whether a call can carry @p signature's parameters and results: every value an i32, and no
+     /// more
+     ///         of them than a Call or a CallResult holds.
+     [[nodiscard]] bool isCallable(FunctionSignature const& signature) noexcept
+     {
+         return signature.isAllI32() && signature.parameters.size() <= proto::MaxCallValues
+                && signature.results.size() <= proto::MaxCallValues;
+     }
+ 
+     /// A runtime, and the host function strings it was created with: kept for as long as anything created
+@@ -688,29 +704,33 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
+         if (_exit)
+             slot->instance->interrupt();
+         _instances.emplace(request.instanceId, slot);
+         _slotInstances.emplace(request.interruptSlot, request.instanceId);
+     }
+     auto const answer = proto::Pdu { proto::Instantiated {
+         .instanceId = request.instanceId, .error = std::nullopt, .callableExports = std::move(callable) } };
+     auto const refusal = proto::Pdu { proto::Instantiated { .instanceId = request.instanceId,
+                                                             .error = ExtensionError::InvalidComponent,
+                                                             .callableExports = {} } };
+-    return sendOrRefuse(_control, answer, refusal).transform([&](proto::Pdu const* sent) {
+-        if (sent == &answer)
+-            return;
+-        // Stopped for good, as a released one is, should a lane have reached it meanwhile.
+-        auto const lock = std::scoped_lock { _mutex };
+-        slot->instance->interrupt();
+-        _instances.erase(request.instanceId);
+-        _slotInstances.erase(request.interruptSlot);
+-    });
++    // Gone before the refusal goes out: a parent that calls it the moment the refusal arrives -- on a lane,
++    // served by another thread -- calls an instance that is not the server's, which is a violation. Stopped
++    // for good, as a released one is, should a lane have reached it meanwhile.
++    return sendOrRefuse(_control,
++                        answer,
++                        refusal,
++                        [&] {
++                            auto const lock = std::scoped_lock { _mutex };
++                            slot->instance->interrupt();
++                            _instances.erase(request.instanceId);
++                            _slotInstances.erase(request.interruptSlot);
++                        })
++        .transform([](proto::Pdu const* /*sent*/) {});
+ }
+ 
+ std::expected<std::optional<MemoryProvision>, ServerExit> HostServer::Impl::provisionOf(
+     proto::Instantiate const& request, RuntimeSlot const& runtime)
+ {
+     auto const& grant = request.memory;
+     if (_engine.memoryMode() == proto::MemoryMode::Copy)
+     {
+         // A host that copies memory is granted nothing, and nothing travels with the request.
+         if (grant != proto::MemoryGrant {} || _control.takeAttachedHandle())
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 90cd06135..01a23825d 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -75,21 +75,22 @@ target_compile_definitions(vtextension_remote_wire PUBLIC
+     CONTOUR_BUILD_INSTRUMENTATION=$<IF:$<BOOL:${CONTOUR_SANITIZE}>,2,$<IF:$<BOOL:${CONTOUR_COVERAGE}>,1,0>>)
+ 
+ # vtextension_remote_process: starting extension host processes and knowing when they end, one source per
+ # operating system. It stays std-only -- the wire library and core-cpp, no engine and no vtbackend -- so that it,
+ # and its tests, cross-build for Windows and run under wine. Systems with none of the four have no launcher yet.
+ set(_process_sources_Linux process/Process_linux.cpp process/Process_linux.hpp)
+ set(_process_sources_FreeBSD process/Process_freebsd.cpp)
+ set(_process_sources_Darwin process/Process_macos.cpp)
+ set(_process_sources_Windows
+     process/AppContainer_win32.cpp process/AppContainer_win32.hpp process/LaunchRefusal_win32.cpp
+-    process/LaunchRefusal_win32.hpp process/Process_win32.cpp process/Process_win32.hpp)
++    process/LaunchRefusal_win32.hpp process/LaunchSpelling_win32.cpp process/LaunchSpelling_win32.hpp
++    process/Process_win32.cpp process/Process_win32.hpp)
+ set(_process_source "${_process_sources_${CMAKE_SYSTEM_NAME}}")
+ if(_process_source AND NOT WIN32)
+     # What the POSIX launchers share.
+     list(APPEND _process_source process/PosixLaunch.cpp process/PosixLaunch.hpp)
+ endif()
+ # What every system has of it: the lanes' watch, which the remote backend keeps and the supervisor reads, and the
+ # log of why no host serves, which the backend and the process connector both write to (through core::log).
+ add_library(vtextension_remote_process STATIC
+     HostRefusals.cpp
+     HostRefusals.hpp
+@@ -177,20 +178,21 @@ if(_process_source)
+             target_sources(vtextension_process_test PRIVATE
+                 ../host/linux/Landlock_test.cpp
+                 ../host/linux/SeccompFilter_test.cpp
+                 ../host/linux/testing/BpfEvaluator.hpp
+             )
+         endif()
+         if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
+             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
+         endif()
+         if(WIN32)
++            target_sources(vtextension_process_test PRIVATE process/LaunchSpelling_test.cpp)
+             # Sandbox.windowsHelperRunsContained listens on loopback for the contained probe.
+             target_link_libraries(vtextension_process_test PRIVATE ws2_32)
+         endif()
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+         add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+         if(NOT WIN32)
+             # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+             target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+diff --git a/src/vtextension/wasm/remote/WamrHelper_test.cpp b/src/vtextension/wasm/remote/WamrHelper_test.cpp
+index 49bc3b2b4..cdfe15758 100644
+--- a/src/vtextension/wasm/remote/WamrHelper_test.cpp
++++ b/src/vtextension/wasm/remote/WamrHelper_test.cpp
+@@ -13,20 +13,21 @@
+ #include <vtextension/testing/TestModules.hpp>
+ #include <vtextension/wasm/BackendConfig.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace process = vtextension::wasm::remote::process;
+ using vtextension::wasm::remote::transport::PduStream;
+ 
+ TEST_CASE("Helper.wamrHelperSaysCopy", "[vtextension]")
+ {
+     // It copies memory wherever it runs, as WAMR places a linear memory where it chooses; and it locks itself
+     // down where the build has a sandbox, its engine opening nothing once it did.
+     auto const lockdown =
+@@ -103,21 +104,21 @@ namespace
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("Helper.windowsHelperIsLockedDown", "[vtextension][appcontainer]")
+ {
+     // Started in its AppContainer, as Contour starts it, the helper finds its token contained, turns on its
+     // mitigations, finds its job, and says LockedDown. Under wine, which stubs AppContainers, it is started
+     // uncontained, and must say so: Unsandboxed, never a lockdown it does not have.
+     auto const hello = helloOfHelperIn(process::testing::helperIsolation());
+-    if (process::testing::runsOnWine())
++    if (vtextension::wasm::testing::runsOnWine())
+     {
+         CHECK(hello.lockdown == proto::LockdownState::Unsandboxed);
+         WARN("wine: the uncontained helper says Unsandboxed, as it must; containment is proved on Windows");
+     }
+     else
+         CHECK(hello.lockdown == proto::LockdownState::LockedDown);
+ }
+ 
+ TEST_CASE("Helper.windowsUncontainedHelperIsRefused", "[vtextension][appcontainer]")
+ {
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_test.cpp b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+index 84ea02778..3680617f4 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_test.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+@@ -20,20 +20,21 @@
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+ #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #include <algorithm>
+     #include <array>
+     #include <format>
+     #include <fstream>
+     #include <ranges>
+     #include <thread>
+ 
+     #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
+@@ -640,25 +641,25 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
+     auto const listener = LoopbackListener {};
+     REQUIRE(listener.port().has_value());
+ 
+     {
+         INFO("uncontained");
+         auto const report = probeReportIn(ProcessIsolation::None, profileFile, *listener.port());
+         CHECK(valueOf(report, "container") == "no");
+         CHECK(valueOf(report, "profile-file") == "ok");
+         CHECK(valueOf(report, "connect") == "ok");
+         // Under wine the job's process count is not held: what it says is only recorded.
+-        if (!process::testing::runsOnWine())
++        if (!vtextension::wasm::testing::runsOnWine())
+             CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:1816");
+     }
+ 
+-    if (process::testing::runsOnWine())
++    if (vtextension::wasm::testing::runsOnWine())
+     {
+         // What wine made of the contained launch, for the record; nothing it does proves a container.
+         auto refusals = std::vector<std::string> {};
+         auto const probe = process::testing::launchHelper(
+             recordingLauncher(refusals),
+             process::testing::HelperLaunch { .executable = VTEXTENSION_PROBE_PATH,
+                                              .leading = { "--contained" },
+                                              .environment = process::defaultHelperEnvironment(),
+                                              .isolation = ProcessIsolation::AppContainer });
+         auto const outcome = probe ? std::string { "it started" }
+diff --git a/src/vtextension/wasm/remote/process/LaunchSpelling_test.cpp b/src/vtextension/wasm/remote/process/LaunchSpelling_test.cpp
+new file mode 100644
+index 000000000..4c7b95e3f
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/LaunchSpelling_test.cpp
+@@ -0,0 +1,124 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// How a launch is spelled for CreateProcessW(): the environment block the system parses, the variables a
++// contained launch cannot go without, and the command line the child's C runtime splits back.
++#include <catch2/catch_test_macros.hpp>
++
++#include <array>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
++
++using namespace std::string_view_literals;
++using vtextension::wasm::remote::process::appendArgument;
++using vtextension::wasm::remote::process::containedEnvironment;
++using vtextension::wasm::remote::process::ContainerRedirectedVariables;
++using vtextension::wasm::remote::process::environmentBlock;
++using vtextension::wasm::remote::process::EnvironmentEntry;
++
++TEST_CASE("LaunchSpelling.emptyEnvironmentIsTwoTerminators", "[vtextension][process]")
++{
++    // An empty block is still a block: one empty string's terminator, then the block's.
++    auto const block = environmentBlock({});
++    REQUIRE(block.has_value());
++    CHECK(*block == std::wstring(2, L'\0'));
++}
++
++TEST_CASE("LaunchSpelling.environmentBlockIsSortedAndTerminated", "[vtextension][process]")
++{
++    struct Row
++    {
++        std::string_view what;
++        std::vector<EnvironmentEntry> environment;
++        std::wstring_view block;
++    };
++    auto const rows = std::to_array<Row>({
++        { .what = "one entry, then the block's terminator",
++          .environment = { { "SystemRoot", "C:\\Windows" } },
++          .block = L"SystemRoot=C:\\Windows\0\0"sv },
++        { .what = "sorted by name, ignoring case",
++          .environment = { { "TMP", "t" }, { "b", "2" }, { "A", "1" } },
++          .block = L"A=1\0b=2\0TMP=t\0\0"sv },
++        // Ordinal on the upper case: '_' (0x5F) sorts after 'A' (0x41), though before 'a' (0x61).
++        { .what = "ordinal, on the upper case",
++          .environment = { { "_X", "u" }, { "a", "l" } },
++          .block = L"a=l\0_X=u\0\0"sv },
++        { .what = "an empty value keeps its entry",
++          .environment = { { "EMPTY", "" } },
++          .block = L"EMPTY=\0\0"sv },
++        { .what = "UTF-8 is spelled in UTF-16",
++          .environment = { { "NAME", "\xC3\xA4" } },
++          .block = L"NAME=\u00E4\0\0"sv },
++    });
++    for (auto const& row: rows)
++    {
++        INFO(row.what);
++        auto const block = environmentBlock(row.environment);
++        REQUIRE(block.has_value());
++        CHECK(*block == row.block);
++    }
++}
++
++TEST_CASE("LaunchSpelling.environmentNotUtf8IsRefused", "[vtextension][process]")
++{
++    auto const environment = std::vector<EnvironmentEntry> { { "NAME", "\xFF" } };
++    CHECK_FALSE(environmentBlock(environment).has_value());
++}
++
++TEST_CASE("LaunchSpelling.containedEnvironmentGainsTheRedirectedVariables", "[vtextension][process]")
++{
++    auto const lookup = [](std::string_view name) -> std::optional<std::string> {
++        if (name == "TMP")
++            return std::nullopt;
++        return std::string { "parent-" } + std::string { name };
++    };
++    auto const environment =
++        std::vector<EnvironmentEntry> { { "SystemRoot", "C:\\Windows" }, { "temp", "asked" } };
++
++    // What it was asked for stays as asked, whatever the case of its name; what it lacks is added from this
++    // process's own, and what this process has none of is left out.
++    CHECK(containedEnvironment(environment, lookup)
++          == std::vector<EnvironmentEntry> { { "SystemRoot", "C:\\Windows" },
++                                             { "temp", "asked" },
++                                             { "LOCALAPPDATA", "parent-LOCALAPPDATA" } });
++    CHECK(ContainerRedirectedVariables == std::array { "LOCALAPPDATA"sv, "TEMP"sv, "TMP"sv });
++}
++
++TEST_CASE("LaunchSpelling.helperEnvironmentContainedIsOneBlock", "[vtextension][process]")
++{
++    // The block a contained launch hands CreateProcessW(): SystemRoot and every redirected variable, sorted.
++    auto const lookup = [](std::string_view name) -> std::optional<std::string> {
++        return std::string { name } + "-value";
++    };
++    auto const environment = std::vector<EnvironmentEntry> { { "SystemRoot", "C:\\Windows" } };
++    auto const block = environmentBlock(containedEnvironment(environment, lookup));
++    REQUIRE(block.has_value());
++    CHECK(
++        *block
++        == L"LOCALAPPDATA=LOCALAPPDATA-value\0SystemRoot=C:\\Windows\0TEMP=TEMP-value\0TMP=TMP-value\0\0"sv);
++}
++
++TEST_CASE("LaunchSpelling.argumentsAreQuotedAsTheRuntimeSplits", "[vtextension][process]")
++{
++    struct Row
++    {
++        std::wstring_view argument;
++        std::wstring_view spelled;
++    };
++    auto const rows = std::to_array<Row>({
++        { .argument = L"plain", .spelled = L"first plain" },
++        { .argument = L"", .spelled = L"first \"\"" },
++        { .argument = L"two words", .spelled = L"first \"two words\"" },
++        { .argument = L"say \"hi\"", .spelled = L"first \"say \\\"hi\\\"\"" },
++        { .argument = L"C:\\dir with space\\", .spelled = L"first \"C:\\dir with space\\\\\"" },
++    });
++    for (auto const& row: rows)
++    {
++        auto commandLine = std::wstring { L"first" };
++        appendArgument(commandLine, row.argument);
++        CHECK(commandLine == row.spelled);
++    }
++}
+diff --git a/src/vtextension/wasm/remote/process/LaunchSpelling_win32.cpp b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.cpp
+new file mode 100644
+index 000000000..d48f5e7b3
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.cpp
+@@ -0,0 +1,118 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
++
++#include <algorithm>
++#include <cstddef>
++#include <ranges>
++
++#define WIN32_LEAN_AND_MEAN
++#include <Windows.h>
++
++namespace vtextension::wasm::remote::process
++{
++
++namespace
++{
++    /// @return Whether @p a and @p b are one variable's name: Windows' names ignore ASCII case.
++    [[nodiscard]] bool isSameName(std::string_view a, std::string_view b) noexcept
++    {
++        auto const fold = [](char c) {
++            return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
++        };
++        return std::ranges::equal(a, b, {}, fold, fold);
++    }
++} // namespace
++
++std::optional<std::wstring> wideOf(std::string_view text)
++{
++    if (text.empty())
++        return std::wstring {};
++    auto const size = ::MultiByteToWideChar(
++        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
++    if (size == 0)
++        return std::nullopt;
++    auto wide = std::wstring(static_cast<std::size_t>(size), L'\0');
++    ::MultiByteToWideChar(
++        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), size);
++    return wide;
++}
++
++void appendArgument(std::wstring& commandLine, std::wstring_view argument)
++{
++    if (!commandLine.empty())
++        commandLine += L' ';
++    if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring_view::npos)
++    {
++        commandLine += argument;
++        return;
++    }
++    commandLine += L'"';
++    auto backslashes = std::size_t { 0 };
++    for (auto const c: argument)
++    {
++        if (c == L'\\')
++        {
++            ++backslashes;
++            continue;
++        }
++        // Backslashes double only before a quote; the quote itself is escaped.
++        commandLine.append(c == L'"' ? (backslashes * 2) + 1 : backslashes, L'\\');
++        backslashes = 0;
++        commandLine += c;
++    }
++    commandLine.append(backslashes * 2, L'\\');
++    commandLine += L'"';
++}
++
++std::optional<std::wstring> environmentBlock(std::span<EnvironmentEntry const> environment)
++{
++    auto entries = std::vector<std::pair<std::wstring, std::wstring>> {};
++    for (auto const& [name, value]: environment)
++    {
++        auto wideName = wideOf(name);
++        auto wideValue = wideOf(value);
++        if (!wideName || !wideValue)
++            return std::nullopt;
++        entries.emplace_back(*std::move(wideName), *std::move(wideValue));
++    }
++    // The order Windows documents for a block: by name, ordinal and ignoring case, regardless of locale.
++    std::ranges::sort(entries, [](auto const& a, auto const& b) {
++        return ::CompareStringOrdinal(a.first.data(),
++                                      static_cast<int>(a.first.size()),
++                                      b.first.data(),
++                                      static_cast<int>(b.first.size()),
++                                      TRUE)
++               == CSTR_LESS_THAN;
++    });
++    auto block = std::wstring {};
++    for (auto const& [name, value]: entries)
++    {
++        block += name;
++        block += L'=';
++        block += value;
++        block += L'\0';
++    }
++    // An empty block still needs two terminators.
++    if (entries.empty())
++        block += L'\0';
++    block += L'\0';
++    return block;
++}
++
++std::vector<EnvironmentEntry> containedEnvironment(
++    std::span<EnvironmentEntry const> environment,
++    std::function<std::optional<std::string>(std::string_view name)> const& lookup)
++{
++    auto contained = std::vector<EnvironmentEntry> { environment.begin(), environment.end() };
++    for (auto const name: ContainerRedirectedVariables)
++    {
++        if (std::ranges::any_of(environment,
++                                [&](auto const& entry) { return isSameName(entry.first, name); }))
++            continue;
++        if (auto value = lookup(name))
++            contained.emplace_back(std::string { name }, *std::move(value));
++    }
++    return contained;
++}
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/LaunchSpelling_win32.hpp b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.hpp
+new file mode 100644
+index 000000000..b1c53b785
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.hpp
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// Windows only: how a launch is spelled for CreateProcessW() -- its command line and its environment block,
++/// in UTF-16 -- and the variables a launch into an AppContainer cannot go without. Pure, so that what the
++/// system parses is tested apart from starting anything.
++
++#include <array>
++#include <functional>
++#include <optional>
++#include <span>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++namespace vtextension::wasm::remote::process
++{
++
++/// One environment variable: its name and its value, in UTF-8.
++using EnvironmentEntry = std::pair<std::string, std::string>;
++
++/// The variables CreateProcessW() points into the AppContainer's own folder as it starts a process in one
++/// (Microsoft's "Launch an AppContainer"), in the environment it is given. Given a block without them it
++/// refuses the launch with ERROR_ENVVAR_NOT_FOUND (203), as a GitHub Windows runner showed; a block with
++/// SystemRoot alone starts uncontained.
++inline constexpr auto ContainerRedirectedVariables =
++    std::to_array<std::string_view>({ "LOCALAPPDATA", "TEMP", "TMP" });
++
++/// @return @p text, UTF-8, as UTF-16; nothing if it is not UTF-8.
++[[nodiscard]] std::optional<std::wstring> wideOf(std::string_view text);
++
++/// Appends @p argument to @p commandLine, quoted as the C runtime's argv parser reads it back.
++void appendArgument(std::wstring& commandLine, std::wstring_view argument);
++
++/// @return The environment block of @p environment: `NAME=value` entries sorted by name as Windows wants
++///         them (ordinal, ignoring case), each NUL-terminated, then one NUL more -- two NULs for an empty
++///         one; nothing if an entry is not UTF-8.
++[[nodiscard]] std::optional<std::wstring> environmentBlock(std::span<EnvironmentEntry const> environment);
++
++/// @param environment The environment a launch was asked for.
++/// @param lookup This process's value of a variable; nothing if it has none.
++/// @return @p environment, with each of ContainerRedirectedVariables it lacks (names compare ignoring case)
++///         given the value @p lookup has for it -- the system replaces it with the container's own folder, so
++///         nothing of this process's reaches the child; one @p lookup has none of is left out.
++[[nodiscard]] std::vector<EnvironmentEntry> containedEnvironment(
++    std::span<EnvironmentEntry const> environment,
++    std::function<std::optional<std::string>(std::string_view name)> const& lookup);
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+index db78489b4..affe8dac0 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+@@ -160,21 +160,22 @@ using Waitable = void*;
+ using Waitable = int;
+ #endif
+ 
+ /// What the system confines a process to as it starts it, beyond what it is handed. A process can enter a
+ /// Windows AppContainer only at its creation, so there it is the parent's to choose; a POSIX helper confines
+ /// itself, and every POSIX launcher starts it alike under either value.
+ enum class ProcessIsolation : uint8_t
+ {
+     None,         ///< Nothing beyond its handles, its environment and (Windows) its job.
+     AppContainer, ///< Windows: in the extension host's AppContainer (AppContainer_win32.hpp), with no
+-                  ///< capabilities, and allowed no child process.
++                  ///< capabilities, and allowed no child process; its environment gains the variables the
++                  ///< system points into the container's folder (ContainerRedirectedVariables).
+ };
+ 
+ /// What to start.
+ struct LaunchSpec
+ {
+     std::filesystem::path executable {}; ///< The program; an absolute path.
+     std::vector<transport::NativeHandle>
+         inherited {}; ///< What the child inherits; it sees them in this order.
+     /// The command line after the program's name, given the values the inherited handles have in the child:
+     /// on POSIX 3, 4, …; on Windows the duplicates' values.
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 013332aa6..7f8b2101f 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -38,20 +38,21 @@
+ #ifdef __linux__
+     #include <vtextension/wasm/remote/process/Process_linux.hpp>
+ #endif
+ #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <csignal>
+ 
+     #include <fcntl.h>
+     #include <poll.h>
+     #include <unistd.h>
+@@ -143,21 +144,21 @@ TEST_CASE("ProcessLauncher.childGetsACleanEnvironment", "[vtextension]")
+ {
+     auto const leak = core::testing::ScopedEnv { "VTEXTENSION_LEAK", "1" };
+     auto probe =
+         launchProbe(process::makeSystemProcessLauncher(), ProbeOptions { .environment = { { "A", "1" } } });
+     REQUIRE(probe.has_value());
+     auto const report = readReport(probe->control);
+     REQUIRE(report.has_value());
+     auto names = valuesOf(*report, "env=");
+ #ifdef _WIN32
+     // Wine adds its own variables to every process it starts, whatever block it was given; Windows adds none.
+-    if (::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr)
++    if (vtextension::wasm::testing::runsOnWine())
+         std::erase_if(names, [](std::string const& name) {
+             return name.starts_with("WINE") || name == "SystemDrive" || name == "SystemRoot"
+                    || name == "PROCESSOR_ARCHITECTURE";
+         });
+ #endif
+     CHECK(names == std::vector<std::string> { "A" });
+     CHECK(endAndReap(*probe->launcher, *probe->process));
+ }
+ 
+ TEST_CASE("ProcessLauncher.childRunsAtTheRootOnTheNullDevice", "[vtextension]")
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.cpp b/src/vtextension/wasm/remote/process/Process_win32.cpp
+index c86d06375..fc76f2731 100644
+--- a/src/vtextension/wasm/remote/process/Process_win32.cpp
++++ b/src/vtextension/wasm/remote/process/Process_win32.cpp
+@@ -5,21 +5,23 @@
+ // inheritable handle of this process; and PROC_THREAD_ATTRIBUTE_JOB_LIST, which puts it in its job before its
+ // first instruction -- no suspended start, no window outside the job. The job kills the child when its last
+ // handle closes (the process handle's), allows it no second process, caps its memory and lets an unhandled
+ // exception end it rather than open a dialog.
+ //
+ // Isolated (ProcessIsolation::AppContainer), two attributes more: PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES
+ // starts it in the extension host's AppContainer, with no capabilities, and
+ // PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY forbids it any child process through its token, not only through
+ // the job's process count. The profile and the helper directory's grant are ensured on the first such launch
+ // (AppContainer_win32.hpp). Its working directory is then its executable's own, which the grant lets it open,
+-// rather than the volume's root, which an AppContainer may not.
++// rather than the volume's root, which an AppContainer may not; and its environment holds LOCALAPPDATA, TEMP
++// and TMP too, which the system points into the container's own folder and without which it refuses the
++// launch (LaunchSpelling_win32.hpp).
+ //
+ // The child gets the null device as stdin and stdout, the stderr it is given or else the null device -- never
+ // this process's console unasked -- the environment it is given and nothing else, the root of its
+ // executable's volume as its working directory, and a console of its own that shows no window
+ // (CREATE_NO_WINDOW), so that it is attached to no console of the parent's and receives none of its
+ // Ctrl+C events.
+ //
+ // The inheritance window. The handle list binds only this CreateProcessW(): while the duplicates are
+ // inheritable, any other CreateProcess() of this process that inherits handles without a list of its own
+ // (QProcess, a library's launcher) inherits them too -- a channel end, the interrupt page, the wake event --
+@@ -28,38 +30,38 @@
+ // only right before CreateProcessW() are they made inheritable; right after it they are closed, whatever it
+ // returned. The window is that one call. Helper launches never race one another in it: every one runs on the
+ // supervisor's thread. macOS has the like window, on its channel ends (Process_macos.cpp).
+ #include <vtextension/wasm/remote/process/Process_win32.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+-#include <cwctype>
+ #include <expected>
+ #include <filesystem>
+ #include <functional>
+ #include <memory>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+ #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
+ #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
++#include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ namespace
+ {
+@@ -69,20 +71,44 @@ namespace
+     /// How often processes beyond what one wait takes are looked at.
+     constexpr auto OverflowPollInterval = std::chrono::milliseconds { 100 };
+ 
+     /// Closes a handle when destroyed.
+     struct HandleCloser
+     {
+         void operator()(HANDLE handle) const noexcept { ::CloseHandle(handle); }
+     };
+     using OwnedHandle = std::unique_ptr<void, HandleCloser>;
+ 
++    /// @return This process's value of the variable @p name, in UTF-8; nothing if it has none, or none UTF-16
++    ///         spells. Read through the Win32 block, which a process's own changes to its environment reach.
++    [[nodiscard]] std::optional<std::string> processVariable(std::string_view name)
++    {
++        auto const wideName = wideOf(name);
++        if (!wideName)
++            return std::nullopt;
++        // Asked once for the size, with its terminator; again, should it have grown in between.
++        auto value = std::wstring {};
++        auto length = ::GetEnvironmentVariableW(wideName->c_str(), nullptr, 0);
++        while (length > value.size())
++        {
++            value.resize(length);
++            length =
++                ::GetEnvironmentVariableW(wideName->c_str(), value.data(), static_cast<DWORD>(value.size()));
++        }
++        if (length == 0)
++            return std::nullopt;
++        value.resize(length);
++        // UTF-8, as every string of the launcher's is; path::string() would spell it in the ANSI code page.
++        auto const utf8 = std::filesystem::path { value }.u8string();
++        return std::string { utf8.begin(), utf8.end() };
++    }
++
+     /// @return Why a call that set @p error failed to start a process.
+     [[nodiscard]] LaunchError launchErrorOf(DWORD error) noexcept
+     {
+         switch (error)
+         {
+             case ERROR_FILE_NOT_FOUND:
+             case ERROR_PATH_NOT_FOUND:
+             case ERROR_ACCESS_DENIED:
+             case ERROR_BAD_EXE_FORMAT: return LaunchError::NotFound;
+             case ERROR_NOT_ENOUGH_MEMORY:
+@@ -95,98 +121,20 @@ namespace
+             default: return LaunchError::Io;
+         }
+     }
+ 
+     /// @return Why a call at @p step that set @p error failed to start a process, and where.
+     [[nodiscard]] LaunchRefusal refusalOf(LaunchStep step, DWORD error) noexcept
+     {
+         return LaunchRefusal { .error = launchErrorOf(error), .step = step, .code = error };
+     }
+ 
+-    /// @return @p text, UTF-8, as UTF-16; nothing if it is not UTF-8.
+-    [[nodiscard]] std::optional<std::wstring> wideOf(std::string_view text)
+-    {
+-        if (text.empty())
+-            return std::wstring {};
+-        auto const size = ::MultiByteToWideChar(
+-            CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+-        if (size == 0)
+-            return std::nullopt;
+-        auto wide = std::wstring(static_cast<std::size_t>(size), L'\0');
+-        ::MultiByteToWideChar(
+-            CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), size);
+-        return wide;
+-    }
+-
+-    /// Appends @p argument to @p commandLine, quoted as the C runtime's argv parser reads it back.
+-    void appendArgument(std::wstring& commandLine, std::wstring_view argument)
+-    {
+-        if (!commandLine.empty())
+-            commandLine += L' ';
+-        if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring_view::npos)
+-        {
+-            commandLine += argument;
+-            return;
+-        }
+-        commandLine += L'"';
+-        auto backslashes = std::size_t { 0 };
+-        for (auto const c: argument)
+-        {
+-            if (c == L'\\')
+-            {
+-                ++backslashes;
+-                continue;
+-            }
+-            // Backslashes double only before a quote; the quote itself is escaped.
+-            commandLine.append(c == L'"' ? (backslashes * 2) + 1 : backslashes, L'\\');
+-            backslashes = 0;
+-            commandLine += c;
+-        }
+-        commandLine.append(backslashes * 2, L'\\');
+-        commandLine += L'"';
+-    }
+-
+-    /// @return The environment block of @p environment: `NAME=value` entries sorted by name, as Windows wants
+-    ///         them, each null-terminated, the block null-terminated; nothing if an entry is not UTF-8.
+-    [[nodiscard]] std::optional<std::wstring> environmentBlock(
+-        std::span<std::pair<std::string, std::string> const> environment)
+-    {
+-        auto entries = std::vector<std::pair<std::wstring, std::wstring>> {};
+-        for (auto const& [name, value]: environment)
+-        {
+-            auto wideName = wideOf(name);
+-            auto wideValue = wideOf(value);
+-            if (!wideName || !wideValue)
+-                return std::nullopt;
+-            entries.emplace_back(*std::move(wideName), *std::move(wideValue));
+-        }
+-        auto const upper = [](std::wstring const& name) {
+-            auto folded = name;
+-            std::ranges::transform(folded, folded.begin(), [](wchar_t c) { return std::towupper(c); });
+-            return folded;
+-        };
+-        std::ranges::sort(entries, {}, [&](auto const& entry) { return upper(entry.first); });
+-        auto block = std::wstring {};
+-        for (auto const& [name, value]: entries)
+-        {
+-            block += name;
+-            block += L'=';
+-            block += value;
+-            block += L'\0';
+-        }
+-        // An empty block still needs two terminators.
+-        if (entries.empty())
+-            block += L'\0';
+-        block += L'\0';
+-        return block;
+-    }
+-
+     /// Owns an initialized PROC_THREAD_ATTRIBUTE_LIST.
+     class AttributeList
+     {
+       public:
+         /// @return A list of @p count attributes; nothing if it could not be made.
+         [[nodiscard]] static std::optional<AttributeList> create(DWORD count)
+         {
+             auto size = SIZE_T { 0 };
+             ::InitializeProcThreadAttributeList(nullptr, count, 0, &size);
+             auto storage = std::make_unique<std::byte[]>(size);
+@@ -254,39 +202,39 @@ namespace
+     [[nodiscard]] std::expected<void, LaunchRefusal> allowInheritance(
+         std::span<HANDLE const> handles) noexcept
+     {
+         for (auto* const handle: handles)
+             if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+                 return std::unexpected(refusalOf(LaunchStep::Inheritance, ::GetLastError()));
+         return {};
+     }
+ 
+     /// @return A job that kills its process when closed, allows it no second one, caps its memory at
+-    ///         @p dataBytes (0: no cap) and ends it on an unhandled exception; nothing if it could not be
+-    ///         made.
+-    [[nodiscard]] OwnedHandle makeJob(uint64_t dataBytes) noexcept
++    ///         @p dataBytes (0: no cap) and ends it on an unhandled exception; or why it could not be made.
++    [[nodiscard]] std::expected<OwnedHandle, LaunchRefusal> makeJob(uint64_t dataBytes) noexcept
+     {
+         auto job = OwnedHandle { ::CreateJobObjectW(nullptr, nullptr) };
+         if (!job)
+-            return job;
++            return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
+         auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
+         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                                                   | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+                                                   | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+         limits.BasicLimitInformation.ActiveProcessLimit = 1;
+         if (dataBytes != 0)
+         {
+             limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+             limits.ProcessMemoryLimit = static_cast<SIZE_T>(dataBytes);
+         }
++        // The code is read before the job closes: its CloseHandle() may set another.
+         if (!::SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
+-            return OwnedHandle {};
++            return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
+         return job;
+     }
+ 
+     class Win32ProcessHandle final: public IProcessHandle
+     {
+       public:
+         Win32ProcessHandle(OwnedHandle process, OwnedHandle job, ProcessId id) noexcept:
+             _process { std::move(process) }, _job { std::move(job) }, _id { id }
+         {
+         }
+@@ -513,22 +461,22 @@ namespace
+                     .capabilities = SECURITY_CAPABILITIES { .AppContainerSid = *container,
+                                                             .Capabilities = nullptr,
+                                                             .CapabilityCount = 0,
+                                                             .Reserved = 0 },
+                     .childProcessPolicy = PROCESS_CREATION_CHILD_PROCESS_RESTRICTED,
+                 };
+             }
+ 
+             auto job = makeJob(spec.caps.dataBytes);
+             if (!job)
+-                return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
+-            auto jobList = std::array<HANDLE, 1> { job.get() };
++                return std::unexpected(job.error());
++            auto jobList = std::array<HANDLE, 1> { job->get() };
+             auto list = AttributeList::create(contained ? 4 : 2);
+             if (!list)
+                 return std::unexpected(refusalOf(LaunchStep::AttributeList, ::GetLastError()));
+             if (auto const set =
+                     list->set(LaunchStep::HandleList,
+                               PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                               std::span { handleList })
+                         .and_then([&] {
+                             return list->set(
+                                 LaunchStep::JobList, PROC_THREAD_ATTRIBUTE_JOB_LIST, std::span { jobList });
+@@ -552,21 +500,25 @@ namespace
+             auto commandLine = std::wstring {};
+             appendArgument(commandLine, executable.wstring());
+             for (auto const& argument:
+                  spec.arguments ? spec.arguments(childHandles) : std::vector<std::string> {})
+             {
+                 auto const wide = wideOf(argument);
+                 if (!wide)
+                     return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
+                 appendArgument(commandLine, *wide);
+             }
+-            auto block = environmentBlock(spec.environment);
++            // Contained, the system points the container's own folders into the environment it is given, and
++            // refuses one that lacks what it points (ContainerRedirectedVariables).
++            auto const environment =
++                contained ? containedEnvironment(spec.environment, processVariable) : spec.environment;
++            auto block = environmentBlock(environment);
+             if (!block)
+                 return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
+             auto const workingDirectory =
+                 (contained ? executable.parent_path() : executable.root_path()).wstring();
+ 
+             auto startup = STARTUPINFOEXW {};
+             startup.StartupInfo.cb = sizeof(startup);
+             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+             startup.StartupInfo.hStdInput = nullDevice.get();
+             startup.StartupInfo.hStdOutput = nullDevice.get();
+@@ -588,24 +540,26 @@ namespace
+                                  &info);
+             auto const error = ::GetLastError();
+             // Closed at once: the child holds its own copies, and no other process may inherit these.
+             owned.clear();
+             nullDevice.reset();
+             errorOutput.reset();
+             if (!created)
+                 return std::unexpected(refusalOf(LaunchStep::CreateProcess, error));
+             ::CloseHandle(info.hThread);
+             return std::make_unique<Win32ProcessHandle>(
+-                OwnedHandle { info.hProcess }, std::move(job), static_cast<ProcessId>(info.dwProcessId));
++                OwnedHandle { info.hProcess }, *std::move(job), static_cast<ProcessId>(info.dwProcessId));
+         }
+ 
+         AppContainerProvision _containers; ///< Ensured on the first isolated launch; used on this one thread.
++        /// Where a refusal its launch error cannot tell apart is said, and a grant this user may not make:
++        /// Contour's error log, or a test's record of it.
+         std::function<void(std::string_view line)> _diagnostics;
+         std::vector<std::pair<LaunchStep, DWORD>> _saidRefusals; ///< Each step and code said already.
+     };
+ } // namespace
+ 
+ std::shared_ptr<IProcessLauncher> makeWin32ProcessLauncher(
+     AppContainerApi api, std::function<void(std::string_view line)> diagnostics)
+ {
+     return std::make_shared<Win32ProcessLauncher>(std::move(api), std::move(diagnostics));
+ }
+@@ -625,24 +579,18 @@ ProcessId currentProcessId() noexcept
+ std::optional<transport::NativeHandle> defaultHelperStandardError()
+ {
+     if constexpr (ThisBuildInstrumentation != BuildInstrumentation::None)
+         if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE); own != nullptr && own != INVALID_HANDLE_VALUE)
+             return own;
+     return std::nullopt;
+ }
+ 
+ std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment()
+ {
+-    // Without SystemRoot a process cannot load the system's DLLs. Read through the Win32 block, which a
+-    // process's own changes to its environment reach.
+-    auto value = std::wstring(MAX_PATH, L'\0');
+-    auto const length =
+-        ::GetEnvironmentVariableW(L"SystemRoot", value.data(), static_cast<DWORD>(value.size()));
+-    if (length == 0 || length >= value.size())
++    // Without SystemRoot a process cannot load the system's DLLs.
++    auto systemRoot = processVariable("SystemRoot");
++    if (!systemRoot)
+         return {};
+-    value.resize(length);
+-    // UTF-8, as every string of the launcher's is; path::string() would spell it in the ANSI code page.
+-    auto const utf8 = std::filesystem::path { value }.u8string();
+-    return { { "SystemRoot", std::string { utf8.begin(), utf8.end() } } };
++    return { { "SystemRoot", *std::move(systemRoot) } };
+ }
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+index adaf97745..fd20debb4 100644
+--- a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
++++ b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+@@ -14,20 +14,21 @@
+ #include <mutex>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ namespace vtextension::wasm::remote::process::testing
+@@ -103,21 +104,21 @@ namespace
+ 
+ std::vector<std::pair<std::string, std::string>> helperEnvironment()
+ {
+     auto environment = defaultHelperEnvironment();
+     std::ranges::move(sanitizerEnvironment(), std::back_inserter(environment));
+     return environment;
+ }
+ 
+ LockdownRequirement helperLockdown() noexcept
+ {
+-    if (host::ThisPlatformSandbox == host::PlatformSandbox::None || runsOnWine())
++    if (host::ThisPlatformSandbox == host::PlatformSandbox::None || wasm::testing::runsOnWine())
+         return LockdownRequirement::AcceptUnsandboxed;
+     return LockdownRequirement::RequireLockedDown;
+ }
+ 
+ HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace, ArgumentRewrite laterArguments):
+     _teardownGrace { teardownGrace },
+     _recording { std::make_shared<RecordingLauncher>(makeSystemProcessLauncher(),
+                                                      std::move(laterArguments)) },
+     _supervisor { [this] {
+         logErrorsToOriginalStandardError();
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+index 54d6f91ee..b7c6d5bb0 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+@@ -15,20 +15,21 @@
+ #include <iterator>
+ #include <optional>
+ #include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <unistd.h>
+ #endif
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+@@ -47,34 +48,24 @@ namespace
+ std::vector<std::pair<std::string, std::string>> sanitizerEnvironment()
+ {
+     auto environment = std::vector<std::pair<std::string, std::string>> {};
+     auto const live = core::LiveEnvironment {};
+     for (auto const name: SanitizerVariables)
+         if (auto value = live.get(name))
+             environment.emplace_back(std::string { name }, *std::move(value));
+     return environment;
+ }
+ 
+-bool runsOnWine() noexcept
+-{
+-#ifdef _WIN32
+-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
+-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
+-#else
+-    return false;
+-#endif
+-}
+-
+ ProcessIsolation helperIsolation() noexcept
+ {
+ #ifdef _WIN32
+-    return runsOnWine() ? ProcessIsolation::None : ProcessIsolation::AppContainer;
++    return wasm::testing::runsOnWine() ? ProcessIsolation::None : ProcessIsolation::AppContainer;
+ #else
+     return ProcessIsolation::None;
+ #endif
+ }
+ 
+ ProcessId ownProcessId() noexcept
+ {
+     return currentProcessId();
+ }
+ 
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+index f64451aad..81c18230c 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+@@ -20,24 +20,20 @@
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+-/// @return Whether this process runs on wine (ntdll exports wine_get_version()), which stubs AppContainers: a
+-///         contained launch there proves nothing, and fails every case it would start. False off Windows.
+-[[nodiscard]] bool runsOnWine() noexcept;
+-
+ /// @return What the extension host is started in by a test that starts it as Contour does: its AppContainer
+ ///         on Windows, nothing under wine, and nothing on POSIX, where the helper confines itself.
+ [[nodiscard]] ProcessIsolation helperIsolation() noexcept;
+ 
+ /// How long a test waits for a child to do what it was told.
+ inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
+ 
+ /// @return This process's id.
+ [[nodiscard]] ProcessId ownProcessId() noexcept;
+ 
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
+index 7589bdcec..c2b2082ca 100644
+--- a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
+@@ -4,20 +4,21 @@
+ // and the guard after it are not, what is open is the parent's object, an object of another size is refused,
+ // and opening never closes anything.
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ 
+ #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #elifdef __linux__
+     #include <fstream>
+     #include <string>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::canMapGuestMemory;
+@@ -34,34 +35,25 @@ namespace
+ 
+ /// A guest page.
+ constexpr auto Page = uint64_t { 64 } * 1024;
+ 
+ /// The object the cases map: four guest pages.
+ constexpr auto ObjectBytes = 4 * Page;
+ 
+ /// The guard the cases reserve after it.
+ constexpr auto GuardBytes = 2 * Page;
+ 
+-#ifdef _WIN32
+-/// Whether this runs under wine.
+-[[nodiscard]] bool runsUnderWine() noexcept
+-{
+-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
+-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
+-}
+-#endif
+-
+ /// Skips the case where this system cannot map guest memory: only wine may say so.
+ void requireGuestMapping()
+ {
+ #ifdef _WIN32
+-    if (!canMapGuestMemory() && runsUnderWine())
++    if (!canMapGuestMemory() && vtextension::wasm::testing::runsOnWine())
+         SKIP("wine places no section view over a placeholder");
+ #endif
+     REQUIRE(canMapGuestMemory());
+ }
+ 
+ #ifdef __linux__
+ /// @return The permissions /proc/self/maps shows for the mapping holding @p address ("rw-s", "---p", ...);
+ ///         empty if none holds it.
+ [[nodiscard]] std::string permissionsAt(std::byte const* address)
+ {
+@@ -159,21 +151,21 @@ TEST_CASE("GuestMemoryMapping.openedBytesAreTheParentsBytes", "[vtextension]")
+     CHECK(helper->accessibleBytes() == 2 * Page);
+     helper->base()[Page + 8] = std::byte { 9 };
+     CHECK(parent->bytes()[Page + 8] == std::byte { 9 });
+ }
+ 
+ #ifdef _WIN32
+ TEST_CASE("GuestMemoryMapping.closedPagesAreThoseNoViewCommitted", "[vtextension]")
+ {
+     // Windows commits a reserved section's pages for the section: the helper's closed pages stay closed only
+     // while the parent commits no more than it granted, which is why SharedGuestMemory commits exactly that.
+-    if (runsUnderWine())
++    if (vtextension::wasm::testing::runsOnWine())
+         SKIP("wine commits a reserved section per view, unlike Windows");
+     requireGuestMapping();
+     auto const object = createSharedObject(ObjectBytes, SharedObjectUse::GuestMemory);
+     REQUIRE(object.has_value());
+     auto parent = SharedMapping::map(object->get(), ObjectBytes, MapAccess::ReadWrite);
+     REQUIRE(parent.has_value());
+     REQUIRE(parent->commit(0, Page).has_value());
+     auto const helper = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, GuardBytes);
+     REQUIRE(helper.has_value());
+     auto const stateAt = [&](uint64_t offset) {
+@@ -222,15 +214,15 @@ TEST_CASE("GuestMemoryMapping.neverShrinks", "[vtextension]")
+     CHECK(mapping->base()[(3 * Page) - 1] == std::byte { 1 });
+ 
+     CHECK(mapping->open(ObjectBytes + Page).error() == MappingError::WrongSize);
+     CHECK(mapping->open((3 * Page) + 1).error() == MappingError::WrongSize);
+     CHECK(mapping->accessibleBytes() == 3 * Page);
+ }
+ 
+ #ifdef _WIN32
+ TEST_CASE("GuestMemoryMapping.placeholdersWork", "[vtextension]")
+ {
+-    if (!canMapGuestMemory() && runsUnderWine())
++    if (!canMapGuestMemory() && vtextension::wasm::testing::runsOnWine())
+         SKIP("wine places no section view over a placeholder: the helper copies memory there");
+     CHECK(canMapGuestMemory());
+ }
+ #endif
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject_test.cpp b/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
+index eaa848665..5e3b40599 100644
+--- a/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
++++ b/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
+@@ -9,20 +9,21 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <initializer_list>
+ #include <string>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <sys/mman.h>
+     #include <sys/types.h>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+@@ -239,37 +240,25 @@ TEST_CASE("SharedObject.reservedSectionCommitsOnlyWhatIsAsked", "[vtextension]")
+     REQUIRE(::VirtualQuery(base, &region, sizeof(region)) != 0);
+     CHECK(region.State == MEM_COMMIT);
+     CHECK(region.RegionSize == GuestBytes);
+     REQUIRE(::VirtualQuery(base + GuestBytes, &region, sizeof(region)) != 0);
+     CHECK(region.State == MEM_RESERVE);
+ 
+     mapping->bytes()[GuestBytes - 1] = std::byte { 1 };
+     CHECK(mapping->bytes()[GuestBytes - 1] == std::byte { 1 });
+ }
+ 
+-namespace
+-{
+-
+-/// Whether this runs under wine, which commits a reserved section per view rather than per section.
+-[[nodiscard]] bool runsUnderWine() noexcept
+-{
+-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
+-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
+-}
+-
+-} // namespace
+-
+ TEST_CASE("SharedObject.pagesCommittedThroughOneViewAreSeenThroughAnother", "[vtextension]")
+ {
+     // Contour commits guest memory through its own view only; the helper's view must then reach the same
+     // pages. Windows commits a reserved section's pages for the section, so any view may touch them.
+-    if (runsUnderWine())
++    if (vtextension::wasm::testing::runsOnWine())
+         SKIP("wine commits a reserved section per view, unlike Windows");
+ 
+     auto const object = createSharedObject(MiB, SharedObjectUse::GuestMemory);
+     REQUIRE(object.has_value());
+     auto parentView = SharedMapping::map(object->get(), MiB, MapAccess::ReadWrite);
+     REQUIRE(parentView.has_value());
+     auto const helperView = SharedMapping::map(object->get(), MiB, MapAccess::ReadWrite);
+     REQUIRE(helperView.has_value());
+ 
+     REQUIRE(parentView->commit(0, GuestBytes).has_value());
+diff --git a/src/vtextension/wasm/testing/Wine.hpp b/src/vtextension/wasm/testing/Wine.hpp
+new file mode 100644
+index 000000000..0cf8d7cce
+--- /dev/null
++++ b/src/vtextension/wasm/testing/Wine.hpp
+@@ -0,0 +1,26 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Test-only: whether a test runs on wine, whose Windows differs from Windows where a case says so.
++// Header-only, so that every test binary, whatever it links, asks it alike.
++#pragma once
++
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#endif
++
++namespace vtextension::wasm::testing
++{
++
++/// @return Whether this process runs on wine (ntdll exports wine_get_version()). False off Windows.
++[[nodiscard]] inline bool runsOnWine() noexcept
++{
++#ifdef _WIN32
++    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
++    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
++#else
++    return false;
++#endif
++}
++
++} // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index 2b6c2c827..b432bb50c 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -39,20 +39,21 @@
+ #include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/host/MemoryProvision.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/FeatureModules.hpp>
+ #include <vtextension/wasm/testing/ProcessModules.hpp>
+ #include <vtextension/wasm/testing/RenderMeasurement.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::wasm::FeatureState;
+ using vtextension::wasm::IWasmBackend;
+ using vtextension::wasm::MemoryGrowthReporting;
+ using vtextension::wasm::ModuleIdentity;
+@@ -902,30 +903,20 @@ TEST_CASE("WasmtimeEngine.reservationAndGuardAreExplicit", "[wasmtime]")
+         object.provision(
+             ContractObjectBytes, GuestPage, 0, object.answering(proto::GrowStatus::Granted, asked)));
+     CHECK(instance.has_value());
+     CHECK(lastMemoryRequest()
+           == MemoryRequest { .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = 0 });
+ }
+ 
+ namespace
+ {
+ 
+-#ifdef _WIN32
+-/// Whether this runs under wine, which lets a store into a reserved page of a section's view through, as if
+-/// it were committed, where Windows faults.
+-[[nodiscard]] bool runsUnderWine() noexcept
+-{
+-    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
+-    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
+-}
+-#endif
+-
+ /// A store that faults on provided memory under signal traps.
+ struct SignalFault
+ {
+     std::string_view what;
+     uint64_t initialPages; ///< The memory's initial size, all of it open.
+     uint32_t index;        ///< The store's dynamic address; its static offset is 8.
+ };
+ 
+ /// Checks that @p fault traps, on an engine trapping through signals, and that the instance and the process
+ /// survive it.
+@@ -984,21 +975,21 @@ void checkSignalTrap(SignalFault const& fault)
+ } // namespace
+ 
+ // Two cases, each bringing up its own engine trapping through signals: the second proves that a case after
+ // the first still traps through Wasmtime's handlers (EngineSignalHandlers).
+ TEST_CASE("WasmtimeEngine.signalTrapsPastTheOpenBytes", "[wasmtime]")
+ {
+     if constexpr (vtextension::wasm::ThisBuildInstrumentation
+                   != vtextension::wasm::BuildInstrumentation::None)
+         SKIP("an instrumented build traps in software only");
+ #ifdef _WIN32
+-    if (runsUnderWine())
++    if (vtextension::wasm::testing::runsOnWine())
+         SKIP("wine lets a store into a reserved page of a section's view through, unlike Windows");
+ #endif
+     checkSignalTrap(SignalFault {
+         .what = "past the open bytes", .initialPages = 1, .index = static_cast<uint32_t>(GuestPage) });
+ }
+ 
+ TEST_CASE("WasmtimeEngine.signalTrapsPastTheObject", "[wasmtime]")
+ {
+     if constexpr (vtextension::wasm::ThisBuildInstrumentation
+                   != vtextension::wasm::BuildInstrumentation::None)

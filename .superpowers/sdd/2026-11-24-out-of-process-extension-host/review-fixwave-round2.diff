@@ -1,0 +1,753 @@
+790ce3259 fix(vtextension): a host short of memory as it starts is retried, and a lacking sandbox is a warning
+03c755b81 fix(vtextension): unlink a WAMR execution environment under its thread cluster's lock
+b9cc6d9d9 feat(vtextension): the extension host on FreeBSD maps no memory both writable and executable
+cbc313fb6 feat(vtextension): Contour says what an extension host's confinement failed with, and went without
+9c50fd9d8 fix(vtextension): lock WAMR's process-wide state around every call that changes it
+2773b7f77 ci: run the arm legs on pull requests labelled for them
+dfa92536a fix(vtextension): register no native unwind tables for guest code on Wasmtime
+9c2b20019 test(vtextension): measure the extension host on WAMR's engine too
+484a91078 test(vtextension): run the extension host's engine-free tests wherever the host is built
+09c4b77d9 build: the containment gate refuses an executable that links two WebAssembly runtimes
+f1de8cfa3 feat(vtextension): the extension host runs in an AppContainer on Windows
+7fe4ac8fb feat(vtextension): grant app containers read access to the extension host once
+7ba7830b2 build: sign the macOS extension host with the one entitlement its compiler needs
+a63cb92a7 feat(vtextension): the extension host runs in a deny-by-default sandbox on macOS
+684b317e0 build: pick wamr by default where the extension host's sandbox cannot run wasmtime
+e3a8ec0b3 ci: run the FreeBSD job on pull requests labelled for it
+ce1fb6b22 feat(vtextension): the extension host enters capability mode on FreeBSD
+ac6154a0c refactor(vtextension): the extension host names every descriptor it keeps, and what for
+c8403b5f2 build: select where extensions run and which engine the extension host uses
+c91520ffa feat(vtextension): run extensions in a sandboxed extension host process by default on Linux
+7df0676a0 refactor(vtextension): small cleanups in the extension host and its engines
+e21788e96 test(vtextension): the sandbox probe locks down with either engine's system call rows
+d400f0f27 fix(vtextension): a host refused for a lasting reason is the last its connector starts
+65ae29eb8 build: package the extension host in the Fedora RPM
+63cbfa843 build: refuse an installed WAMR that compiles to native code
+3723845f1 fix(vtextension): every engine withholds the CPU-time clocks alike
+abe668823 build: build the extension host with whichever engine the build selected
+a2f21171b feat(vtextension): the extension host can run its modules interpreted
+905dcfaed fix(vtextension): a sanitizer build's extension host reads only its own process entries
+e3060fc80 fix(vtextension): an outer filter refusing one argument value lets every other value through
+f67f72569 fix(vtextension): a crash in the locked-down extension host is no longer taken for a sandbox kill
+9c6ad2082 fix(vtextension): a kernel refusing what our Landlock row claims for its ABI falls back to the row before
+244f74bed fix(vtextension): a sanitizer build's extension host no longer dies by its own filter as it exits
+f53282dd8 fix(vtextension): an outer sandbox refusing descriptor control no longer stops every extension host
+57f4d9ba4 feat(vtextension): the extension host gives up file system access on Linux before it starts a thread
+307b59ee4 feat(vtextension): the extension host restricts its system calls on Linux
+a5b682853 fix(vtextension): refuse an older extension host for its version, not as a broken peer
+7bc4f9d43 feat(vtextension): say which confinement step of an extension host failed, and start it only once
+303b1c7bb feat(vtextension): the extension host locks down in a fixed order, its threads prepared first
+
+ cmake/ApplyPatchOnce.cmake                         | 30 +++++++++++++
+ cmake/ContourThirdParties.cmake                    | 33 +++++++++++---
+ src/vtextension/wasm/host/ExecutorThread_test.cpp  |  9 ++--
+ src/vtextension/wasm/remote/HostRefusals.cpp       | 12 ++---
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp | 51 ++++++++++++++++++++++
+ src/vtextension/wasm/wamr/WamrThreadEnv.cpp        | 24 +++++++++-
+ src/vtextension/wasm/wamr/WamrThreadEnv.hpp        |  4 +-
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp   | 49 ++++++++++++++++++---
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp   |  7 +++
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          | 20 +++++++++
+ 10 files changed, 215 insertions(+), 24 deletions(-)
+
+diff --git a/cmake/ApplyPatchOnce.cmake b/cmake/ApplyPatchOnce.cmake
+new file mode 100644
+index 000000000..68279fdf0
+--- /dev/null
++++ b/cmake/ApplyPatchOnce.cmake
+@@ -0,0 +1,30 @@
++# Applies PATCH_FILE to the source tree in the working directory, once: a tree it is already applied to (a
++# reconfigure, or a populated source cache) is left as it is. Run as the PATCH_COMMAND of a fetched dependency:
++#
++#   ${CMAKE_COMMAND} -D PATCH_EXECUTABLE=<patch> -D PATCH_FILE=<file> -P ApplyPatchOnce.cmake
++#
++# `patch -R --dry-run` succeeds only where the whole patch is in place; otherwise it is applied forward with
++# -N, which refuses rather than reverses a hunk found applied, so that a tree patched halfway fails loudly.
++cmake_minimum_required(VERSION 3.25)
++foreach(_required IN ITEMS PATCH_EXECUTABLE PATCH_FILE)
++    if(NOT ${_required})
++        message(FATAL_ERROR "ApplyPatchOnce.cmake needs -D ${_required}=...")
++    endif()
++endforeach()
++
++execute_process(
++    COMMAND "${PATCH_EXECUTABLE}" -p1 -R --dry-run --silent --input "${PATCH_FILE}"
++    RESULT_VARIABLE _applied
++    OUTPUT_QUIET ERROR_QUIET
++)
++if(_applied EQUAL 0)
++    message(STATUS "Already applied: ${PATCH_FILE}")
++    return()
++endif()
++execute_process(
++    COMMAND "${PATCH_EXECUTABLE}" -p1 -N --forward --input "${PATCH_FILE}"
++    RESULT_VARIABLE _patched
++)
++if(NOT _patched EQUAL 0)
++    message(FATAL_ERROR "Could not apply ${PATCH_FILE}")
++endif()
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index 4470dbec5..ad00b498a 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -256,40 +256,41 @@ function(ContourThirdParties_WamrTerminates target resultVar)
+ endfunction()
+ 
+ if(CONTOUR_EXTENSIONS)
+     add_library(contour_wamr INTERFACE)
+     add_library(contour::wamr ALIAS contour_wamr)
+ 
+     set(_wamr_target "")
+     set(_wamr_rejected "")
+     if(TARGET iwasm::vmlib)
+         set(_wamr_target iwasm::vmlib)
+-        set(THIRDPARTY_BUILTIN_wamr "embedded")
++        set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's thread-safety patch")
+     elseif(NOT CONTOUR_BUILD_STATIC)
+         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
+         set(_wamr_candidate "")
+         if(TARGET iwasm::vmlib)
+             set(_wamr_candidate iwasm::vmlib)
+         else()
+             find_package(PkgConfig QUIET)
+             if(PkgConfig_FOUND)
+                 pkg_check_modules(PC_WAMR QUIET IMPORTED_TARGET GLOBAL iwasm>=${WAMR_MINIMAL_VERSION})
+                 if(TARGET PkgConfig::PC_WAMR)
+                     set(_wamr_candidate PkgConfig::PC_WAMR)
+                 endif()
+             endif()
+         endif()
+         if(_wamr_candidate)
+             ContourThirdParties_WamrTerminates(${_wamr_candidate} _wamr_terminates)
+             if(_wamr_terminates)
+                 set(_wamr_target ${_wamr_candidate})
+-                set(THIRDPARTY_BUILTIN_wamr "system package (wasm_runtime_terminate verified)")
++                set(THIRDPARTY_BUILTIN_wamr
++                    "system package, without Contour's thread-safety patch (its interrupt verified)")
+             else()
+                 set(_wamr_rejected "${_wamr_terminates_REASON}")
+                 message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
+             endif()
+         endif()
+     endif()
+ 
+     if(NOT _wamr_target)
+         if(NOT CONTOUR_USE_CPM)
+             if(_wamr_rejected)
+@@ -297,31 +298,52 @@ if(CONTOUR_EXTENSIONS)
+             else()
+                 set(_wamr_found "None is installed.")
+             endif()
+             message(FATAL_ERROR "Could not find a usable WAMR >= ${WAMR_MINIMAL_VERSION}: one built with "
+                 "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
+                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
+                 "${_wamr_found} "
+                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+         endif()
+         message(STATUS "Using CPM to fetch WAMR")
++        set(_wamr_patch "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch")
++        file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
++        string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
++        # The patch program; on Windows, the one Git for Windows carries if none is on the PATH (as CPM's PATCHES
++        # looks for it).
++        find_program(_wamr_patch_executable patch)
++        if(NOT _wamr_patch_executable AND CMAKE_HOST_WIN32)
++            find_package(Git QUIET)
++            if(GIT_EXECUTABLE)
++                get_filename_component(_git_directory "${GIT_EXECUTABLE}" DIRECTORY)
++                find_program(_wamr_patch_executable patch
++                             HINTS "${_git_directory}/../usr/bin" "${_git_directory}/../../usr/bin")
++            endif()
++        endif()
++        if(NOT _wamr_patch_executable)
++            message(FATAL_ERROR "Fetching WAMR needs the patch program, to apply ${_wamr_patch}.")
++        endif()
+         CPMAddPackage(
+             NAME wamr
+             VERSION ${WAMR_MINIMAL_VERSION}
+             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
+             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
+             # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
+             # while setting or clearing any instance's exception walks every cluster under that lock: a data
+             # race between one extension's call or trap and another's unload. The patch unlinks under the lock.
+             # An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory, as
+-            # the cluster and the environment are freed only after the walk's list lock is released.
+-            PATCHES "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch"
++            # the cluster and the environment are freed only after the walk's list lock is released. Applied
++            # once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a patched tree succeeds; the
++            # patch's own hash keys the source cache, so that a changed patch is never served an old tree.
++            PATCH_COMMAND "${CMAKE_COMMAND}" -D "PATCH_EXECUTABLE=${_wamr_patch_executable}"
++                          -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake"
++            CUSTOM_CACHE_KEY "25bd7eb63e82-${_wamr_patch_hash}"
+             OPTIONS
+                 "WAMR_BUILD_INTERP 1"
+                 "WAMR_BUILD_FAST_INTERP 1"
+                 "WAMR_BUILD_AOT 0"
+                 "WAMR_BUILD_JIT 0"
+                 "WAMR_BUILD_FAST_JIT 0"
+                 "WAMR_BUILD_LIBC_WASI 1"
+                 "WAMR_BUILD_LIBC_BUILTIN 0"
+                 "WAMR_BUILD_THREAD_MGR 1"
+                 "WAMR_BUILD_LIB_PTHREAD 0"
+@@ -379,21 +401,22 @@ if(CONTOUR_EXTENSIONS)
+             # wasm_export.h marks the API __declspec(dllimport) under MSVC unless told otherwise, which
+             # is right only for a WAMR DLL; this one is linked statically.
+             target_compile_definitions(contour_wamr INTERFACE WASM_RUNTIME_API_EXTERN=)
+         endif()
+         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+             # The native-call trampoline is a plain .s file, which the driver assembles without
+             # preprocessing; Clang then warns about every -D and dependency flag the build passes.
+             target_compile_options(vmlib PRIVATE $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>)
+         endif()
+         set(_wamr_target vmlib)
+-        set(THIRDPARTY_BUILTIN_wamr "CPM (WAMR-${WAMR_MINIMAL_VERSION}, static, fast interpreter)")
++        set(THIRDPARTY_BUILTIN_wamr
++            "CPM (${WAMR_MINIMAL_VERSION}, static, fast interpreter, with Contour's thread-safety patch)")
+         if(_wamr_rejected)
+             string(APPEND THIRDPARTY_BUILTIN_wamr "; system WAMR rejected: ${_wamr_rejected}")
+         endif()
+     endif()
+     target_link_libraries(contour_wamr INTERFACE ${_wamr_target})
+ else()
+     set(THIRDPARTY_BUILTIN_wamr "(extensions disabled)")
+ endif()
+ 
+ # Wasmtime compiles the status-line extensions to native code inside the extension host, the only
+diff --git a/src/vtextension/wasm/host/ExecutorThread_test.cpp b/src/vtextension/wasm/host/ExecutorThread_test.cpp
+index 213d48e86..81c0f3005 100644
+--- a/src/vtextension/wasm/host/ExecutorThread_test.cpp
++++ b/src/vtextension/wasm/host/ExecutorThread_test.cpp
+@@ -18,26 +18,25 @@ using vtextension::wasm::host::ExecutorThread;
+ TEST_CASE("ExecutorThread.runsItsBody", "[vtextension][host]")
+ {
+     auto ran = std::atomic<int> { 0 };
+     {
+         auto thread = ExecutorThread::start(std::size_t { 1024 } * 1024, [&] { ++ran; });
+         REQUIRE(thread.has_value());
+     }
+     CHECK(ran.load() == 1);
+ }
+ 
+-TEST_CASE("ExecutorThread.startReturnsOnceTheThreadRuns", "[vtextension][host]")
++TEST_CASE("ExecutorThread.startedThreadRunsTheBody", "[vtextension][host]")
+ {
+-    // The host locks down right after starting its threads: none may still be starting by then. start()
+-    // returns once the thread has entered the function that runs the body -- the C library's start-up done --
+-    // which may be just before the body's first statement: so the body is waited for, not raced. It is still
+-    // waited for with a bound, as a thread start() returned for that never runs is a failure, not a hang.
++    // A thread start() returned runs its body. start() returns once the thread has entered the function that
++    // runs the body -- the C library's start-up done, which is what the host locks down after -- and that
++    // may be just before the body's first statement: so the body is waited for, with a bound, not raced.
+     auto entered = std::latch { 1 };
+     auto release = std::latch { 1 };
+     auto thread = ExecutorThread::start(std::size_t { 1024 } * 1024, [&] {
+         entered.count_down();
+         release.wait();
+     });
+     REQUIRE(thread.has_value());
+     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+     while (!entered.try_wait() && std::chrono::steady_clock::now() < deadline)
+         std::this_thread::yield();
+diff --git a/src/vtextension/wasm/remote/HostRefusals.cpp b/src/vtextension/wasm/remote/HostRefusals.cpp
+index dc52edb5a..67784d6c4 100644
+--- a/src/vtextension/wasm/remote/HostRefusals.cpp
++++ b/src/vtextension/wasm/remote/HostRefusals.cpp
+@@ -14,20 +14,27 @@
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ namespace
+ {
++    /// Warnings of extensions running, but not quite as they should: a sandbox short of a step is worth
++    /// knowing about whether or not anyone debugs extensions, so it is on unless turned off. At namespace
++    /// scope, so that it is registered -- listed, and turned off by a filter -- before anything logs.
++    auto const warningLog = core::log::Category("vtextension.warning",
++                                                "Warns of extensions running, but not quite as they should.",
++                                                core::log::Category::State::Enabled);
++
+     /// The line for a host that could not be started, around what the launcher says of why.
+     constexpr auto LaunchLine =
+         std::string_view { "The extension host cannot be started: {}. Extensions do not run." };
+ 
+     /// A reason a host was refused at the handshake, and the line logged for it.
+     struct HandshakeRefusalRow
+     {
+         HostRefusal refusal;   ///< The reason.
+         std::string_view text; ///< The line logged.
+     };
+@@ -167,24 +174,19 @@ void HostRefusalLog::unavailable(proto::LockdownStep step)
+         return;
+     auto const bit = uint32_t { 1 } << std::to_underlying(step);
+     if ((_unavailable.fetch_or(bit) & bit) != 0)
+         return;
+     _writer(LineSeverity::Warning, unavailableStepLine(step));
+ }
+ 
+ HostRefusalLog::Writer logWriter()
+ {
+     return [](LineSeverity severity, std::string_view line) {
+-        // A sandbox short of a step is worth knowing about whether or not anyone debugs extensions.
+-        static auto const warningLog =
+-            core::log::Category("vtextension.warning",
+-                                "Warns of extensions running, but not quite as they should.",
+-                                core::log::Category::State::Enabled);
+         switch (severity)
+         {
+             case LineSeverity::Warning: warningLog()("{}", line); return;
+             case LineSeverity::Error: errorLog()("{}", line); return;
+         }
+     };
+ }
+ 
+ } // namespace vtextension::wasm::remote
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index 6979ed812..f39eadfb6 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -46,20 +46,21 @@
+ #include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #ifndef _WIN32
+     #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ #endif
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
++#include <vtextension/wasm/testing/PreparationHookEngine.hpp>
+ #include <vtextension/wasm/testing/RenderMeasurement.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #endif
+ 
+ using vtextension::ExtensionError;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::BackendConfig;
+@@ -987,20 +988,70 @@ TEST_CASE("RemoteBackend.unavailableStepIsLoggedOnceAndServed", "[vtextension][r
+             runtime,
+             HelperPolicy { .timeouts = {}, .lockdown = LockdownRequirement::AcceptUnsandboxed },
+             refusals);
+         CHECK(connected.has_value());
+     }
+     CHECK(lines == std::vector { unavailableStepLine(proto::LockdownStep::FileSystem) });
+     CHECK(lines.front().contains(proto::lockdownStepText(proto::LockdownStep::FileSystem)));
+     CHECK(connector->refusals().empty());
+ }
+ 
++TEST_CASE("RemoteBackend.hostShortOfMemoryAsItPrimesIsRetried", "[vtextension][remote]")
++{
++    // A real host in this process whose engine runs out of memory preparing its threads (injected at the
++    // engine's own seam, prepareThread()): its server says so in a Failed Hello at Priming, and Contour
++    // refuses it for a reason that does not last -- so the next load starts a host again.
++    struct RecordingConnector final: IHostConnector
++    {
++        InProcessHostConnector hosts;
++        std::mutex mutex;
++        std::vector<HostRefusal> seen;
++
++        explicit RecordingConnector(vtextension::wasm::host::EngineFactory engines):
++            hosts { std::move(engines), HostServerConfig {} }
++        {
++        }
++        [[nodiscard]] std::expected<HostConnection, ExtensionError> connect() override
++        {
++            return hosts.connect();
++        }
++        void refused(HostRefusal refusal) override
++        {
++            auto const lock = std::scoped_lock { mutex };
++            seen.push_back(refusal);
++        }
++    };
++    auto const starved = [] {
++        return std::make_unique<vtextension::wasm::testing::PreparationHookEngine>(
++            vtextension::wasm::testing::makeHostedEngine(proto::MemoryMode::Copy),
++            []() -> std::expected<void, ExtensionError> {
++                return std::unexpected(ExtensionError::OutOfMemory);
++            });
++    };
++    auto const connector = std::make_shared<RecordingConnector>(starved);
++    auto const backend = makeRemoteBackend(
++        makeRemoteKindState(),
++        BackendConfig {
++            .timeouts = {}, .connector = connector, .lockdown = LockdownRequirement::AcceptUnsandboxed });
++    auto const runtime = contract::createRuntime(*backend);
++    for ([[maybe_unused]] auto const attempt: { 1, 2 })
++    {
++        auto const module = runtime->load(ModuleIdentity {}, toModule(PeekModule));
++        REQUIRE_FALSE(module.has_value());
++        CHECK(module.error() == ExtensionError::HostUnavailable);
++    }
++    auto const lock = std::scoped_lock { connector->mutex };
++    CHECK(connector->seen == std::vector { HostRefusal::OutOfResources, HostRefusal::OutOfResources });
++    CHECK(vtextension::wasm::remote::refusalPersistence(HostRefusal::OutOfResources)
++          == vtextension::wasm::remote::RefusalPersistence::Transient);
++}
++
+ TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")
+ {
+     auto const connector = scriptedConnector(HelperScript {});
+     {
+         auto const backend = makeRemoteBackend(
+             sharedKind(),
+             BackendConfig { .timeouts = { .load = std::chrono::milliseconds { 11 },
+                                           .instantiate = std::chrono::milliseconds { 12 },
+                                           .handshake = std::chrono::milliseconds { 13 },
+                                           .interruptGrace = std::chrono::milliseconds { 14 } },
+diff --git a/src/vtextension/wasm/wamr/WamrThreadEnv.cpp b/src/vtextension/wasm/wamr/WamrThreadEnv.cpp
+index b2a9d2312..9615330bb 100644
+--- a/src/vtextension/wasm/wamr/WamrThreadEnv.cpp
++++ b/src/vtextension/wasm/wamr/WamrThreadEnv.cpp
+@@ -1,17 +1,18 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+ 
+ #include <core/Assert.hpp>
+ 
+ #include <atomic>
+ #include <cstddef>
++#include <cstdint>
+ #include <mutex>
+ #include <tuple>
+ #include <utility>
+ 
+ #include <wasm_export.h>
+ 
+ #include <vtextension/wasm/wamr/WamrGlobals.hpp>
+ 
+ namespace vtextension::wasm::wamr
+ {
+@@ -47,20 +48,28 @@ namespace
+     /// runtime here only once WAMR is initialized, and a teardown withdraws it here before WAMR goes.
+     /// @return Whether the runtime was up and @p body succeeded.
+     template <typename Body>
+     [[nodiscard]] bool whileRuntimeUp(uint64_t generation, Body const& body)
+     {
+         auto& ownership = runtimeOwnership();
+         auto const lock = std::scoped_lock { ownership.mutex };
+         return ownership.holders > 0 && currentGeneration.load() == generation && body();
+     }
+ 
++    /// What preparing a thread's environment came to.
++    enum class ThreadEnvInit : uint8_t
++    {
++        RuntimeDown, ///< No runtime of the generation asked for was up.
++        Refused,     ///< WAMR could not make the environment.
++        Ready,       ///< The environment is there.
++    };
++
+     /// Whether the calling thread is the one that brought the running runtime up.
+     [[nodiscard]] bool isInitializingThread()
+     {
+         auto& ownership = runtimeOwnership();
+         auto const lock = std::scoped_lock { ownership.mutex };
+         return ownership.holders > 0 && ownership.initializingThread == std::this_thread::get_id();
+     }
+ } // namespace
+ 
+ uint64_t runtimeGeneration() noexcept
+@@ -117,22 +126,33 @@ bool ThreadEnv::isCurrentThreadPrepared()
+ std::expected<ThreadEnv, ExtensionError> ThreadEnv::enter()
+ {
+     auto const generation = runtimeGeneration();
+     if (isCurrentThreadPrepared())
+     {
+         ++threadEnvDepth;
+         return ThreadEnv { Hold::Nested, generation };
+     }
+     // With no runtime up there is nothing to prepare the thread for, and on Windows WAMR would keep the
+     // thread's state in a thread-local slot the runtime does not hold: its key is freed, or never was.
+-    if (!whileRuntimeUp(generation, [] { return wasm_runtime_init_thread_env(); }))
+-        return std::unexpected(ExtensionError::RuntimeUnavailable);
++    auto initialized = ThreadEnvInit::RuntimeDown;
++    std::ignore = whileRuntimeUp(generation, [&initialized] {
++        initialized = wasm_runtime_init_thread_env() ? ThreadEnvInit::Ready : ThreadEnvInit::Refused;
++        return true;
++    });
++    switch (initialized)
++    {
++        case ThreadEnvInit::RuntimeDown: return std::unexpected(ExtensionError::RuntimeUnavailable);
++        // All a thread's environment can fail at is allocating it: its record and the semaphore, mutex and
++        // condition WAMR makes for it on Windows (os_thread_env_init); on POSIX nothing fails.
++        case ThreadEnvInit::Refused: return std::unexpected(ExtensionError::OutOfMemory);
++        case ThreadEnvInit::Ready: break;
++    }
+     ++threadEnvDepth;
+     threadEnvGeneration = generation;
+     return ThreadEnv { Hold::Owned, generation };
+ }
+ 
+ ThreadEnv::ThreadEnv(ThreadEnv&& other) noexcept:
+     _hold { std::exchange(other._hold, Hold::Released) },
+     _thread { other._thread },
+     _generation { other._generation }
+ {
+diff --git a/src/vtextension/wasm/wamr/WamrThreadEnv.hpp b/src/vtextension/wasm/wamr/WamrThreadEnv.hpp
+index 35951c4e2..4dbd15ca5 100644
+--- a/src/vtextension/wasm/wamr/WamrThreadEnv.hpp
++++ b/src/vtextension/wasm/wamr/WamrThreadEnv.hpp
+@@ -25,22 +25,22 @@ namespace vtextension::wasm::wamr
+ /// that entered it.
+ ///
+ /// The state belongs to one runtime: when the last holder releases it, the runtime is torn down (on
+ /// Windows that frees the thread-local slot the state lives in), and a later acquireRuntime() brings up a
+ /// new runtime, a new generation. A guard entered for an earlier generation no longer prepares its
+ /// thread; a long-lived thread (a pool worker) ends it and enters a new one. @see runtimeGeneration
+ class ThreadEnv
+ {
+   public:
+     /// Prepares the calling thread.
+-    /// @return The guard; `RuntimeUnavailable` if no runtime is up or the runtime could not set up the
+-    ///         thread.
++    /// @return The guard; `RuntimeUnavailable` if no runtime is up, `OutOfMemory` if the runtime could not
++    ///         allocate the thread's environment.
+     [[nodiscard]] static std::expected<ThreadEnv, ExtensionError> enter();
+ 
+     ThreadEnv(ThreadEnv&& other) noexcept;
+     ThreadEnv(ThreadEnv const&) = delete;
+     ThreadEnv& operator=(ThreadEnv const&) = delete;
+     ThreadEnv& operator=(ThreadEnv&&) = delete;
+ 
+     /// Releases the thread's runtime state if this guard set it up. Must run on the thread that
+     /// entered the guard.
+     ~ThreadEnv();
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+index 9208d4fdc..9db8a3f34 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+@@ -368,75 +368,106 @@ namespace
+     thread_local auto threadPrimedFor = uint64_t { 0 };
+ 
+     /// What a thread is primed with: an engine configured as every runtime's engine of a facade is, as to
+     /// how it traps, and PrimingModule compiled on it.
+     struct Priming
+     {
+         detail::EngineHandle engine;
+         detail::ModuleHandle module;
+     };
+ 
++    /// What an operating system says when memory or address space ran out, as Wasmtime passes it on: the
++    /// texts of ENOMEM on POSIX and of ERROR_NOT_ENOUGH_MEMORY, ERROR_OUTOFMEMORY and ERROR_COMMITMENT_LIMIT
++    /// on Windows, the error numbers Rust's io::Error appends, and Wasmtime's own words.
++    constexpr auto ResourceErrorMarkers = std::to_array<std::string_view>({
++        "Cannot allocate memory",
++        "os error 12)",
++        "Not enough memory resources",
++        "Not enough storage",
++        "paging file is too small",
++        "os error 8)",
++        "os error 14)",
++        "os error 1455)",
++        "out of memory",
++    });
++
++    /// @return What @p error says, as resourceErrorOf() reads it; `RuntimeUnavailable` for no error.
++    [[nodiscard]] ExtensionError extensionErrorOf(wasmtime_error_t const* error)
++    {
++        if (error == nullptr)
++            return ExtensionError::RuntimeUnavailable;
++        auto message = wasm_name_t {};
++        wasmtime_error_message(error, &message);
++        auto const kind = resourceErrorOf(std::string_view { message.data, message.size });
++        wasm_byte_vec_delete(&message);
++        return kind;
++    }
++
+     /// Compiles PrimingModule on an engine configured by @p config as to how it traps.
+-    /// @return The engine and the module; `RuntimeUnavailable` if either cannot be made.
++    /// @return The engine and the module; `OutOfMemory` if compiling it ran out of memory
++    /// (resourceErrorOf()),
++    ///         `RuntimeUnavailable` if either cannot be made otherwise. A null engine is a refused
++    ///         configuration: Wasmtime aborts where it cannot allocate one.
+     [[nodiscard]] std::expected<Priming, ExtensionError> compilePriming(WasmtimeConfig const& config)
+     {
+         // Its own memory: the module has none, and so needs no provision.
+         auto primingConfig = WasmtimeConfig { .trapMode = config.trapMode,
+                                               .wasiEnvironment = config.wasiEnvironment,
+                                               .memory = MemorySharing::Private };
+         auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(
+             primingConfig,
+             RuntimeLimits { .memoryBytes = 0, .stackBytes = PrimingStackBytes, .tableElements = 0 })) };
+         if (!engine)
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         auto* module = static_cast<wasmtime_module_t*>(nullptr);
+         auto const error = detail::ErrorHandle { wasmtime_module_new(
+             engine.get(), PrimingModule.data(), PrimingModule.size(), &module) };
+         if (error || module == nullptr)
+-            return std::unexpected(ExtensionError::RuntimeUnavailable);
++            return std::unexpected(extensionErrorOf(error.get()));
+         primingCompilationCount.fetch_add(1);
+         return Priming { .engine = std::move(engine), .module = detail::ModuleHandle { module } };
+     }
+ 
+     /// Instantiates @p priming's module and calls its function on the calling thread: what the engine does
+     /// the first time a guest runs on a thread, and once in the process.
+-    /// @return Nothing once it returned; `RuntimeUnavailable` if anything failed or trapped.
++    /// @return Nothing once it returned; `OutOfMemory` if instantiating or calling it ran out of memory
++    ///         (resourceErrorOf()); `RuntimeUnavailable` if anything else failed or it trapped.
+     [[nodiscard]] std::expected<void, ExtensionError> runPriming(Priming const& priming)
+     {
+         auto const store = detail::StoreHandle { wasmtime_store_new(priming.engine.get(), nullptr, nullptr) };
+         if (!store)
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         auto* const context = wasmtime_store_context(store.get());
+         // Epoch interruption is on, as on every engine; nothing moves this engine's epoch past one tick.
+         wasmtime_context_set_epoch_deadline(context, 1);
+         auto instance = wasmtime_instance_t {};
+         auto* rawTrap = static_cast<wasm_trap_t*>(nullptr);
+         auto const error = detail::ErrorHandle { wasmtime_instance_new(
+             context, priming.module.get(), nullptr, 0, &instance, &rawTrap) };
+         auto const trap = detail::TrapHandle { rawTrap };
+         if (error || trap)
+-            return std::unexpected(ExtensionError::RuntimeUnavailable);
++            return std::unexpected(extensionErrorOf(error.get()));
+         auto item = wasmtime_extern_t {};
+         if (!wasmtime_instance_export_get(
+                 context, &instance, PrimingExport.data(), PrimingExport.size(), &item))
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         if (item.kind != WASMTIME_EXTERN_FUNC)
+         {
+             wasmtime_extern_delete(&item);
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         }
+         auto* rawCallTrap = static_cast<wasm_trap_t*>(nullptr);
+         auto const callError = detail::ErrorHandle { wasmtime_func_call(
+             context, &item.of.func, nullptr, 0, nullptr, 0, &rawCallTrap) };
+         auto const callTrap = detail::TrapHandle { rawCallTrap };
+         if (callError || callTrap)
+-            return std::unexpected(ExtensionError::RuntimeUnavailable);
++            return std::unexpected(extensionErrorOf(callError.get()));
+         return {};
+     }
+ 
+     /// A Wasmtime engine: a facade over the kind's shared state.
+     class WasmtimeEngine final: public host::IHostedEngine
+     {
+       public:
+         WasmtimeEngine(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
+             _kind { std::move(kind) },
+             _config { std::move(config) },
+@@ -637,20 +668,28 @@ std::shared_ptr<KindState> makeKindState()
+ {
+     return std::make_shared<KindState>();
+ }
+ 
+ std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
+                                                         WasmtimeConfig config)
+ {
+     return std::make_unique<WasmtimeEngine>(std::move(kind), std::move(config));
+ }
+ 
++ExtensionError resourceErrorOf(std::string_view message) noexcept
++{
++    return std::ranges::any_of(ResourceErrorMarkers,
++                               [message](std::string_view marker) { return message.contains(marker); })
++               ? ExtensionError::OutOfMemory
++               : ExtensionError::RuntimeUnavailable;
++}
++
+ } // namespace vtextension::wasm::wasmtime
+ 
+ namespace vtextension::wasm::wasmtime::testing
+ {
+ 
+ uint64_t primingCompilations() noexcept
+ {
+     return primingCompilationCount.load();
+ }
+ 
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
+index d77856de1..4c928e1a6 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
+@@ -1,19 +1,20 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The Wasmtime engine: the WebAssembly runtime interface on Wasmtime, extensions compiled to native code by
+ // Cranelift, one Wasmtime engine per runtime, configured from the one feature table (../EngineFeatures.hpp).
+ // An engine an extension host process drives (host::IHostedEngine), and an in-process backend for tests.
+ #pragma once
+ 
+ #include <cstdint>
+ #include <memory>
++#include <string_view>
+ 
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/wasi/Preview1Shim.hpp>
+ #include <vtextension/wasm/wasi/SystemEnvironment.hpp>
+ 
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ /// How compiled guest code detects an out-of-bounds access or a stack overflow.
+@@ -61,20 +62,26 @@ class KindState;
+ /// @param config How the engine sets up each Wasmtime engine it creates.
+ /// @return The engine. Refused memory growth is not reported (MemoryGrowthReporting::Unreported): the
+ ///         guest's memory.grow returns -1, and whatever the guest does about it fails the call. Its memory is
+ ///         copied to the parent (MemoryMode::Copy) under MemorySharing::Private, and shared with it
+ ///         (MemoryMode::Shared) under MemorySharing::Provided.
+ ///         Each thread it runs guests on is primed by prepareThread(), which runs a built-in module of one
+ ///         empty function there.
+ [[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
+                                                                       WasmtimeConfig config);
+ 
++/// @param message What Wasmtime said of a failure (wasmtime_error_message()).
++/// @return `OutOfMemory` where it says the system ran out of memory or address space, as an allocation or a
++///         mapping the operating system refused (a row of ResourceErrorMarkers in WasmtimeEngine.cpp);
++///         `RuntimeUnavailable` otherwise.
++[[nodiscard]] ExtensionError resourceErrorOf(std::string_view message) noexcept;
++
+ } // namespace vtextension::wasm::wasmtime
+ 
+ namespace vtextension::wasm::wasmtime::testing
+ {
+ 
+ /// Test-only: how many times any engine of this process compiled its built-in priming module.
+ /// @return The count, since the process started.
+ [[nodiscard]] uint64_t primingCompilations() noexcept;
+ 
+ } // namespace vtextension::wasm::wasmtime::testing
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index af71ce5b6..962f8d70e 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -1099,10 +1099,30 @@ TEST_CASE("WasmtimeEngine.privateMemoryIsUnchanged", "[wasmtime]")
+     CHECK(lastMemoryRequest() == requestBefore);
+     CHECK(host::takeProvision().has_value());
+ }
+ 
+ TEST_CASE("Wasmtime.measureRender", "[.measure]")
+ {
+     // Reported, not asserted; vtextension_test's twin measures WAMR the same way.
+     auto const backend = WasmtimeTraits::make();
+     vtextension::wasm::testing::measureBundledRender(*backend, "Wasmtime");
+ }
++
++TEST_CASE("WasmtimeEngine.resourceErrorsAreOutOfMemory", "[wasmtime]")
++{
++    // What Wasmtime passes on from the operating system when a mapping or an allocation is refused reads as
++    // the system being out of memory, which a host refuses for a reason that does not last; anything else
++    // stays the runtime being unavailable.
++    using vtextension::wasm::wasmtime::resourceErrorOf;
++    CHECK(resourceErrorOf("failed to create stack pool mapping: Cannot allocate memory (os error 12)")
++          == ExtensionError::OutOfMemory);
++    CHECK(resourceErrorOf(
++              "failed to allocate memory: Not enough memory resources are available to process this "
++              "command. (os error 8)")
++          == ExtensionError::OutOfMemory);
++    CHECK(resourceErrorOf("mmap failed: The paging file is too small for this operation to complete. "
++                          "(os error 1455)")
++          == ExtensionError::OutOfMemory);
++    CHECK(resourceErrorOf("failed to parse WebAssembly module") == ExtensionError::RuntimeUnavailable);
++    CHECK(resourceErrorOf("Permission denied (os error 13)") == ExtensionError::RuntimeUnavailable);
++    CHECK(resourceErrorOf("") == ExtensionError::RuntimeUnavailable);
++}

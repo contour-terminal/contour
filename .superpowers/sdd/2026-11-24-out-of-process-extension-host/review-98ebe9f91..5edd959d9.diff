@@ -1,0 +1,2549 @@
+# Review package: 98ebe9f91..HEAD
+
+## Commits
+5edd959d9 feat(vtextension): the extension host enters capability mode on FreeBSD
+b7e78b8c9 refactor(vtextension): the extension host names every descriptor it keeps, and what for
+
+## Files changed
+ src/contour-extension-host/testing/HostileHost.cpp |   2 +-
+ src/vtextension/CMakeLists.txt                     |   8 +
+ src/vtextension/wasm/host/CMakeLists.txt           |  10 +-
+ src/vtextension/wasm/host/DescriptorRights.cpp     |  59 +++++++
+ src/vtextension/wasm/host/DescriptorRights.hpp     |  56 ++++++
+ src/vtextension/wasm/host/HostBootstrap.hpp        |   7 +-
+ src/vtextension/wasm/host/HostBootstrap_posix.cpp  |  31 +++-
+ src/vtextension/wasm/host/HostBootstrap_win32.cpp  |   5 +
+ src/vtextension/wasm/host/HostProcess.cpp          |  17 +-
+ src/vtextension/wasm/host/HostProcess.hpp          |   7 +
+ src/vtextension/wasm/host/HostProcess_test.cpp     |  28 ++-
+ src/vtextension/wasm/host/IHostedEngine.hpp        |   7 +
+ src/vtextension/wasm/host/Sandbox.hpp              |  14 ++
+ src/vtextension/wasm/host/Sandbox_freebsd.cpp      | 145 ++++++++++++++++
+ src/vtextension/wasm/host/Sandbox_linux.cpp        |   8 +-
+ src/vtextension/wasm/host/Sandbox_test.cpp         |  42 +++++
+ src/vtextension/wasm/host/linux/SeccompFilter.cpp  |   9 +-
+ src/vtextension/wasm/host/linux/SeccompFilter.hpp  |   7 +-
+ src/vtextension/wasm/remote/CMakeLists.txt         |  10 +-
+ .../wasm/remote/process/ProcessLauncher_test.cpp   |   4 +-
+ .../wasm/remote/process/SandboxProbe_test.cpp      | 190 +++++++++++++++------
+ .../wasm/remote/process/testing/LaunchProbe.cpp    |  12 +-
+ .../wasm/remote/process/testing/SandboxProbe.cpp   | 148 +++++++++++++---
+ .../wasm/remote/process/testing/SandboxProbe.hpp   |  29 ++--
+ src/vtextension/wasm/testing/DecoratedEngine.hpp   |   5 +
+ .../wasm/testing/PreparationHookEngine.hpp         |   6 +
+ src/vtextension/wasm/wamr/WamrBackend.hpp          |   8 +
+ src/vtextension/wasm/wamr/WamrEngine.cpp           |  38 ++++-
+ src/vtextension/wasm/wamr/WamrEngine_test.cpp      |  19 +++
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp   |   3 +
+ 30 files changed, 808 insertions(+), 126 deletions(-)
+
+## Diff
+diff --git a/src/contour-extension-host/testing/HostileHost.cpp b/src/contour-extension-host/testing/HostileHost.cpp
+index 03609060d..c19fec5c6 100644
+--- a/src/contour-extension-host/testing/HostileHost.cpp
++++ b/src/contour-extension-host/testing/HostileHost.cpp
+@@ -97,21 +97,21 @@ constexpr auto Limits = proto::PduLimits {};
+ /// Runs the real host on @p arguments, its engine reaching memory as @p memory says.
+ [[nodiscard]] int serve(std::vector<std::string> const& arguments, HostMemory memory = HostMemory::AsBuilt)
+ {
+     auto views = std::vector<std::string_view> {};
+     for (auto const& argument: arguments)
+         views.emplace_back(argument);
+     // Hostility is measured against a host that confines nothing more than its hardening: a sandbox would
+     // refuse what the hostile modes do to the host itself.
+     auto confinement = vtextension::wasm::host::systemConfinement();
+     confinement.sandbox =
+-        [](vtextension::wasm::host::SandboxDescriptors,
++        [](vtextension::wasm::host::SandboxDescriptors const&,
+            vtextension::wasm::host::GuestCode) -> std::unique_ptr<vtextension::wasm::host::ISandbox> {
+         return std::make_unique<vtextension::wasm::host::NullSandbox>();
+     };
+     return vtextension::wasm::host::runExtensionHost(views, enginesOf(memory), confinement);
+ }
+ 
+ /// Has the crash that follows end the process at once: without a core dump, which a system that collects
+ /// them (systemd-coredump) writes before the process is gone -- long enough for Contour to stop it first, and
+ /// count the crash as a host it stopped rather than one that died on its own. Sanitizer runtimes disable
+ /// core dumps themselves, so only plain builds need this.
+diff --git a/src/vtextension/CMakeLists.txt b/src/vtextension/CMakeLists.txt
+index 00c05af61..77b7f5051 100644
+--- a/src/vtextension/CMakeLists.txt
++++ b/src/vtextension/CMakeLists.txt
+@@ -200,20 +200,28 @@ if(CONTOUR_HAVE_WASMTIME)
+     add_subdirectory(wasm/wasmtime)
+ endif()
+ 
+ # Whether the extension host locks itself down with the Linux sandbox (wasm/host/Sandbox_linux.cpp): Linux, on the
+ # architectures whose system calls its filter numbers, the rows of _CONTOUR_SANDBOXED_PLATFORMS
+ # (../../CMakeLists.txt). Read by both directories below.
+ set(VTEXTENSION_LINUX_SANDBOX OFF)
+ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CONTOUR_SANDBOXED_PLATFORM)
+     set(VTEXTENSION_LINUX_SANDBOX ON)
+ endif()
++# Whether it locks itself down with FreeBSD's (wasm/host/Sandbox_freebsd.cpp): on FreeBSD, on every architecture,
++# as Capsicum names no system call by number. Built, tested and run by the extension host there although FreeBSD is
++# not yet a row of _CONTOUR_SANDBOXED_PLATFORMS: that row is what makes extensions run out of process by default,
++# and it is added once FreeBSD's CI has run the sandbox's tests green.
++set(VTEXTENSION_FREEBSD_SANDBOX OFF)
++if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
++    set(VTEXTENSION_FREEBSD_SANDBOX ON)
++endif()
+ 
+ # The protocol and channels between Contour and its extension host process, and the host's server; no engine,
+ # always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.
+ add_subdirectory(wasm/remote)
+ add_subdirectory(wasm/host)
+ 
+ # The backend a program runs its extensions on, and the one name every program that composes one links: the
+ # GUI and `contour daemon` (../contour/CMakeLists.txt) and bench-headless. vtextension, vthost and the test
+ # executables do not; a test names the backend it runs on. Its target defines
+ # vtextension::wasm::makeDefaultBackend(): out of process, the remote backend over extension host processes
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index 3aa4dc626..5a591d255 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -4,37 +4,43 @@
+ # executable's body, HostBootstrap and Sandbox what that process does to itself before it serves. It links no
+ # engine: whoever composes a host hands it one (IHostedEngine), and its tests live in vtextension_remote_test
+ # (../remote/CMakeLists.txt), which links Wasmtime's.
+ 
+ set(_bootstrap_source HostBootstrap_posix.cpp)
+ if(WIN32)
+     set(_bootstrap_source HostBootstrap_win32.cpp)
+ endif()
+ 
+ # Each system's sandbox (Sandbox.hpp) is a file of its own, and a value of PlatformSandbox; a system that has none
+-# yet runs the host unsandboxed, and its Hello says so. Linux's: where VTEXTENSION_LINUX_SANDBOX (../../CMakeLists.txt).
++# yet runs the host unsandboxed, and its Hello says so. Linux's: where VTEXTENSION_LINUX_SANDBOX; FreeBSD's: where
++# VTEXTENSION_FREEBSD_SANDBOX (both ../../CMakeLists.txt).
+ set(_sandbox_source Sandbox_none.cpp)
+ set(_platform_sandbox 0)
+-if(VTEXTENSION_LINUX_SANDBOX)
++if(VTEXTENSION_FREEBSD_SANDBOX)
++    set(_sandbox_source Sandbox_freebsd.cpp)
++    set(_platform_sandbox 2)
++elseif(VTEXTENSION_LINUX_SANDBOX)
+     set(_sandbox_source
+         Sandbox_linux.cpp
+         linux/Landlock.cpp
+         linux/Landlock.hpp
+         linux/SeccompFilter.cpp
+         linux/SeccompFilter.hpp
+         linux/SystemCallRows.cpp
+         linux/SystemCallRows.hpp
+     )
+     set(_platform_sandbox 1)
+ endif()
+ 
+ add_library(vtextension_host STATIC
++    DescriptorRights.cpp
++    DescriptorRights.hpp
+     ExecutorThread.cpp
+     ExecutorThread.hpp
+     GuestCode.hpp
+     HelperEngine.hpp
+     HostBootstrap.cpp
+     HostBootstrap.hpp
+     ${_bootstrap_source}
+     HostProcess.cpp
+     HostProcess.hpp
+     HostServer.cpp
+diff --git a/src/vtextension/wasm/host/DescriptorRights.cpp b/src/vtextension/wasm/host/DescriptorRights.cpp
+new file mode 100644
+index 000000000..7a2f372bf
+--- /dev/null
++++ b/src/vtextension/wasm/host/DescriptorRights.cpp
+@@ -0,0 +1,59 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/host/DescriptorRights.hpp>
++
++#include <algorithm>
++#include <array>
++#include <cstddef>
++#include <ranges>
++#include <span>
++#include <utility>
++
++namespace vtextension::wasm::host
++{
++
++namespace
++{
++    using enum DescriptorRight;
++
++    // Each role's rights. F_GETFL is everyone's: it reads, and a stream's flags are what C's stdio and WAMR
++    // ask of any descriptor they are handed.
++    constexpr auto ControlRights =
++        std::array { Read, Write, Receive, Send, Event, Shutdown, Fstat, GetStatusFlags };
++    constexpr auto LaneRights = std::array { Read, Write, Receive, Send, Event, Shutdown, GetStatusFlags };
++    constexpr auto PageRights = std::array { MapRead, Fstat, GetStatusFlags };
++    constexpr auto WakeRights = std::array { Read, Event, GetStatusFlags };
++    constexpr auto StandardErrorRights = std::array { Write, Fstat, GetStatusFlags };
++    // WAMR's WASI stats the device and reads its flags as it instantiates a module; a guest writes to it,
++    // seeks it (fd_seek) and reads its flags (fd_fdstat_get), each of which the backend contract asserts.
++    constexpr auto EngineDeviceRights = std::array { Write, Fstat, Seek, GetStatusFlags };
++
++    /// Every role, at its enumerator's index.
++    constexpr auto RoleRightsTable = std::array {
++        DescriptorRoleRights { .role = DescriptorRole::Control, .rights = ControlRights },
++        DescriptorRoleRights { .role = DescriptorRole::Lane, .rights = LaneRights },
++        DescriptorRoleRights { .role = DescriptorRole::Page, .rights = PageRights },
++        DescriptorRoleRights { .role = DescriptorRole::Wake, .rights = WakeRights },
++        DescriptorRoleRights { .role = DescriptorRole::StandardError, .rights = StandardErrorRights },
++        DescriptorRoleRights { .role = DescriptorRole::EngineDevice, .rights = EngineDeviceRights },
++    };
++
++    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, RoleRightsTable.size()),
++                                      [](std::size_t index) {
++                                          return std::to_underlying(RoleRightsTable[index].role) == index;
++                                      }),
++                  "RoleRightsTable lists every DescriptorRole at its own index");
++    static_assert(RoleRightsTable.back().role == DescriptorRole::EngineDevice,
++                  "RoleRightsTable ends at the last DescriptorRole");
++} // namespace
++
++std::span<DescriptorRoleRights const> descriptorRoleRights() noexcept
++{
++    return RoleRightsTable;
++}
++
++std::span<DescriptorRight const> rightsOf(DescriptorRole role) noexcept
++{
++    return RoleRightsTable[std::to_underlying(role)].rights;
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/DescriptorRights.hpp b/src/vtextension/wasm/host/DescriptorRights.hpp
+new file mode 100644
+index 000000000..8c9b49211
+--- /dev/null
++++ b/src/vtextension/wasm/host/DescriptorRights.hpp
+@@ -0,0 +1,56 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// What each descriptor the extension host keeps is used for once it is locked down, and so what a sandbox
++/// that limits descriptor by descriptor (FreeBSD's Capsicum) leaves it. Named in the system's neutral words,
++/// so that the table is the same everywhere and is tested everywhere; each such sandbox maps a right to its
++/// own.
++
++#include <cstdint>
++#include <span>
++
++namespace vtextension::wasm::host
++{
++
++/// What a descriptor the host keeps is for.
++enum class DescriptorRole : uint8_t
++{
++    Control,       ///< The control channel: requests in, replies and granted handles over it.
++    Lane,          ///< A lane channel, which carries the calls of one executor.
++    Page,          ///< The interrupt page, mapped read-only before the lockdown.
++    Wake,          ///< The wake signal's receiving end, which the interrupt listener waits on.
++    StandardError, ///< Standard error, which the host tells why it fails on.
++    EngineDevice,  ///< A device the engine opened before the lockdown: WAMR's null device, its guests' stdio.
++};
++
++/// One thing a descriptor may be used for. There is deliberately none for an ioctl: no descriptor needs one.
++enum class DescriptorRight : uint8_t
++{
++    Read,           ///< read(2) and its kin.
++    Write,          ///< write(2), writev(2) and their kin.
++    Receive,        ///< recv(2), recvmsg(2): taking in what a socket carries, descriptors included.
++    Send,           ///< send(2), sendmsg(2).
++    Event,          ///< Waiting on it: poll(2), kevent(2).
++    Shutdown,       ///< shutdown(2).
++    Fstat,          ///< fstat(2): what C's stdio and WAMR's WASI ask of a stream.
++    MapRead,        ///< Mapping it read-only, mmap(2).
++    Seek,           ///< lseek(2): a guest's fd_seek on its null device.
++    GetStatusFlags, ///< fcntl(2) F_GETFL and no other fcntl that needs a right: a guest's fd_fdstat_get.
++};
++
++/// The rights of one role.
++struct DescriptorRoleRights
++{
++    DescriptorRole role;                     ///< The role.
++    std::span<DescriptorRight const> rights; ///< What a descriptor of it may be used for; never empty.
++};
++
++/// @return Every DescriptorRole's rights, one row each, at its enumerator's index.
++[[nodiscard]] std::span<DescriptorRoleRights const> descriptorRoleRights() noexcept;
++
++/// @param role A role.
++/// @return What a descriptor of @p role may be used for.
++[[nodiscard]] std::span<DescriptorRight const> rightsOf(DescriptorRole role) noexcept;
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostBootstrap.hpp b/src/vtextension/wasm/host/HostBootstrap.hpp
+index 75f5bad15..093a23d12 100644
+--- a/src/vtextension/wasm/host/HostBootstrap.hpp
++++ b/src/vtextension/wasm/host/HostBootstrap.hpp
+@@ -64,33 +64,38 @@ struct HardeningRow
+     std::span<HardeningRow const> steps) noexcept;
+ 
+ /// Hardens this process by this system's steps (hardeningSteps()), before it starts any thread of its own.
+ /// @return Nothing if every step was taken; the first that failed otherwise.
+ [[nodiscard]] std::expected<void, ConfinementFailure> hardenProcess() noexcept;
+ 
+ /// @param code An error code a confinement step returned: errno on POSIX, an HRESULT on Windows.
+ /// @return What the system says of it, user-readable.
+ [[nodiscard]] std::string systemErrorText(int code);
+ 
++/// @return This process's standard error, which the host tells why it fails on: a handle it keeps using once
++///         it is locked down.
++[[nodiscard]] remote::transport::NativeHandle standardErrorHandle() noexcept;
++
+ /// Whether the host caps its own resources.
+ enum class CapPolicy : uint8_t
+ {
+     Skip,  ///< It caps nothing: a sanitizer's shadow memory and its stop-the-world threads exceed any cap.
+     Apply, ///< It caps them.
+ };
+ 
+ /// How this build caps the host: not at all in a sanitizer build.
+ inline constexpr CapPolicy BuildCapPolicy =
+     ThisBuildInstrumentation == BuildInstrumentation::Sanitizers ? CapPolicy::Skip : CapPolicy::Apply;
+ 
+ /// Caps this process's resources, as far as @p policy says: on Linux no further process or thread
+-/// (RLIMIT_NPROC 0) and @p dataBytes of data memory (RLIMIT_DATA); on FreeBSD no further process or thread;
++/// (RLIMIT_NPROC 0) and @p dataBytes of data memory (RLIMIT_DATA); on FreeBSD no further process
++/// (RLIMIT_NPROC 1, as FreeBSD reads 0 as no limit) and @p dataBytes of address space (RLIMIT_AS);
+ /// on macOS and Windows nothing (Windows caps memory in the job Contour started it in). Soft and hard limits
+ /// alike, so that they cannot be raised again; a hard limit it inherited that is stricter still is kept, as
+ /// it caps already.
+ /// @param dataBytes The cap on its data memory; 0 for none.
+ /// @param policy Whether to cap at all.
+ /// @return Nothing once capped, or when @p policy is `Skip`; `ResourceCaps` with the system's error if it
+ ///         refused a cap. Every cap is applied, even past one that was refused.
+ [[nodiscard]] std::expected<void, ConfinementFailure> capResources(uint64_t dataBytes,
+                                                                    CapPolicy policy) noexcept;
+ 
+diff --git a/src/vtextension/wasm/host/HostBootstrap_posix.cpp b/src/vtextension/wasm/host/HostBootstrap_posix.cpp
+index 339e7f746..6eec42b57 100644
+--- a/src/vtextension/wasm/host/HostBootstrap_posix.cpp
++++ b/src/vtextension/wasm/host/HostBootstrap_posix.cpp
+@@ -31,42 +31,63 @@ namespace vtextension::wasm::host
+ 
+ using remote::proto::LockdownStep;
+ 
+ namespace
+ {
+     /// What a resource is capped to.
+     enum class CappedValue : uint8_t
+     {
+         Zero,      ///< None at all.
+         DataBytes, ///< The data bytes asked for; not capped when they are 0.
++        /// One: a process count that refuses every fork where 0 would mean no limit. FreeBSD charges a fork
++        /// to the real user's count of processes, which this one is among, and reads a limit of 0 as none
++        /// (chgproccnt() in kern_resource.c).
++        One,
+     };
+ 
+     /// One resource cap.
+     struct ResourceCap
+     {
+         int resource;      ///< The limit (RLIMIT_…).
+         CappedValue value; ///< What it is capped to.
+     };
+ 
+     /// The caps this system applies.
+ #ifdef __linux__
+     // RLIMIT_DATA counts private writable mappings, not the PROT_NONE reservations an engine makes for its
+     // memories, so it bounds what the host commits.
+     constexpr auto Caps =
+         std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::Zero },
+                      ResourceCap { .resource = RLIMIT_DATA, .value = CappedValue::DataBytes } };
+ #elifdef __FreeBSD__
+-    constexpr auto Caps = std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::Zero } };
++    // FreeBSD has no limit on private writable mappings, so RLIMIT_AS bounds what the host maps at all. Sized
++    // to the data bytes alone, as Contour's limit on the host's memory: WAMR, the engine the host runs there,
++    // copies guest memory and reserves no address space beyond what it uses.
++    constexpr auto Caps =
++        std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::One },
++                     ResourceCap { .resource = RLIMIT_AS, .value = CappedValue::DataBytes } };
+ #else
+     constexpr auto Caps = std::array<ResourceCap, 0> {};
+ #endif
+ 
++    /// @return What @p value caps a resource to, @p dataBytes being the data bytes asked for.
++    [[nodiscard]] constexpr rlim_t cappedTo(CappedValue value, uint64_t dataBytes) noexcept
++    {
++        switch (value)
++        {
++            case CappedValue::Zero: return 0;
++            case CappedValue::DataBytes: return static_cast<rlim_t>(dataBytes);
++            case CappedValue::One: return 1;
++        }
++        return 0;
++    }
++
+     /// @return Nothing if @p result is 0; errno otherwise.
+     [[nodiscard]] std::expected<void, int> errnoOf(int result) noexcept
+     {
+         if (result != 0)
+             return std::unexpected(errno);
+         return {};
+     }
+ 
+     /// Refuses core dumps, soft and hard.
+     [[nodiscard]] std::expected<void, int> refuseCoreDumps() noexcept
+@@ -133,34 +154,38 @@ std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexce
+ std::span<HardeningRow const> hardeningSteps() noexcept
+ {
+     return HardeningSteps;
+ }
+ 
+ std::string systemErrorText(int code)
+ {
+     return std::system_category().message(code);
+ }
+ 
++remote::transport::NativeHandle standardErrorHandle() noexcept
++{
++    return STDERR_FILENO;
++}
++
+ std::expected<void, ConfinementFailure> capResources(uint64_t dataBytes, CapPolicy policy) noexcept
+ {
+     if (policy == CapPolicy::Skip)
+         return {};
+     auto failed = std::optional<int> {};
+     for (auto const& cap: Caps)
+     {
+         if (cap.value == CappedValue::DataBytes && dataBytes == 0)
+             continue;
+         auto inherited = rlimit {};
+         auto const capped = errnoOf(::getrlimit(cap.resource, &inherited)).and_then([&] {
+             // A hard limit cannot be raised: one stricter than the cap, inherited from Contour, caps already.
+-            auto const wanted =
+-                cap.value == CappedValue::Zero ? rlim_t { 0 } : static_cast<rlim_t>(dataBytes);
++            auto const wanted = cappedTo(cap.value, dataBytes);
+             auto const value = std::min(wanted, inherited.rlim_max);
+             auto const limit = rlimit { .rlim_cur = value, .rlim_max = value };
+             return errnoOf(::setrlimit(cap.resource, &limit));
+         });
+         if (!capped && !failed)
+             failed = capped.error();
+     }
+     if (failed)
+         return std::unexpected(ConfinementFailure { .step = LockdownStep::ResourceCaps, .code = *failed });
+     return {};
+diff --git a/src/vtextension/wasm/host/HostBootstrap_win32.cpp b/src/vtextension/wasm/host/HostBootstrap_win32.cpp
+index 6a6033737..c41be31b1 100644
+--- a/src/vtextension/wasm/host/HostBootstrap_win32.cpp
++++ b/src/vtextension/wasm/host/HostBootstrap_win32.cpp
+@@ -46,17 +46,22 @@ std::span<HardeningRow const> hardeningSteps() noexcept
+     return HardeningSteps;
+ }
+ 
+ std::string systemErrorText(int code)
+ {
+     // The system's message names an HRESULT it knows; the value itself names every one.
+     return std::format(
+         "{}, HRESULT 0x{:08X}", std::system_category().message(code), static_cast<uint32_t>(code));
+ }
+ 
++remote::transport::NativeHandle standardErrorHandle() noexcept
++{
++    return GetStdHandle(STD_ERROR_HANDLE);
++}
++
+ std::expected<void, ConfinementFailure> capResources([[maybe_unused]] uint64_t dataBytes,
+                                                      [[maybe_unused]] CapPolicy policy) noexcept
+ {
+     return {};
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostProcess.cpp b/src/vtextension/wasm/host/HostProcess.cpp
+index 9b5c3e50c..32d74e18d 100644
+--- a/src/vtextension/wasm/host/HostProcess.cpp
++++ b/src/vtextension/wasm/host/HostProcess.cpp
+@@ -178,20 +178,34 @@ HostConfinement systemConfinement()
+         .confine =
+             [](uint64_t dataBytes) {
+                 if constexpr (BuildCapPolicy == CapPolicy::Skip)
+                     tellOnStandardError("resource caps are off in this build");
+                 return capResources(dataBytes, BuildCapPolicy);
+             },
+         .tell = &tellOnStandardError,
+     };
+ }
+ 
++SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints, IHostedEngine const& engine)
++{
++    auto held = std::vector<HeldDescriptor> {};
++    for (auto const& lane: endpoints.lanes)
++        held.push_back(HeldDescriptor { .role = DescriptorRole::Lane, .handle = lane.nativeHandle() });
++    held.push_back(
++        HeldDescriptor { .role = DescriptorRole::Page, .handle = endpoints.controlPage.nativeHandle() });
++    held.push_back(HeldDescriptor { .role = DescriptorRole::Wake, .handle = endpoints.wake.nativeHandle() });
++    held.push_back(HeldDescriptor { .role = DescriptorRole::StandardError, .handle = standardErrorHandle() });
++    for (auto const device: engine.heldDevices())
++        held.push_back(HeldDescriptor { .role = DescriptorRole::EngineDevice, .handle = device });
++    return SandboxDescriptors { .control = endpoints.control.nativeHandle(), .held = std::move(held) };
++}
++
+ int runExtensionHost(std::span<std::string_view const> arguments,
+                      EngineFactory const& engines,
+                      HostConfinement const& confinement)
+ {
+     using Confined = std::expected<void, ConfinementFailure>;
+     // Tells of a step that failed, after what it was a step of.
+     auto const tellOf = [&confinement](std::string_view what, Confined const& step) {
+         if (!step)
+             confinement.tell(std::format("{} failed: {}", what, confinementFailureText(step.error())));
+     };
+@@ -206,22 +220,21 @@ int runExtensionHost(std::span<std::string_view const> arguments,
+     auto const hardened = confinement.beforeThreads();
+     tellOf("hardening", hardened);
+     auto endpoints = confinement.adoptEndpoints(*parsed);
+     if (!endpoints)
+         return endWith(endpoints.error());
+     // Declared before the host, so that every object the host made of it goes first.
+     auto const engine = engines();
+     if (!engine)
+         return endWith(HostProcessExit::EngineUnavailable);
+     // Still before any thread: what the sandbox restricts now, every thread inherits.
+-    auto const sandbox = confinement.sandbox(
+-        SandboxDescriptors { .control = endpoints->control.nativeHandle() }, engine->guestCode());
++    auto const sandbox = confinement.sandbox(sandboxDescriptorsOf(*endpoints, *engine), engine->guestCode());
+     auto const restricted = sandbox->restrictBeforeThreads();
+     tellOf("sandbox", restricted);
+ 
+     auto config = HostServerConfig {};
+     config.startExecutor = confinement.startThread;
+     // Once every thread runs and was prepared: caps first, which the locked-down host could not set.
+     config.confine = [&confinement, &sandbox, &tellOf, hardened, restricted, dataBytes = parsed->dataBytes]()
+         -> std::expected<remote::proto::LockdownState, ConfinementFailure> {
+         auto const capped = confinement.confine(dataBytes);
+         tellOf("resource caps", capped);
+diff --git a/src/vtextension/wasm/host/HostProcess.hpp b/src/vtextension/wasm/host/HostProcess.hpp
+index 8d76a1c3d..bbdd58e5a 100644
+--- a/src/vtextension/wasm/host/HostProcess.hpp
++++ b/src/vtextension/wasm/host/HostProcess.hpp
+@@ -67,20 +67,27 @@ struct HostEndpoints
+     remote::transport::ControlPage controlPage;    ///< The interrupt page, read-only.
+     remote::transport::WakeReceiver wake;          ///< The wake signal's receiving end.
+ };
+ 
+ /// Takes ownership of every handle @p arguments name.
+ /// @param arguments The parsed command line.
+ /// @return The endpoints; `HandlesUnusable` if any handle cannot be adopted.
+ [[nodiscard]] std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(
+     remote::transport::HelperArguments const& arguments);
+ 
++/// @param endpoints What a host serves over.
++/// @param engine What it runs modules on.
++/// @return Every handle the host keeps using once it is locked down, each with its role: its endpoints, its
++///         standard error and the devices its engine holds.
++[[nodiscard]] SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints,
++                                                      IHostedEngine const& engine);
++
+ /// A host's whole serving side over its endpoints: the server, and the listener that hands it the interrupts
+ /// raised on the page.
+ class HostProcess
+ {
+   public:
+     /// @param engine What runtimes are created on; must outlive the host.
+     /// @param endpoints What it serves over.
+     /// @param config How its server runs; whether a slot is raised is the page's to say.
+     HostProcess(IHostedEngine& engine, HostEndpoints endpoints, HostServerConfig config);
+ 
+diff --git a/src/vtextension/wasm/host/HostProcess_test.cpp b/src/vtextension/wasm/host/HostProcess_test.cpp
+index 4709ee5fb..643c885fe 100644
+--- a/src/vtextension/wasm/host/HostProcess_test.cpp
++++ b/src/vtextension/wasm/host/HostProcess_test.cpp
+@@ -57,38 +57,41 @@
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::testing::toModule;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::host::BootstrapError;
+ using vtextension::wasm::host::CapPolicy;
+ using vtextension::wasm::host::capResources;
+ using vtextension::wasm::host::ConfinementFailure;
+ using vtextension::wasm::host::confinementFailureText;
++using vtextension::wasm::host::DescriptorRole;
+ using vtextension::wasm::host::EngineFactory;
+ using vtextension::wasm::host::ExecutorStackBytes;
+ using vtextension::wasm::host::ExecutorThread;
+ using vtextension::wasm::host::exitCodeOf;
+ using vtextension::wasm::host::GuestCode;
+ using vtextension::wasm::host::HardeningRow;
+ using vtextension::wasm::host::hardeningSteps;
+ using vtextension::wasm::host::hardenProcess;
++using vtextension::wasm::host::HeldDescriptor;
+ using vtextension::wasm::host::HostConfinement;
+ using vtextension::wasm::host::HostProcessExit;
+ using vtextension::wasm::host::hostProcessExitOf;
+ using vtextension::wasm::host::hostProcessExits;
+ using vtextension::wasm::host::IHostedEngine;
+ using vtextension::wasm::host::ISandbox;
+ using vtextension::wasm::host::NullSandbox;
+ using vtextension::wasm::host::runExtensionHost;
+ using vtextension::wasm::host::SandboxDescriptors;
+ using vtextension::wasm::host::ServerExit;
++using vtextension::wasm::host::standardErrorHandle;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ControlPage;
+ using vtextension::wasm::remote::transport::formatHelperArguments;
+ using vtextension::wasm::remote::transport::HelperArguments;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+ using vtextension::wasm::remote::transport::makeWakePair;
+ using vtextension::wasm::remote::transport::NativeHandle;
+ using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::remote::transport::StreamError;
+@@ -148,20 +151,23 @@ struct Confined
+     std::atomic<std::size_t> threadsWhenHardened { 0 };
+     std::atomic<std::size_t> threadsWhenConfined { 0 };
+     /// What beforeThreads returns.
+     std::expected<void, ConfinementFailure> hardening {};
+     /// What the sandbox's steps return, and what it states once both were taken.
+     std::expected<void, ConfinementFailure> restriction {};
+     std::expected<void, ConfinementFailure> lockdown {};
+     proto::LockdownState sandboxState = proto::LockdownState::Unsandboxed;
+     /// The control handle the sandbox was made for.
+     std::atomic<NativeHandle> sandboxedControl {};
++    /// The other handles the sandbox was made for, each with its role.
++    std::mutex sandboxedLock;
++    std::vector<HeldDescriptor> sandboxedHeld;
+     /// The code the sandbox was made for: its engine's.
+     std::atomic<GuestCode> sandboxedCode { GuestCode::Interpreted };
+     /// How many threads the host started, and how many it had when the sandbox restricted it.
+     std::atomic<int> threadsStarted { 0 };
+     std::atomic<int> threadsWhenRestricted { -1 };
+     /// What the host told, line by line.
+     std::mutex toldLock;
+     std::vector<std::string> told;
+     /// What the host did, step by step, in order: bind, harden, engine, restrict, listener, executor,
+     /// prepare, caps, lockDown.
+@@ -229,22 +235,27 @@ class RecordingSandbox final: public ISandbox
+                 confined->hardenedAt.store(confined->steps.fetch_add(1));
+                 confined->hardenings.fetch_add(1);
+                 confined->record("harden");
+                 return confined->hardening;
+             },
+         .adoptEndpoints =
+             [confined](HelperArguments const& arguments) {
+                 confined->record("adopt");
+                 return vtextension::wasm::host::adoptEndpoints(arguments);
+             },
+-        .sandbox = [confined](SandboxDescriptors descriptors, GuestCode code) -> std::unique_ptr<ISandbox> {
++        .sandbox = [confined](SandboxDescriptors const& descriptors,
++                              GuestCode code) -> std::unique_ptr<ISandbox> {
+             confined->sandboxedControl.store(descriptors.control);
++            {
++                auto const lock = std::scoped_lock { confined->sandboxedLock };
++                confined->sandboxedHeld = descriptors.held;
++            }
+             confined->sandboxedCode.store(code);
+             return std::make_unique<RecordingSandbox>(confined);
+         },
+         .startThread = [confined](std::size_t stackBytes, std::function<void()> body)
+             -> std::expected<ExecutorThread, std::error_code> {
+             confined->record(stackBytes == ExecutorStackBytes ? "executor" : "listener");
+             confined->threadsStarted.fetch_add(1);
+             return ExecutorThread::start(stackBytes, std::move(body));
+         },
+         .confine =
+@@ -552,21 +563,34 @@ namespace
+     auto task = std::packaged_task<int()> { [&] {
+         return runHost(arguments, recordingEngines(confined), confinement);
+     } };
+     auto exitCode = task.get_future();
+     auto host = std::jthread { std::move(task) };
+ 
+     auto const hello = parent.control.receive();
+     confined->record("hello");
+     // The sandbox, if the test's, was made for the control end the host adopted: the one it was handed.
+     if (auto const sandboxed = confined->sandboxedControl.load(); sandboxed != NativeHandle {})
++    {
+         CHECK(sandboxed == parent.arguments.control);
++        // ... and for every other handle it keeps, each with its role: the engine, Wasmtime's, holds none.
++        auto expected = std::vector<HeldDescriptor> {};
++        for (auto const lane: parent.arguments.lanes)
++            expected.push_back(HeldDescriptor { .role = DescriptorRole::Lane, .handle = lane });
++        expected.push_back(
++            HeldDescriptor { .role = DescriptorRole::Page, .handle = parent.arguments.controlPage });
++        expected.push_back(HeldDescriptor { .role = DescriptorRole::Wake, .handle = parent.arguments.wake });
++        expected.push_back(
++            HeldDescriptor { .role = DescriptorRole::StandardError, .handle = standardErrorHandle() });
++        auto const lock = std::scoped_lock { confined->sandboxedLock };
++        CHECK(confined->sandboxedHeld == expected);
++    }
+     {
+         auto const closed = std::move(parent.control);
+     }
+     REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
+     CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+     REQUIRE(hello.has_value());
+     REQUIRE(std::holds_alternative<proto::Hello>(*hello));
+     return std::get<proto::Hello>(*hello);
+ }
+ 
+@@ -693,21 +717,21 @@ TEST_CASE("HostProcess.hardeningFailureIsStatedAsItsStep", "[vtextension][host]"
+         == std::vector {
+             toldOf("hardening", failure),
+             toldOf("sandbox", ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 2 }) });
+ }
+ 
+ TEST_CASE("HostProcess.nullSandboxSaysUnsandboxed", "[vtextension][host]")
+ {
+     // What every system does until it has a sandbox of its own: confines nothing, and says so.
+     auto confined = std::make_shared<Confined>();
+     auto confinement = testConfinement(confined);
+-    confinement.sandbox = [](SandboxDescriptors, GuestCode) -> std::unique_ptr<ISandbox> {
++    confinement.sandbox = [](SandboxDescriptors const&, GuestCode) -> std::unique_ptr<ISandbox> {
+         return std::make_unique<NullSandbox>();
+     };
+     CHECK(helloOf(confined, confinement) == helloSaying(proto::LockdownState::Unsandboxed));
+ }
+ 
+ TEST_CASE("HostProcess.sandboxThatLocksDownSaysSo", "[vtextension][host]")
+ {
+     auto confined = std::make_shared<Confined>();
+     confined->sandboxState = proto::LockdownState::LockedDown;
+     CHECK(helloOf(confined) == helloSaying(proto::LockdownState::LockedDown));
+diff --git a/src/vtextension/wasm/host/IHostedEngine.hpp b/src/vtextension/wasm/host/IHostedEngine.hpp
+index c7d6a520b..32e47161f 100644
+--- a/src/vtextension/wasm/host/IHostedEngine.hpp
++++ b/src/vtextension/wasm/host/IHostedEngine.hpp
+@@ -2,25 +2,27 @@
+ #pragma once
+ 
+ /// @file
+ /// What the extension host process runs modules on: a WebAssembly backend, and how it shares an instance's
+ /// memory with Contour.
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <functional>
+ #include <memory>
++#include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/GuestCode.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// A backend a host process drives. The helper's own interface: the parent never sees one.
+ class IHostedEngine: public IWasmBackend
+ {
+   public:
+     /// @return How the engine's instances share their linear memory with the parent: what the host states in
+     ///         its Hello, and so how the parent reaches that memory.
+@@ -28,20 +30,25 @@ class IHostedEngine: public IWasmBackend
+ 
+     /// @return Under MemoryMode::Shared, how many inaccessible bytes must follow each instance's memory
+     ///         object where the host maps it: the guard the engine's compiled code relies on
+     ///         (MemoryProvision). 0 for an engine that copies memory.
+     [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
+ 
+     /// @return How the engine runs a module's code: what the host's sandbox lets it do with executable
+     ///         memory once it is locked down.
+     [[nodiscard]] virtual GuestCode guestCode() const noexcept = 0;
+ 
++    /// @return The devices the engine opened before the host locked itself down and keeps using after it:
++    ///         what the host's sandbox leaves an engine's device (DescriptorRole::EngineDevice). Empty for an
++    ///         engine that keeps none.
++    [[nodiscard]] virtual std::vector<remote::transport::NativeHandle> heldDevices() const = 0;
++
+     /// Prepares the calling thread to run guests, before the host locks itself down: does once what running
+     /// a guest on it would do the first time -- installing the engine's signal handlers, the thread's
+     /// alternate signal stack, its thread environment -- so that nothing a guest does later needs what the
+     /// locked-down host may no longer do. Called on every thread that runs guests, each once; idempotent per
+     /// thread.
+     /// @return Nothing once the thread is prepared; why not otherwise, which ends the host.
+     [[nodiscard]] virtual std::expected<void, ExtensionError> prepareThread() = 0;
+ };
+ 
+ /// Creates the engine one host runs on; null if none can be.
+diff --git a/src/vtextension/wasm/host/Sandbox.hpp b/src/vtextension/wasm/host/Sandbox.hpp
+index 0f0b4ad9c..414163d8b 100644
+--- a/src/vtextension/wasm/host/Sandbox.hpp
++++ b/src/vtextension/wasm/host/Sandbox.hpp
+@@ -8,21 +8,23 @@
+ /// What is set per thread and inherited by the threads started after it (Linux no_new_privs and Landlock,
+ /// FreeBSD PROC_NO_NEW_PRIVS) is the first step's. What would forbid what preparing a thread still does, or
+ /// must reach threads that run already (a system call filter synchronized across threads, capability mode, a
+ /// sandbox profile), is the second's. Each system's sandbox is made by makeSystemSandbox(); a system without
+ /// one runs the host unsandboxed (NullSandbox), and says so in its Hello.
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <string>
++#include <vector>
+ 
++#include <vtextension/wasm/host/DescriptorRights.hpp>
+ #include <vtextension/wasm/host/GuestCode.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ #ifndef CONTOUR_PLATFORM_SANDBOX
+     #error "CONTOUR_PLATFORM_SANDBOX is set by linking vtextension_host."
+ #endif
+ 
+ namespace vtextension::wasm::host
+ {
+@@ -49,24 +51,36 @@ struct ConfinementFailure
+     int code;
+ 
+     bool operator==(ConfinementFailure const&) const = default;
+ };
+ 
+ /// @param failure A step that failed.
+ /// @return What failed and why, user-readable: the step's text (lockdownSteps()), then the system's word on
+ ///         the error.
+ [[nodiscard]] std::string confinementFailureText(ConfinementFailure const& failure);
+ 
++/// A handle the host keeps using once it is locked down, beside its control channel, and what for.
++struct HeldDescriptor
++{
++    DescriptorRole role;                    ///< What it is used for: what a sandbox may leave it.
++    remote::transport::NativeHandle handle; ///< The handle.
++
++    bool operator==(HeldDescriptor const&) const = default;
++};
++
+ /// What a sandbox confines the host to: the handles it keeps using once it is locked down.
+ struct SandboxDescriptors
+ {
+     remote::transport::NativeHandle control; ///< The control channel's helper end, adopted by the host.
++    /// Every other handle it keeps using, each with its role: what a sandbox that limits handle by handle
++    /// (FreeBSD's) limits. A handle the host holds and that is not here keeps every right it has.
++    std::vector<HeldDescriptor> held = {};
+ };
+ 
+ /// The host's sandbox. Each step is taken once, in order; a step that failed leaves the other to be taken
+ /// all the same, so that a host is as confined as the system lets it be.
+ class ISandbox
+ {
+   public:
+     ISandbox() = default;
+     ISandbox(ISandbox const&) = delete;
+     ISandbox(ISandbox&&) = delete;
+diff --git a/src/vtextension/wasm/host/Sandbox_freebsd.cpp b/src/vtextension/wasm/host/Sandbox_freebsd.cpp
+new file mode 100644
+index 000000000..4263bceb5
+--- /dev/null
++++ b/src/vtextension/wasm/host/Sandbox_freebsd.cpp
+@@ -0,0 +1,145 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The extension host's sandbox on FreeBSD. Before any thread: PROC_NO_NEW_PRIVS, where the system has it
++// (FreeBSD 14 and later). Once every thread was started and prepared: each descriptor the host keeps is
++// limited to what its role uses it for (DescriptorRights.hpp), and then the process enters capability mode,
++// which every thread takes on at its next system call: no file system, no network address, no other process.
++//
++// Capsicum cannot keep a socket that may send from sending descriptors over it (SCM_RIGHTS); what the host
++// attaches, Contour's end discards.
++#include <sys/capsicum.h>
++#include <sys/procctl.h>
++
++#include <algorithm>
++#include <array>
++#include <cerrno>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <memory>
++#include <optional>
++#include <ranges>
++#include <utility>
++
++#include <unistd.h>
++
++#include <vtextension/wasm/host/DescriptorRights.hpp>
++#include <vtextension/wasm/host/Sandbox.hpp>
++
++namespace vtextension::wasm::host
++{
++
++namespace
++{
++    /// A right in Capsicum's words.
++    struct CapabilityRight
++    {
++        DescriptorRight right; ///< The right.
++        uint64_t capability;   ///< The CAP_… right it is (rights(4)).
++    };
++
++    /// Every DescriptorRight, at its enumerator's index. GetStatusFlags is CAP_FCNTL, narrowed to F_GETFL by
++    /// cap_fcntls_limit() (CommandsFor).
++    constexpr auto CapabilityRights = std::array {
++        CapabilityRight { .right = DescriptorRight::Read, .capability = CAP_READ },
++        CapabilityRight { .right = DescriptorRight::Write, .capability = CAP_WRITE },
++        CapabilityRight { .right = DescriptorRight::Receive, .capability = CAP_RECV },
++        CapabilityRight { .right = DescriptorRight::Send, .capability = CAP_SEND },
++        CapabilityRight { .right = DescriptorRight::Event, .capability = CAP_EVENT },
++        CapabilityRight { .right = DescriptorRight::Shutdown, .capability = CAP_SHUTDOWN },
++        CapabilityRight { .right = DescriptorRight::Fstat, .capability = CAP_FSTAT },
++        CapabilityRight { .right = DescriptorRight::MapRead, .capability = CAP_MMAP_R },
++        CapabilityRight { .right = DescriptorRight::Seek, .capability = CAP_SEEK },
++        CapabilityRight { .right = DescriptorRight::GetStatusFlags, .capability = CAP_FCNTL },
++    };
++
++    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, CapabilityRights.size()),
++                                      [](std::size_t index) {
++                                          return std::to_underlying(CapabilityRights[index].right) == index;
++                                      }),
++                  "CapabilityRights lists every DescriptorRight at its own index");
++    static_assert(CapabilityRights.back().right == DescriptorRight::GetStatusFlags,
++                  "CapabilityRights ends at the last DescriptorRight");
++
++    /// The fcntl(2) commands that need CAP_FCNTL a descriptor with GetStatusFlags may still issue.
++    constexpr auto StatusFlagCommands = uint32_t { CAP_FCNTL_GETFL };
++
++    /// @return Nothing if @p result is 0; @p step with errno otherwise.
++    [[nodiscard]] std::expected<void, ConfinementFailure> stepOf(int result, remote::proto::LockdownStep step)
++    {
++        if (result != 0)
++            return std::unexpected(ConfinementFailure { .step = step, .code = errno });
++        return {};
++    }
++
++    /// Limits @p descriptor to what its role uses it for: its rights, and of the fcntl commands only F_GETFL.
++    /// No ioctl is left, as no role has CAP_IOCTL.
++    [[nodiscard]] std::expected<void, ConfinementFailure> limit(HeldDescriptor descriptor)
++    {
++        auto const rights = rightsOf(descriptor.role);
++        auto capabilities = cap_rights_t {};
++        cap_rights_init(&capabilities);
++        for (auto const right: rights)
++            cap_rights_set(&capabilities, CapabilityRights[std::to_underlying(right)].capability);
++        auto const limited = stepOf(::cap_rights_limit(descriptor.handle, &capabilities),
++                                    remote::proto::LockdownStep::DescriptorRights);
++        if (!limited || std::ranges::find(rights, DescriptorRight::GetStatusFlags) == rights.end())
++            return limited;
++        return stepOf(::cap_fcntls_limit(descriptor.handle, StatusFlagCommands),
++                      remote::proto::LockdownStep::DescriptorRights);
++    }
++
++    class FreeBsdSandbox final: public ISandbox
++    {
++      public:
++        explicit FreeBsdSandbox(SandboxDescriptors descriptors): _descriptors { std::move(descriptors) } {}
++
++        [[nodiscard]] std::expected<void, ConfinementFailure> restrictBeforeThreads() override
++        {
++#ifdef PROC_NO_NEW_PRIVS_CTL
++            // Per process, and kept across fork: set once, it reaches every thread.
++            auto enable = PROC_NO_NEW_PRIVS_ENABLE;
++            return stepOf(::procctl(P_PID, 0, PROC_NO_NEW_PRIVS_CTL, &enable),
++                          remote::proto::LockdownStep::NoNewPrivileges);
++#else
++            // Older than FreeBSD 14: capability mode refuses execve(2) all the same.
++            return {};
++#endif
++        }
++
++        [[nodiscard]] std::expected<void, ConfinementFailure> lockDown() override
++        {
++            // Every descriptor is limited, and capability mode entered, even past a step that failed; the
++            // first that failed is the one stated. Limiting comes first: cap_rights_limit() works in
++            // capability mode too, but a descriptor left unlimited would keep every right it was opened with.
++            auto first = std::optional<ConfinementFailure> {};
++            auto const note = [&first](std::expected<void, ConfinementFailure> const& step) {
++                if (!step && !first)
++                    first = step.error();
++            };
++            note(limit(HeldDescriptor { .role = DescriptorRole::Control, .handle = _descriptors.control }));
++            for (auto const& descriptor: _descriptors.held)
++                note(limit(descriptor));
++            note(stepOf(::cap_enter(), remote::proto::LockdownStep::Capabilities));
++            if (first)
++                return std::unexpected(*first);
++            return {};
++        }
++
++        [[nodiscard]] remote::proto::LockdownState lockdownState() const noexcept override
++        {
++            return remote::proto::LockdownState::LockedDown;
++        }
++
++      private:
++        SandboxDescriptors _descriptors;
++    };
++} // namespace
++
++std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, [[maybe_unused]] GuestCode code)
++{
++    // Capability mode leaves memory protection alone, so how the engine runs code changes nothing here.
++    return std::make_unique<FreeBsdSandbox>(std::move(descriptors));
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/Sandbox_linux.cpp b/src/vtextension/wasm/host/Sandbox_linux.cpp
+index 23212ef35..3e11cfc30 100644
+--- a/src/vtextension/wasm/host/Sandbox_linux.cpp
++++ b/src/vtextension/wasm/host/Sandbox_linux.cpp
+@@ -97,21 +97,24 @@ namespace
+         "the file system restriction is unavailable on this system; system calls are restricted"
+     };
+ 
+     class LinuxSandbox final: public ISandbox
+     {
+       public:
+         LinuxSandbox(SandboxDescriptors descriptors,
+                      GuestCode code,
+                      LandlockSystem landlock,
+                      std::function<void(std::string_view)> tell):
+-            _descriptors { descriptors }, _code { code }, _landlock { landlock }, _tell { std::move(tell) }
++            _descriptors { std::move(descriptors) },
++            _code { code },
++            _landlock { landlock },
++            _tell { std::move(tell) }
+         {
+         }
+ 
+         [[nodiscard]] std::expected<void, ConfinementFailure> restrictBeforeThreads() override
+         {
+             // Every step runs; the first that failed is the one stated.
+             auto first = std::optional<ConfinementFailure> {};
+             if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
+                 first = ConfinementFailure { .step = remote::proto::LockdownStep::NoNewPrivileges,
+                                              .code = errno };
+@@ -148,14 +151,15 @@ namespace
+       private:
+         SandboxDescriptors _descriptors;
+         GuestCode _code;
+         LandlockSystem _landlock;
+         std::function<void(std::string_view)> _tell;
+     };
+ } // namespace
+ 
+ std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, GuestCode code)
+ {
+-    return std::make_unique<LinuxSandbox>(descriptors, code, systemLandlock(), &tellOnStandardError);
++    return std::make_unique<LinuxSandbox>(
++        std::move(descriptors), code, systemLandlock(), &tellOnStandardError);
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/Sandbox_test.cpp b/src/vtextension/wasm/host/Sandbox_test.cpp
+index ceba81742..14c21b723 100644
+--- a/src/vtextension/wasm/host/Sandbox_test.cpp
++++ b/src/vtextension/wasm/host/Sandbox_test.cpp
+@@ -1,31 +1,41 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The sandbox seam: a system without a sandbox runs the host unsandboxed, and a step that failed is phrased
+ // from the one table both ends share.
+ #include <catch2/catch_message.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <algorithm>
++#include <cstddef>
+ #include <memory>
++#include <ranges>
++#include <set>
+ #include <string>
++#include <utility>
+ 
++#include <vtextension/wasm/host/DescriptorRights.hpp>
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ #include <vtextension/wasm/host/Sandbox.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ using vtextension::wasm::host::ConfinementFailure;
+ using vtextension::wasm::host::confinementFailureText;
++using vtextension::wasm::host::DescriptorRight;
++using vtextension::wasm::host::DescriptorRole;
++using vtextension::wasm::host::descriptorRoleRights;
+ using vtextension::wasm::host::GuestCode;
+ using vtextension::wasm::host::makeSystemSandbox;
+ using vtextension::wasm::host::NullSandbox;
+ using vtextension::wasm::host::PlatformSandbox;
++using vtextension::wasm::host::rightsOf;
+ using vtextension::wasm::host::SandboxDescriptors;
+ using vtextension::wasm::host::systemErrorText;
+ using vtextension::wasm::host::ThisPlatformSandbox;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ 
+ TEST_CASE("Sandbox.nullSandboxTakesBothStepsUnsandboxed", "[vtextension][host]")
+ {
+     auto sandbox = NullSandbox {};
+     CHECK(sandbox.restrictBeforeThreads().has_value());
+@@ -50,10 +60,42 @@ TEST_CASE("Sandbox.failureSaysTheStepAndWhatTheSystemSaid", "[vtextension][host]
+ {
+     // The error code is read, not printed as a bare number: the line carries the system's word on it.
+     auto const failure = ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 1 };
+     auto const text = confinementFailureText(failure);
+     INFO(text);
+     CHECK(text
+           == std::string { proto::lockdownStepText(proto::LockdownStep::SystemCalls) } + ": "
+                  + systemErrorText(1));
+     CHECK_FALSE(systemErrorText(1).empty());
+ }
++
++TEST_CASE("Sandbox.rightsTableCoversEveryRole", "[vtextension][host]")
++{
++    // One row per role, at its index, up to the last; each names what its role is used for, once each.
++    auto const rows = descriptorRoleRights();
++    REQUIRE(rows.size() == std::to_underlying(DescriptorRole::EngineDevice) + std::size_t { 1 });
++    for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
++    {
++        auto const& row = rows[index];
++        INFO("role " << index);
++        auto const roleIndex = std::size_t { std::to_underlying(row.role) };
++        CHECK(roleIndex == index);
++        CHECK_FALSE(row.rights.empty());
++        CHECK(std::set<DescriptorRight>(row.rights.begin(), row.rights.end()).size() == row.rights.size());
++        CHECK(std::ranges::equal(rightsOf(row.role), row.rights));
++    }
++
++    // What the host does with each after the lockdown: it talks over its channels and waits on its wake end,
++    // and never writes to the page nor reads its standard error. The engine's device takes what a guest's
++    // stdio does: writes, seeks, and its flags.
++    auto const has = [](DescriptorRole role, DescriptorRight right) {
++        return std::ranges::find(rightsOf(role), right) != rightsOf(role).end();
++    };
++    for (auto const role: { DescriptorRole::Control, DescriptorRole::Lane })
++        for (auto const right: { DescriptorRight::Receive, DescriptorRight::Send, DescriptorRight::Event })
++            CHECK(has(role, right));
++    CHECK(has(DescriptorRole::Wake, DescriptorRight::Event));
++    CHECK_FALSE(has(DescriptorRole::Page, DescriptorRight::Write));
++    CHECK_FALSE(has(DescriptorRole::StandardError, DescriptorRight::Read));
++    for (auto const right: { DescriptorRight::Write, DescriptorRight::Seek, DescriptorRight::GetStatusFlags })
++        CHECK(has(DescriptorRole::EngineDevice, right));
++}
+diff --git a/src/vtextension/wasm/host/linux/SeccompFilter.cpp b/src/vtextension/wasm/host/linux/SeccompFilter.cpp
+index f3ffa7850..fdbd7ba47 100644
+--- a/src/vtextension/wasm/host/linux/SeccompFilter.cpp
++++ b/src/vtextension/wasm/host/linux/SeccompFilter.cpp
+@@ -90,21 +90,21 @@ namespace
+ 
+     /// The branches of a conditional jump.
+     enum class Branch : uint8_t
+     {
+         WhenFalse,
+         WhenTrue,
+     };
+ 
+     /// @return @p check as a comparison, the descriptors and process filled in.
+     [[nodiscard]] Comparison comparisonOf(ArgumentCheck const& check,
+-                                          SandboxDescriptors descriptors,
++                                          SandboxDescriptors const& descriptors,
+                                           int ownProcess) noexcept
+     {
+         auto const fixed = [&](uint64_t value) {
+             return Comparison {
+                 .index = check.index, .mask = check.mask, .value = value, .sense = Sense::Equal
+             };
+         };
+         switch (check.test)
+         {
+             case ArgumentTest::Equals: return fixed(check.value & check.mask);
+@@ -200,28 +200,31 @@ uint32_t seccompReturnOf(SystemCallAction action, int error) noexcept
+     {
+         case SystemCallAction::Kill: return SECCOMP_RET_KILL_PROCESS;
+         case SystemCallAction::Refuse:
+             return SECCOMP_RET_ERRNO | (static_cast<uint32_t>(error) & SECCOMP_RET_DATA);
+         case SystemCallAction::Allow: return SECCOMP_RET_ALLOW;
+     }
+     return SECCOMP_RET_KILL_PROCESS;
+ }
+ 
+ std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
+-    std::span<SystemCallRow const> rows, SandboxDescriptors descriptors, int ownProcess, AuditArch arch)
++    std::span<SystemCallRow const> rows,
++    SandboxDescriptors const& descriptors,
++    int ownProcess,
++    AuditArch arch)
+ {
+     return assembleFilter(rows, descriptors, ownProcess, arch, SystemCallAction::Kill);
+ }
+ 
+ std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
+     std::span<SystemCallRow const> rows,
+-    SandboxDescriptors descriptors,
++    SandboxDescriptors const& descriptors,
+     int ownProcess,
+     AuditArch arch,
+     SystemCallAction unlisted)
+ {
+     auto program = std::vector<sock_filter> {
+         statement(LoadWord, ArchOffset),
+         jump(JumpIfEqual, std::to_underlying(arch), 1, 0),
+         statement(Return, SECCOMP_RET_KILL_PROCESS),
+         statement(LoadWord, NumberOffset),
+     };
+diff --git a/src/vtextension/wasm/host/linux/SeccompFilter.hpp b/src/vtextension/wasm/host/linux/SeccompFilter.hpp
+index 983bf5bca..e804b815c 100644
+--- a/src/vtextension/wasm/host/linux/SeccompFilter.hpp
++++ b/src/vtextension/wasm/host/linux/SeccompFilter.hpp
+@@ -29,35 +29,38 @@ namespace vtextension::wasm::host
+ [[nodiscard]] uint32_t seccompReturnOf(SystemCallAction action, int error) noexcept;
+ 
+ /// Assembles @p rows into a program that kills the process for any call they do not name.
+ /// @param rows What becomes of each call named, each number at most once.
+ /// @param descriptors The descriptors `EqualsControl` compares with.
+ /// @param ownProcess The process id `EqualsOwnProcess` compares with.
+ /// @param arch The architecture @p rows are numbered for, and the only one the program lets through.
+ /// @return The program; `SystemCalls` with `E2BIG` if it exceeds what the kernel runs or a jump reaches,
+ ///         with `EINVAL` if a check names no argument or a `Refuse` no errno.
+ [[nodiscard]] std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
+-    std::span<SystemCallRow const> rows, SandboxDescriptors descriptors, int ownProcess, AuditArch arch);
++    std::span<SystemCallRow const> rows,
++    SandboxDescriptors const& descriptors,
++    int ownProcess,
++    AuditArch arch);
+ 
+ /// assembleFilter(), with the action of a call @p rows do not name given: what an outer sandbox's filter,
+ /// which lets through all it does not refuse, is made of. A call whose row's argument checks fail takes
+ /// @p unlisted as well, as the row does not apply to it: a row refusing one value of an argument lets every
+ /// other value through an allow-by-default filter, rather than killing it.
+ /// @param rows What becomes of each call named, each number at most once.
+ /// @param descriptors The descriptors `EqualsControl` compares with.
+ /// @param ownProcess The process id `EqualsOwnProcess` compares with.
+ /// @param arch The architecture @p rows are numbered for, and the only one the program lets through.
+ /// @param unlisted What becomes of a call no row names.
+ /// @return The program, or why it cannot be assembled.
+ [[nodiscard]] std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
+     std::span<SystemCallRow const> rows,
+-    SandboxDescriptors descriptors,
++    SandboxDescriptors const& descriptors,
+     int ownProcess,
+     AuditArch arch,
+     SystemCallAction unlisted);
+ 
+ /// Installs @p program on every thread of the process (SECCOMP_FILTER_FLAG_TSYNC). The calling thread must
+ /// have no_new_privs set; a thread started after it inherits the filter.
+ /// @param program An assembled program.
+ /// @return Nothing once every thread runs it; `ThreadSync` (code `EPERM`) if a thread could not take it,
+ ///         which the kernel says when a thread runs a filter of its own; `SystemCalls` with the errno
+ ///         otherwise.
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 025dc2024..fdf70abbc 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -117,23 +117,23 @@ if(_process_source)
+     if(VTEXTENSION_TESTING)
+         # The probe the launcher's tests start: it binds itself to its parent and caps itself as the host does,
+         # reports what it was started with -- working directory, environment, caps, open handles -- on its
+         # control channel, and exits once that channel ends. Never installed.
+         # With --parent it is a hosting process instead: it supervises a helper of its own, for the tests of a
+         # helper outliving its parent.
+         add_executable(extension_host_probe process/testing/LaunchProbe.cpp process/testing/RecordingLauncher.hpp
+             process/testing/SandboxProbe.hpp)
+         target_link_libraries(extension_host_probe PRIVATE
+             vtextension_host vtextension_remote_process vtextension_remote_wire)
+-        # Where the Linux sandbox is built (VTEXTENSION_LINUX_SANDBOX), the probe also locks itself down as the
+-        # host does, and process_test proves the sandbox with it and tests its pieces.
+-        if(VTEXTENSION_LINUX_SANDBOX)
++        # Where a sandbox is built (VTEXTENSION_LINUX_SANDBOX, VTEXTENSION_FREEBSD_SANDBOX), the probe also locks
++        # itself down as the host does, and process_test proves the sandbox with it and tests its pieces.
++        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX)
+             target_sources(extension_host_probe PRIVATE process/testing/SandboxProbe.cpp)
+             target_link_libraries(extension_host_probe PRIVATE vtextension_host_sanitizer_options)
+         endif()
+ 
+         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
+         # no engine, so that it cross-builds and runs under wine.
+         add_executable(vtextension_process_test
+             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+             HostRefusals_test.cpp
+             LaneWatch_test.cpp
+@@ -159,23 +159,25 @@ if(_process_source)
+         # whose header needs the sandbox definition only that target carries. vtextension_out_of_process for the
+         # composition's tests, which create backends but load nothing through a helper.
+         target_link_libraries(vtextension_process_test PRIVATE
+             vtextension_host vtextension_out_of_process vtextension_remote_process vtextension_remote_wire
+             core::testing Catch2::Catch2 contour_test_trace)
+         if(VTEXTENSION_LINUX_SANDBOX)
+             target_sources(vtextension_process_test PRIVATE
+                 ../host/linux/Landlock_test.cpp
+                 ../host/linux/SeccompFilter_test.cpp
+                 ../host/linux/testing/BpfEvaluator.hpp
+-                process/SandboxProbe_test.cpp
+             )
+         endif()
++        if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX)
++            target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
++        endif()
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+         add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+         if(NOT WIN32)
+             # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+             target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+         endif()
+     endif()
+ endif()
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 188c6ecf1..a577b6269 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -612,21 +612,23 @@ TEST_CASE("HostBootstrap.capsHold", "[vtextension]")
+     CHECK(awaitReap(*probe->launcher, *probe->process)
+           == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+ 
+     if (valuesOf(*report, "caps=") == std::vector<std::string> { "skip" })
+         SKIP("sanitizer builds apply no caps");
+     CHECK(valuesOf(*report, "caps=") == std::vector<std::string> { "apply" });
+ #ifdef __linux__
+     CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "0" });
+     CHECK(valuesOf(*report, "data=") == std::vector<std::string> { std::to_string(ProbeDataBytes) });
+ #elifdef __FreeBSD__
+-    CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "0" });
++    // FreeBSD reads a process limit of 0 as none at all, so 1, which the user's count is at already.
++    CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "1" });
++    CHECK(valuesOf(*report, "as=") == std::vector<std::string> { std::to_string(ProbeDataBytes) });
+ #endif
+ }
+ 
+ #ifndef _WIN32
+ TEST_CASE("HostBootstrap.wrongParentExits", "[vtextension]")
+ {
+     // The process the probe is told of is not its parent: it ends before it adopts anything.
+     constexpr auto ParentGoneExitCode = 72;
+     auto probe = launchProbe(process::makeSystemProcessLauncher(), ProbeOptions { .parentProcessId = 1 });
+     REQUIRE(probe.has_value());
+diff --git a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+index a68e1636d..0243c61ce 100644
+--- a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
++++ b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+@@ -1,20 +1,23 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+-// The Linux sandbox, for real: the probe locks itself down as the extension host does, in a process of its
+-// own, and tries one operation from a thread that ran before the lockdown. What is forbidden fails -- refused
+-// with an errno where a library may ask, the process killed by SIGSYS where nothing honest asks -- and what
+-// the host does still works, also inside an outer sandbox's filter.
++// The system's sandbox, for real: the probe locks itself down as the extension host does, in a process of its
++// own, and tries one operation from a thread that ran before the lockdown. What is forbidden fails -- on
++// Linux refused with an errno where a library may ask, the process killed by SIGSYS where nothing honest
++// asks; on FreeBSD refused by capability mode or by the descriptor's rights -- and what the host does still
++// works, on Linux also inside an outer sandbox's filter.
+ #include <catch2/catch_message.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
+-#include <sys/syscall.h>
++#ifdef __linux__
++    #include <sys/syscall.h>
++#endif
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <chrono>
+ #include <csignal>
+ #include <cstdint>
+ #include <filesystem>
+ #include <format>
+ #include <fstream>
+@@ -24,20 +27,21 @@
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <unistd.h>
+ 
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
+ #include <vtextension/wasm/host/GuestCode.hpp>
++#include <vtextension/wasm/host/HostBootstrap.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ using namespace vtextension::wasm::remote;
+ using process::ExitKind;
+ using process::ExitStatus;
+@@ -128,98 +132,167 @@ enum class ProbeSandbox : uint8_t
+ /// @return The value of @p key in @p report.
+ [[nodiscard]] std::string valueOf(std::vector<std::string> const& report, std::string_view key)
+ {
+     auto const prefix = std::format("{}=", key);
+     auto const line =
+         std::ranges::find_if(report, [&](std::string const& text) { return text.starts_with(prefix); });
+     REQUIRE(line != report.end());
+     return line->substr(prefix.size());
+ }
+ 
++#ifdef __linux__
+ /// @return The Landlock ABI this kernel has; 0 if none.
+ [[nodiscard]] long landlockAbi()
+ {
+     constexpr auto Version = 1U;
+     auto const version = ::syscall(SYS_landlock_create_ruleset, nullptr, 0, Version);
+     return version < 0 ? 0 : version;
+ }
+ 
++constexpr auto FirstAbiWithThreadSync = 8;
++#endif
++
+ constexpr auto Killed = ExitStatus { .kind = ExitKind::Signalled, .value = SIGSYS };
+ constexpr auto Clean = ExitStatus { .kind = ExitKind::Exited, .value = 0 };
+-constexpr auto FirstAbiWithThreadSync = 8;
+ 
+ /// The refusal an op's report says.
+ [[nodiscard]] std::string refused(int error)
+ {
+     return std::format("refused:{}", error);
+ }
+ 
++/// What an op comes to in a locked-down probe.
++enum class Fate : uint8_t
++{
++    Allowed,    ///< It works.
++    Refused,    ///< It fails with an errno, and the probe lives on.
++    Killed,     ///< The process is killed before it can say anything.
++    Unasserted, ///< The probe lives on; what the op came to is recorded, not asserted.
++};
++
++/// Who an op the host's caps refuse is allowed to after all.
++enum class CapExemption : uint8_t
++{
++    None,     ///< No one: the sandbox refuses it, whatever the caps.
++    Uncapped, ///< A build that skips the caps (sanitizers), and the superuser, whom FreeBSD lets past them.
++};
++
++/// What one op comes to on this system.
++struct Expectation
++{
++    std::string_view op;
++    Fate fate;
++    int error = 0; ///< The errno, for Fate::Refused.
++    /// The instrumented build whose rows allow it after all: a sanitizer's reads its own maps, a coverage
++    /// build maps its counter files shared.
++    std::optional<vtextension::wasm::BuildInstrumentation> allowedIn = std::nullopt;
++    CapExemption exemption = CapExemption::None;
++};
++
++#ifdef __linux__
++constexpr auto ForbiddenOperations = std::array {
++    Expectation { .op = "open-file", .fate = Fate::Refused, .error = EACCES },
++    Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EACCES },
++    Expectation { .op = "open-own-process",
++                  .fate = Fate::Refused,
++                  .error = EACCES,
++                  .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
++    Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = EACCES },
++    Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "send-descriptor", .fate = Fate::Killed },
++    Expectation { .op = "fork", .fate = Fate::Killed },
++    Expectation { .op = "spawn-thread", .fate = Fate::Killed },
++    Expectation { .op = "execve", .fate = Fate::Killed },
++    Expectation { .op = "ptrace-traceme", .fate = Fate::Killed },
++    Expectation { .op = "signal-parent", .fate = Fate::Killed },
++    Expectation { .op = "map-writable-executable", .fate = Fate::Killed },
++    Expectation { .op = "map-shared-unfixed",
++                  .fate = Fate::Killed,
++                  .allowedIn = vtextension::wasm::BuildInstrumentation::Coverage },
++    Expectation { .op = "protect-writable-executable", .fate = Fate::Killed },
++};
++#elifdef __FreeBSD__
++// Capability mode refuses what names something global -- a path, an address, another process -- with
++// ECAPMODE; a descriptor's rights refuse what its role does not use with ENOTCAPABLE. It refuses neither a
++// new socket, which reaches nothing without an address, nor a new process, which RLIMIT_NPROC does. It cannot
++// refuse SCM_RIGHTS over a socket that may send, so what send-descriptor comes to is recorded: Contour's end
++// discards what a helper attaches.
++constexpr auto ForbiddenOperations = std::array {
++    Expectation { .op = "open-file", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "open-directory", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "open-own-process", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "socket-inet", .fate = Fate::Allowed },
++    Expectation { .op = "socket-unix", .fate = Fate::Allowed },
++    Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "ioctl-control", .fate = Fate::Refused, .error = ENOTCAPABLE },
++    Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
++    Expectation { .op = "fork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
++    Expectation {
++        .op = "pdfork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
++    Expectation { .op = "execve", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "ptrace-traceme", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = ECAPMODE },
++};
++#endif
++
++/// @return What @p expectation's op comes to in this build, run by this user.
++[[nodiscard]] Fate fateOf(Expectation const& expectation)
++{
++    if (expectation.allowedIn == vtextension::wasm::ThisBuildInstrumentation)
++        return Fate::Allowed;
++    auto const uncapped = vtextension::wasm::host::BuildCapPolicy == vtextension::wasm::host::CapPolicy::Skip
++                          || ::geteuid() == 0;
++    if (expectation.exemption == CapExemption::Uncapped && uncapped)
++        return Fate::Allowed;
++    return expectation.fate;
++}
++
+ } // namespace
+ 
+ TEST_CASE("Sandbox.forbiddenOperationsFailFromAnExecutor", "[vtextension][sandbox]")
+ {
+-    struct Expectation
+-    {
+-        std::string_view op;
+-        std::optional<int> refusedWith; ///< Nothing: the process is killed.
+-        /// The instrumented build whose rows allow it after all: a coverage build maps its counter files
+-        /// shared.
+-        std::optional<vtextension::wasm::BuildInstrumentation> allowedIn = std::nullopt;
+-    };
+-    constexpr auto Expectations = std::array {
+-        Expectation { .op = "open-file", .refusedWith = EACCES },
+-        Expectation { .op = "open-directory", .refusedWith = EACCES },
+-        // A sanitizer build reads its own maps for a report, and no other process's.
+-        Expectation { .op = "open-own-process",
+-                      .refusedWith = EACCES,
+-                      .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
+-        Expectation { .op = "open-other-process", .refusedWith = EACCES },
+-        Expectation { .op = "socket-inet", .refusedWith = EPERM },
+-        Expectation { .op = "socket-unix", .refusedWith = EPERM },
+-        Expectation { .op = "send-descriptor", .refusedWith = std::nullopt },
+-        Expectation { .op = "fork", .refusedWith = std::nullopt },
+-        Expectation { .op = "spawn-thread", .refusedWith = std::nullopt },
+-        Expectation { .op = "execve", .refusedWith = std::nullopt },
+-        Expectation { .op = "ptrace-traceme", .refusedWith = std::nullopt },
+-        Expectation { .op = "signal-parent", .refusedWith = std::nullopt },
+-        Expectation { .op = "map-writable-executable", .refusedWith = std::nullopt },
+-        Expectation { .op = "map-shared-unfixed",
+-                      .refusedWith = std::nullopt,
+-                      .allowedIn = vtextension::wasm::BuildInstrumentation::Coverage },
+-        Expectation { .op = "protect-writable-executable", .refusedWith = std::nullopt },
+-    };
+-    for (auto const& expectation: Expectations)
++    for (auto const& expectation: ForbiddenOperations)
+     {
+         INFO(expectation.op);
+         auto const run = runProbe(expectation.op);
+         CHECK(valueOf(run.lockdown, "lockdown") == "locked");
+-        if (expectation.allowedIn == vtextension::wasm::ThisBuildInstrumentation)
++        switch (fateOf(expectation))
+         {
+-            REQUIRE(run.op.has_value());
+-            CHECK(valueOf(*run.op, "op") == "ok");
+-            CHECK(run.exit == Clean);
+-        }
+-        else if (expectation.refusedWith)
+-        {
+-            REQUIRE(run.op.has_value());
+-            CHECK(valueOf(*run.op, "op") == refused(*expectation.refusedWith));
+-            CHECK(run.exit == Clean);
+-        }
+-        else
+-        {
+-            // Killed before it could say anything: its report never came, and its status names the filter.
+-            CHECK_FALSE(run.op.has_value());
+-            CHECK(run.exit == Killed);
++            case Fate::Allowed:
++                REQUIRE(run.op.has_value());
++                CHECK(valueOf(*run.op, "op") == "ok");
++                CHECK(run.exit == Clean);
++                break;
++            case Fate::Refused:
++                REQUIRE(run.op.has_value());
++                CHECK(valueOf(*run.op, "op") == refused(expectation.error));
++                CHECK(run.exit == Clean);
++                break;
++            case Fate::Killed:
++                // Killed before it could say anything: its report never came, and its status names the
++                // filter.
++                CHECK_FALSE(run.op.has_value());
++                CHECK(run.exit == Killed);
++                break;
++            case Fate::Unasserted:
++                REQUIRE(run.op.has_value());
++                WARN(expectation.op << ": " << valueOf(*run.op, "op"));
++                CHECK(run.exit == Clean);
++                break;
+         }
+     }
+ }
+ 
++#ifdef __linux__
+ TEST_CASE("Sandbox.onlyCompiledCodeTurnsExecutable", "[vtextension][sandbox]")
+ {
+     struct Expectation
+     {
+         GuestCode guestCode;
+         std::string_view op;
+         ExitStatus exit; ///< Killed, or Clean once the op worked.
+     };
+     // An interpreter writes no code: nothing of its host's turns executable, by mapping or protecting --
+     // while memory it protects without the execute bit, as guest memory opens, is protected as asked. An
+@@ -240,23 +313,30 @@ TEST_CASE("Sandbox.onlyCompiledCodeTurnsExecutable", "[vtextension][sandbox]")
+         if (expectation.exit == Clean)
+         {
+             REQUIRE(run.op.has_value());
+             CHECK(valueOf(*run.op, "op") == "ok");
+         }
+         else
+             CHECK_FALSE(run.op.has_value());
+     }
+ }
+ 
++#endif
++
+ TEST_CASE("Sandbox.permittedOperationsWorkFromAnExecutor", "[vtextension][sandbox]")
+ {
+-    for (auto const outerFilter: { std::string_view {}, std::string_view { "flatpak" } })
++#ifdef __linux__
++    constexpr auto OuterFilters = std::array { std::string_view {}, std::string_view { "flatpak" } };
++#else
++    constexpr auto OuterFilters = std::array { std::string_view {} };
++#endif
++    for (auto const outerFilter: OuterFilters)
+     {
+         INFO("outer filter: " << outerFilter);
+         auto probe = launchProbe("permitted", outerFilter, ProbeSandbox::System);
+         auto const lockdown = readReport(probe.lanes.front());
+         REQUIRE(lockdown.has_value());
+         CHECK(valueOf(*lockdown, "lockdown") == "locked");
+ 
+         // Granted an object after it locked down, it takes it in and maps it as the host does.
+         auto control = transport::PduStream { std::move(probe.control),
+                                               proto::ChannelKind::Control,
+@@ -291,20 +371,21 @@ TEST_CASE("Sandbox.permittedOperationsWorkFromAnExecutor", "[vtextension][sandbo
+         CHECK(std::ranges::equal(mapping->bytes().first(Mark.size()), std::as_bytes(std::span { Mark })));
+ 
+         control.shutdown();
+         auto const status = process::testing::awaitReap(*probe.launcher, *probe.process);
+         CHECK(status == Clean);
+         if (!status)
+             CHECK(process::testing::endAndReap(*probe.launcher, *probe.process));
+     }
+ }
+ 
++#ifdef __linux__
+ TEST_CASE("Sandbox.landlockCoversEveryThread", "[vtextension][sandbox]")
+ {
+     auto probe = launchProbe("none", {}, ProbeSandbox::System);
+     auto const lockdown = readReport(probe.lanes.front());
+     REQUIRE(lockdown.has_value());
+     CHECK(valueOf(*lockdown, "lockdown") == "locked");
+ 
+     // Every thread runs the filter, and gains no privilege: the main thread, the one started before the
+     // restriction and the one after.
+     auto const tasks = std::filesystem::path { std::format("/proc/{}/task", probe.process->id()) };
+@@ -373,10 +454,11 @@ TEST_CASE("Sandbox.threadSyncFailureFailsLockdown", "[vtextension][sandbox]")
+ 
+ TEST_CASE("Channel.refusingDescriptorsMayBeUnavailable", "[vtextension][sandbox]")
+ {
+     // Where an outer filter refuses SO_PASSRIGHTS, Contour's end discards what a helper attaches instead.
+     auto const run = runProbe("channel-pair", "passrights", ProbeSandbox::None);
+     CHECK(valueOf(run.lockdown, "lockdown") == "none");
+     REQUIRE(run.op.has_value());
+     CHECK(valueOf(*run.op, "op") == "upward:discarded");
+     CHECK(run.exit == Clean);
+ }
++#endif
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index a02552685..752205bc7 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -29,22 +29,22 @@
+ // With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
+ // --receive-grant does, and flips bytes of the whole object at random on a thread of its own while Contour
+ // reads it. A Mersenne twister seeded with `--seed` picks each flip from its raw output, so a seed names the
+ // same flips on every standard library; how they interleave with Contour's reads is the scheduler's. It
+ // reports `mutating` and `end` on its first lane once the thread runs, or `granted=refused` and `end`; then,
+ // once its control channel ended, `mutations=N` (how many bytes it flipped) and `end`, and exits.
+ //
+ // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
+ // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
+ // `other`; (POSIX) `pid=` its process id and `sid=` its session's; `caps=` `apply` or `skip` as
+-// the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
+-// descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
++// the build caps, and (POSIX) `nproc=`, `data=` and `as=` its limits, a number or `unlimited`; and `fd=N` per
++// open descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+ #include <core/Clock.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <bit>
+ #include <charconv>
+ #include <cstdint>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <format>
+@@ -210,21 +210,22 @@ enum class StandardStream : uint8_t
+ {
+     namespace host = vtextension::wasm::host;
+     auto lines = std::format("caps={}\n", host::BuildCapPolicy == host::CapPolicy::Apply ? "apply" : "skip");
+ #ifndef _WIN32
+     auto const limitText = [](int resource) {
+         struct rlimit limit {};
+         if (::getrlimit(resource, &limit) != 0)
+             return std::string { "unknown" };
+         return limit.rlim_cur == RLIM_INFINITY ? std::string { "unlimited" } : std::to_string(limit.rlim_cur);
+     };
+-    lines += std::format("nproc={}\ndata={}\n", limitText(RLIMIT_NPROC), limitText(RLIMIT_DATA));
++    lines += std::format(
++        "nproc={}\ndata={}\nas={}\n", limitText(RLIMIT_NPROC), limitText(RLIMIT_DATA), limitText(RLIMIT_AS));
+ #endif
+     return lines;
+ }
+ 
+ /// Reports what the probe was started with, then waits for its control channel to end.
+ [[nodiscard]] ProbeExit report(std::span<std::string_view const> arguments, char const* const* environment)
+ {
+     auto helperArguments = std::vector<std::string_view> {};
+     auto checked = std::vector<std::string_view> {};
+     for (auto const argument: arguments)
+@@ -490,22 +491,23 @@ int main(int argc, char const* argv[], char const* envp[])
+     if (arguments.empty())
+         return static_cast<int>(ProbeExit::Usage);
+     auto const rest = std::span { arguments }.subspan(1);
+     auto const exit = [&] {
+         if (arguments.front() == "--report")
+             return report(rest, envp);
+         if (arguments.front() == "--parent")
+             return parent(rest);
+         if (arguments.front() == "--receive-grant")
+         {
+-// Where this build has the Linux sandbox (PlatformSandbox::Linux): what the sandboxed mode is made of.
+-#if CONTOUR_PLATFORM_SANDBOX == 1
++// Where this build has the Linux or the FreeBSD sandbox (PlatformSandbox::Linux, ::FreeBSD): what the
++// sandboxed mode is made of.
++#if CONTOUR_PLATFORM_SANDBOX == 1 || CONTOUR_PLATFORM_SANDBOX == 2
+             namespace testing = vtextension::wasm::remote::process::testing;
+             if (testing::asksForSandboxProbe(rest))
+                 return static_cast<ProbeExit>(testing::runSandboxProbe(rest));
+ #endif
+             return receiveGrant(rest);
+         }
+         if (arguments.front() == "--mutate")
+             return mutate(rest);
+         return ProbeExit::Usage;
+     }();
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+index af6973b47..740618fa8 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+@@ -1,20 +1,25 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/remote/process/testing/SandboxProbe.hpp>
+ 
++#include <sys/ioctl.h>
+ #include <sys/mman.h>
+-#include <sys/prctl.h>
+ #include <sys/ptrace.h>
+ #include <sys/random.h>
+ #include <sys/socket.h>
+ #include <sys/syscall.h>
+ #include <sys/wait.h>
++#ifdef __linux__
++    #include <sys/prctl.h>
++#elifdef __FreeBSD__
++    #include <sys/procdesc.h>
++#endif
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <chrono>
+ #include <condition_variable>
+ #include <csignal>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+@@ -30,36 +35,40 @@
+ #include <string>
+ #include <string_view>
+ #include <tuple>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <fcntl.h>
+ #include <unistd.h>
+ 
+-#include <linux/seccomp.h>
++#include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ #include <vtextension/wasm/host/HostProcess.hpp>
+ #include <vtextension/wasm/host/Sandbox.hpp>
+-#include <vtextension/wasm/host/linux/SeccompFilter.hpp>
+-#include <vtextension/wasm/host/linux/SystemCallRows.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+-#ifdef __aarch64__
+-    #include <linux/membarrier.h>
++#ifdef __linux__
++    #include <linux/seccomp.h>
++    #include <vtextension/wasm/host/linux/SeccompFilter.hpp>
++    #include <vtextension/wasm/host/linux/SystemCallRows.hpp>
++    #ifdef __aarch64__
++        #include <linux/membarrier.h>
++    #endif
+ #endif
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+ namespace
+ {
+     namespace host = vtextension::wasm::host;
+     using transport::Channel;
+     using transport::PduStream;
+@@ -152,20 +161,45 @@ namespace
+     [[nodiscard]] std::string socketInet(OperationContext&)
+     {
+         return socketOf(AF_INET);
+     }
+ 
+     [[nodiscard]] std::string socketUnix(OperationContext&)
+     {
+         return socketOf(AF_UNIX);
+     }
+ 
++    /// Reaches for an address: the loopback's discard port. Where a sandbox lets a socket be made at all, it
++    /// is the address that it refuses.
++    [[nodiscard]] std::string connectInet(OperationContext&)
++    {
++        auto const descriptor = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
++        if (descriptor < 0)
++            return outcomeOf(descriptor);
++        constexpr auto DiscardPort = uint16_t { 9 };
++        auto address = sockaddr_in {};
++        address.sin_family = AF_INET;
++        address.sin_port = htons(DiscardPort);
++        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++        auto const outcome =
++            outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
++        ::close(descriptor);
++        return outcome;
++    }
++
++    /// Asks the control channel how much it holds, by an ioctl no descriptor of the host needs.
++    [[nodiscard]] std::string ioctlControl(OperationContext& context)
++    {
++        auto pending = 0;
++        return outcomeOf(::ioctl(context.controlDescriptor, FIONREAD, &pending));
++    }
++
+     /// Sends a byte to Contour with this process's stderr attached, as a helper handing a descriptor up
+     /// would.
+     [[nodiscard]] std::string sendDescriptor(OperationContext& context)
+     {
+         auto byte = std::array<std::byte, 1> {};
+         auto vector = iovec { .iov_base = byte.data(), .iov_len = byte.size() };
+         alignas(cmsghdr) auto buffer = std::array<std::byte, CMSG_SPACE(sizeof(int))> {};
+         auto message = msghdr {};
+         message.msg_iov = &vector;
+         message.msg_iovlen = 1;
+@@ -183,52 +217,78 @@ namespace
+     [[nodiscard]] std::string forkProcess(OperationContext&)
+     {
+         auto const child = ::fork();
+         if (child == 0)
+             ::_exit(0);
+         if (child > 0)
+             ::waitpid(child, nullptr, 0);
+         return outcomeOf(child);
+     }
+ 
++#ifdef __FreeBSD__
++    /// Forks as Capsicum lets a process in capability mode fork: to a process descriptor.
++    [[nodiscard]] std::string forkToDescriptor(OperationContext&)
++    {
++        auto descriptor = -1;
++        auto const child = ::pdfork(&descriptor, 0);
++        if (child == 0)
++            ::_exit(0);
++        if (child > 0)
++            ::close(descriptor);
++        return outcomeOf(child);
++    }
++#endif
++
+     [[nodiscard]] std::string spawnThread(OperationContext&)
+     {
+         auto thread = host::ExecutorThread::start(ThreadStackBytes, [] {});
+         return thread ? std::string { "ok" } : std::format("refused:{}", thread.error().value());
+     }
+ 
+     [[nodiscard]] std::string executeProgram(OperationContext&)
+     {
+         auto program = std::string { "/bin/true" };
+         auto arguments = std::array<char*, 2> { program.data(), nullptr };
+         auto environment = std::array<char*, 1> { nullptr };
+         return outcomeOf(::execve(program.c_str(), arguments.data(), environment.data()));
+     }
+ 
+     [[nodiscard]] std::string traceMe(OperationContext&)
+     {
++#ifdef __FreeBSD__
++        return outcomeOf(::ptrace(PT_TRACE_ME, 0, nullptr, 0));
++#else
+         return outcomeOf(::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr));
++#endif
+     }
+ 
+     [[nodiscard]] std::string signalParent(OperationContext& context)
+     {
+         return outcomeOf(::kill(context.parentProcess, 0));
+     }
+ 
+     [[nodiscard]] std::string mapAnonymous(int protection, int flags)
+     {
+         constexpr auto Bytes = std::size_t { 4096 };
++#ifdef __linux__
+         // Through the system call itself: what the filter sees, without the C library's wrapper in between.
+         auto const mapped = ::syscall(SYS_mmap, nullptr, Bytes, protection, flags | MAP_ANONYMOUS, -1, 0);
+         if (mapped < 0)
+             return outcomeOf(mapped);
+         ::syscall(SYS_munmap, mapped, Bytes);
++#else
++        // FreeBSD's syscall() returns an int, too narrow for an address; no filter sits between it and mmap.
++        auto* const mapped = ::mmap(nullptr, Bytes, protection, flags | MAP_ANONYMOUS, -1, 0);
++        if (mapped == MAP_FAILED)
++            return outcomeOf(-1);
++        ::munmap(mapped, Bytes);
++#endif
+         return "ok";
+     }
+ 
+     [[nodiscard]] std::string mapWritableExecutable(OperationContext&)
+     {
+         return mapAnonymous(PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE);
+     }
+ 
+     [[nodiscard]] std::string mapSharedUnfixed(OperationContext&)
+     {
+@@ -312,21 +372,21 @@ namespace
+             return "failed:clock";
+         auto mutex = std::mutex {};
+         auto condition = std::condition_variable {};
+         {
+             auto lock = std::unique_lock { mutex };
+             std::ignore = condition.wait_for(lock, std::chrono::milliseconds { 1 });
+         }
+         auto stack = stack_t {};
+         if (::sigaltstack(nullptr, &stack) != 0)
+             return "failed:sigaltstack";
+-#ifdef __aarch64__
++#if defined(__linux__) && defined(__aarch64__)
+         if (::syscall(SYS_membarrier, MEMBARRIER_CMD_QUERY, 0, 0) < 0)
+             return "failed:membarrier";
+ #endif
+         return "ok";
+     }
+ 
+     /// One op the probe can try.
+     struct Operation
+     {
+         std::string_view name;
+@@ -334,36 +394,42 @@ namespace
+     };
+ 
+     constexpr auto Operations = std::array {
+         Operation { .name = "none", .run = &nothing },
+         Operation { .name = "open-file", .run = &openFile },
+         Operation { .name = "open-directory", .run = &openDirectory },
+         Operation { .name = "open-own-process", .run = &openOwnProcess },
+         Operation { .name = "open-other-process", .run = &openOtherProcess },
+         Operation { .name = "socket-inet", .run = &socketInet },
+         Operation { .name = "socket-unix", .run = &socketUnix },
++        Operation { .name = "connect-inet", .run = &connectInet },
++        Operation { .name = "ioctl-control", .run = &ioctlControl },
+         Operation { .name = "send-descriptor", .run = &sendDescriptor },
+         Operation { .name = "fork", .run = &forkProcess },
++#ifdef __FreeBSD__
++        Operation { .name = "pdfork", .run = &forkToDescriptor },
++#endif
+         Operation { .name = "spawn-thread", .run = &spawnThread },
+         Operation { .name = "execve", .run = &executeProgram },
+         Operation { .name = "ptrace-traceme", .run = &traceMe },
+         Operation { .name = "signal-parent", .run = &signalParent },
+         Operation { .name = "map-writable-executable", .run = &mapWritableExecutable },
+         Operation { .name = "map-shared-unfixed", .run = &mapSharedUnfixed },
+         Operation { .name = "protect-writable-executable", .run = &protectWritableExecutable },
+         Operation { .name = "map-executable", .run = &mapExecutable },
+         Operation { .name = "protect-executable", .run = &protectExecutable },
+         Operation { .name = "protect-readable", .run = &protectReadable },
+         Operation { .name = "channel-pair", .run = &channelPair },
+         Operation { .name = "permitted", .run = &permitted },
+     };
+ 
++#ifdef __linux__
+     /// An outer sandbox's filter: what it refuses, and with which errno; only when the call's arguments pass
+     /// `checks`, if any.
+     struct OuterRefusal
+     {
+         host::SystemCall call;
+         int error;
+         std::span<host::ArgumentCheck const> checks = {};
+     };
+ 
+     /// The outer filters the probe can install before it sandboxes itself.
+@@ -463,20 +529,55 @@ namespace
+             _done.count_down();
+             if (_thread)
+                 _thread->join();
+         }
+ 
+       private:
+         std::latch _done { 1 };
+         std::optional<host::ExecutorThread> _thread;
+     };
+ 
++    /// Installs @p outer, as an outer sandbox would have before the host starts: on the process, or
++    /// (`thread`) on a thread of its own, @p filtered.
++    /// @return Whether it was installed.
++    [[nodiscard]] bool installOuter(OuterFilter const& outer, FilteredThread& filtered)
++    {
++        if (outer.name == "thread")
++            return filtered.start().has_value();
++        auto const program = outerProgram(outer.refusals);
++        return program && ::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0 && host::installFilter(*program);
++    }
++#else
++    /// An outer sandbox's filter, by name. There is none to install where the host's sandbox filters no
++    /// system call.
++    struct OuterFilter
++    {
++        std::string_view name;
++    };
++
++    constexpr auto OuterFilters = std::array<OuterFilter, 0> {};
++
++    /// A thread that runs a filter of its own: none here.
++    class FilteredThread
++    {
++      public:
++        void stop() noexcept {}
++    };
++
++    /// @return Never installed: OuterFilters names none.
++    [[nodiscard]] bool installOuter(OuterFilter const& /*outer*/, FilteredThread& /*filtered*/)
++    {
++        return false;
++    }
++
++#endif
++
+     /// Sends @p text on @p channel.
+     [[nodiscard]] bool sendText(Channel& channel, std::string_view text)
+     {
+         return channel.send(std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() })
+             .has_value();
+     }
+ 
+     /// @return The lockdown line's value for @p failure.
+     [[nodiscard]] std::string failedLine(host::ConfinementFailure const& failure)
+     {
+@@ -569,53 +670,51 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
+     auto opLane = Channel::adopt(parsed->lanes.at(1));
+     if (!controlEnd || !lane || !opLane)
+         return exitWith(SandboxProbeExit::NoControl);
+     auto const controlDescriptor = controlEnd->nativeHandle();
+     auto control = PduStream {
+         *std::move(controlEnd), proto::ChannelKind::Control, proto::Direction::ToHelper, proto::PduLimits {}
+     };
+ 
+     // The outer sandbox, there before the host starts.
+     auto filtered = FilteredThread {};
+-    if (request->outer && request->outer->name == "thread")
+-    {
+-        if (!filtered.start())
+-            return exitWith(SandboxProbeExit::SetupFailed);
+-    }
+-    else if (request->outer)
+-    {
+-        auto const program = outerProgram(request->outer->refusals);
+-        if (!program || ::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 || !host::installFilter(*program))
+-            return exitWith(SandboxProbeExit::SetupFailed);
+-    }
++    if (request->outer && !installOuter(*request->outer, filtered))
++        return exitWith(SandboxProbeExit::SetupFailed);
+ 
+     // Each thread opens a file once told to, between the restriction and the lockdown, then runs what it is
+     // given once told to go.
+     auto openNow = std::latch { 1 };
+     auto opened = std::latch { 2 };
+     auto finish = std::latch { 1 };
+     auto beforeRestrict = std::string {};
+     auto afterRestrict = std::string {};
+     auto early = host::ExecutorThread::start(ThreadStackBytes, [&] {
+         openNow.wait();
+         beforeRestrict = openPath("/etc/hostname", O_RDONLY);
+         opened.count_down();
+         finish.wait();
+     });
+     if (!early)
+         return exitWith(SandboxProbeExit::SetupFailed);
+ 
+-    auto const sandbox =
+-        request->sandboxing == Sandboxing::System
+-            ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor },
+-                                      request->guestCode)
+-            : std::unique_ptr<host::ISandbox> {};
++    // What the host keeps, as it keeps it: control, the lanes it reports on, and standard error.
++    auto descriptors = host::SandboxDescriptors {
++        .control = controlDescriptor,
++        .held = { host::HeldDescriptor { .role = host::DescriptorRole::Lane, .handle = lane->nativeHandle() },
++                  host::HeldDescriptor { .role = host::DescriptorRole::Lane,
++                                         .handle = opLane->nativeHandle() },
++                  host::HeldDescriptor { .role = host::DescriptorRole::StandardError,
++                                         .handle = host::standardErrorHandle() } },
++    };
++    auto const sandbox = request->sandboxing == Sandboxing::System
++                             ? host::makeSystemSandbox(std::move(descriptors), request->guestCode)
++                             : std::unique_ptr<host::ISandbox> {};
+     auto const restricted =
+         sandbox ? sandbox->restrictBeforeThreads() : std::expected<void, host::ConfinementFailure> {};
+ 
+     auto context = OperationContext { .control = control,
+                                       .controlDescriptor = controlDescriptor,
+                                       .parentProcess = ::getppid() };
+     auto go = std::latch { 1 };
+     auto reported = std::latch { 1 };
+     auto reportSent = false;
+     auto executor = host::ExecutorThread::start(ThreadStackBytes, [&] {
+@@ -629,20 +728,23 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
+         // Until Contour ends the connection.
+         while (control.receive())
+         {
+         }
+     });
+     if (!executor)
+         return exitWith(SandboxProbeExit::SetupFailed);
+     openNow.count_down();
+     opened.wait();
+ 
++    // As the host does: its caps, then the lockdown.
++    if (sandbox)
++        std::ignore = host::capResources(parsed->dataBytes, host::BuildCapPolicy);
+     auto const lockedDown = sandbox ? sandbox->lockDown() : std::expected<void, host::ConfinementFailure> {};
+     auto const lockdown = [&] {
+         if (!sandbox)
+             return std::string { "none" };
+         if (!restricted)
+             return failedLine(restricted.error());
+         if (!lockedDown)
+             return failedLine(lockedDown.error());
+         return std::string { "locked" };
+     }();
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
+index 532ac673d..4441bdd68 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
+@@ -1,39 +1,40 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+-/// Test-only, Linux: the probe's sandboxed mode, which locks itself down as the extension host does and then
+-/// tries one operation on a thread that ran before the lockdown.
++/// Test-only, Linux and FreeBSD: the probe's sandboxed mode, which locks itself down as the extension host
++/// does and then tries one operation on a thread that ran before the lockdown.
+ ///
+ ///   extension_host_probe --receive-grant [--sandboxed] [--guest-code=<code>] [--outer-filter=<kind>]
+ ///   [--sandbox-op=<op>] <helper arguments>
+ ///
+-/// It binds itself to its parent and hardens itself as the host does. An outer filter, if named, is installed
+-/// first, as an outer sandbox (Flatpak's bwrap) would have: `no-landlock` (Landlock's calls fail ENOSYS),
+-/// `flatpak` (clone3 fails ENOSYS; unshare, setns, mount, personality and ptrace EPERM), `passrights`
+-/// (setting SO_PASSRIGHTS fails EPERM), or `thread` (a thread of its own installs a filter of its own). Then
+-/// it starts a thread, restricts itself (--sandboxed: makeSystemSandbox()'s restrictBeforeThreads(), with the
+-/// rows of an engine whose guest code is `--guest-code=` `compiled`, the default, or `interpreted`), starts
+-/// the op's thread, has both try to open a file, and locks down.
++/// It binds itself to its parent and hardens itself as the host does. An outer filter (Linux), if named, is
++/// installed first, as an outer sandbox (Flatpak's bwrap) would have: `no-landlock` (Landlock's calls fail
++/// ENOSYS), `flatpak` (clone3 fails ENOSYS; unshare, setns, mount, personality and ptrace EPERM),
++/// `passrights` (setting SO_PASSRIGHTS fails EPERM), or `thread` (a thread of its own installs a filter of
++/// its own). Then it starts a thread, restricts itself (--sandboxed: makeSystemSandbox()'s
++/// restrictBeforeThreads(), with the rows of an engine whose guest code is `--guest-code=` `compiled`, the
++/// default, or `interpreted`), starts the op's thread, has both try to open a file, caps itself (--sandboxed)
++/// and locks down.
+ ///
+ /// On its first lane it reports `lockdown=` `locked`, `none` (not --sandboxed) or `failed:<step>:<code>`;
+ /// `before-restrict=` and `after-restrict=`, what opening a file from each thread came to; and `end`. Then
+ /// the op's thread runs the op and reports, on its second lane, `op=` `ok`, `refused:<errno>`,
+ /// `failed:<what>` or (channel-pair) `upward:<refused|discarded>`, and `end` -- unless the op killed the
+ /// process. It exits 0 once its control channel ended.
+ ///
+-/// The ops: open-file, open-directory, socket-inet, socket-unix, send-descriptor, fork, spawn-thread,
+-/// execve, ptrace-traceme, signal-parent, map-writable-executable, map-shared-unfixed, map-executable,
+-/// protect-writable-executable, protect-executable, protect-readable, channel-pair, none, and permitted,
+-/// which takes one Instantiate's grant off control as the host does and then does what the locked-down host
+-/// does (see SandboxProbe.cpp).
++/// The ops: open-file, open-directory, socket-inet, socket-unix, connect-inet, ioctl-control,
++/// send-descriptor, fork, pdfork (FreeBSD), spawn-thread, execve, ptrace-traceme, signal-parent,
++/// map-writable-executable, map-shared-unfixed, map-executable, protect-writable-executable,
++/// protect-executable, protect-readable, channel-pair, none, and permitted, which takes one Instantiate's
++/// grant off control as the host does and then does what the locked-down host does (see SandboxProbe.cpp).
+ 
+ #include <span>
+ #include <string_view>
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+ /// @return Whether @p arguments ask for the sandboxed mode: any of its four options.
+ [[nodiscard]] bool asksForSandboxProbe(std::span<std::string_view const> arguments) noexcept;
+ 
+diff --git a/src/vtextension/wasm/testing/DecoratedEngine.hpp b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+index d814027b5..954ff7d89 100644
+--- a/src/vtextension/wasm/testing/DecoratedEngine.hpp
++++ b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+@@ -147,20 +147,25 @@ class DecoratedEngine final: public host::IHostedEngine
+ 
+     [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+     {
+         return _inner->memoryMode();
+     }
+ 
+     [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
+ 
+     [[nodiscard]] host::GuestCode guestCode() const noexcept override { return _inner->guestCode(); }
+ 
++    [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override
++    {
++        return _inner->heldDevices();
++    }
++
+     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+     {
+         return _inner->prepareThread();
+     }
+ 
+   private:
+     std::unique_ptr<host::IHostedEngine> _inner;
+     InstanceDecorator _decorate;
+ };
+ 
+diff --git a/src/vtextension/wasm/testing/PreparationHookEngine.hpp b/src/vtextension/wasm/testing/PreparationHookEngine.hpp
+index 3b2461a38..f4d9c7fb8 100644
+--- a/src/vtextension/wasm/testing/PreparationHookEngine.hpp
++++ b/src/vtextension/wasm/testing/PreparationHookEngine.hpp
+@@ -3,20 +3,21 @@
+ // Test-only: a hosted engine that lets a test observe, or fail, the preparation of each thread a host runs
+ // guests on, while everything else is forwarded to the engine it wraps.
+ #pragma once
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <functional>
+ #include <memory>
+ #include <span>
+ #include <utility>
++#include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ 
+ namespace vtextension::wasm::testing
+ {
+ 
+ /// What runs as a thread is prepared, on that thread: nothing to go on, or why the thread is not prepared.
+ using PreparationHook = std::function<std::expected<void, ExtensionError>()>;
+@@ -55,20 +56,25 @@ class PreparationHookEngine final: public host::IHostedEngine
+ 
+     [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+     {
+         return _inner->memoryMode();
+     }
+ 
+     [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
+ 
+     [[nodiscard]] host::GuestCode guestCode() const noexcept override { return _inner->guestCode(); }
+ 
++    [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override
++    {
++        return _inner->heldDevices();
++    }
++
+     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+     {
+         return _onPrepare().and_then([this] { return _inner->prepareThread(); });
+     }
+ 
+   private:
+     std::unique_ptr<host::IHostedEngine> _inner;
+     PreparationHook _onPrepare;
+ };
+ 
+diff --git a/src/vtextension/wasm/wamr/WamrBackend.hpp b/src/vtextension/wasm/wamr/WamrBackend.hpp
+index ee8e05197..30915bf3c 100644
+--- a/src/vtextension/wasm/wamr/WamrBackend.hpp
++++ b/src/vtextension/wasm/wamr/WamrBackend.hpp
+@@ -57,20 +57,28 @@ class NullDevice
+     /// itself down needs.
+     /// @param open Opens it, once.
+     /// @return The device; `RuntimeUnavailable` if it could not be opened.
+     [[nodiscard]] static std::expected<NullDevice, ExtensionError> openShared(
+         NullDeviceOpener const& open = systemNullDeviceOpener());
+ 
+     /// @return The device a runtime created now binds to: the shared one, or one opened for it;
+     ///         `RuntimeUnavailable` if none could be opened.
+     [[nodiscard]] std::expected<std::shared_ptr<OpenNullDevice const>, ExtensionError> forRuntime() const;
+ 
++    /// @return The raw handle of the device every runtime shares; nothing where each runtime opens its own.
++    [[nodiscard]] std::optional<int64_t> sharedHandle() const noexcept
++    {
++        if (!_shared)
++            return std::nullopt;
++        return _shared->handle();
++    }
++
+   private:
+     NullDevice(NullDeviceOpener open, std::shared_ptr<OpenNullDevice const> shared) noexcept:
+         _open { std::move(open) }, _shared { std::move(shared) }
+     {
+     }
+ 
+     NullDeviceOpener _open;                        ///< Opens a runtime's own; empty when one is shared.
+     std::shared_ptr<OpenNullDevice const> _shared; ///< The one every runtime shares; null when each opens.
+ };
+ 
+diff --git a/src/vtextension/wasm/wamr/WamrEngine.cpp b/src/vtextension/wasm/wamr/WamrEngine.cpp
+index 62de2eee0..9df716a41 100644
+--- a/src/vtextension/wasm/wamr/WamrEngine.cpp
++++ b/src/vtextension/wasm/wamr/WamrEngine.cpp
+@@ -3,20 +3,21 @@
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <optional>
+ #include <span>
+ #include <string_view>
+ #include <utility>
++#include <vector>
+ 
+ #include <wasm_export.h>
+ 
+ #include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+ 
+ namespace vtextension::wasm::wamr
+ {
+ 
+ namespace
+ {
+@@ -43,40 +44,43 @@ namespace
+     class WamrEngine final: public host::IHostedEngine
+     {
+         struct PrivateTag
+         {
+         };
+ 
+       public:
+         /// Takes a hold on WAMR's runtime for the engine.
+         /// @param backend The backend it is a facade over.
+         /// @return The engine; `RuntimeUnavailable` if WAMR could not initialize.
++        /// @param devices The devices the backend keeps open: its shared null device.
+         [[nodiscard]] static std::expected<std::unique_ptr<WamrEngine>, ExtensionError> create(
+-            std::unique_ptr<IWasmBackend> backend)
++            std::unique_ptr<IWasmBackend> backend, std::vector<remote::transport::NativeHandle> devices)
+         {
+             if (auto acquired = acquireRuntime(); !acquired)
+                 return std::unexpected(acquired.error());
+             try
+             {
+-                return std::make_unique<WamrEngine>(PrivateTag {}, std::move(backend));
++                return std::make_unique<WamrEngine>(PrivateTag {}, std::move(backend), std::move(devices));
+             }
+             catch (...)
+             {
+                 releaseRuntime();
+                 throw;
+             }
+         }
+ 
+         /// Use create(); public only so that std::make_unique can reach it. Takes over the hold create()
+         /// took.
+-        WamrEngine(PrivateTag /*unused*/, std::unique_ptr<IWasmBackend> backend) noexcept:
+-            _backend { std::move(backend) }
++        WamrEngine(PrivateTag /*unused*/,
++                   std::unique_ptr<IWasmBackend> backend,
++                   std::vector<remote::transport::NativeHandle> devices) noexcept:
++            _backend { std::move(backend) }, _devices { std::move(devices) }
+         {
+         }
+ 
+         WamrEngine(WamrEngine const&) = delete;
+         WamrEngine(WamrEngine&&) = delete;
+         WamrEngine& operator=(WamrEngine const&) = delete;
+         WamrEngine& operator=(WamrEngine&&) = delete;
+ 
+         /// Releases the engine's hold on the runtime, after the backend.
+         ~WamrEngine() override
+@@ -118,34 +122,51 @@ namespace
+ 
+         [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return 0; }
+ 
+         /// The build's WAMR has the interpreter alone: no JIT and no AOT code
+         /// (cmake/ContourThirdParties.cmake).
+         [[nodiscard]] host::GuestCode guestCode() const noexcept override
+         {
+             return host::GuestCode::Interpreted;
+         }
+ 
++        /// The null device its runtimes bind their guests' standard streams to, opened as it was made.
++        [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override
++        {
++            return _devices;
++        }
++
+         /// Enters WAMR's thread environment on the calling thread, unless it holds one of the running
+         /// runtime already. The interpreter installs no signal handler, so this is all a thread needs.
+         [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+         {
+             if (preparedThread && preparedThread->generation() == wamr::runtimeGeneration())
+                 return {};
+             preparedThread.reset();
+             return ThreadEnv::enter().transform(
+                 [](ThreadEnv entered) { preparedThread.emplace(std::move(entered)); });
+         }
+ 
+       private:
+         std::unique_ptr<IWasmBackend> _backend;
++        std::vector<remote::transport::NativeHandle> _devices;
+     };
++
++    /// @return @p handle, a raw handle as a null device opener returns it, as the transport names one.
++    [[nodiscard]] remote::transport::NativeHandle nativeHandleOf(int64_t handle) noexcept
++    {
++#ifdef _WIN32
++        return reinterpret_cast<remote::transport::NativeHandle>(static_cast<intptr_t>(handle));
++#else
++        return static_cast<remote::transport::NativeHandle>(handle);
++#endif
++    }
+ } // namespace
+ 
+ NativeCompilation linkedNativeCompilation() noexcept
+ {
+     auto const compiles =
+         std::ranges::any_of(std::array { Mode_Fast_JIT, Mode_LLVM_JIT, Mode_Multi_Tier_JIT },
+                             &wasm_runtime_is_running_mode_supported);
+     return compiles ? NativeCompilation::Present : NativeCompilation::Absent;
+ }
+ 
+@@ -155,25 +176,28 @@ std::string_view wamrEngineErrorText(WamrEngineError error) noexcept
+     return row != ErrorTexts.end() ? row->text : std::string_view { "the engine could not be made" };
+ }
+ 
+ std::expected<std::unique_ptr<host::IHostedEngine>, WamrEngineError> makeWamrEngine(
+     WamrEngineConfig const& config)
+ {
+     // Checked before anything is opened: an engine that could compile would hold, or need, executable memory
+     // that its host's sandbox, made for an interpreter, refuses.
+     if (config.nativeCompilation() != NativeCompilation::Absent)
+         return std::unexpected(WamrEngineError::CompilesNativeCode);
++    auto devices = std::vector<remote::transport::NativeHandle> {};
+     return NullDevice::openShared(config.openNullDevice)
+         .transform_error([](ExtensionError) { return WamrEngineError::NullDeviceUnavailable; })
+-        .transform([](NullDevice nullDevice) {
++        .transform([&devices](NullDevice nullDevice) {
++            if (auto const handle = nullDevice.sharedHandle())
++                devices.push_back(nativeHandleOf(*handle));
+             return makeWamrBackend(WamrConfig { .nullDevice = std::move(nullDevice) });
+         })
+-        .and_then([](std::unique_ptr<IWasmBackend> backend) {
+-            return WamrEngine::create(std::move(backend))
++        .and_then([&devices](std::unique_ptr<IWasmBackend> backend) {
++            return WamrEngine::create(std::move(backend), std::move(devices))
+                 .transform([](std::unique_ptr<WamrEngine> engine) -> std::unique_ptr<host::IHostedEngine> {
+                     return engine;
+                 })
+                 .transform_error([](ExtensionError) { return WamrEngineError::RuntimeUnavailable; });
+         });
+ }
+ 
+ } // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrEngine_test.cpp b/src/vtextension/wasm/wamr/WamrEngine_test.cpp
+index 86d623b07..2aa2ac680 100644
+--- a/src/vtextension/wasm/wamr/WamrEngine_test.cpp
++++ b/src/vtextension/wasm/wamr/WamrEngine_test.cpp
+@@ -93,20 +93,39 @@ TEST_CASE("WamrEngine.runtimesShareOneNullDevice", "[vtextension][wamr]")
+             auto const module = contract::load(*runtime, contract::DescribedModule);
+             CHECK(module->instantiate(context).has_value());
+         }
+         CHECK(opened == 1);
+         CHECK(openDescriptors() == afterEngine);
+     }
+     // ... and it is closed with the engine and the last runtime.
+     CHECK(openDescriptors() == before);
+ }
+ 
++TEST_CASE("WamrEngine.holdsTheNullDeviceItOpened", "[vtextension][wamr]")
++{
++    // The one device the engine keeps is the one a sandbox that limits descriptor by descriptor must leave
++    // it, and it is what the opener returned.
++    auto opened = std::optional<int64_t> {};
++    auto const made =
++        makeWamrEngine(WamrEngineConfig { .openNullDevice = [&opened, open = systemNullDeviceOpener()] {
++            opened = open();
++            return opened;
++        } });
++    REQUIRE(made.has_value());
++    REQUIRE(opened.has_value());
++    auto const held = (*made)->heldDevices();
++    REQUIRE(held.size() == 1);
++#ifndef _WIN32
++    CHECK(held.front() == static_cast<int>(*opened));
++#endif
++}
++
+ TEST_CASE("WamrEngine.prepareThreadIsIdempotent", "[vtextension][wamr]")
+ {
+     auto const made = makeWamrEngine();
+     REQUIRE(made.has_value());
+     auto const& engine = *made;
+     // Before any runtime exists, as a host prepares its threads before it locks itself down: on a thread
+     // that did not bring the runtime up, and on the one that did.
+     auto prepared = std::vector<bool> {};
+     auto worker = std::thread { [&] {
+         for ([[maybe_unused]] auto const index: { 0, 1 })
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+index eaa7ab372..e174501fb 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+@@ -473,20 +473,23 @@ namespace
+         {
+             return memoryGuardBytesOf(_config);
+         }
+ 
+         /// Cranelift compiles each module to native code, which is made executable once written.
+         [[nodiscard]] host::GuestCode guestCode() const noexcept override
+         {
+             return host::GuestCode::Compiled;
+         }
+ 
++        /// Its guests' standard streams are the shim's, which opens nothing.
++        [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override { return {}; }
++
+         /// Runs PrimingModule on the calling thread, which installs Wasmtime's signal handlers (once in the
+         /// process, under TrapMode::Signals) and the thread's alternate signal stack, both of which Wasmtime
+         /// does lazily, the first time a guest runs. Compiled once per engine, on the first thread primed.
+         [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+         {
+             if (threadPrimedFor == _serial)
+                 return {};
+             return priming()
+                 .and_then([](Priming const* priming) { return runPriming(*priming); })
+                 .transform([this] { threadPrimedFor = _serial; });

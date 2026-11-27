@@ -1,0 +1,1078 @@
+# Review package: b0160e5b7..HEAD
+
+## Commits
+4cc49cc4b fix(vtextension): bound a lane's nested calls by the stack its thread has
+
+## Files changed
+ src/vtextension/wasm/host/CMakeLists.txt      |   2 +
+ src/vtextension/wasm/host/ExecutorThread.cpp  | 102 +++++++++++
+ src/vtextension/wasm/host/ExecutorThread.hpp  |  42 +++++
+ src/vtextension/wasm/host/HostServer.cpp      |  81 +++++----
+ src/vtextension/wasm/host/HostServer.hpp      |  27 ++-
+ src/vtextension/wasm/host/HostServer_test.cpp | 240 ++++++++++++++++++++++++++
+ src/vtextension/wasm/remote/CMakeLists.txt    |  12 +-
+ src/vtextension/wasm/wasmtime/CMakeLists.txt  |  10 ++
+ 8 files changed, 477 insertions(+), 39 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index 044494598..302a40e82 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -1,15 +1,17 @@
+ # vtextension_host: the extension host's side of the protocol. HostServer serves one engine's runtimes, modules
+ # and instances over a control channel and its lanes; InProcessHostConnector runs one in this process, for the
+ # tests and for measuring the protocol without a process boundary. It links no engine: whoever composes a host
+ # hands it one (IHostedEngine), and its tests live in vtextension_remote_test (../remote/CMakeLists.txt), which
+ # links Wasmtime's.
+ 
+ add_library(vtextension_host STATIC
++    ExecutorThread.cpp
++    ExecutorThread.hpp
+     HostServer.cpp
+     HostServer.hpp
+     IHostedEngine.hpp
+     InProcessHost.cpp
+     InProcessHost.hpp
+     ../remote/HostConnector.hpp
+ )
+ target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire PRIVATE core::base)
+diff --git a/src/vtextension/wasm/host/ExecutorThread.cpp b/src/vtextension/wasm/host/ExecutorThread.cpp
+new file mode 100644
+index 000000000..038f9427b
+--- /dev/null
++++ b/src/vtextension/wasm/host/ExecutorThread.cpp
+@@ -0,0 +1,102 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/host/ExecutorThread.hpp>
++
++#include <algorithm>
++#include <cstddef>
++#include <functional>
++#include <memory>
++#include <system_error>
++#include <utility>
++
++#ifdef _WIN32
++    #include <Windows.h>
++#else
++    #include <climits>
++
++    #include <pthread.h>
++#endif
++
++namespace vtextension::wasm::host
++{
++
++struct ExecutorThread::State
++{
++    std::function<void()> body;
++#ifdef _WIN32
++    HANDLE thread = nullptr;
++#else
++    pthread_t thread {};
++#endif
++};
++
++namespace
++{
++#ifdef _WIN32
++    DWORD WINAPI runBody(LPVOID state)
++    {
++        static_cast<ExecutorThread::State*>(state)->body();
++        return 0;
++    }
++#else
++    void* runBody(void* state)
++    {
++        static_cast<ExecutorThread::State*>(state)->body();
++        return nullptr;
++    }
++#endif
++} // namespace
++
++ExecutorThread::ExecutorThread(std::size_t stackBytes, std::function<void()> body):
++    _state { std::make_unique<State>(State { .body = std::move(body) }) }
++{
++#ifdef _WIN32
++    // Reserved, not committed: the pages are touched only as deep as the calls go.
++    _state->thread = ::CreateThread(
++        nullptr, stackBytes, &runBody, _state.get(), STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
++    if (!_state->thread)
++        throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(), "CreateThread");
++#else
++    auto attributes = pthread_attr_t {};
++    if (auto const failed = ::pthread_attr_init(&attributes); failed != 0)
++        throw std::system_error(failed, std::generic_category(), "pthread_attr_init");
++    auto const size = std::max(stackBytes, static_cast<std::size_t>(PTHREAD_STACK_MIN));
++    auto failed = ::pthread_attr_setstacksize(&attributes, size);
++    if (failed == 0)
++        failed = ::pthread_create(&_state->thread, &attributes, &runBody, _state.get());
++    ::pthread_attr_destroy(&attributes);
++    if (failed != 0)
++        throw std::system_error(failed, std::generic_category(), "pthread_create");
++#endif
++}
++
++ExecutorThread::ExecutorThread(ExecutorThread&&) noexcept = default;
++
++ExecutorThread& ExecutorThread::operator=(ExecutorThread&& other) noexcept
++{
++    if (this != &other)
++    {
++        join();
++        _state = std::move(other._state);
++    }
++    return *this;
++}
++
++ExecutorThread::~ExecutorThread()
++{
++    join();
++}
++
++void ExecutorThread::join() noexcept
++{
++    if (!_state)
++        return;
++#ifdef _WIN32
++    ::WaitForSingleObject(_state->thread, INFINITE);
++    ::CloseHandle(_state->thread);
++#else
++    ::pthread_join(_state->thread, nullptr);
++#endif
++    _state.reset();
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/ExecutorThread.hpp b/src/vtextension/wasm/host/ExecutorThread.hpp
+new file mode 100644
+index 000000000..49572699b
+--- /dev/null
++++ b/src/vtextension/wasm/host/ExecutorThread.hpp
+@@ -0,0 +1,42 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// A thread whose stack size is chosen: what std::thread and std::jthread cannot do, and what a lane executor
++/// needs, since the guest calls it nests run on its stack.
++
++#include <cstddef>
++#include <functional>
++#include <memory>
++
++namespace vtextension::wasm::host
++{
++
++/// A thread running one function on a stack of a chosen size, joined when it is destroyed. Move-only.
++class ExecutorThread
++{
++  public:
++    /// The platform's handle and the function it runs, at a stable address the thread is handed; defined in
++    /// ExecutorThread.cpp.
++    struct State;
++
++    /// Starts @p body on a new thread.
++    /// @param stackBytes The least stack the thread gets; the platform's minimum if that is larger.
++    /// @param body What the thread runs. Must not throw.
++    /// @throws std::system_error if the thread could not be started, as std::thread does.
++    ExecutorThread(std::size_t stackBytes, std::function<void()> body);
++    ExecutorThread(ExecutorThread&&) noexcept;
++    ExecutorThread& operator=(ExecutorThread&&) noexcept;
++    ExecutorThread(ExecutorThread const&) = delete;
++    ExecutorThread& operator=(ExecutorThread const&) = delete;
++    /// Joins the thread, unless it was joined or moved from.
++    ~ExecutorThread();
++
++    /// Waits until the thread finished. Idempotent.
++    void join() noexcept;
++
++  private:
++    std::unique_ptr<State> _state;
++};
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostServer.cpp b/src/vtextension/wasm/host/HostServer.cpp
+index 138f46c8f..9e5354239 100644
+--- a/src/vtextension/wasm/host/HostServer.cpp
++++ b/src/vtextension/wasm/host/HostServer.cpp
+@@ -6,29 +6,29 @@
+ #include <algorithm>
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <span>
+ #include <string>
+-#include <thread>
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/host/ExecutorThread.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ namespace proto = remote::proto;
+ using remote::transport::Channel;
+ using remote::transport::PduStream;
+ using remote::transport::StreamError;
+@@ -98,46 +98,41 @@ namespace
+     };
+ 
+     /// One export a Call may name.
+     struct CallableExport
+     {
+         ExportFunction function;    ///< Its handle on the instance.
+         std::size_t parameters = 0; ///< How many i32s it takes.
+         std::size_t results = 0;    ///< How many i32s it returns.
+     };
+ 
++    /// Whether a MemoryWrite failed since the call it belongs to was served.
++    enum class WriteState : uint8_t
++    {
++        Clean,
++        Failed, ///< Fails the instance's next Call, or the HostResult its parked call awaits.
++    };
++
+     /// No lane uses an instance.
+     constexpr auto NoLane = uint32_t { 0 };
+ 
+     /// An instance, what may be called on it, and which lane uses it.
+     struct InstanceSlot
+     {
+         std::shared_ptr<ModuleSlot> module; ///< Declared first, so released after the instance.
+         std::unique_ptr<IWasmInstance> instance;
+         std::unordered_map<uint32_t, CallableExport> exports; ///< By ordinal; fixed once instantiated.
+         /// The tag of the lane using it (its index + 1), NoLane if none: a call or memory access holds it,
+         /// and a lane's nested calls into it share it.
+         std::atomic<uint32_t> lane { NoLane };
+-    };
+-
+-    /// Whether a lane serves on.
+-    enum class LaneState : uint8_t
+-    {
+-        Serving,
+-        Ended,
+-    };
+-
+-    /// Whether a MemoryWrite failed since the call it belongs to was served.
+-    enum class WriteState : uint8_t
+-    {
+-        Clean,
+-        Failed, ///< Fails the next Call, or the HostResult awaited, on the lane.
++        /// Whether a MemoryWrite into it failed; touched only by the lane holding it.
++        WriteState write = WriteState::Clean;
+     };
+ 
+     /// Whether a lane's hold on an instance is the one that releases it.
+     enum class HoldRole : uint8_t
+     {
+         Nested,    ///< The lane held it already, further up its stack.
+         Outermost, ///< The lane took it.
+     };
+ 
+     /// A lane's hold on an instance, for one call or memory access: refused while another lane holds it.
+@@ -182,44 +177,49 @@ class HostServer::Impl
+     Impl(IHostedEngine& engine, std::vector<Channel> lanes, Channel control, HostServerConfig config);
+ 
+     [[nodiscard]] ServerExit run();
+     void stop() noexcept { finish(ServerExit::Stopped); }
+     void interrupt(uint32_t instanceId) noexcept;
+ 
+   private:
+     /// One lane, served by an executor thread of its own; only that thread touches it, but for shutdown().
+     struct Lane
+     {
+-        Impl* server;                         ///< The server it belongs to.
+-        PduStream stream;                     ///< The helper's end.
+-        uint32_t tag;                         ///< Its index + 1: what it holds instances with.
+-        std::optional<ServerExit> ended;      ///< Why it stopped serving; nothing while it serves.
+-        WriteState write = WriteState::Clean; ///< Whether a MemoryWrite failed.
++        Impl* server;                    ///< The server it belongs to.
++        PduStream stream;                ///< The helper's end.
++        uint32_t tag;                    ///< Its index + 1: what it holds instances with.
++        std::optional<ServerExit> ended; ///< Why it stopped serving; nothing while it serves.
++        /// The instances whose calls run on the lane, outermost first: one per guest call on its stack.
++        std::vector<InstanceSlot*> calls;
+         /// The executor thread's preparation: entered at its first call, renewed for a later generation.
+         std::unique_ptr<IThreadGuard> guard;
+     };
+ 
+     /// The host context of every instance: a host call is sent on the lane whose call made it.
+     class LaneHostContext final: public IHostContext
+     {
+       public:
+         [[nodiscard]] std::expected<void, ExtensionError> callHost(
+             std::size_t functionIndex, std::span<uint32_t const> arguments) noexcept override;
+     };
+ 
+     /// The lane whose call runs on this thread; null outside a call, and on the control thread.
+     static thread_local Lane* CurrentLane;
+ 
+     /// Ends the connection for @p reason, unless it ended already: interrupts every live instance, then shuts
+     /// every channel down, so that every thread blocked on one returns. Repeating it is harmless.
+     void finish(ServerExit reason) noexcept;
+ 
++    /// Releases every instance, module and runtime the parent did not, then the control thread's guard; on
++    /// the control thread, once every executor is joined.
++    void release() noexcept;
++
+     /// Prepares the calling thread for the engine's current generation, unless it is.
+     /// @param guard The thread's guard, replaced if it is for an earlier generation.
+     [[nodiscard]] std::expected<void, ExtensionError> prepare(std::unique_ptr<IThreadGuard>& guard);
+ 
+     // The control channel's requests, on the thread that runs the server.
+     [[nodiscard]] Served serve(proto::CreateRuntime const& request);
+     [[nodiscard]] Served serve(proto::Load& request);
+     [[nodiscard]] Served serve(proto::Instantiate const& request);
+     [[nodiscard]] Served serve(proto::Release const& request);
+     /// Anything else on control is a violation; the codec refuses what travels the other way already.
+@@ -280,76 +280,84 @@ HostServer::Impl::Impl(IHostedEngine& engine,
+ {
+     _lanes.reserve(lanes.size());
+     for (auto&& [index, channel]: core::views::enumerate(lanes))
+         _lanes.push_back(Lane { .server = this,
+                                 .stream = PduStream { std::move(channel),
+                                                       proto::ChannelKind::Lane,
+                                                       proto::Direction::ToHelper,
+                                                       config.limits },
+                                 .tag = static_cast<uint32_t>(index) + 1,
+                                 .ended = std::nullopt,
+-                                .write = WriteState::Clean,
++                                .calls = {},
+                                 .guard = nullptr });
+ }
+ 
+ ServerExit HostServer::Impl::run()
+ {
+-    auto executors = std::vector<std::jthread> {};
++    // Destroyed in reverse, on every way out, an exception's included: the connection ends (unblocking every
++    // executor), the executors are joined, then every engine object goes, here on the control thread.
++    auto releaseAll = core::Finally { [this] { release(); } };
++    auto executors = std::vector<ExecutorThread> {};
++    auto endConnection = core::Finally { [this] { finish(ServerExit::ProtocolViolation); } };
+     auto const hello = send(_control,
+                             proto::Hello { .version = proto::ProtocolVersion,
+                                            .memoryMode = _engine.memoryMode(),
+                                            .lockdown = _config.lockdown });
+     if (hello)
+     {
+         executors.reserve(_lanes.size());
+         for (auto& lane: _lanes)
+-            executors.emplace_back([this, &lane] { runLane(lane); });
++            executors.emplace_back(ExecutorStackBytes, [this, &lane] { runLane(lane); });
+         while (true)
+         {
+             auto request = _control.receive();
+             if (!request)
+             {
+                 finish(exitOf(request.error()));
+                 break;
+             }
+             auto const served = std::visit([&](auto& pdu) { return serve(pdu); }, *request);
+             if (!served)
+             {
+                 finish(served.error());
+                 break;
+             }
+         }
+     }
+     else
+         finish(hello.error());
+ 
+     // Every channel is shut down by now, and every instance interrupted: each executor returns.
++    endConnection.run();
+     executors.clear();
++    releaseAll.run();
++    auto const lock = std::scoped_lock { _mutex };
++    return _exit.value_or(ServerExit::Stopped);
++}
+ 
++void HostServer::Impl::release() noexcept
++{
+     // What the parent never released goes here, still on a prepared thread; outside the lock, which an
+     // interrupt() racing this takes.
+     auto runtimes = decltype(_runtimes) {};
+     auto modules = decltype(_modules) {};
+     auto instances = decltype(_instances) {};
+-    auto exit = ServerExit::Stopped;
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         runtimes = std::exchange(_runtimes, {});
+         modules = std::exchange(_modules, {});
+         instances = std::exchange(_instances, {});
+-        exit = _exit.value_or(ServerExit::Stopped);
+     }
+     instances.clear();
+     modules.clear();
+     runtimes.clear();
+     _controlGuard.reset();
+-    return exit;
+ }
+ 
+ void HostServer::Impl::finish(ServerExit reason) noexcept
+ {
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         if (!_exit)
+             _exit = reason;
+         for (auto const& [id, slot]: _instances)
+             slot->instance->interrupt();
+@@ -382,20 +390,25 @@ std::shared_ptr<InstanceSlot> HostServer::Impl::instanceOf(uint32_t id)
+     return found != _instances.end() ? found->second : nullptr;
+ }
+ 
+ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
+ {
+     if (!_runtimeIds.insert(request.runtimeId).second)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     // The engine is handed views of the server's own copy of the strings, which outlives the runtime.
+     auto slot =
+         std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
++    // A stack the executors cannot hold MaxCallDepth of is refused, before the engine sees it.
++    if (request.stackBytes > MaxRuntimeStackBytes)
++        return send(_control,
++                    proto::RuntimeCreated { .runtimeId = request.runtimeId,
++                                            .error = ExtensionError::RuntimeUnavailable });
+     auto table = std::vector<HostFunction> {};
+     table.reserve(slot->functions.size());
+     for (auto const& function: slot->functions)
+         table.push_back(HostFunction {
+             .module = function.module, .name = function.name, .parameterCount = function.parameterCount });
+     auto created =
+         _engine.createRuntime(RuntimeLimits { .memoryBytes = static_cast<std::size_t>(request.memoryBytes),
+                                               .stackBytes = static_cast<std::size_t>(request.stackBytes) },
+                               table);
+     auto error = std::optional<ExtensionError> {};
+@@ -496,21 +509,23 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
+         _instances.emplace(request.instanceId, slot);
+     }
+     auto const answer = proto::Pdu { proto::Instantiated {
+         .instanceId = request.instanceId, .error = std::nullopt, .callableExports = std::move(callable) } };
+     auto const refusal = proto::Pdu { proto::Instantiated { .instanceId = request.instanceId,
+                                                             .error = ExtensionError::InvalidComponent,
+                                                             .callableExports = {} } };
+     return sendOrRefuse(_control, answer, refusal).transform([&](proto::Pdu const* sent) {
+         if (sent == &answer)
+             return;
++        // Stopped for good, as a released one is, should a lane have reached it meanwhile.
+         auto const lock = std::scoped_lock { _mutex };
++        slot->instance->interrupt();
+         _instances.erase(request.instanceId);
+     });
+ }
+ 
+ Served HostServer::Impl::serve(proto::Release const& request)
+ {
+     // Released outside the lock; a lane still holding it releases it when its call returns.
+     auto released = std::shared_ptr<void> {};
+     {
+         auto const lock = std::scoped_lock { _mutex };
+@@ -559,33 +574,40 @@ void HostServer::Impl::runLane(Lane& lane)
+ 
+ Served HostServer::Impl::serve(Lane& lane, proto::Call const& request)
+ {
+     auto const slot = instanceOf(request.instanceId);
+     if (!slot)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     auto const callable = slot->exports.find(request.exportOrdinal);
+     if (callable == slot->exports.end() || request.argv.size() != callable->second.parameters)
+         return std::unexpected(ServerExit::ProtocolViolation);
+ 
++    // Each guest call on the lane runs on its executor's stack, with a stack limit of its own: the depth
++    // bounds what they take together (ExecutorStackBytes).
++    if (lane.calls.size() >= MaxCallDepth)
++        return std::unexpected(ServerExit::ProtocolViolation);
++
+     auto result = proto::CallResult {};
+     {
+         auto const hold = InstanceHold::take(*slot, lane.tag);
+         if (!hold)
+             return std::unexpected(ServerExit::ProtocolViolation);
+-        if (std::exchange(lane.write, WriteState::Clean) == WriteState::Failed || !prepare(lane.guard))
++        if (std::exchange(slot->write, WriteState::Clean) == WriteState::Failed || !prepare(lane.guard))
+             result.failure = CallFailure::Trap;
+         else
+         {
+             auto argv = request.argv;
+             argv.resize(std::max(callable->second.parameters, callable->second.results));
+             auto const outer = std::exchange(CurrentLane, &lane);
++            lane.calls.push_back(slot.get());
+             auto const called = slot->instance->call(callable->second.function, argv);
++            lane.calls.pop_back();
+             CurrentLane = outer;
+             if (called)
+             {
+                 argv.resize(callable->second.results);
+                 result.argv = std::move(argv);
+             }
+             else
+                 result.failure = called.error();
+         }
+     }
+@@ -621,21 +643,21 @@ Served HostServer::Impl::serve(Lane& lane, proto::MemoryWrite const& request)
+     if (!slot)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     auto const hold = InstanceHold::take(*slot, lane.tag);
+     if (!hold)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     // The stream's memory cap keeps the size within 32 bits.
+     if (auto const view =
+             slot->instance->memory(request.address, static_cast<uint32_t>(request.bytes.size())))
+         std::ranges::copy(request.bytes, view->begin());
+     else
+-        lane.write = WriteState::Failed;
++        slot->write = WriteState::Failed;
+     return {};
+ }
+ 
+ std::expected<void, ExtensionError> HostServer::Impl::awaitHost(Lane& lane,
+                                                                 std::size_t functionIndex,
+                                                                 std::span<uint32_t const> arguments)
+ {
+     // Every way out but a HostResult fails the host call, which stops the guest's call; the lane's reason
+     // then ends the connection once that call returned.
+     auto const sent = send(lane.stream,
+@@ -649,21 +671,22 @@ std::expected<void, ExtensionError> HostServer::Impl::awaitHost(Lane& lane,
+     while (!lane.ended)
+     {
+         auto request = lane.stream.receive();
+         if (!request)
+         {
+             lane.ended = exitOf(request.error());
+             break;
+         }
+         if (auto const* result = std::get_if<proto::HostResult>(&*request))
+         {
+-            if (std::exchange(lane.write, WriteState::Clean) == WriteState::Failed)
++            // A write into the parked call's instance that failed fails that call.
++            if (std::exchange(lane.calls.back()->write, WriteState::Clean) == WriteState::Failed)
+                 return std::unexpected(ExtensionError::Trapped);
+             if (result->error)
+                 return std::unexpected(*result->error);
+             return {};
+         }
+         // A call back in, or the guest's memory: served on this thread, as the parent is parked on this lane.
+         auto const served = std::visit([&](auto const& pdu) { return serve(lane, pdu); }, *request);
+         if (!served)
+             lane.ended = served.error();
+     }
+diff --git a/src/vtextension/wasm/host/HostServer.hpp b/src/vtextension/wasm/host/HostServer.hpp
+index c8e7987be..b5206c849 100644
+--- a/src/vtextension/wasm/host/HostServer.hpp
++++ b/src/vtextension/wasm/host/HostServer.hpp
+@@ -4,31 +4,52 @@
+ /// @file
+ /// The extension host's side of the protocol: serves runtimes, modules and instances of one engine to the
+ /// parent at the other end of its channels.
+ ///
+ /// The control channel creates and releases runtimes, modules and instances, on the thread that runs the
+ /// server; each lane runs one parent thread's calls, host calls and memory accesses, on an executor thread of
+ /// its own. A host call a guest makes is sent on the lane the call came in on, and the parent may call back
+ /// in, on that lane, before it answers. Ids are the parent's: one the parent never created, or creates twice,
+ /// is a protocol violation, as is any PDU out of place. A violation ends the connection.
+ 
++#include <cstddef>
+ #include <cstdint>
+ #include <memory>
+ #include <vector>
+ 
++#include <vtextension/ExtensionLimits.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
++/// The most guest calls one lane runs at once: its outermost call, and those the parent makes back in while
++/// host calls wait. A Call past it is a protocol violation.
++inline constexpr std::size_t MaxCallDepth = 8;
++
++/// The largest stack a runtime may give each instance's calls (RuntimeLimits::stackBytes); a CreateRuntime
++/// asking for more is refused (`RuntimeUnavailable`). Each guest call on a lane sets its own limit from where
++/// the lane's stack stands, so the lane's thread must hold MaxCallDepth of them.
++inline constexpr std::size_t MaxRuntimeStackBytes = std::size_t { 1024 } * 1024;
++
++/// What one guest call on a lane may take of its thread's stack besides the guest's own: the engine's entry,
++/// the host call's way out and the server's frames serving the lane meanwhile, sanitizers included.
++inline constexpr std::size_t HostFrameBytes = std::size_t { 256 } * 1024;
++
++/// The stack each lane's executor thread runs on: MaxCallDepth guest calls at their largest.
++inline constexpr std::size_t ExecutorStackBytes = MaxCallDepth * (MaxRuntimeStackBytes + HostFrameBytes);
++
++static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
++              "a host runs the stack the parent gives");
++
+ /// How a host server runs.
+ struct HostServerConfig
+ {
+     remote::proto::PduLimits limits {}; ///< The caps of the PDUs it receives, and sends.
+     /// How far the host confined itself, as its Hello states.
+     remote::proto::LockdownState lockdown = remote::proto::LockdownState::Unsandboxed;
+ };
+ 
+ /// Why a host server stopped serving.
+ enum class ServerExit : uint8_t
+@@ -49,23 +70,23 @@ class HostServer
+     HostServer(IHostedEngine& engine,
+                std::vector<remote::transport::Channel> lanes,
+                remote::transport::Channel control,
+                HostServerConfig config);
+     ~HostServer();
+     HostServer(HostServer const&) = delete;
+     HostServer(HostServer&&) = delete;
+     HostServer& operator=(HostServer const&) = delete;
+     HostServer& operator=(HostServer&&) = delete;
+ 
+-    /// Sends Hello, starts one executor jthread per lane, serves control on the calling thread until EOF,
+-    /// a violation or stop(); then stops, joins the executors, releases every instance, module, runtime.
+-    /// Called once.
++    /// Sends Hello, starts one executor thread per lane (of ExecutorStackBytes), serves control on the
++    /// calling thread until EOF, a violation or stop(); then stops, joins the executors, releases every
++    /// instance, module, runtime. Called once.
+     /// @return Why it stopped serving: the first of the reasons that came up, on any channel.
+     [[nodiscard]] ServerExit run();
+ 
+     /// Thread-safe, idempotent: interrupts every live instance, shuts every channel down. Callable before,
+     /// during and after run(); run() then returns `Stopped`, unless it had stopped for another reason first.
+     void stop() noexcept;
+ 
+     /// Interrupts one instance; a brief mutex over the instance map, no I/O. Unknown id: ignored.
+     /// @param instanceId The parent-chosen id of the instance.
+     void interrupt(uint32_t instanceId) noexcept;
+diff --git a/src/vtextension/wasm/host/HostServer_test.cpp b/src/vtextension/wasm/host/HostServer_test.cpp
+index 6d30ab713..b351bd735 100644
+--- a/src/vtextension/wasm/host/HostServer_test.cpp
++++ b/src/vtextension/wasm/host/HostServer_test.cpp
+@@ -32,20 +32,22 @@
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::ModuleIdentity;
+ using vtextension::wasm::host::HostServer;
+ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
++using vtextension::wasm::host::MaxCallDepth;
++using vtextension::wasm::host::MaxRuntimeStackBytes;
+ using vtextension::wasm::host::ServerExit;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+ using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::remote::transport::StreamError;
+ using vtextension::wasm::testing::makeHostedEngine;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+@@ -235,20 +237,45 @@ class ScriptedParent
+ ///       (import "contract:test/host@0" "ping" (func $ping (param i32)))
+ ///       (func $start (call $ping (i32.const 5)))
+ ///       (start $start))
+ constexpr auto StartPingModule = std::to_array<uint8_t>({
+     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60, 0x00,
+     0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74, 0x65, 0x73,
+     0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00, 0x00, 0x03, 0x02,
+     0x01, 0x01, 0x08, 0x01, 0x01, 0x0a, 0x08, 0x01, 0x06, 0x00, 0x41, 0x05, 0x10, 0x00, 0x0b,
+ });
+ 
++/// Exports one function, taking and returning nothing.
++///
++///     (module (func (export "f")))
++constexpr auto OneExportModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
++    0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
++});
++
++/// Recurses `n` calls deep, then calls `pair(0, 0)`: a host call with `n` guest frames beneath it.
++///
++///     (module
++///       (import "contract:test/host@0" "pair" (func $pair (param i32 i32)))
++///       (func $down (export "down") (param i32)
++///         (if (local.get 0)
++///           (then (call $down (i32.sub (local.get 0) (i32.const 1))))
++///           (else (call $pair (i32.const 0) (i32.const 0))))))
++constexpr auto DeepModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0a, 0x02, 0x60, 0x02, 0x7f, 0x7f,
++    0x00, 0x60, 0x01, 0x7f, 0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61,
++    0x63, 0x74, 0x3a, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04,
++    0x70, 0x61, 0x69, 0x72, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x07, 0x08, 0x01, 0x04, 0x64,
++    0x6f, 0x77, 0x6e, 0x00, 0x01, 0x0a, 0x17, 0x01, 0x15, 0x00, 0x20, 0x00, 0x04, 0x40, 0x20,
++    0x00, 0x41, 0x01, 0x6b, 0x10, 0x01, 0x05, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0b, 0x0b,
++});
++
+ /// Appends @p value to @p out as an unsigned LEB128.
+ void appendLeb(std::vector<std::byte>& out, uint32_t value)
+ {
+     do
+     {
+         auto const low = static_cast<uint8_t>(value & 0x7f);
+         value >>= 7;
+         out.push_back(std::byte { static_cast<uint8_t>(low | (value != 0 ? 0x80 : 0x00)) });
+     } while (value != 0);
+ }
+@@ -446,20 +473,186 @@ TEST_CASE("HostServer.memoryOpsOnTheLane", "[vtextension][host]")
+         parent.send(
+             0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "add"), .argv = { 1, 2 } });
+         CHECK(parent.receive(0)
+               == proto::Pdu { proto::CallResult { .failure = CallFailure::Trap, .argv = {} } });
+         // Only that one.
+         parent.send(
+             0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "add"), .argv = { 1, 2 } });
+         CHECK(parent.receive(0)
+               == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 3 } } });
+     }
++
++    SECTION("a write out of bounds fails its own instance's call, not a nested one's")
++    {
++        parent.instantiateOk(1, 2);
++        parent.send(0,
++                    proto::Call {
++                        .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "ping-then-store"), .argv = {} });
++        CHECK(parent.receive(0)
++              == proto::Pdu { proto::CallHost { .functionIndex = 0, .arguments = { 42 } } });
++        parent.send(0,
++                    proto::MemoryWrite {
++                        .instanceId = 1, .address = contract::PageBytes - 2, .bytes = bytes("abcd") });
++        parent.send(
++            0, proto::Call { .instanceId = 2, .exportOrdinal = ordinalOf(loaded, "add"), .argv = { 2, 3 } });
++        CHECK(parent.receive(0)
++              == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 5 } } });
++        parent.send(0, proto::HostResult { .error = std::nullopt });
++        CHECK(parent.receive(0)
++              == proto::Pdu { proto::CallResult { .failure = CallFailure::HostFailure, .argv = {} } });
++    }
++
++    SECTION("an unknown instance is a violation")
++    {
++        parent.send(0, proto::MemoryRead { .instanceId = 42, .address = 0, .size = 4 });
++        CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
++    }
++}
++
++TEST_CASE("HostServer.busyInstanceIsRefusedOnAnotherLane", "[vtextension][host]")
++{
++    auto parent = ScriptedParent {};
++    parent.skipHello();
++    parent.createRuntime(1);
++    auto const loaded = parent.loadOk(1, 1, toModule(contract::PairModule));
++    parent.instantiateOk(1, 1);
++
++    // Lane 0's call is parked in its host call: the instance is lane 0's until that call returns.
++    parent.send(
++        0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "pair"), .argv = { 7, 9 } });
++    CHECK(parent.receive(0) == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 7, 9 } } });
++
++    SECTION("a call")
++    {
++        parent.send(
++            1, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "pair"), .argv = { 1, 2 } });
++    }
++    SECTION("a memory read")
++    {
++        parent.send(1, proto::MemoryRead { .instanceId = 1, .address = 0, .size = 4 });
++    }
++    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
++    CHECK(parent.lanes.at(1).receive() == std::unexpected(StreamError::Closed));
++}
++
++TEST_CASE("HostServer.callDepthIsBounded", "[vtextension][host]")
++{
++    auto parent = ScriptedParent {};
++    parent.skipHello();
++    parent.createRuntime(1);
++    auto const loaded = parent.loadOk(1, 1, toModule(contract::PairModule));
++    parent.instantiateOk(1, 1);
++    parent.instantiateOk(1, 2);
++    auto const pair = ordinalOf(loaded, "pair");
++
++    // MaxCallDepth calls, alternating between two instances, each parked in its host call.
++    for (auto const depth: std::views::iota(uint32_t { 0 }, static_cast<uint32_t>(MaxCallDepth)))
++    {
++        parent.send(
++            0, proto::Call { .instanceId = 1 + (depth % 2), .exportOrdinal = pair, .argv = { depth, 0 } });
++        CHECK(parent.receive(0)
++              == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { depth, 0 } } });
++    }
++
++    SECTION("up to the bound, every call returns")
++    {
++        for ([[maybe_unused]] auto const depth: std::views::iota(std::size_t { 0 }, MaxCallDepth))
++        {
++            parent.send(0, proto::HostResult { .error = std::nullopt });
++            CHECK(parent.receive(0)
++                  == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = {} } });
++        }
++    }
++
++    SECTION("one past it is a violation")
++    {
++        parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = pair, .argv = { 1, 1 } });
++        CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
++    }
++}
++
++TEST_CASE("HostServer.nestedCallsFitTheExecutorStack", "[vtextension][host]")
++{
++    // Each instance's calls get a stack limit of their own, counted from where the lane's stack stands when
++    // they begin: MaxCallDepth calls into as many instances, each nearly filling the largest stack a runtime
++    // may give, must fit one executor's stack.
++    auto parent = ScriptedParent {};
++    parent.skipHello();
++    auto functions = std::vector<proto::WireHostFunction> {};
++    for (auto const& function: contract::HostFunctions)
++        functions.push_back(proto::WireHostFunction { .module = std::string { function.module },
++                                                      .name = std::string { function.name },
++                                                      .parameterCount = function.parameterCount });
++    parent.sendControl(proto::CreateRuntime { .runtimeId = 1,
++                                              .memoryBytes = contract::Limits.memoryBytes,
++                                              .stackBytes = MaxRuntimeStackBytes,
++                                              .functions = std::move(functions) });
++    REQUIRE(parent.receiveControl()
++            == proto::Pdu { proto::RuntimeCreated { .runtimeId = 1, .error = std::nullopt } });
++    auto const loaded = parent.loadOk(1, 1, toModule(DeepModule));
++    auto const down = ordinalOf(loaded, "down");
++    for (auto const instance: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(MaxCallDepth) + 1))
++        parent.instantiateOk(1, instance);
++
++    // How deep one call may recurse before its stack runs out: the deepest that reaches the host call.
++    auto const reachesTheHost = [&](uint32_t depth) {
++        parent.send(1, proto::Call { .instanceId = 1, .exportOrdinal = down, .argv = { depth } });
++        auto const answer = parent.receive(1);
++        if (std::holds_alternative<proto::CallResult>(answer))
++            return false;
++        parent.send(1, proto::HostResult { .error = std::nullopt });
++        std::ignore = parent.receive(1);
++        return true;
++    };
++    auto shallow = uint32_t { 0 };
++    auto deep = uint32_t { 1 } << 22;
++    while (deep - shallow > 1)
++    {
++        auto const middle = shallow + ((deep - shallow) / 2);
++        (reachesTheHost(middle) ? shallow : deep) = middle;
++    }
++    REQUIRE(shallow > 1000);
++    // Within a few frames of the limit: the calls take nearly MaxCallDepth whole stacks between them.
++    auto const depth = shallow - 64;
++
++    for (auto const instance: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(MaxCallDepth) + 1))
++    {
++        parent.send(0, proto::Call { .instanceId = instance, .exportOrdinal = down, .argv = { depth } });
++        REQUIRE(parent.receive(0)
++                == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 0, 0 } } });
++    }
++    for ([[maybe_unused]] auto const instance: std::views::iota(std::size_t { 0 }, MaxCallDepth))
++    {
++        parent.send(0, proto::HostResult { .error = std::nullopt });
++        CHECK(parent.receive(0) == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = {} } });
++    }
++}
++
++TEST_CASE("HostServer.refusesAStackTheLanesCannotHold", "[vtextension][host]")
++{
++    auto parent = ScriptedParent {};
++    parent.skipHello();
++    parent.sendControl(proto::CreateRuntime { .runtimeId = 1,
++                                              .memoryBytes = contract::Limits.memoryBytes,
++                                              .stackBytes = MaxRuntimeStackBytes + 1,
++                                              .functions = {} });
++    CHECK(parent.receiveControl()
++          == proto::Pdu {
++              proto::RuntimeCreated { .runtimeId = 1, .error = ExtensionError::RuntimeUnavailable } });
++
++    // The largest it holds is accepted.
++    parent.sendControl(proto::CreateRuntime { .runtimeId = 2,
++                                              .memoryBytes = contract::Limits.memoryBytes,
++                                              .stackBytes = MaxRuntimeStackBytes,
++                                              .functions = {} });
++    CHECK(parent.receiveControl()
++          == proto::Pdu { proto::RuntimeCreated { .runtimeId = 2, .error = std::nullopt } });
+ }
+ 
+ TEST_CASE("HostServer.malformedFrameEndsTheConnection", "[vtextension][host]")
+ {
+     auto parent = ScriptedParent { HostServerConfig {}, LaneZero::Raw };
+     parent.skipHello();
+ 
+     auto const garbage = std::to_array<uint8_t>({ 0x03, 0x00, 0xff, 0xff });
+     REQUIRE(parent.rawLaneZero->send(garbage).has_value());
+ 
+@@ -489,20 +682,48 @@ TEST_CASE("HostServer.stopInterruptsARunningGuest", "[vtextension][host]")
+     auto const loaded = parent.loadOk(1, 1, toModule(contract::InstanceModule));
+     parent.instantiateOk(1, 1);
+ 
+     parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "spin"), .argv = {} });
+     std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+     parent.server->stop();
+     CHECK(parent.exitWithinDeadline() == ServerExit::Stopped);
+     parent.server->stop(); // idempotent
+ }
+ 
++TEST_CASE("HostServer.stopEndsAParkedCall", "[vtextension][host]")
++{
++    auto parent = ScriptedParent {};
++    parent.skipHello();
++    parent.createRuntime(1);
++    auto const loaded = parent.loadOk(1, 1, toModule(contract::PairModule));
++    parent.instantiateOk(1, 1);
++
++    parent.send(
++        0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "pair"), .argv = { 7, 9 } });
++    CHECK(parent.receive(0) == proto::Pdu { proto::CallHost { .functionIndex = 1, .arguments = { 7, 9 } } });
++    parent.server->stop();
++    CHECK(parent.exitWithinDeadline() == ServerExit::Stopped);
++    CHECK(parent.lanes.front().receive() == std::unexpected(StreamError::Closed));
++}
++
++TEST_CASE("HostServer.stopBeforeRun", "[vtextension][host]")
++{
++    auto const engine = makeHostedEngine();
++    auto control = makeChannelPair();
++    REQUIRE(control.has_value());
++    auto server = HostServer { *engine, {}, std::move(control->helper), HostServerConfig {} };
++    server.stop();
++    CHECK(server.run() == ServerExit::Stopped);
++    CHECK(parentControl(std::move(control->parent), proto::PduLimits {}).receive()
++          == std::unexpected(StreamError::Closed));
++}
++
+ TEST_CASE("HostServer.interruptStopsOneInstance", "[vtextension][host]")
+ {
+     auto parent = ScriptedParent {};
+     parent.skipHello();
+     parent.createRuntime(1);
+     auto const loaded = parent.loadOk(1, 1, toModule(contract::InstanceModule));
+     parent.instantiateOk(1, 1);
+     parent.instantiateOk(1, 2);
+ 
+     parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "spin"), .argv = {} });
+@@ -580,20 +801,39 @@ TEST_CASE("HostServer.describingPastTheCapFailsTheLoad", "[vtextension][host]")
+     REQUIRE(module.size() < config.limits.maxModuleBytes);
+     CHECK(parent.load(1, 1, module)
+           == proto::Loaded {
+               .moduleId = 1, .error = ExtensionError::InvalidComponent, .imports = {}, .exports = {} });
+ 
+     // A module never described is never instantiated: the id is not the server's.
+     std::ignore = parent.loadOk(1, 2, toModule(contract::InstanceModule));
+     parent.instantiateOk(2, 1);
+ }
+ 
++TEST_CASE("HostServer.callablesPastTheCapFailTheInstantiation", "[vtextension][host]")
++{
++    // Under a module cap of three bytes an Instantiated holds at most three, and naming one callable export
++    // takes four; the module itself (31 bytes) still fits the Load's slack, and its description the Loaded's.
++    auto const config =
++        HostServerConfig { .limits = proto::PduLimits { .maxModuleBytes = 3, .maxMemoryBytes = 1024 } };
++    auto parent = ScriptedParent { config };
++    parent.skipHello();
++    parent.createRuntime(1);
++    std::ignore = parent.loadOk(1, 1, toModule(OneExportModule));
++    CHECK(parent.instantiate(1, 1)
++          == proto::Instantiated {
++              .instanceId = 1, .error = ExtensionError::InvalidComponent, .callableExports = {} });
++
++    // The instance went with the refusal: a call of it is not the server's to serve.
++    parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = 0, .argv = {} });
++    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
++}
++
+ TEST_CASE("InProcessHost.connectStartsAServingHost", "[vtextension][host]")
+ {
+     auto connector = InProcessHostConnector { [] { return makeHostedEngine(); }, HostServerConfig {} };
+     auto connection = connector.connect();
+     REQUIRE(connection.has_value());
+     CHECK(connection->lanes.size() == MaxLaneChannels);
+     CHECK(connector.connects() == 1);
+     CHECK(connector.liveHosts() == 1);
+ 
+     auto control = parentControl(std::move(connection->control), proto::PduLimits {});
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 119a01616..2ac42ac02 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -51,29 +51,27 @@ if(VTEXTENSION_FUZZING)
+     # coverage runtime in each of them).
+     #
+     # Not an OBJECT library both share: the fuzzer's copy needs the fuzzer's compile flags, which the
+     # library's must not have. Both compile _codec_sources, so a new codec source reaches both.
+     add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp ${_codec_sources})
+     target_include_directories(vtextension_remote_fuzz PRIVATE ${PROJECT_SOURCE_DIR}/src)
+     target_compile_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+     target_link_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+ endif()
+ 
+-if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime)
++if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+     # The host's server, and (later) the backend that reaches it, driven over real channels on a real engine:
+-    # Wasmtime's, the engine a host process runs, reached through a neutral probe (../testing/HostedEngine.hpp)
+-    # defined in its directory.
++    # Wasmtime's, the engine a host process runs, reached through its directory's neutral test probe
++    # (vtextension_wasmtime_hosted_engine).
+     add_executable(vtextension_remote_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         ../host/HostServer_test.cpp
+-        ../testing/HostedEngine.hpp
+-        ../wasmtime/HostedEngine.cpp
+     )
+     target_link_libraries(vtextension_remote_test PRIVATE
+-        vtextension vtextension_remote_wire vtextension_host vtextension_wasmtime contour::wasmtime core::testing
+-        Catch2::Catch2 contour_test_trace)
++        vtextension vtextension_remote_wire vtextension_host vtextension_wasmtime vtextension_wasmtime_hosted_engine
++        contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
+     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+diff --git a/src/vtextension/wasm/wasmtime/CMakeLists.txt b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+index b82d48792..8435ec3ec 100644
+--- a/src/vtextension/wasm/wasmtime/CMakeLists.txt
++++ b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+@@ -16,20 +16,30 @@ target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE contour::w
+ # feature the backend switches, from the same list the configure-time probe checks an installed Wasmtime
+ # against (cmake/ContourThirdParties.cmake).
+ ContourThirdParties_WasmtimeFeatureChecks(_wasmtime_feature_checks ${_WASMTIME_REQUIRED_FEATURES})
+ file(CONFIGURE
+     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp"
+     CONTENT "// SPDX-License-Identifier: Apache-2.0\n// Generated by CMake from _WASMTIME_REQUIRED_FEATURES (cmake/ContourThirdParties.cmake).\n#pragma once\n\n${_wasmtime_feature_checks}"
+     @ONLY
+ )
+ target_include_directories(vtextension_wasmtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+ 
++if(VTEXTENSION_TESTING)
++    # Test support for the extension host's suite (vtextension_remote_test): the engine a host process drives,
++    # reached through a neutral probe (../testing/HostedEngine.hpp), so that the host's tests name no engine.
++    add_library(vtextension_wasmtime_hosted_engine STATIC
++        HostedEngine.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/testing/HostedEngine.hpp
++    )
++    target_link_libraries(vtextension_wasmtime_hosted_engine PUBLIC vtextension_wasmtime)
++endif()
++
+ if(VTEXTENSION_TESTING AND CONTOUR_WASMTIME_MISSING_TEST_FEATURES)
+     list(JOIN CONTOUR_WASMTIME_MISSING_TEST_FEATURES ", " _wasmtime_missing_text)
+     message(STATUS "vtextension_wasmtime_test is not built: the installed Wasmtime lacks ${_wasmtime_missing_text}, "
+         "which its tests need.")
+ elseif(VTEXTENSION_TESTING)
+     # The backend's own suite: the contract, and what is Wasmtime's alone, which drives its C API directly.
+     # PreparedGeneration.cpp defines the probe runtime-agnostic tests read (../testing/PreparedGeneration.hpp).
+     add_executable(vtextension_wasmtime_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         PreparedGeneration.cpp

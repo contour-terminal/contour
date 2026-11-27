@@ -1,0 +1,373 @@
+b8f54327d fix(vtextension): an extension host is started with no console, and the loader probe says what it may load
+773748ec9 feat(vtextension): an extension host the loader ends is logged with why
+75fb55248 fix(vtextension): an instance refused for its answer's size is gone before the refusal is sent
+8538f54dc fix(vtextension): a contained extension host's environment names its container's own folders
+
+ .../wasm/remote/process/LoaderProbe_test.cpp       |  4 +-
+ .../wasm/remote/process/Process_win32.cpp          |  4 ++
+ .../wasm/remote/process/testing/LoaderProbe.cpp    | 40 ++++++++++-----
+ .../remote/process/testing/PeImports_win32.cpp     | 57 ++++++++++++++++++++--
+ .../remote/process/testing/PeImports_win32.hpp     | 13 +++--
+ 5 files changed, 97 insertions(+), 21 deletions(-)
+
+diff --git a/src/vtextension/wasm/remote/process/LoaderProbe_test.cpp b/src/vtextension/wasm/remote/process/LoaderProbe_test.cpp
+index e9c6a77e6..e27ad8d44 100644
+--- a/src/vtextension/wasm/remote/process/LoaderProbe_test.cpp
++++ b/src/vtextension/wasm/remote/process/LoaderProbe_test.cpp
+@@ -140,21 +140,21 @@ void checkLoaderRun(ProcessIsolation isolation, std::vector<std::filesystem::pat
+                      isolation == ProcessIsolation::AppContainer ? "contained" : "uncontained",
+                      process::exitStatusText(*status),
+                      text));
+     CHECK(*status == process::ExitStatus { .kind = process::ExitKind::Exited, .value = 0 });
+     auto const lines = linesOf(text);
+     CHECK(std::ranges::contains(lines, std::string { "started" }));
+     CHECK(afterPrefix(lines, "console=").has_value());
+     for (auto const& library: arguments)
+     {
+         INFO(library);
+-        CHECK(afterPrefix(lines, std::format("library={} ", library)) == "ok");
++        CHECK(afterPrefix(lines, std::format("library={} ", library)).value_or("(no line)") == "ok");
+     }
+     CHECK(std::ranges::contains(lines, std::string { "end" }));
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("LoaderProbe.importsKernel32Only", "[vtextension][appcontainer]")
+ {
+     // It must start wherever a process can, so that what it says is about the libraries it is given.
+     CHECK(process::testing::startupImportsOf(VTEXTENSION_LOADER_PROBE_PATH)
+@@ -174,17 +174,19 @@ TEST_CASE("LoaderProbe.containedProcessLoadsWhatItsExecutableImports", "[vtexten
+             case LoadedLibraries::None: checkLoaderRun(run.isolation, {}); break;
+             case LoadedLibraries::ExecutableImports:
+                 for (auto const* const executable: ContainedExecutables)
+                 {
+                     INFO(executable);
+                     auto const closure = process::testing::importClosureOf(executable);
+                     INFO("not found beside it nor in the system directory: "
+                          << (closure.unresolved.empty() ? std::string { "none" }
+                                                         : closure.unresolved.front()));
+                     CHECK(closure.unresolved.empty());
++                    // Read at all: every executable imports kernel32, and more.
++                    CHECK(!closure.libraries.empty());
+                     checkLoaderRun(run.isolation, closure.libraries);
+                 }
+                 break;
+         }
+     }
+ }
+ #endif
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.cpp b/src/vtextension/wasm/remote/process/Process_win32.cpp
+index c8cd42d06..2dd4c2eb3 100644
+--- a/src/vtextension/wasm/remote/process/Process_win32.cpp
++++ b/src/vtextension/wasm/remote/process/Process_win32.cpp
+@@ -527,20 +527,24 @@ namespace
+             auto startup = STARTUPINFOEXW {};
+             startup.StartupInfo.cb = sizeof(startup);
+             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+             startup.StartupInfo.hStdInput = nullDevice.get();
+             startup.StartupInfo.hStdOutput = nullDevice.get();
+             startup.StartupInfo.hStdError = childError;
+             startup.lpAttributeList = list->get();
+             auto info = PROCESS_INFORMATION {};
+             if (auto const allowed = allowInheritance(handleList); !allowed)
+                 return std::unexpected(allowed.error());
++            // No console (DETACHED_PROCESS): a contained child started with one of its own (CREATE_NO_WINDOW)
++            // died in its startup with 0xC0000142 on a Windows runner. Unverified why; a likely reason is
++            // that its console host is started as its child, which a contained child may not have
++            // (PROCESS_CREATION_CHILD_PROCESS_RESTRICTED).
+             auto const created =
+                 ::CreateProcessW(executable.c_str(),
+                                  commandLine.data(),
+                                  nullptr,
+                                  nullptr,
+                                  TRUE,
+                                  EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS,
+                                  block->data(),
+                                  workingDirectory.c_str(),
+                                  &startup.StartupInfo,
+diff --git a/src/vtextension/wasm/remote/process/testing/LoaderProbe.cpp b/src/vtextension/wasm/remote/process/testing/LoaderProbe.cpp
+index 4147c0e25..4ba02fea6 100644
+--- a/src/vtextension/wasm/remote/process/testing/LoaderProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LoaderProbe.cpp
+@@ -1,53 +1,54 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The loader probe (Windows only, test-only, never installed): what a process can load, said on its stderr by
+ // one that imports nothing but kernel32 -- its C runtime linked in -- so that it starts wherever a process
+ // can start at all, contained or not.
+ //
+ //   extension_host_loader_probe [LIBRARY]...
+ //
+-// It writes one line each: `started`; `console=ok`, or `console=error:<code>` with the Win32 error, for
+-// whether it may create a console of its own (AllocConsole(), freed again at once); `library=<LIBRARY> ok` or
++// It writes one line each, to the stderr it was started with: `started`; `console=ok`, or
++// `console=error:<code>` with the Win32 error, for whether it may create a console of its own
++// (AllocConsole(), freed again at once -- on a desktop a console window may flash); `library=<LIBRARY> ok` or
+ // `library=<LIBRARY> error:<code>` for each LIBRARY in the order given (none may hold a double quote), loaded
+ // with LoadLibraryExW() and kept loaded, so that a library is tried after those it imports when they come
+-// first; then `end`. It exits 0.
++// first -- and for a LIBRARY named without a directory, an API set among them, `resolved=<LIBRARY> <file>`,
++// the file the loader mapped it to; then `end`. It exits 0.
+ #define WIN32_LEAN_AND_MEAN
+ #include <format>
+ #include <optional>
+ #include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <Windows.h>
+ 
+ namespace
+ {
+ 
+-/// Writes @p line, UTF-16, to stderr as one UTF-8 line.
+-void say(std::wstring_view line)
++/// Writes @p line, UTF-16, to @p report as one UTF-8 line.
++void say(HANDLE report, std::wstring_view line)
+ {
+     auto text = std::string {};
+     if (!line.empty())
+     {
+         auto const size = ::WideCharToMultiByte(
+             CP_UTF8, 0, line.data(), static_cast<int>(line.size()), nullptr, 0, nullptr, nullptr);
+         text.resize(static_cast<std::size_t>(size));
+         ::WideCharToMultiByte(
+             CP_UTF8, 0, line.data(), static_cast<int>(line.size()), text.data(), size, nullptr, nullptr);
+     }
+     text += '\n';
+     auto written = DWORD { 0 };
+-    ::WriteFile(
+-        ::GetStdHandle(STD_ERROR_HANDLE), text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
++    ::WriteFile(report, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+ }
+ 
+ /// @return `ok` for ERROR_SUCCESS, else `error:<code>` with @p error, a Win32 error.
+ [[nodiscard]] std::wstring outcomeOf(DWORD error)
+ {
+     if (error == ERROR_SUCCESS)
+         return L"ok";
+     return std::format(L"error:{}", error);
+ }
+ 
+@@ -86,25 +87,40 @@ template <typename Result>
+             if (!argument)
+                 argument.emplace();
+             *argument += c;
+         }
+     }
+     if (argument)
+         arguments.push_back(*std::move(argument));
+     return arguments;
+ }
+ 
++/// @return The file @p module was mapped from; empty if the system does not say.
++[[nodiscard]] std::wstring fileOf(HMODULE module)
++{
++    auto file = std::wstring(MAX_PATH, L'\0');
++    auto const length = ::GetModuleFileNameW(module, file.data(), static_cast<DWORD>(file.size()));
++    file.resize(length < file.size() ? length : 0);
++    return file;
++}
++
+ } // namespace
+ 
+ int main()
+ {
+-    say(L"started");
++    // Read once, before AllocConsole() points the standard handles at a console of its own.
++    auto* const report = ::GetStdHandle(STD_ERROR_HANDLE);
++    say(report, L"started");
+     auto const consoleError = errorOf(::AllocConsole());
+-    say(std::format(L"console={}", outcomeOf(consoleError)));
++    say(report, std::format(L"console={}", outcomeOf(consoleError)));
+     if (consoleError == ERROR_SUCCESS)
+         ::FreeConsole();
+     for (auto const& library: argumentsOf(::GetCommandLineW()) | std::views::drop(1))
+-        say(std::format(
+-            L"library={} {}", library, outcomeOf(errorOf(::LoadLibraryExW(library.c_str(), nullptr, 0)))));
+-    say(L"end");
++    {
++        auto* const module = ::LoadLibraryExW(library.c_str(), nullptr, 0);
++        say(report, std::format(L"library={} {}", library, outcomeOf(errorOf(module))));
++        if (module != nullptr && library.find_first_of(L"\\/") == std::wstring::npos)
++            say(report, std::format(L"resolved={} {}", library, fileOf(module)));
++    }
++    say(report, L"end");
+     return 0;
+ }
+diff --git a/src/vtextension/wasm/remote/process/testing/PeImports_win32.cpp b/src/vtextension/wasm/remote/process/testing/PeImports_win32.cpp
+index 014e8031b..68aa37a8b 100644
+--- a/src/vtextension/wasm/remote/process/testing/PeImports_win32.cpp
++++ b/src/vtextension/wasm/remote/process/testing/PeImports_win32.cpp
+@@ -7,43 +7,85 @@
+ #include <algorithm>
+ #include <array>
+ #include <cctype>
+ #include <cstddef>
+ #include <cstring>
+ #include <fstream>
+ #include <functional>
+ #include <ios>
+ #include <iterator>
+ #include <ranges>
++#include <string>
+ #include <string_view>
+ #include <utility>
++#include <vector>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+ namespace
+ {
+     /// The prefixes of API set names: contracts the loader maps onto libraries, not files.
+     constexpr auto ApiSetPrefixes = std::to_array<std::string_view>({ "api-ms-win-", "ext-ms-win-" });
+ 
++    /// Where the system lists its known DLLs: libraries the loader maps from the system directory alone.
++    constexpr wchar_t const* KnownDllsKey = LR"(SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs)";
++
++    /// @return The names of the system's known DLLs, lower-cased, as its registry lists them; none where it
++    ///         lists none.
++    [[nodiscard]] std::vector<std::string> knownDlls()
++    {
++        auto names = std::vector<std::string> {};
++        HKEY key = nullptr;
++        if (::RegOpenKeyExW(HKEY_LOCAL_MACHINE, KnownDllsKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS)
++            return names;
++        for (auto const index: std::views::iota(DWORD { 0 }))
++        {
++            auto valueName = std::wstring(256, L'\0');
++            auto valueNameLength = static_cast<DWORD>(valueName.size());
++            auto data = std::wstring(MAX_PATH, L'\0');
++            auto dataBytes = static_cast<DWORD>(data.size() * sizeof(wchar_t));
++            auto type = DWORD { 0 };
++            auto const result = ::RegEnumValueW(key,
++                                                index,
++                                                valueName.data(),
++                                                &valueNameLength,
++                                                nullptr,
++                                                &type,
++                                                reinterpret_cast<BYTE*>(data.data()),
++                                                &dataBytes);
++            if (result == ERROR_NO_MORE_ITEMS)
++                break;
++            if (result != ERROR_SUCCESS || type != REG_SZ)
++                continue;
++            data.resize(::wcsnlen(data.c_str(), dataBytes / sizeof(wchar_t)));
++            auto name = std::string {};
++            for (auto const c: data)
++                name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++            names.push_back(std::move(name));
++        }
++        ::RegCloseKey(key);
++        return names;
++    }
++
+     /// @return The system directory, as the loader searches it.
+     [[nodiscard]] std::filesystem::path systemDirectory()
+     {
+         auto directory = std::wstring(MAX_PATH, L'\0');
+         auto const length = ::GetSystemDirectoryW(directory.data(), static_cast<UINT>(directory.size()));
+         REQUIRE(length != 0);
+         REQUIRE(length < directory.size());
+         directory.resize(length);
+-        return directory;
++        return std::filesystem::path { directory }.make_preferred();
+     }
+ } // namespace
+ 
+ std::vector<std::string> startupImportsOf(std::filesystem::path const& file)
+ {
+     auto stream = std::ifstream { file, std::ios::binary };
+     REQUIRE(stream.good());
+     auto const bytes = std::vector<char> { std::istreambuf_iterator<char> { stream }, {} };
+     auto const read = [&]<typename T>(std::size_t offset) {
+         REQUIRE(offset + sizeof(T) <= bytes.size());
+@@ -89,34 +131,43 @@ std::vector<std::string> startupImportsOf(std::filesystem::path const& file)
+         std::ranges::transform(name, name.begin(), [](char c) {
+             return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+         });
+         imports.push_back(std::move(name));
+     }
+     return imports;
+ }
+ 
+ ImportClosure importClosureOf(std::filesystem::path const& executable)
+ {
+-    auto const besideIt = executable.parent_path();
++    auto const besideIt = std::filesystem::path { executable }.make_preferred().parent_path();
+     auto const system = systemDirectory();
++    auto const known = knownDlls();
+     auto closure = ImportClosure {};
+     auto seen = std::vector<std::string> {};
+     // Depth first, each library listed after what it imports.
+     auto const visit = [&](this auto const& self, std::filesystem::path const& image) -> void {
+         for (auto const& name: startupImportsOf(image))
+         {
+             if (std::ranges::contains(seen, name))
+                 continue;
+             seen.push_back(name);
++            // An API set is loaded by its name, so that a library behind it that fails is named apart from
++            // the one importing it.
+             if (std::ranges::any_of(ApiSetPrefixes, [&](auto prefix) { return name.starts_with(prefix); }))
++            {
++                closure.libraries.emplace_back(name);
+                 continue;
+-            auto const candidates = std::array { besideIt / name, system / name };
++            }
++            auto candidates = std::vector<std::filesystem::path> {};
++            if (!std::ranges::contains(known, name))
++                candidates.push_back(besideIt / name);
++            candidates.push_back(system / name);
+             auto const found = std::ranges::find_if(
+                 candidates, [](auto const& path) { return std::filesystem::is_regular_file(path); });
+             if (found == candidates.end())
+             {
+                 closure.unresolved.push_back(name);
+                 continue;
+             }
+             self(*found);
+             closure.libraries.push_back(*found);
+         }
+diff --git a/src/vtextension/wasm/remote/process/testing/PeImports_win32.hpp b/src/vtextension/wasm/remote/process/testing/PeImports_win32.hpp
+index ed36a74fd..bfdc62950 100644
+--- a/src/vtextension/wasm/remote/process/testing/PeImports_win32.hpp
++++ b/src/vtextension/wasm/remote/process/testing/PeImports_win32.hpp
+@@ -12,23 +12,26 @@
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+ /// @return The libraries the executable or library @p file imports as it starts, lower-cased: its import
+ ///         directory's, not those it delay-loads. Fails the case if @p file is no PE32+ image.
+ [[nodiscard]] std::vector<std::string> startupImportsOf(std::filesystem::path const& file);
+ 
+ /// The libraries an executable loads as it starts, as far as their files say.
+ struct ImportClosure
+ {
+-    /// Each library found, every one after those it imports: the order the loader initialises them in.
++    /// Each library found, every one after those it imports: the order the loader initialises them in. A file
++    /// by its path; an API set by its bare name, which LoadLibraryExW() resolves through the system's API set
++    /// schema to the library behind it (`api-ms-win-crt-*` to ucrtbase.dll), loading that one in its turn.
+     std::vector<std::filesystem::path> libraries;
+     /// Each import found neither beside the executable nor in the system directory.
+     std::vector<std::string> unresolved;
+ };
+ 
+-/// @return What @p executable loads as it starts: its imports and theirs, each looked up beside it, then in
+-///         the system directory, as the loader looks for one not already loaded. API sets (`api-ms-win-*`,
+-///         `ext-ms-win-*`) are no files: the loader maps them onto libraries, which are listed where a
+-///         library imports them by name.
++/// @return What @p executable loads as it starts: its imports and theirs, each looked up as the loader
++///         looks for one not already loaded -- a known DLL (the system's `KnownDLLs` list) in the system
++///         directory, any other beside @p executable, then in the system directory. API sets (`api-ms-win-*`,
++///         `ext-ms-win-*`) are no files: each is listed by its name, where it is first imported, and what it
++///         maps onto is not read further.
+ [[nodiscard]] ImportClosure importClosureOf(std::filesystem::path const& executable);
+ 
+ } // namespace vtextension::wasm::remote::process::testing

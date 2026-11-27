@@ -1,0 +1,445 @@
+# Review package: f3899d673..HEAD
+
+## Commits
+078b5be04 fix(vtextension): send a release queued while a request let go of the channel
+
+## Files changed
+ src/vtextension/wasm/WasmRuntime.hpp               |  4 +-
+ src/vtextension/wasm/remote/HelperIncarnation.cpp  | 62 +++++++++++++++-------
+ src/vtextension/wasm/remote/HelperIncarnation.hpp  | 26 +++++++--
+ src/vtextension/wasm/remote/RemoteBackend.cpp      |  2 +
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp | 49 ++++++++++++++++-
+ src/vtextension/wasm/remote/Teardown_test.cpp      |  4 +-
+ 6 files changed, 119 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/WasmRuntime.hpp b/src/vtextension/wasm/WasmRuntime.hpp
+index d5859cddb..c56727dff 100644
+--- a/src/vtextension/wasm/WasmRuntime.hpp
++++ b/src/vtextension/wasm/WasmRuntime.hpp
+@@ -379,21 +379,23 @@ class IThreadGuard
+ /// backend with no per-thread state still counts its bring-ups and refuses a guard with no runtime up,
+ /// and while one is up returns a trivial guard that remembers the generation it was entered for.
+ class IWasmBackend
+ {
+   public:
+     IWasmBackend() = default;
+     IWasmBackend(IWasmBackend const&) = delete;
+     IWasmBackend(IWasmBackend&&) = delete;
+     IWasmBackend& operator=(IWasmBackend const&) = delete;
+     IWasmBackend& operator=(IWasmBackend&&) = delete;
+-    /// Must outlive every runtime created from it.
++    /// Must outlive every runtime created from it. The one exception is the remote backend
++    /// (makeRemoteBackend()), which tolerates being dropped first: it lets its hosts go, and whatever still
++    /// uses one of its runtimes fails `HostUnavailable`.
+     virtual ~IWasmBackend() = default;
+ 
+     /// Creates a runtime. The engine is brought up with the first runtime alive and torn down with
+     /// the last, so a process creating none starts nothing.
+     /// @param limits The limits every instance of the runtime is held to.
+     /// @param hostFunctions The host functions modules may import; IHostContext::callHost() receives an
+     ///                      index into this table. The runtime copies what it needs. Runtimes alive at
+     ///                      once must agree on every host function they share (see the class notes).
+     /// @return The runtime; `RuntimeUnavailable` if the engine could not be brought up, the backend
+     ///         cannot provide one of @p hostFunctions, or @p limits allow a table more than
+diff --git a/src/vtextension/wasm/remote/HelperIncarnation.cpp b/src/vtextension/wasm/remote/HelperIncarnation.cpp
+index fee8b758d..368b0d2fa 100644
+--- a/src/vtextension/wasm/remote/HelperIncarnation.cpp
++++ b/src/vtextension/wasm/remote/HelperIncarnation.cpp
+@@ -133,32 +133,38 @@ HelperIncarnation::HelperIncarnation(HostConnection connection, HostTimeouts tim
+ {
+     _lanes.reserve(connection.lanes.size());
+     for (auto& lane: connection.lanes)
+         _lanes.push_back(parentEnd(std::move(lane), proto::ChannelKind::Lane));
+ }
+ 
+ HelperIncarnation::~HelperIncarnation() = default;
+ 
+ std::expected<proto::Pdu, StreamError> HelperIncarnation::request(proto::Pdu const& pdu, HostStep step)
+ {
+-    auto const lock = std::scoped_lock { _controlMutex };
+-    // Armed only once the channel is this request's: waiting for another's is not the host's time.
+-    auto const watch = this->watch(step);
+-    if (!isAlive())
+-        return std::unexpected(StreamError::Closed);
+-    // What was released before goes first -- an interrupt slot given back with an instance is handed to the
+-    // next only after the host heard of it -- and what was released meanwhile goes right after.
+-    if (!sendReleases())
+-        return std::unexpected(StreamError::Closed);
+-    auto reply = exchange(pdu);
+-    if (reply)
+-        std::ignore = sendReleases();
++    auto reply = [&]() -> std::expected<proto::Pdu, StreamError> {
++        auto const lock = std::scoped_lock { _controlMutex };
++        // Armed only once the channel is this request's: waiting for another's is not the host's time.
++        auto const watch = this->watch(step);
++        if (!isAlive())
++            return std::unexpected(StreamError::Closed);
++        // What was released before goes first -- an interrupt slot given back with an instance is handed to
++        // the next only after the host heard of it -- and what was released meanwhile goes right after.
++        if (!sendReleases())
++            return std::unexpected(StreamError::Closed);
++        auto exchanged = exchange(pdu);
++        if (exchanged)
++            std::ignore = sendReleases();
++        return exchanged;
++    }();
++    // A release queued after the last send above, while the channel was still held -- the watch's disarm
++    // runs then -- found it taken: it is this thread's to send.
++    offerReleases();
+     return reply;
+ }
+ 
+ std::expected<proto::Pdu, StreamError> HelperIncarnation::exchange(proto::Pdu const& pdu)
+ {
+     if (!isAlive())
+         return std::unexpected(StreamError::Closed);
+     if (auto const sent = _control.send(pdu); !sent)
+     {
+         // A PDU over its cap was not sent, and the stream is intact: the request fails, the host lives on.
+@@ -186,55 +192,71 @@ void HelperIncarnation::release(proto::Release release) noexcept
+         if (_outbox.size() >= MaxPendingReleases)
+             return true;
+         _outbox.push_back(release);
+         return false;
+     }();
+     if (isOverflowing)
+     {
+         markDead();
+         return;
+     }
+-    // Sent now only if that costs no wait: another thread's request sends it after its exchange, and a host
+-    // that reads slowly gets it with the next release or request.
+-    auto const lock = std::unique_lock { _controlMutex, std::try_to_lock };
+-    if (lock.owns_lock() && isAlive())
+-        trySendReleases();
++    offerReleases();
++}
++
++void HelperIncarnation::offerReleases() noexcept
++{
++    // Sent now only if that costs no wait. A thread that finds the channel taken leaves its release to the
++    // holder, and every holder looks at the queue again once it let go, so none is left behind for a request
++    // that may never come. One that the channel does not take now waits for the next release or request.
++    while (isAlive() && hasQueuedReleases())
++    {
++        auto const lock = std::unique_lock { _controlMutex, std::try_to_lock };
++        if (!lock.owns_lock() || trySendReleases() == ReleaseFlush::Blocked)
++            return;
++    }
++}
++
++bool HelperIncarnation::hasQueuedReleases()
++{
++    auto const lock = std::scoped_lock { _outboxMutex };
++    return !_outbox.empty();
+ }
+ 
+ bool HelperIncarnation::sendReleases()
+ {
+     while (auto const next = oldestRelease())
+     {
+         if (!_control.send(*next))
+         {
+             markDead();
+             return false;
+         }
+         forgetOldestRelease();
+     }
+     return true;
+ }
+ 
+-void HelperIncarnation::trySendReleases() noexcept
++HelperIncarnation::ReleaseFlush HelperIncarnation::trySendReleases() noexcept
+ {
+     while (auto const next = oldestRelease())
+     {
+         auto const outcome = _control.trySend(*next);
+         if (!outcome)
+         {
+             markDead();
+-            return;
++            return ReleaseFlush::Blocked;
+         }
+         if (*outcome == transport::SendOutcome::WouldBlock)
+-            return;
++            return ReleaseFlush::Blocked;
+         forgetOldestRelease();
+     }
++    return ReleaseFlush::Drained;
+ }
+ 
+ std::optional<proto::Release> HelperIncarnation::oldestRelease()
+ {
+     auto const lock = std::scoped_lock { _outboxMutex };
+     return _outbox.empty() ? std::nullopt : std::optional { _outbox.front() };
+ }
+ 
+ void HelperIncarnation::forgetOldestRelease()
+ {
+diff --git a/src/vtextension/wasm/remote/HelperIncarnation.hpp b/src/vtextension/wasm/remote/HelperIncarnation.hpp
+index 1a7120917..ab449fb26 100644
+--- a/src/vtextension/wasm/remote/HelperIncarnation.hpp
++++ b/src/vtextension/wasm/remote/HelperIncarnation.hpp
+@@ -114,23 +114,26 @@ class HelperIncarnation
+     /// Sends @p pdu on the control channel and receives the reply, as one request no other thread's
+     /// interleaves with, under @p step's watch from the moment it holds the channel. A failure to send or
+     /// receive, but an over-cap PDU the stream refused to send, kills the incarnation; so does overstaying.
+     /// @param pdu The request.
+     /// @param step The step it is: what its budget is.
+     /// @return The reply; why there is none: `Closed` if the incarnation is dead already, or died meanwhile.
+     [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> request(proto::Pdu const& pdu,
+                                                                             HostStep step);
+ 
+     /// Tells the host a module or an instance is gone, without ever blocking: the release is queued, and
+-    /// sent at once only if no other thread holds the control channel and the channel takes it now. What is
+-    /// queued goes out before and after the next request's exchange, in order. Does nothing once the
+-    /// incarnation is dead; a host that lets more than MaxPendingReleases pile up kills it.
++    /// sent at once only if no other thread holds the control channel and the channel takes it now; if one
++    /// does, that thread sends it once it lets the channel go. What is queued goes out before and after the
++    /// next request's exchange, in order. Does nothing once the
++    /// incarnation is dead; a host that lets more than MaxPendingReleases pile up kills it. Queuing
++    /// allocates: running out of memory there ends the process (std::terminate), as the destructors calling
++    /// this cannot report it.
+     /// @param release What is gone.
+     void release(proto::Release release) noexcept;
+ 
+     /// Lets the host go at once, as dropping the last reference to the incarnation would, though threads may
+     /// still hold one: the incarnation is dead, its host is let go (IHostHandle::letGo()), and every channel
+     /// is shut down, so that a thread blocked on one returns. Never blocks. Only the first of letGo() and
+     /// markDead() does anything.
+     void letGo() noexcept;
+ 
+     /// @return Lane @p index's stream; used only by the thread holding that lane.
+@@ -171,23 +174,38 @@ class HelperIncarnation
+     [[nodiscard]] std::expected<proto::Pdu, transport::StreamError> exchange(proto::Pdu const& pdu);
+ 
+     /// @return A watch over @p step, with its budget.
+     [[nodiscard]] StepWatch watch(HostStep step);
+ 
+     /// Sends every queued release, blocking, its caller holding the control mutex; kills the incarnation if
+     /// one cannot be sent.
+     /// @return Whether every one was sent.
+     [[nodiscard]] bool sendReleases();
+ 
++    /// How far trySendReleases() got.
++    enum class ReleaseFlush : uint8_t
++    {
++        Blocked, ///< The channel took no more, or failed: some are left, or the incarnation died.
++        Drained, ///< Every queued release was sent.
++    };
++
+     /// Sends queued releases as far as the channel takes them now, its caller holding the control mutex;
+     /// kills the incarnation if the channel failed.
+-    void trySendReleases() noexcept;
++    /// @return Whether it drained the queue.
++    [[nodiscard]] ReleaseFlush trySendReleases() noexcept;
++
++    /// Sends queued releases as far as that costs no wait: only while the control mutex is free, and the
++    /// channel takes them; again as long as more were queued meanwhile. Called without the control mutex.
++    void offerReleases() noexcept;
++
++    /// @return Whether a release is queued.
++    [[nodiscard]] bool hasQueuedReleases();
+ 
+     /// @return The oldest queued release; nothing if none is queued.
+     [[nodiscard]] std::optional<proto::Release> oldestRelease();
+ 
+     /// Forgets the oldest queued release, which was sent.
+     void forgetOldestRelease();
+ 
+     /// Shuts every channel down.
+     void shutdownChannels() noexcept;
+ 
+diff --git a/src/vtextension/wasm/remote/RemoteBackend.cpp b/src/vtextension/wasm/remote/RemoteBackend.cpp
+index c4d131642..b1154ca43 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend.cpp
+@@ -189,20 +189,22 @@ namespace
+             return false;
+         }
+ 
+         /// Lets every listed incarnation go, and starts none from now on.
+         void close() noexcept
+         {
+             auto listed = std::vector<std::weak_ptr<HelperIncarnation>> {};
+             {
+                 auto const lock = std::scoped_lock { _mutex };
+                 _state = RosterState::Closed;
++                // The whole list, expired entries with the rest: none stays behind, and nothing is listed
++                // again once closed (enlist()).
+                 listed = std::exchange(_listed, {});
+             }
+             for (auto const& entry: listed)
+                 if (auto const incarnation = entry.lock())
+                     incarnation->letGo();
+         }
+ 
+       private:
+         mutable std::mutex _mutex; ///< Guards what follows.
+         RosterState _state = RosterState::Open;
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index f823f872a..52983cf14 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -384,42 +384,51 @@ struct WatchRecord
+ /// attachment of the latest connection.
+ struct HandleRecords
+ {
+     std::atomic<int> terminations = 0;
+     std::atomic<int> lettings = 0; ///< How often a handle was let go.
+     std::atomic<std::size_t> connections = 0;
+     std::mutex mutex;                 ///< Guards what follows.
+     std::vector<WatchRecord> watches; ///< Every watch armed, in order.
+     std::size_t disarmed = 0;         ///< How many watches were disarmed.
+     HostAttachment attachment;        ///< The latest connection's.
++    /// Run once, by the next watch disarmed, outside the mutex: where a request still holds the control
++    /// channel after its last send.
++    std::function<void()> onNextDisarm;
+ };
+ 
+ /// A host handle that records what it is told.
+ class CountingHandle final: public IHostHandle
+ {
+   public:
+     explicit CountingHandle(std::shared_ptr<HandleRecords> records) noexcept: _records { std::move(records) }
+     {
+     }
+ 
+     void interrupt(uint32_t /*instanceId*/, uint32_t /*interruptSlot*/) noexcept override {}
+     void clearInterrupt(uint32_t /*interruptSlot*/) noexcept override {}
+     void terminate() noexcept override { _records->terminations.fetch_add(1); }
+     void letGo() noexcept override { _records->lettings.fetch_add(1); }
+ 
+     [[nodiscard]] StepWatch watch(HostStep step, std::chrono::milliseconds budget) override
+     {
+         auto const lock = std::scoped_lock { _records->mutex };
+         _records->watches.push_back(WatchRecord { .step = step, .budget = budget });
+         return StepWatch { [records = _records] {
+-            auto const disarmLock = std::scoped_lock { records->mutex };
+-            ++records->disarmed;
++            auto hook = std::function<void()> {};
++            {
++                auto const disarmLock = std::scoped_lock { records->mutex };
++                ++records->disarmed;
++                hook = std::exchange(records->onNextDisarm, nullptr);
++            }
++            if (hook)
++                hook();
+         } };
+     }
+ 
+     void attach(HostAttachment attachment) override
+     {
+         auto const lock = std::scoped_lock { _records->mutex };
+         _records->attachment = std::move(attachment);
+     }
+ 
+   private:
+@@ -481,20 +490,27 @@ class ScriptedConnector final: public IHostConnector
+         return _records->watches;
+     }
+ 
+     /// @return How many of them were disarmed.
+     [[nodiscard]] std::size_t disarmed() const
+     {
+         auto const lock = std::scoped_lock { _records->mutex };
+         return _records->disarmed;
+     }
+ 
++    /// Has the next watch disarmed run @p hook, once.
++    void onNextDisarm(std::function<void()> hook)
++    {
++        auto const lock = std::scoped_lock { _records->mutex };
++        _records->onNextDisarm = std::move(hook);
++    }
++
+     /// @return The latest connection's attachment.
+     [[nodiscard]] HostAttachment attachment() const
+     {
+         auto const lock = std::scoped_lock { _records->mutex };
+         return _records->attachment;
+     }
+ 
+   private:
+     Script _script;
+     std::shared_ptr<HandleRecords> _records = std::make_shared<HandleRecords>();
+@@ -1470,20 +1486,49 @@ TEST_CASE("RemoteBackend.releaseWaitsForTheControlChannel", "[vtextension][remot
+     auto const& first = std::get<proto::Instantiate>(pdus.at(1));
+     CHECK(std::holds_alternative<proto::Instantiate>(pdus.at(2)));
+     CHECK(releasesInstance(pdus.at(3), first.instanceId));
+ 
+     auto const third = contract::instantiate(*module, context);
+     auto const all = transcript.awaitAtLeast(5);
+     CHECK(indexOf(all, [&](auto const& pdu) { return releasesInstance(pdu, first.instanceId); }) == 3);
+     CHECK(connector->terminations() == 0);
+ }
+ 
++TEST_CASE("RemoteBackend.releaseQueuedWhileARequestEndsIsSent", "[vtextension][remote][threading]")
++{
++    // An instance dropped in the last moment a request holds the control channel -- after its last send,
++    // while its watch is disarmed -- finds the channel taken. The request's thread sends the release once it
++    // let go: the extension then idles, and no later request would carry it.
++    auto transcript = Transcript {};
++    auto arrived = std::promise<void> {};
++    auto const connector =
++        std::make_shared<ScriptedConnector>([&](HelperEnds& ends, std::size_t /*connection*/) {
++            serveGated(ends, transcript, 0, arrived, std::shared_future<void> {}, AfterGate::Answers);
++        });
++    auto const backend = makeBackend(connector);
++    auto const runtime = contract::createRuntime(*backend);
++    auto const module = contract::load(*runtime, PeekModule);
++    auto context = contract::RecordingHostContext {};
++    auto older = contract::instantiate(*module, context);
++
++    connector->onNextDisarm([&] {
++        auto dropping = std::async(std::launch::async, [&] { older.reset(); });
++        readyWithin(dropping, std::chrono::seconds { 5 }, "dropping an instance waited for the channel");
++    });
++    auto const newer = contract::instantiate(*module, context);
++
++    // Recorded: Load, Instantiate, Instantiate, and the release, with nothing more asked of the host.
++    auto const pdus = transcript.awaitAtLeast(4);
++    REQUIRE(pdus.size() >= 4);
++    CHECK(releasesInstance(pdus.at(3), std::get<proto::Instantiate>(pdus.at(1)).instanceId));
++}
++
+ TEST_CASE("RemoteBackend.releaseOverflowKillsTheHelper", "[vtextension][remote][threading]")
+ {
+     // A host that stops reading its control channel while a request is outstanding: every drop after it is
+     // queued, at once, until more pile up than a host that reads would ever let -- and that host is killed.
+     using namespace std::chrono_literals;
+     auto transcript = Transcript {};
+     auto arrived = std::promise<void> {};
+     auto gate = std::promise<void> {};
+     auto const connector = std::make_shared<ScriptedConnector>(
+         [&, opened = gate.get_future().share()](HelperEnds& ends, std::size_t /*connection*/) {
+diff --git a/src/vtextension/wasm/remote/Teardown_test.cpp b/src/vtextension/wasm/remote/Teardown_test.cpp
+index 754c70f4c..96c8275bc 100644
+--- a/src/vtextension/wasm/remote/Teardown_test.cpp
++++ b/src/vtextension/wasm/remote/Teardown_test.cpp
+@@ -183,21 +183,23 @@ void killChild(ProcessId processId)
+     auto const pid = static_cast<pid_t>(processId);
+     if (::kill(pid, SIGKILL) == 0)
+     {
+         auto status = 0;
+         std::ignore = ::waitpid(pid, &status, 0);
+     }
+ }
+ #endif
+ 
+ /// Makes this process the reaper of the processes its children leave behind, once for the binary: an
+-/// orphaned helper is then this process's child, which it can wait for (Linux, FreeBSD).
++/// orphaned helper is then this process's child, which it can wait for (Linux, FreeBSD). It holds for the
++/// whole test process from then on: a grandchild a later case orphans becomes this binary's zombie until it
++/// exits, which is harmless.
+ void becomeSubreaper()
+ {
+ #ifdef __linux__
+     static auto const isSubreaper = ::prctl(PR_SET_CHILD_SUBREAPER, 1) == 0;
+     REQUIRE(isSubreaper);
+ #elifdef __FreeBSD__
+     static auto const isSubreaper = ::procctl(P_PID, ::getpid(), PROC_REAP_ACQUIRE, nullptr) == 0;
+     REQUIRE(isSubreaper);
+ #endif
+ }

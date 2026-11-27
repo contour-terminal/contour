@@ -1,0 +1,2818 @@
+# Review package: 67e99c3d9..HEAD
+
+## Commits
+5fdb8bfdf build: build the extension host with whichever engine the build selected
+e8a021e9a feat(vtextension): the extension host can run its modules interpreted
+92d9750e2 fix(vtextension): a sanitizer build's extension host reads only its own process entries
+ccfd77033 fix(vtextension): an outer filter refusing one argument value lets every other value through
+750f0080c fix(vtextension): a crash in the locked-down extension host is no longer taken for a sandbox kill
+
+## Files changed
+ src/CMakeLists.txt                                 |   9 ++
+ src/contour-extension-host/CMakeLists.txt          |  58 ++++----
+ src/contour-extension-host/testing/HostileHost.cpp |   5 +-
+ src/vtextension/wasm/host/CMakeLists.txt           |  10 +-
+ src/vtextension/wasm/host/GuestCode.hpp            |  20 +++
+ src/vtextension/wasm/host/HelperEngine.hpp         |   6 +-
+ src/vtextension/wasm/host/HostProcess.cpp          |   4 +-
+ src/vtextension/wasm/host/HostProcess.hpp          |   7 +-
+ src/vtextension/wasm/host/HostProcess_test.cpp     |  10 +-
+ src/vtextension/wasm/host/IHostedEngine.hpp        |   5 +
+ src/vtextension/wasm/host/Sandbox.hpp              |   8 +-
+ src/vtextension/wasm/host/Sandbox_linux.cpp        |  15 +-
+ src/vtextension/wasm/host/Sandbox_none.cpp         |   3 +-
+ src/vtextension/wasm/host/Sandbox_test.cpp         |   3 +-
+ src/vtextension/wasm/host/SanitizerOptions.cpp     |   3 +-
+ src/vtextension/wasm/host/linux/SeccompFilter.cpp  |  19 +--
+ src/vtextension/wasm/host/linux/SeccompFilter.hpp  |  10 +-
+ .../wasm/host/linux/SeccompFilter_test.cpp         | 155 +++++++++++++++++----
+ src/vtextension/wasm/host/linux/SystemCallRows.cpp | 102 +++++++++++---
+ src/vtextension/wasm/host/linux/SystemCallRows.hpp |  34 +++--
+ src/vtextension/wasm/remote/CMakeLists.txt         |  58 +++++++-
+ .../wasm/remote/ReviewFocusProcess_test.cpp        |   4 +-
+ src/vtextension/wasm/remote/WamrHelper_test.cpp    |  49 +++++++
+ .../wasm/remote/process/SandboxProbe_test.cpp      |   5 +
+ .../wasm/remote/process/testing/SandboxProbe.cpp   |  18 ++-
+ src/vtextension/wasm/testing/DecoratedEngine.hpp   |   2 +
+ .../wasm/testing/PreparationHookEngine.hpp         |   2 +
+ src/vtextension/wasm/wamr/CMakeLists.txt           |  19 ++-
+ src/vtextension/wasm/wamr/HelperEngine.cpp         |  23 +++
+ .../wasm/wamr/RemoteWamrEngine_test.cpp            |  39 ++++++
+ src/vtextension/wasm/wamr/WamrBackend.cpp          |  72 +++++++---
+ src/vtextension/wasm/wamr/WamrBackend.hpp          |  74 +++++++++-
+ src/vtextension/wasm/wamr/WamrEngine.cpp           | 136 ++++++++++++++++++
+ src/vtextension/wasm/wamr/WamrEngine.hpp           |  28 ++++
+ src/vtextension/wasm/wamr/WamrEngine_test.cpp      | 114 +++++++++++++++
+ src/vtextension/wasm/wamr/WamrRuntime.hpp          |  14 +-
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp   |   6 +
+ 37 files changed, 1000 insertions(+), 149 deletions(-)
+
+## Diff
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 3329c1aa0..cc65959cc 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -34,19 +34,28 @@ add_subdirectory(vtcontrol)
+ add_subdirectory(vtparser)
+ add_subdirectory(vtbackend)
+ if(CONTOUR_EXTENSIONS)
+     # Where contour-extension-host is installed on Unix, a private executable of Contour's, and the way there
+     # from the directory contour is installed in: how contour finds it (vtextension_remote_process).
+     include(GNUInstallDirs)
+     set(CONTOUR_EXTENSION_HOST_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}/contour")
+     # contour installs to CMAKE_INSTALL_BINDIR (../contour/CMakeLists.txt).
+     file(RELATIVE_PATH CONTOUR_EXTENSION_HOST_RELATIVE_DIR
+         "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBEXECDIR}/contour")
++    # The engine contour-extension-host runs, whose directory (vtextension/wasm/<engine>/) defines
++    # vtextension_<engine>_helper_engine: Wasmtime's wherever one was found (../cmake/ContourThirdParties.cmake),
++    # as it compiles modules to native code and shares their memory with Contour; else the one
++    # CONTOUR_WASM_RUNTIME selects, which interprets them.
++    if(CONTOUR_HAVE_WASMTIME)
++        set(CONTOUR_EXTENSION_HOST_ENGINE wasmtime)
++    else()
++        set(CONTOUR_EXTENSION_HOST_ENGINE ${CONTOUR_WASM_RUNTIME})
++    endif()
+     add_subdirectory(vtextension)
+     add_subdirectory(contour-extension-host)
+ endif()
+ add_subdirectory(vtconformance)
+ add_subdirectory(vtworkspace)
+ add_subdirectory(vthost)
+ add_subdirectory(vtrasterizer)
+ 
+ add_subdirectory(contour)
+diff --git a/src/contour-extension-host/CMakeLists.txt b/src/contour-extension-host/CMakeLists.txt
+index 1a9229167..08df67c43 100644
+--- a/src/contour-extension-host/CMakeLists.txt
++++ b/src/contour-extension-host/CMakeLists.txt
+@@ -1,30 +1,38 @@
+ # contour-extension-host: the process Contour runs extensions in, apart from itself. Its body is
+-# vtextension_host's runExtensionHost(); main.cpp only hands it the command line and the engine.
+-if(TARGET vtextension_wasmtime)
+-    add_executable(contour-extension-host main.cpp)
+-    target_link_libraries(contour-extension-host PRIVATE
+-        vtextension_host vtextension_host_sanitizer_options vtextension_wasmtime_helper_engine contour::wasmtime)
+-    # A console program, so that it opens no window; Contour starts it without a console (CREATE_NO_WINDOW).
+-    set_target_properties(contour-extension-host PROPERTIES WIN32_EXECUTABLE OFF)
++# vtextension_host's runExtensionHost(); main.cpp only hands it the command line and the engine, the one
++# CONTOUR_EXTENSION_HOST_ENGINE names (../CMakeLists.txt).
++set(_extension_host_engine vtextension_${CONTOUR_EXTENSION_HOST_ENGINE}_helper_engine)
+ 
+-    # Installed where contour finds it (vtextension_remote_process's locateExtensionHost()): beside contour.exe
+-    # on Windows; elsewhere among the private executables, CONTOUR_EXTENSION_HOST_INSTALL_DIR (../CMakeLists.txt),
+-    # as no user runs it. A macOS app bundle carries it instead: contour copies it in (../contour/CMakeLists.txt).
+-    if(WIN32)
+-        install(TARGETS contour-extension-host RUNTIME DESTINATION bin)
+-    elseif(NOT CONTOUR_MACOS_APP_BUNDLE)
+-        install(TARGETS contour-extension-host RUNTIME DESTINATION "${CONTOUR_EXTENSION_HOST_INSTALL_DIR}")
+-    endif()
++add_executable(contour-extension-host main.cpp)
++target_link_libraries(contour-extension-host PRIVATE
++    vtextension_host vtextension_host_sanitizer_options ${_extension_host_engine})
++# A console program, so that it opens no window; Contour starts it without a console (CREATE_NO_WINDOW).
++set_target_properties(contour-extension-host PROPERTIES WIN32_EXECUTABLE OFF)
++
++# Installed where contour finds it (vtextension_remote_process's locateExtensionHost()): beside contour.exe
++# on Windows; elsewhere among the private executables, CONTOUR_EXTENSION_HOST_INSTALL_DIR (../CMakeLists.txt),
++# as no user runs it. A macOS app bundle carries it instead: contour copies it in (../contour/CMakeLists.txt).
++if(WIN32)
++    install(TARGETS contour-extension-host RUNTIME DESTINATION bin)
++elseif(NOT CONTOUR_MACOS_APP_BUNDLE)
++    install(TARGETS contour-extension-host RUNTIME DESTINATION "${CONTOUR_EXTENSION_HOST_INSTALL_DIR}")
++endif()
++
++if(VTEXTENSION_TESTING)
++    # The extension host misbehaving on purpose, one way per --hostile=<name> (testing/HostileModes.hpp): what
++    # the crash and hostility tests start. No test mode ships in contour-extension-host itself. Never installed.
++    add_executable(contour-extension-host-hostile testing/HostileHost.cpp testing/HostileModes.hpp)
++    target_link_libraries(contour-extension-host-hostile PRIVATE
++        vtextension_host vtextension_remote_wire ${_extension_host_engine})
++    target_include_directories(contour-extension-host-hostile PRIVATE ${PROJECT_SOURCE_DIR}/src)
++    set_target_properties(contour-extension-host-hostile PROPERTIES WIN32_EXECUTABLE OFF)
+ 
+-    if(VTEXTENSION_TESTING)
+-        # The extension host misbehaving on purpose, one way per --hostile=<name> (testing/HostileModes.hpp): what
+-        # the crash and hostility tests start. No test mode ships in contour-extension-host itself. Never installed.
+-        add_executable(contour-extension-host-hostile testing/HostileHost.cpp testing/HostileModes.hpp)
+-        target_link_libraries(contour-extension-host-hostile PRIVATE
+-            vtextension_host vtextension_remote_wire vtextension_wasmtime_helper_engine contour::wasmtime)
+-        target_include_directories(contour-extension-host-hostile PRIVATE ${PROJECT_SOURCE_DIR}/src)
+-        set_target_properties(contour-extension-host-hostile PROPERTIES WIN32_EXECUTABLE OFF)
++    if(NOT CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wamr" AND TARGET vtextension_wamr_helper_engine)
++        # The extension host on WAMR's engine, beside the one this build runs: what a build without Wasmtime
++        # ships, proven here by vtextension_wamr_helper_test. Never installed.
++        add_executable(contour-extension-host-wamr main.cpp)
++        target_link_libraries(contour-extension-host-wamr PRIVATE
++            vtextension_host vtextension_host_sanitizer_options vtextension_wamr_helper_engine)
++        set_target_properties(contour-extension-host-wamr PROPERTIES WIN32_EXECUTABLE OFF)
+     endif()
+-else()
+-    message(STATUS "contour-extension-host is not built: it needs Wasmtime until its WAMR engine lands")
+ endif()
+diff --git a/src/contour-extension-host/testing/HostileHost.cpp b/src/contour-extension-host/testing/HostileHost.cpp
+index 6963698ce..c14d25479 100644
+--- a/src/contour-extension-host/testing/HostileHost.cpp
++++ b/src/contour-extension-host/testing/HostileHost.cpp
+@@ -96,22 +96,23 @@ constexpr auto Limits = proto::PduLimits {};
+ 
+ /// Runs the real host on @p arguments, its engine reaching memory as @p memory says.
+ [[nodiscard]] int serve(std::vector<std::string> const& arguments, HostMemory memory = HostMemory::AsBuilt)
+ {
+     auto views = std::vector<std::string_view> {};
+     for (auto const& argument: arguments)
+         views.emplace_back(argument);
+     // Hostility is measured against a host that confines nothing more than its hardening: a sandbox would
+     // refuse what the hostile modes do to the host itself.
+     auto confinement = vtextension::wasm::host::systemConfinement();
+-    confinement.sandbox = [](vtextension::wasm::host::SandboxDescriptors)
+-        -> std::unique_ptr<vtextension::wasm::host::ISandbox> {
++    confinement.sandbox =
++        [](vtextension::wasm::host::SandboxDescriptors,
++           vtextension::wasm::host::GuestCode) -> std::unique_ptr<vtextension::wasm::host::ISandbox> {
+         return std::make_unique<vtextension::wasm::host::NullSandbox>();
+     };
+     return vtextension::wasm::host::runExtensionHost(views, enginesOf(memory), confinement);
+ }
+ 
+ /// Has the crash that follows end the process at once: without a core dump, which a system that collects
+ /// them (systemd-coredump) writes before the process is gone -- long enough for Contour to stop it first, and
+ /// count the crash as a host it stopped rather than one that died on its own. Sanitizer runtimes disable
+ /// core dumps themselves, so only plain builds need this.
+ void withoutCoreDump() noexcept
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index aadf1c785..3aa4dc626 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -23,20 +23,21 @@ if(VTEXTENSION_LINUX_SANDBOX)
+         linux/SeccompFilter.hpp
+         linux/SystemCallRows.cpp
+         linux/SystemCallRows.hpp
+     )
+     set(_platform_sandbox 1)
+ endif()
+ 
+ add_library(vtextension_host STATIC
+     ExecutorThread.cpp
+     ExecutorThread.hpp
++    GuestCode.hpp
+     HelperEngine.hpp
+     HostBootstrap.cpp
+     HostBootstrap.hpp
+     ${_bootstrap_source}
+     HostProcess.cpp
+     HostProcess.hpp
+     HostServer.cpp
+     HostServer.hpp
+     IHostedEngine.hpp
+     InProcessHost.cpp
+@@ -58,12 +59,17 @@ endif()
+ # The memory a host hands the engine an instance runs on (MemoryProvision.hpp): a target of its own, so that an
+ # engine's backend, which Contour also links to run extensions in its own process, needs it and not the host.
+ add_library(vtextension_memory_provision STATIC
+     MemoryProvision.cpp
+     MemoryProvision.hpp
+ )
+ target_link_libraries(vtextension_memory_provision PUBLIC vtextension_remote_wire)
+ 
+ # What a sanitizer build's sandboxed process defaults its sanitizer to (SanitizerOptions.cpp): objects, linked
+ # into each executable that locks itself down -- the extension host and the probe that locks down as it does.
+-add_library(vtextension_host_sanitizer_options OBJECT SanitizerOptions.cpp)
+-target_link_libraries(vtextension_host_sanitizer_options PRIVATE vtextension_remote_wire)
++# Only the Linux filter needs them, and only ELF names them so; elsewhere the target is empty.
++if(VTEXTENSION_LINUX_SANDBOX)
++    add_library(vtextension_host_sanitizer_options OBJECT SanitizerOptions.cpp)
++    target_link_libraries(vtextension_host_sanitizer_options PRIVATE vtextension_remote_wire)
++else()
++    add_library(vtextension_host_sanitizer_options INTERFACE)
++endif()
+diff --git a/src/vtextension/wasm/host/GuestCode.hpp b/src/vtextension/wasm/host/GuestCode.hpp
+new file mode 100644
+index 000000000..95d9c9aff
+--- /dev/null
++++ b/src/vtextension/wasm/host/GuestCode.hpp
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// What an engine makes of a module's code: what decides whether the host it runs in may still map
++/// executable memory once it is locked down.
++
++#include <cstdint>
++
++namespace vtextension::wasm::host
++{
++
++/// How an engine runs a module's code.
++enum class GuestCode : uint8_t
++{
++    Interpreted, ///< Interpreted: once locked down, the host never makes memory executable.
++    Compiled,    ///< Compiled to native code as it is loaded: written, then made executable.
++};
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HelperEngine.hpp b/src/vtextension/wasm/host/HelperEngine.hpp
+index 480f41e0f..d27a5b51e 100644
+--- a/src/vtextension/wasm/host/HelperEngine.hpp
++++ b/src/vtextension/wasm/host/HelperEngine.hpp
+@@ -6,20 +6,20 @@
+ /// directory of the engine the executable links, so that the host names no engine.
+ 
+ #include <memory>
+ 
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// @return A new engine for the extension host process; null if none can be created. Its instances run in the
+-///         memory object Contour grants each of them where this system can map one
+-///         (remote::transport::canMapGuestMemory()), and copy memory over the protocol where it cannot. Every
+-///         engine it returns shares the process's one kind state.
++///         memory object Contour grants each of them where the engine can place memory there and this system
++///         can map one (remote::transport::canMapGuestMemory()), and copy memory over the protocol otherwise;
++///         its memoryMode() says which. Every engine it returns shares the process's one kind state.
+ [[nodiscard]] std::unique_ptr<IHostedEngine> makeHelperEngine();
+ 
+ /// @return A new engine as makeHelperEngine() makes it, but whose instances copy memory over the protocol
+ ///         wherever they run: what a host that cannot map memory runs, on a system that can.
+ [[nodiscard]] std::unique_ptr<IHostedEngine> makeCopyingHelperEngine();
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostProcess.cpp b/src/vtextension/wasm/host/HostProcess.cpp
+index 20d7e7cfd..9b5c3e50c 100644
+--- a/src/vtextension/wasm/host/HostProcess.cpp
++++ b/src/vtextension/wasm/host/HostProcess.cpp
+@@ -206,22 +206,22 @@ int runExtensionHost(std::span<std::string_view const> arguments,
+     auto const hardened = confinement.beforeThreads();
+     tellOf("hardening", hardened);
+     auto endpoints = confinement.adoptEndpoints(*parsed);
+     if (!endpoints)
+         return endWith(endpoints.error());
+     // Declared before the host, so that every object the host made of it goes first.
+     auto const engine = engines();
+     if (!engine)
+         return endWith(HostProcessExit::EngineUnavailable);
+     // Still before any thread: what the sandbox restricts now, every thread inherits.
+-    auto const sandbox =
+-        confinement.sandbox(SandboxDescriptors { .control = endpoints->control.nativeHandle() });
++    auto const sandbox = confinement.sandbox(
++        SandboxDescriptors { .control = endpoints->control.nativeHandle() }, engine->guestCode());
+     auto const restricted = sandbox->restrictBeforeThreads();
+     tellOf("sandbox", restricted);
+ 
+     auto config = HostServerConfig {};
+     config.startExecutor = confinement.startThread;
+     // Once every thread runs and was prepared: caps first, which the locked-down host could not set.
+     config.confine = [&confinement, &sandbox, &tellOf, hardened, restricted, dataBytes = parsed->dataBytes]()
+         -> std::expected<remote::proto::LockdownState, ConfinementFailure> {
+         auto const capped = confinement.confine(dataBytes);
+         tellOf("resource caps", capped);
+diff --git a/src/vtextension/wasm/host/HostProcess.hpp b/src/vtextension/wasm/host/HostProcess.hpp
+index 3e7ca59fc..8d76a1c3d 100644
+--- a/src/vtextension/wasm/host/HostProcess.hpp
++++ b/src/vtextension/wasm/host/HostProcess.hpp
+@@ -113,23 +113,24 @@ struct HostConfinement
+     /// Hardens the process while its main thread is its only one, as hardenProcess() does: right after it
+     /// bound itself to its parent, before it adopts its endpoints, makes its engine or starts any thread.
+     /// @return Nothing if it hardened itself wholly; the first step that failed otherwise, which the host
+     ///         tells of through tell.
+     std::function<std::expected<void, ConfinementFailure>()> beforeThreads;
+     /// Takes ownership of every handle the command line names, as adoptEndpoints() does: once hardened, so
+     /// that no descriptor it adopts was open while the process could still be dumped or traced.
+     std::function<std::expected<HostEndpoints, HostProcessExit>(
+         remote::transport::HelperArguments const& arguments)>
+         adoptEndpoints;
+-    /// Makes the host's sandbox for the endpoints it adopted, as makeSystemSandbox() does: once its engine is
+-    /// made, while its main thread is still its only one. Never returns null.
+-    std::function<std::unique_ptr<ISandbox>(SandboxDescriptors descriptors)> sandbox;
++    /// Makes the host's sandbox for the endpoints it adopted and the code its engine runs, as
++    /// makeSystemSandbox() does: once its engine is made, while its main thread is still its only one. Never
++    /// returns null.
++    std::function<std::unique_ptr<ISandbox>(SandboxDescriptors descriptors, GuestCode code)> sandbox;
+     /// How the host starts each of its threads, its interrupt listener's and every lane's: the operating
+     /// system's threads (ExecutorThread::start), but in a test one that records each start.
+     ExecutorStarter startThread;
+     /// Caps its resources once its threads run and were prepared, to the data bytes it is given, as
+     /// capResources() does; before the sandbox locks it down, so that capping needs nothing the locked-down
+     /// host may not do.
+     /// @return Nothing once capped; the step that failed otherwise, which the host tells of through tell.
+     std::function<std::expected<void, ConfinementFailure>(uint64_t dataBytes)> confine;
+     /// Tells of a confinement the host could not complete, one line without its end: on stderr, after
+     /// `contour-extension-host: `, as tellOnStandardError() does.
+diff --git a/src/vtextension/wasm/host/HostProcess_test.cpp b/src/vtextension/wasm/host/HostProcess_test.cpp
+index 8b252e594..d9ed145ff 100644
+--- a/src/vtextension/wasm/host/HostProcess_test.cpp
++++ b/src/vtextension/wasm/host/HostProcess_test.cpp
+@@ -61,20 +61,21 @@ using vtextension::testing::toModule;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::host::BootstrapError;
+ using vtextension::wasm::host::CapPolicy;
+ using vtextension::wasm::host::capResources;
+ using vtextension::wasm::host::ConfinementFailure;
+ using vtextension::wasm::host::confinementFailureText;
+ using vtextension::wasm::host::EngineFactory;
+ using vtextension::wasm::host::ExecutorStackBytes;
+ using vtextension::wasm::host::ExecutorThread;
+ using vtextension::wasm::host::exitCodeOf;
++using vtextension::wasm::host::GuestCode;
+ using vtextension::wasm::host::HardeningRow;
+ using vtextension::wasm::host::hardeningSteps;
+ using vtextension::wasm::host::hardenProcess;
+ using vtextension::wasm::host::HostConfinement;
+ using vtextension::wasm::host::HostProcessExit;
+ using vtextension::wasm::host::hostProcessExitOf;
+ using vtextension::wasm::host::hostProcessExits;
+ using vtextension::wasm::host::IHostedEngine;
+ using vtextension::wasm::host::ISandbox;
+ using vtextension::wasm::host::NullSandbox;
+@@ -148,20 +149,22 @@ struct Confined
+     std::atomic<std::size_t> threadsWhenHardened { 0 };
+     std::atomic<std::size_t> threadsWhenConfined { 0 };
+     /// What beforeThreads returns.
+     std::expected<void, ConfinementFailure> hardening {};
+     /// What the sandbox's steps return, and what it states once both were taken.
+     std::expected<void, ConfinementFailure> restriction {};
+     std::expected<void, ConfinementFailure> lockdown {};
+     proto::LockdownState sandboxState = proto::LockdownState::Unsandboxed;
+     /// The control handle the sandbox was made for.
+     std::atomic<NativeHandle> sandboxedControl {};
++    /// The code the sandbox was made for: its engine's.
++    std::atomic<GuestCode> sandboxedCode { GuestCode::Interpreted };
+     /// How many threads the host started, and how many it had when the sandbox restricted it.
+     std::atomic<int> threadsStarted { 0 };
+     std::atomic<int> threadsWhenRestricted { -1 };
+     /// What the host told, line by line.
+     std::mutex toldLock;
+     std::vector<std::string> told;
+     /// What the host did, step by step, in order: bind, harden, engine, restrict, listener, executor,
+     /// prepare, caps, lockDown.
+     std::mutex eventsLock;
+     std::vector<std::string> events;
+@@ -227,22 +230,23 @@ class RecordingSandbox final: public ISandbox
+                 confined->hardenedAt.store(confined->steps.fetch_add(1));
+                 confined->hardenings.fetch_add(1);
+                 confined->record("harden");
+                 return confined->hardening;
+             },
+         .adoptEndpoints =
+             [confined](HelperArguments const& arguments) {
+                 confined->record("adopt");
+                 return vtextension::wasm::host::adoptEndpoints(arguments);
+             },
+-        .sandbox = [confined](SandboxDescriptors descriptors) -> std::unique_ptr<ISandbox> {
++        .sandbox = [confined](SandboxDescriptors descriptors, GuestCode code) -> std::unique_ptr<ISandbox> {
+             confined->sandboxedControl.store(descriptors.control);
++            confined->sandboxedCode.store(code);
+             return std::make_unique<RecordingSandbox>(confined);
+         },
+         .startThread = [confined](std::size_t stackBytes, std::function<void()> body)
+             -> std::expected<ExecutorThread, std::error_code> {
+             confined->record(stackBytes == ExecutorStackBytes ? "executor" : "listener");
+             confined->threadsStarted.fetch_add(1);
+             return ExecutorThread::start(stackBytes, std::move(body));
+         },
+         .confine =
+             [confined](uint64_t dataBytes) {
+@@ -516,20 +520,22 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
+     REQUIRE(hello.has_value());
+     CHECK(*hello
+           == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                          .memoryMode = proto::MemoryMode::Copy,
+                                          .lockdown = proto::LockdownState::Unsandboxed,
+                                          .failedStep = proto::LockdownStep::None,
+                                          .failureCode = 0 } });
+     CHECK(confined->boundTo.load() == TheParent);
+     CHECK(confined->cappedTo.load() == TheDataBytes);
+     CHECK(confined->confines.load() == 1);
++    // The sandbox was made for the code the engine runs.
++    CHECK(confined->sandboxedCode.load() == makeHostedEngine(proto::MemoryMode::Copy)->guestCode());
+ 
+     {
+         // Contour closes the connection: the host serves no more, and ends as having served.
+         auto const closed = std::move(parent.control);
+     }
+     REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
+     CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+     CHECK(exitCodeOf(HostProcessExit::Served) == 0);
+ }
+ 
+@@ -688,21 +694,21 @@ TEST_CASE("HostProcess.hardeningFailureIsStatedAsItsStep", "[vtextension][host]"
+         == std::vector {
+             toldOf("hardening", failure),
+             toldOf("sandbox", ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 2 }) });
+ }
+ 
+ TEST_CASE("HostProcess.nullSandboxSaysUnsandboxed", "[vtextension][host]")
+ {
+     // What every system does until it has a sandbox of its own: confines nothing, and says so.
+     auto confined = std::make_shared<Confined>();
+     auto confinement = testConfinement(confined);
+-    confinement.sandbox = [](SandboxDescriptors) -> std::unique_ptr<ISandbox> {
++    confinement.sandbox = [](SandboxDescriptors, GuestCode) -> std::unique_ptr<ISandbox> {
+         return std::make_unique<NullSandbox>();
+     };
+     CHECK(helloOf(confined, confinement) == helloSaying(proto::LockdownState::Unsandboxed));
+ }
+ 
+ TEST_CASE("HostProcess.sandboxThatLocksDownSaysSo", "[vtextension][host]")
+ {
+     auto confined = std::make_shared<Confined>();
+     confined->sandboxState = proto::LockdownState::LockedDown;
+     CHECK(helloOf(confined) == helloSaying(proto::LockdownState::LockedDown));
+diff --git a/src/vtextension/wasm/host/IHostedEngine.hpp b/src/vtextension/wasm/host/IHostedEngine.hpp
+index d99834222..c7d6a520b 100644
+--- a/src/vtextension/wasm/host/IHostedEngine.hpp
++++ b/src/vtextension/wasm/host/IHostedEngine.hpp
+@@ -5,38 +5,43 @@
+ /// What the extension host process runs modules on: a WebAssembly backend, and how it shares an instance's
+ /// memory with Contour.
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <functional>
+ #include <memory>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/host/GuestCode.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// A backend a host process drives. The helper's own interface: the parent never sees one.
+ class IHostedEngine: public IWasmBackend
+ {
+   public:
+     /// @return How the engine's instances share their linear memory with the parent: what the host states in
+     ///         its Hello, and so how the parent reaches that memory.
+     [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
+ 
+     /// @return Under MemoryMode::Shared, how many inaccessible bytes must follow each instance's memory
+     ///         object where the host maps it: the guard the engine's compiled code relies on
+     ///         (MemoryProvision). 0 for an engine that copies memory.
+     [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
+ 
++    /// @return How the engine runs a module's code: what the host's sandbox lets it do with executable
++    ///         memory once it is locked down.
++    [[nodiscard]] virtual GuestCode guestCode() const noexcept = 0;
++
+     /// Prepares the calling thread to run guests, before the host locks itself down: does once what running
+     /// a guest on it would do the first time -- installing the engine's signal handlers, the thread's
+     /// alternate signal stack, its thread environment -- so that nothing a guest does later needs what the
+     /// locked-down host may no longer do. Called on every thread that runs guests, each once; idempotent per
+     /// thread.
+     /// @return Nothing once the thread is prepared; why not otherwise, which ends the host.
+     [[nodiscard]] virtual std::expected<void, ExtensionError> prepareThread() = 0;
+ };
+ 
+ /// Creates the engine one host runs on; null if none can be.
+diff --git a/src/vtextension/wasm/host/Sandbox.hpp b/src/vtextension/wasm/host/Sandbox.hpp
+index 813863197..0f0b4ad9c 100644
+--- a/src/vtextension/wasm/host/Sandbox.hpp
++++ b/src/vtextension/wasm/host/Sandbox.hpp
+@@ -9,20 +9,21 @@
+ /// FreeBSD PROC_NO_NEW_PRIVS) is the first step's. What would forbid what preparing a thread still does, or
+ /// must reach threads that run already (a system call filter synchronized across threads, capability mode, a
+ /// sandbox profile), is the second's. Each system's sandbox is made by makeSystemSandbox(); a system without
+ /// one runs the host unsandboxed (NullSandbox), and says so in its Hello.
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <string>
+ 
++#include <vtextension/wasm/host/GuestCode.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ #ifndef CONTOUR_PLATFORM_SANDBOX
+     #error "CONTOUR_PLATFORM_SANDBOX is set by linking vtextension_host."
+ #endif
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+@@ -93,17 +94,18 @@ class NullSandbox final: public ISandbox
+ {
+   public:
+     [[nodiscard]] std::expected<void, ConfinementFailure> restrictBeforeThreads() override { return {}; }
+     [[nodiscard]] std::expected<void, ConfinementFailure> lockDown() override { return {}; }
+     [[nodiscard]] remote::proto::LockdownState lockdownState() const noexcept override
+     {
+         return remote::proto::LockdownState::Unsandboxed;
+     }
+ };
+ 
+-/// Makes this system's sandbox for a host that keeps using @p descriptors. Defined per system: where there is
+-/// no sandbox yet (Sandbox_none.cpp), a NullSandbox.
++/// Makes this system's sandbox for a host that keeps using @p descriptors and runs @p code. Defined per
++/// system: where there is no sandbox yet (Sandbox_none.cpp), a NullSandbox.
+ /// @param descriptors The handles the host keeps using.
++/// @param code How its engine runs a module's code: whether it still makes memory executable.
+ /// @return The sandbox; never null.
+-[[nodiscard]] std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors);
++[[nodiscard]] std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, GuestCode code);
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/Sandbox_linux.cpp b/src/vtextension/wasm/host/Sandbox_linux.cpp
+index 3b226d6b5..23212ef35 100644
+--- a/src/vtextension/wasm/host/Sandbox_linux.cpp
++++ b/src/vtextension/wasm/host/Sandbox_linux.cpp
+@@ -33,24 +33,25 @@ namespace
+     /// A directory an instrumented build's host may still reach once it gave up the file system.
+     struct InstrumentationDirectory
+     {
+         BuildInstrumentation build; ///< The build that needs it.
+         char const* path;           ///< The directory.
+         uint64_t rights;            ///< What it may do beneath it.
+     };
+ 
+     /// Every directory an instrumented build keeps: a sanitizer reads its process's maps for a report (it
+     /// names modules and offsets, unsymbolized), and a coverage build writes its counters into the build
+-    /// tree.
++    /// tree. `/proc/self` resolves to `/proc/<pid>` as it is opened, so the rule covers the host's own
++    /// entries and no other process's.
+     constexpr auto InstrumentationDirectories = std::array {
+         InstrumentationDirectory { .build = BuildInstrumentation::Sanitizers,
+-                                   .path = "/proc",
++                                   .path = "/proc/self",
+                                    .rights = LandlockReadFile | LandlockReadDirectory },
+ #ifdef CONTOUR_COVERAGE_OBJECT_ROOT
+         InstrumentationDirectory { .build = BuildInstrumentation::Coverage,
+                                    .path = CONTOUR_COVERAGE_OBJECT_ROOT,
+                                    .rights = LandlockReadFile | LandlockWriteFile | LandlockReadDirectory
+                                              | LandlockMakeRegular | LandlockTruncate },
+ #endif
+     };
+ 
+     /// The directories of InstrumentationDirectories this build keeps, opened: closed with it.
+@@ -93,23 +94,24 @@ namespace
+ 
+     /// What the host is told when Landlock is unavailable: it runs confined by its system call filter alone.
+     constexpr auto LandlockUnavailable = std::string_view {
+         "the file system restriction is unavailable on this system; system calls are restricted"
+     };
+ 
+     class LinuxSandbox final: public ISandbox
+     {
+       public:
+         LinuxSandbox(SandboxDescriptors descriptors,
++                     GuestCode code,
+                      LandlockSystem landlock,
+                      std::function<void(std::string_view)> tell):
+-            _descriptors { descriptors }, _landlock { landlock }, _tell { std::move(tell) }
++            _descriptors { descriptors }, _code { code }, _landlock { landlock }, _tell { std::move(tell) }
+         {
+         }
+ 
+         [[nodiscard]] std::expected<void, ConfinementFailure> restrictBeforeThreads() override
+         {
+             // Every step runs; the first that failed is the one stated.
+             auto first = std::optional<ConfinementFailure> {};
+             if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
+                 first = ConfinementFailure { .step = remote::proto::LockdownStep::NoNewPrivileges,
+                                              .code = errno };
+@@ -126,33 +128,34 @@ namespace
+                 _tell(LandlockUnavailable);
+             if (!restricted && !first)
+                 first = restricted.error();
+             if (first)
+                 return std::unexpected(*first);
+             return {};
+         }
+ 
+         [[nodiscard]] std::expected<void, ConfinementFailure> lockDown() override
+         {
+-            auto const rows = buildRows(ThisAuditArch);
++            auto const rows = buildRows(_code, ThisAuditArch);
+             return assembleFilter(rows, _descriptors, ::getpid(), ThisAuditArch)
+                 .and_then([](std::vector<sock_filter> const& program) { return installFilter(program); });
+         }
+ 
+         [[nodiscard]] remote::proto::LockdownState lockdownState() const noexcept override
+         {
+             return remote::proto::LockdownState::LockedDown;
+         }
+ 
+       private:
+         SandboxDescriptors _descriptors;
++        GuestCode _code;
+         LandlockSystem _landlock;
+         std::function<void(std::string_view)> _tell;
+     };
+ } // namespace
+ 
+-std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors)
++std::unique_ptr<ISandbox> makeSystemSandbox(SandboxDescriptors descriptors, GuestCode code)
+ {
+-    return std::make_unique<LinuxSandbox>(descriptors, systemLandlock(), &tellOnStandardError);
++    return std::make_unique<LinuxSandbox>(descriptors, code, systemLandlock(), &tellOnStandardError);
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/Sandbox_none.cpp b/src/vtextension/wasm/host/Sandbox_none.cpp
+index 95cb730b5..426ebeb86 100644
+--- a/src/vtextension/wasm/host/Sandbox_none.cpp
++++ b/src/vtextension/wasm/host/Sandbox_none.cpp
+@@ -1,16 +1,17 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The sandbox of a system Contour has none for: the host runs unsandboxed, and its Hello says so.
+ #include <memory>
+ 
+ #include <vtextension/wasm/host/Sandbox.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+-std::unique_ptr<ISandbox> makeSystemSandbox([[maybe_unused]] SandboxDescriptors descriptors)
++std::unique_ptr<ISandbox> makeSystemSandbox([[maybe_unused]] SandboxDescriptors descriptors,
++                                            [[maybe_unused]] GuestCode code)
+ {
+     return std::make_unique<NullSandbox>();
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/Sandbox_test.cpp b/src/vtextension/wasm/host/Sandbox_test.cpp
+index 9419d6278..ceba81742 100644
+--- a/src/vtextension/wasm/host/Sandbox_test.cpp
++++ b/src/vtextension/wasm/host/Sandbox_test.cpp
+@@ -8,20 +8,21 @@
+ #include <memory>
+ #include <string>
+ 
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ #include <vtextension/wasm/host/Sandbox.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ using vtextension::wasm::host::ConfinementFailure;
+ using vtextension::wasm::host::confinementFailureText;
++using vtextension::wasm::host::GuestCode;
+ using vtextension::wasm::host::makeSystemSandbox;
+ using vtextension::wasm::host::NullSandbox;
+ using vtextension::wasm::host::PlatformSandbox;
+ using vtextension::wasm::host::SandboxDescriptors;
+ using vtextension::wasm::host::systemErrorText;
+ using vtextension::wasm::host::ThisPlatformSandbox;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ 
+ TEST_CASE("Sandbox.nullSandboxTakesBothStepsUnsandboxed", "[vtextension][host]")
+@@ -31,21 +32,21 @@ TEST_CASE("Sandbox.nullSandboxTakesBothStepsUnsandboxed", "[vtextension][host]")
+     CHECK(sandbox.lockDown().has_value());
+     CHECK(sandbox.lockdownState() == proto::LockdownState::Unsandboxed);
+ }
+ 
+ TEST_CASE("Sandbox.systemWithoutOneRunsUnsandboxed", "[vtextension][host]")
+ {
+     // A system without a sandbox makes the null one, which confines nothing. Where there is one, it would
+     // confine this very process: the probe proves it in a child of its own (SandboxProbe_test.cpp).
+     if constexpr (ThisPlatformSandbox != PlatformSandbox::None)
+         SKIP("this system has a sandbox");
+-    auto const sandbox = makeSystemSandbox(SandboxDescriptors { .control = {} });
++    auto const sandbox = makeSystemSandbox(SandboxDescriptors { .control = {} }, GuestCode::Interpreted);
+     REQUIRE(sandbox != nullptr);
+     CHECK(sandbox->restrictBeforeThreads().has_value());
+     CHECK(sandbox->lockDown().has_value());
+     CHECK(sandbox->lockdownState() == proto::LockdownState::Unsandboxed);
+ }
+ 
+ TEST_CASE("Sandbox.failureSaysTheStepAndWhatTheSystemSaid", "[vtextension][host]")
+ {
+     // The error code is read, not printed as a bare number: the line carries the system's word on it.
+     auto const failure = ConfinementFailure { .step = proto::LockdownStep::SystemCalls, .code = 1 };
+diff --git a/src/vtextension/wasm/host/SanitizerOptions.cpp b/src/vtextension/wasm/host/SanitizerOptions.cpp
+index eb44121ec..bba769b33 100644
+--- a/src/vtextension/wasm/host/SanitizerOptions.cpp
++++ b/src/vtextension/wasm/host/SanitizerOptions.cpp
+@@ -1,20 +1,21 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // What a sanitizer build's sandboxed process defaults its sanitizer to, whatever environment it was started
+ // with: no leak check at exit. LeakSanitizer stops the world through a cloned tracer (clone, ptrace, wait4),
+ // which the extension host's system call filter kills, so every exit would end in SIGSYS. Leaks are the
+ // in-process HostServer tests' to find. The runtime asks for these at start; the environment's
+ // ASAN_OPTIONS/LSAN_OPTIONS still override them.
+ //
+ // Linked as objects into each executable that locks itself down, as a static library member defining them
+-// would never be pulled in over the runtime's own weak defaults.
++// would never be pulled in over the runtime's own weak defaults. Compiled into Linux builds only: it serves
++// the Linux filter, and its assembler labels are ELF names (Mach-O's would carry a leading underscore).
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
+ 
+ #if CONTOUR_BUILD_INSTRUMENTATION == 2
+ // The runtime looks them up by their C names, which an assembler label gives these, so that the C++ names
+ // follow the project's.
+ extern "C"
+ {
+     /// @return AddressSanitizer's default options for this process.
+     [[gnu::used]] char const* asanDefaultOptions() __asm__("__asan_default_options");
+     /// @return LeakSanitizer's default options for this process.
+diff --git a/src/vtextension/wasm/host/linux/SeccompFilter.cpp b/src/vtextension/wasm/host/linux/SeccompFilter.cpp
+index d1b7f1884..f3ffa7850 100644
+--- a/src/vtextension/wasm/host/linux/SeccompFilter.cpp
++++ b/src/vtextension/wasm/host/linux/SeccompFilter.cpp
+@@ -121,21 +121,21 @@ namespace
+                 return fixed(static_cast<uint64_t>(static_cast<uint32_t>(ownProcess)) & check.mask);
+         }
+         return fixed(check.value);
+     }
+ 
+     /// A row's body as it is assembled: its instructions, and the jumps to patch once their targets are
+     /// known.
+     class RowBody
+     {
+       public:
+-        /// Appends the test of @p comparison; failing it jumps to the row's kill.
++        /// Appends the test of @p comparison; failing it jumps to the row's failure return.
+         void compare(Comparison const& comparison)
+         {
+             auto halves = std::vector<Half> {};
+             for (auto const half: { Half::Low, Half::High })
+                 if (halfOf(comparison.mask, half) != 0)
+                     halves.push_back(half);
+             auto passes = std::vector<std::size_t> {};
+             for (auto const position: std::views::iota(std::size_t { 0 }, halves.size()))
+             {
+                 auto const half = halves[position];
+@@ -149,45 +149,47 @@ namespace
+                     _fails.push_back(Patch { .at = at, .branch = Branch::WhenFalse });
+                 else if (isLast)
+                     _fails.push_back(Patch { .at = at, .branch = Branch::WhenTrue });
+                 else
+                     passes.push_back(at); // this half differs: the whole differs
+             }
+             for (auto const at: passes)
+                 _program.at(at).jf = static_cast<uint8_t>(_program.size() - (at + 1));
+         }
+ 
+-        /// Ends the body with @p decision, and the kill its failed checks jump to.
++        /// Ends the body with @p decision, and the return its failed checks jump to.
++        /// @param decision What the row decides when its checks pass.
++        /// @param failed What it decides when one fails: the filter's unlisted action.
+         /// @return The body; nothing if a jump would exceed what an instruction reaches.
+-        [[nodiscard]] std::optional<std::vector<sock_filter>> finish(uint32_t decision) &&
++        [[nodiscard]] std::optional<std::vector<sock_filter>> finish(uint32_t decision, uint32_t failed) &&
+         {
+             _program.push_back(statement(Return, decision));
+             if (_fails.empty())
+                 return std::move(_program);
+-            _program.push_back(statement(Return, SECCOMP_RET_KILL_PROCESS));
+-            auto const kill = _program.size() - 1;
++            _program.push_back(statement(Return, failed));
++            auto const fail = _program.size() - 1;
+             for (auto const& patch: _fails)
+             {
+-                auto const distance = kill - (patch.at + 1);
++                auto const distance = fail - (patch.at + 1);
+                 if (distance > MaxJump)
+                     return std::nullopt;
+                 (patch.branch == Branch::WhenTrue ? _program.at(patch.at).jt : _program.at(patch.at).jf) =
+                     static_cast<uint8_t>(distance);
+             }
+             return std::move(_program);
+         }
+ 
+       private:
+         struct Patch
+         {
+             std::size_t at;
+-            Branch branch; ///< Which branch of the jump at `at` goes to the kill.
++            Branch branch; ///< Which branch of the jump at `at` goes to the failure return.
+         };
+         std::vector<sock_filter> _program;
+         std::vector<Patch> _fails;
+     };
+ 
+     [[nodiscard]] ConfinementFailure assemblyFailure(int error) noexcept
+     {
+         return ConfinementFailure { .step = remote::proto::LockdownStep::SystemCalls, .code = error };
+     }
+ } // namespace
+@@ -233,21 +235,22 @@ std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
+     {
+         if (row.action == SystemCallAction::Refuse && (row.error <= 0 || row.error > MaxErrno))
+             return std::unexpected(assemblyFailure(EINVAL));
+         auto body = RowBody {};
+         for (auto const& check: row.checks)
+         {
+             if (check.index >= std::extent_v<decltype(seccomp_data::args)>)
+                 return std::unexpected(assemblyFailure(EINVAL));
+             body.compare(comparisonOf(check, descriptors, ownProcess));
+         }
+-        auto const assembled = std::move(body).finish(seccompReturnOf(row.action, row.error));
++        auto const assembled =
++            std::move(body).finish(seccompReturnOf(row.action, row.error), seccompReturnOf(unlisted, 0));
+         if (!assembled || assembled->size() > MaxJump)
+             return std::unexpected(assemblyFailure(E2BIG));
+         // A row whose number differs is skipped whole; the accumulator still holds the number then, as only a
+         // matching row loads its arguments, and every row that does ends in a return.
+         program.push_back(
+             jump(JumpIfEqual, static_cast<uint32_t>(row.number), 0, static_cast<uint8_t>(assembled->size())));
+         program.insert(program.end(), assembled->begin(), assembled->end());
+     }
+     program.push_back(statement(Return, seccompReturnOf(unlisted, 0)));
+     if (program.size() > BPF_MAXINSNS)
+diff --git a/src/vtextension/wasm/host/linux/SeccompFilter.hpp b/src/vtextension/wasm/host/linux/SeccompFilter.hpp
+index bdde0dcbf..983bf5bca 100644
+--- a/src/vtextension/wasm/host/linux/SeccompFilter.hpp
++++ b/src/vtextension/wasm/host/linux/SeccompFilter.hpp
+@@ -1,21 +1,21 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// The extension host's system call filter on Linux: SystemCallRows.hpp's rows, assembled by hand into the
+ /// classic BPF program seccomp runs, and installed on every thread at once.
+ ///
+ /// The program checks the architecture first (another one, or an x32 call on x86_64, kills the process),
+-/// then tests each row's number in the rows' order; a row whose number matches decides, its argument checks
+-/// passing or the process being killed. A call no row names takes the unlisted action: for the host's own
+-/// filter, killing the process.
++/// then tests each row's number in the rows' order; a row whose number matches decides when its argument
++/// checks pass. A call no row names, or one whose row's checks fail, takes the unlisted action: for the
++/// host's own filter, killing the process.
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <span>
+ #include <vector>
+ 
+ #include <linux/filter.h>
+ #include <vtextension/wasm/host/Sandbox.hpp>
+ #include <vtextension/wasm/host/linux/SystemCallRows.hpp>
+ 
+@@ -32,21 +32,23 @@ namespace vtextension::wasm::host
+ /// @param rows What becomes of each call named, each number at most once.
+ /// @param descriptors The descriptors `EqualsControl` compares with.
+ /// @param ownProcess The process id `EqualsOwnProcess` compares with.
+ /// @param arch The architecture @p rows are numbered for, and the only one the program lets through.
+ /// @return The program; `SystemCalls` with `E2BIG` if it exceeds what the kernel runs or a jump reaches,
+ ///         with `EINVAL` if a check names no argument or a `Refuse` no errno.
+ [[nodiscard]] std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
+     std::span<SystemCallRow const> rows, SandboxDescriptors descriptors, int ownProcess, AuditArch arch);
+ 
+ /// assembleFilter(), with the action of a call @p rows do not name given: what an outer sandbox's filter,
+-/// which lets through all it does not refuse, is made of.
++/// which lets through all it does not refuse, is made of. A call whose row's argument checks fail takes
++/// @p unlisted as well, as the row does not apply to it: a row refusing one value of an argument lets every
++/// other value through an allow-by-default filter, rather than killing it.
+ /// @param rows What becomes of each call named, each number at most once.
+ /// @param descriptors The descriptors `EqualsControl` compares with.
+ /// @param ownProcess The process id `EqualsOwnProcess` compares with.
+ /// @param arch The architecture @p rows are numbered for, and the only one the program lets through.
+ /// @param unlisted What becomes of a call no row names.
+ /// @return The program, or why it cannot be assembled.
+ [[nodiscard]] std::expected<std::vector<sock_filter>, ConfinementFailure> assembleFilter(
+     std::span<SystemCallRow const> rows,
+     SandboxDescriptors descriptors,
+     int ownProcess,
+diff --git a/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp b/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp
+index 141f4373c..bdb5fc636 100644
+--- a/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp
++++ b/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp
+@@ -8,20 +8,22 @@
+ #include <sys/mman.h>
+ #include <sys/socket.h>
+ 
+ #include <array>
+ #include <cerrno>
+ #include <cstdint>
+ #include <set>
+ #include <string>
+ #include <vector>
+ 
++#include <fcntl.h>
++
+ #include <vtextension/wasm/host/linux/SeccompFilter.hpp>
+ #include <vtextension/wasm/host/linux/SystemCallRows.hpp>
+ #include <vtextension/wasm/host/linux/testing/BpfEvaluator.hpp>
+ 
+ using namespace vtextension::wasm::host;
+ using vtextension::wasm::BuildInstrumentation;
+ using vtextension::wasm::host::testing::evaluateFilter;
+ using vtextension::wasm::host::testing::FilterVerdict;
+ using vtextension::wasm::host::testing::SystemCallUse;
+ using vtextension::wasm::host::testing::verdictOf;
+@@ -37,28 +39,31 @@ constexpr auto OtherProcess = 1;
+ constexpr auto Both = std::array { AuditArch::Amd64, AuditArch::AArch64 };
+ 
+ /// @return The number of @p call on @p arch, which must have it.
+ [[nodiscard]] long numberOf(SystemCall call, AuditArch arch)
+ {
+     auto const number = systemCallNumber(call, arch);
+     REQUIRE(number.has_value());
+     return *number;
+ }
+ 
+-/// @return What the filter of @p instrumentation's rows on @p arch decides for @p call with @p arguments.
++/// @return What the filter of @p instrumentation's rows on @p arch, for an engine running @p code, decides
++/// for
++///         @p call with @p arguments.
+ [[nodiscard]] FilterVerdict decide(BuildInstrumentation instrumentation,
+                                    AuditArch arch,
+                                    long number,
+                                    std::array<uint64_t, 6> arguments = {},
+-                                   AuditArch madeOn = AuditArch::Amd64)
++                                   AuditArch madeOn = AuditArch::Amd64,
++                                   GuestCode code = GuestCode::Compiled)
+ {
+-    auto const rows = rowsFor(instrumentation, arch);
++    auto const rows = rowsFor(code, instrumentation, arch);
+     auto const program = assembleFilter(rows, SandboxDescriptors { .control = Control }, OwnProcess, arch);
+     REQUIRE(program.has_value());
+     auto const returned =
+         evaluateFilter(*program, SystemCallUse { .arch = madeOn, .number = number, .arguments = arguments });
+     REQUIRE(returned.has_value());
+     return verdictOf(*returned);
+ }
+ 
+ constexpr auto Allowed = FilterVerdict { .action = SystemCallAction::Allow };
+ constexpr auto Killed = FilterVerdict { .action = SystemCallAction::Kill };
+@@ -119,21 +124,22 @@ TEST_CASE("SeccompFilter.decidesEachRowAsItsTableSays", "[vtextension][sandbox]"
+             SystemCall::Mprotect, { 0x1000, 4096, PROT_READ | PROT_EXEC }, Allowed, "code made executable" },
+         Decision { SystemCall::Mprotect, { 0x1000, 4096, ReadWrite }, Allowed, "memory opened" },
+         Decision { SystemCall::Clone, {}, Killed, "a thread or process" },
+         Decision { SystemCall::Clone3, {}, Killed, "a thread or process" },
+         Decision { SystemCall::Execve, {}, Killed, "a program" },
+         Decision { SystemCall::Execveat, {}, Killed, "a program" },
+         Decision { SystemCall::Ptrace, {}, Killed, "tracing" },
+         Decision { SystemCall::Tgkill, { OwnProcess, 1, 6 }, Allowed, "abort()" },
+         Decision { SystemCall::Tgkill, { OtherProcess, 1, 6 }, Killed, "another process's thread" },
+         Decision { SystemCall::Kill, { OtherProcess, 0 }, Killed, "another process" },
+-        Decision { SystemCall::RtSigaction, {}, Killed, "a handler: priming installed them all" },
++        Decision { SystemCall::RtSigaction, {}, Allowed, "a fault handed on to the default action" },
++        Decision { SystemCall::Writev, { 2 }, Allowed, "the C library's report of heap corruption" },
+     };
+     for (auto const arch: Both)
+     {
+         for (auto const& decision: decisions)
+         {
+             INFO((arch == AuditArch::Amd64 ? "x86_64: " : "aarch64: ") << decision.what);
+             CHECK(
+                 decide(
+                     BuildInstrumentation::None, arch, numberOf(decision.call, arch), decision.arguments, arch)
+                 == decision.verdict);
+@@ -206,34 +212,42 @@ TEST_CASE("SeccompFilter.noRowSetAllowsTheForbidden", "[vtextension][sandbox]")
+         SystemCall::Mount,
+         SystemCall::Bpf,
+         SystemCall::PerfEventOpen,
+         SystemCall::Accept,
+         SystemCall::Accept4,
+         SystemCall::Listen,
+         SystemCall::Socketpair,
+         SystemCall::Seccomp,
+     };
+     for (auto const arch: Both)
+-        for (auto const& rows: { releaseRows(arch), sanitizerRows(arch), coverageRows(arch) })
++        for (auto const& rows: { releaseRows(arch),
++                                 compiledRows(arch),
++                                 interpretedRows(arch),
++                                 sanitizerRows(arch),
++                                 coverageRows(arch) })
+             for (auto const call: Forbidden)
+                 if (auto const number = systemCallNumber(call, arch))
+                     for (auto const& row: rows)
+                     {
+                         INFO(systemCallNumbers()[std::to_underlying(call)].name << ": " << row.reason);
+                         CHECK_FALSE((row.number == *number && row.action == SystemCallAction::Allow));
+                     }
+ }
+ 
+ TEST_CASE("SeccompFilter.everyRowSaysWhy", "[vtextension][sandbox]")
+ {
+     for (auto const arch: Both)
+-        for (auto const& rows: { releaseRows(arch), sanitizerRows(arch), coverageRows(arch) })
++        for (auto const& rows: { releaseRows(arch),
++                                 compiledRows(arch),
++                                 interpretedRows(arch),
++                                 sanitizerRows(arch),
++                                 coverageRows(arch) })
+         {
+             auto numbers = std::set<long> {};
+             for (auto const& row: rows)
+             {
+                 INFO("number " << row.number);
+                 CHECK_FALSE(row.reason.empty());
+                 CHECK(numbers.insert(row.number).second);
+                 CHECK((row.action == SystemCallAction::Refuse) == (row.error != 0));
+             }
+         }
+@@ -243,38 +257,40 @@ TEST_CASE("SeccompFilter.assemblesForBothArchitectures", "[vtextension][sandbox]
+ {
+     // aarch64 has no open, fork or poll; its rows leave them out, and number the rest its own way.
+     for (auto const call: { SystemCall::Open, SystemCall::Fork, SystemCall::Poll })
+     {
+         CHECK(systemCallNumber(call, AuditArch::Amd64).has_value());
+         CHECK_FALSE(systemCallNumber(call, AuditArch::AArch64).has_value());
+     }
+     CHECK(systemCallNumber(SystemCall::Read, AuditArch::Amd64) == 0);
+     CHECK(systemCallNumber(SystemCall::Read, AuditArch::AArch64) == 63);
+     for (auto const arch: Both)
+-        for (auto const instrumentation:
+-             { BuildInstrumentation::None, BuildInstrumentation::Coverage, BuildInstrumentation::Sanitizers })
+-        {
+-            auto const rows = rowsFor(instrumentation, arch);
+-            auto const program =
+-                assembleFilter(rows, SandboxDescriptors { .control = Control }, OwnProcess, arch);
+-            REQUIRE(program.has_value());
+-            CHECK(program->size() <= BPF_MAXINSNS);
+-            // Every row is reached: each number decides as its row says, arguments aside.
+-            for (auto const& row: rows)
+-                if (row.checks.empty())
+-                {
+-                    auto const returned =
+-                        evaluateFilter(*program, SystemCallUse { .arch = arch, .number = row.number });
+-                    REQUIRE(returned.has_value());
+-                    CHECK(*returned == seccompReturnOf(row.action, row.error));
+-                }
+-        }
++        for (auto const code: { GuestCode::Interpreted, GuestCode::Compiled })
++            for (auto const instrumentation: { BuildInstrumentation::None,
++                                               BuildInstrumentation::Coverage,
++                                               BuildInstrumentation::Sanitizers })
++            {
++                auto const rows = rowsFor(code, instrumentation, arch);
++                auto const program =
++                    assembleFilter(rows, SandboxDescriptors { .control = Control }, OwnProcess, arch);
++                REQUIRE(program.has_value());
++                CHECK(program->size() <= BPF_MAXINSNS);
++                // Every row is reached: each number decides as its row says, arguments aside.
++                for (auto const& row: rows)
++                    if (row.checks.empty())
++                    {
++                        auto const returned =
++                            evaluateFilter(*program, SystemCallUse { .arch = arch, .number = row.number });
++                        REQUIRE(returned.has_value());
++                        CHECK(*returned == seccompReturnOf(row.action, row.error));
++                    }
++            }
+     // A Refuse without an errno, or a check of a seventh argument, is no program.
+     auto const noErrno = std::array { SystemCallRow {
+         .number = 0, .checks = {}, .action = SystemCallAction::Refuse, .error = 0, .reason = "none" } };
+     CHECK(assembleFilter(noErrno, SandboxDescriptors { .control = Control }, OwnProcess, AuditArch::Amd64)
+               .error()
+           == ConfinementFailure { .step = vtextension::wasm::remote::proto::LockdownStep::SystemCalls,
+                                   .code = EINVAL });
+     constexpr auto Seventh =
+         std::array { ArgumentCheck { .index = 6, .test = ArgumentTest::Equals, .mask = 1, .value = 1 } };
+     auto const seventh = std::array { SystemCallRow {
+@@ -311,10 +327,101 @@ TEST_CASE("SeccompFilter.checksBothHalvesOfAWideArgument", "[vtextension][sandbo
+         {
+             INFO(argument);
+             auto const returned = evaluateFilter(
+                 *program,
+                 SystemCallUse { .arch = AuditArch::Amd64, .number = 0, .arguments = { 0, argument } });
+             REQUIRE(returned.has_value());
+             CHECK(verdictOf(*returned) == expected);
+         }
+     }
+ }
++
++TEST_CASE("SeccompFilter.failedChecksTakeTheUnlistedAction", "[vtextension][sandbox]")
++{
++    // An outer sandbox refusing one value of an argument lets every other value through, as a call no row
++    // names; the host's own filter, which kills what it does not name, kills a failed check as well.
++    constexpr auto Refused = uint64_t { 83 };
++    constexpr auto OneValue = std::array {
++        ArgumentCheck { .index = 2, .test = ArgumentTest::Equals, .mask = 0xFFFF'FFFF, .value = Refused },
++    };
++    auto const rows = std::array { SystemCallRow { .number = 54,
++                                                   .checks = OneValue,
++                                                   .action = SystemCallAction::Refuse,
++                                                   .error = EPERM,
++                                                   .reason = "one option" } };
++    for (auto const unlisted: { SystemCallAction::Allow, SystemCallAction::Kill })
++    {
++        auto const program = assembleFilter(
++            rows, SandboxDescriptors { .control = Control }, OwnProcess, AuditArch::Amd64, unlisted);
++        REQUIRE(program.has_value());
++        auto const verdictFor = [&](long number, uint64_t option) {
++            auto const returned = evaluateFilter(
++                *program,
++                SystemCallUse { .arch = AuditArch::Amd64, .number = number, .arguments = { 0, 0, option } });
++            REQUIRE(returned.has_value());
++            return verdictOf(*returned);
++        };
++        auto const otherwise = FilterVerdict { .action = unlisted };
++        CHECK(verdictFor(54, Refused) == refusedWith(EPERM));
++        CHECK(verdictFor(54, Refused + 1) == otherwise);
++        CHECK(verdictFor(55, Refused) == otherwise);
++    }
++}
++
++TEST_CASE("SeccompFilter.anInterpreterMakesNothingExecutable", "[vtextension][sandbox]")
++{
++    // An engine that compiles makes its code executable once written; one that interprets never does, and
++    // asks only what the rows of its own allow.
++    constexpr auto Executable = uint64_t { PROT_READ | PROT_EXEC };
++    struct Expectation
++    {
++        SystemCall call;
++        std::array<uint64_t, 6> arguments;
++        FilterVerdict compiled;
++        FilterVerdict interpreted;
++        char const* what;
++    };
++    auto const expectations = std::array {
++        Expectation {
++            SystemCall::Mprotect, { 0x1000, 4096, Executable }, Allowed, Killed, "code made executable" },
++        Expectation { SystemCall::Mprotect, { 0x1000, 4096, PROT_WRITE | PROT_EXEC }, Killed, Killed, "W+X" },
++        Expectation { SystemCall::Mprotect, { 0x1000, 4096, ReadWrite }, Allowed, Allowed, "memory opened" },
++        Expectation {
++            SystemCall::Mmap, { 0, 4096, Executable, Anonymous }, Killed, Killed, "executable memory" },
++        Expectation { SystemCall::Fcntl, { 12, F_GETFL }, Killed, Allowed, "a descriptor's flags asked" },
++        Expectation {
++            SystemCall::Fcntl, { 12, F_SETFL, O_NONBLOCK }, Killed, Killed, "a descriptor's flags set" },
++        Expectation { SystemCall::Fcntl, { 12, F_DUPFD, 0 }, Killed, Killed, "a descriptor duplicated" },
++        Expectation { SystemCall::Lseek, { 12, 0, SEEK_SET }, Killed, Allowed, "a seek" },
++        Expectation {
++            SystemCall::SchedGetaffinity, { 0, 128 }, Killed, refusedWith(ENOSYS), "a thread's CPUs asked" },
++    };
++    for (auto const arch: Both)
++        for (auto const& expectation: expectations)
++        {
++            INFO((arch == AuditArch::Amd64 ? "x86_64: " : "aarch64: ") << expectation.what);
++            auto const number = numberOf(expectation.call, arch);
++            CHECK(decide(BuildInstrumentation::None,
++                         arch,
++                         number,
++                         expectation.arguments,
++                         arch,
++                         GuestCode::Compiled)
++                  == expectation.compiled);
++            CHECK(decide(BuildInstrumentation::None,
++                         arch,
++                         number,
++                         expectation.arguments,
++                         arch,
++                         GuestCode::Interpreted)
++                  == expectation.interpreted);
++        }
++    // aarch64 flushes instruction caches only for code it wrote.
++    auto const membarrier = numberOf(SystemCall::Membarrier, AuditArch::AArch64);
++    CHECK(decide(BuildInstrumentation::None,
++                 AuditArch::AArch64,
++                 membarrier,
++                 {},
++                 AuditArch::AArch64,
++                 GuestCode::Interpreted)
++          == Killed);
++}
+diff --git a/src/vtextension/wasm/host/linux/SystemCallRows.cpp b/src/vtextension/wasm/host/linux/SystemCallRows.cpp
+index ff50d362a..78dd2b1e0 100644
+--- a/src/vtextension/wasm/host/linux/SystemCallRows.cpp
++++ b/src/vtextension/wasm/host/linux/SystemCallRows.cpp
+@@ -72,43 +72,45 @@ namespace
+         SystemCallNumbers { SystemCall::ProcessVmReadv, "process_vm_readv", 310, 270 },
+         SystemCallNumbers { SystemCall::ProcessVmWritev, "process_vm_writev", 311, 271 },
+         SystemCallNumbers { SystemCall::Ptrace, "ptrace", 101, 117 },
+         SystemCallNumbers { SystemCall::Read, "read", 0, 63 },
+         SystemCallNumbers { SystemCall::Recvfrom, "recvfrom", 45, 207 },
+         SystemCallNumbers { SystemCall::Recvmsg, "recvmsg", 47, 212 },
+         SystemCallNumbers { SystemCall::RestartSyscall, "restart_syscall", 219, 128 },
+         SystemCallNumbers { SystemCall::RtSigaction, "rt_sigaction", 13, 134 },
+         SystemCallNumbers { SystemCall::RtSigprocmask, "rt_sigprocmask", 14, 135 },
+         SystemCallNumbers { SystemCall::RtSigreturn, "rt_sigreturn", 15, 139 },
++        SystemCallNumbers { SystemCall::SchedGetaffinity, "sched_getaffinity", 204, 123 },
+         SystemCallNumbers { SystemCall::SchedYield, "sched_yield", 24, 124 },
+         SystemCallNumbers { SystemCall::Seccomp, "seccomp", 317, 277 },
+         SystemCallNumbers { SystemCall::Sendmmsg, "sendmmsg", 307, 269 },
+         SystemCallNumbers { SystemCall::Sendmsg, "sendmsg", 46, 211 },
+         SystemCallNumbers { SystemCall::Sendto, "sendto", 44, 206 },
+         SystemCallNumbers { SystemCall::Setns, "setns", 308, 268 },
+         SystemCallNumbers { SystemCall::Setsockopt, "setsockopt", 54, 208 },
+         SystemCallNumbers { SystemCall::Shutdown, "shutdown", 48, 210 },
+         SystemCallNumbers { SystemCall::Sigaltstack, "sigaltstack", 131, 132 },
+         SystemCallNumbers { SystemCall::Socket, "socket", 41, 198 },
+         SystemCallNumbers { SystemCall::Socketpair, "socketpair", 53, 199 },
+         SystemCallNumbers { SystemCall::Statx, "statx", 332, 291 },
+         SystemCallNumbers { SystemCall::Tgkill, "tgkill", 234, 131 },
+         SystemCallNumbers { SystemCall::Unshare, "unshare", 272, 97 },
+         SystemCallNumbers { SystemCall::Vfork, "vfork", 58, NoSystemCall },
+         SystemCallNumbers { SystemCall::Write, "write", 1, 64 },
++        SystemCallNumbers { SystemCall::Writev, "writev", 20, 66 },
+     };
+     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, NumberTable.size()),
+                                       [](std::size_t index) {
+                                           return std::to_underlying(NumberTable.at(index).call) == index;
+                                       }),
+                   "NumberTable holds one row per SystemCall, at its index.");
+-    static_assert(NumberTable.back().call == SystemCall::Write, "NumberTable names every SystemCall.");
++    static_assert(NumberTable.back().call == SystemCall::Writev, "NumberTable names every SystemCall.");
+ 
+     /// Where a row applies.
+     enum class Architectures : uint8_t
+     {
+         Every,   ///< Wherever the call exists.
+         AArch64, ///< On aarch64 only.
+     };
+ 
+     /// A row before it is numbered for an architecture.
+     struct RowSpec
+@@ -163,66 +165,71 @@ namespace
+     };
+     constexpr auto WritableOrExecutable = uint64_t { PROT_WRITE | PROT_EXEC };
+     constexpr auto SharedOrFixed = uint64_t { MAP_SHARED | MAP_FIXED };
+     /// Never executable; shared only at a fixed address, over a reservation of the host's own.
+     constexpr auto MappingRelease = std::array {
+         ArgumentCheck { .index = 2, .test = ArgumentTest::AllClear, .mask = PROT_EXEC, .value = 0 },
+         ArgumentCheck {
+             .index = 3, .test = ArgumentTest::NotEquals, .mask = SharedOrFixed, .value = MAP_SHARED },
+     };
+     /// Never executable.
+-    constexpr auto MappingCoverage = std::array {
++    constexpr auto NeverExecutable = std::array {
+         ArgumentCheck { .index = 2, .test = ArgumentTest::AllClear, .mask = PROT_EXEC, .value = 0 },
+     };
+     /// Never writable and executable at once.
+     constexpr auto ProtectionRelease = std::array {
+         ArgumentCheck { .index = 2,
+                         .test = ArgumentTest::NotEquals,
+                         .mask = WritableOrExecutable,
+                         .value = WritableOrExecutable },
+     };
+-    /// The descriptor's own metadata: the path argument is empty.
++    /// The descriptor's own metadata, as AT_EMPTY_PATH asks for it. Seccomp cannot read the path argument,
++    /// so a caller passing a path with the flag set still stats that path. That is accepted residual risk: a
++    /// file's metadata stays observable (Landlock does not govern a stat), never its contents.
+     constexpr auto StatOfDescriptorAt3 = std::array {
+         ArgumentCheck { .index = 3, .test = ArgumentTest::AllSet, .mask = AT_EMPTY_PATH, .value = 0 },
+     };
+     constexpr auto StatOfDescriptorAt2 = std::array {
+         ArgumentCheck { .index = 2, .test = ArgumentTest::AllSet, .mask = AT_EMPTY_PATH, .value = 0 },
+     };
+ 
+     // Most frequent first, as the helper suites measured them: the filter tests the rows in this order.
+     constexpr auto ReleaseTable = std::array {
+         allow(SystemCall::Futex, "every wait and wake between the host's threads"),
+         allow(SystemCall::Sendto, "send() on a channel: every reply, host call and growth request"),
+         allow(SystemCall::Recvfrom, "recv() on a lane, and on the wake signal"),
+         allowWhen(SystemCall::Recvmsg,
+                   OnControl,
+                   "the control channel takes in the memory objects Contour grants; nothing else does"),
+         allow(SystemCall::Poll, "the interrupt listener waits on the wake signal and its stop"),
+         allow(SystemCall::Ppoll, "poll() where the architecture has only ppoll"),
+         allow(SystemCall::Read, "reads of descriptors the host holds already"),
+         allow(SystemCall::Write, "the wake signal, and lines on stderr"),
++        allow(SystemCall::Writev,
++              "the C library's report of heap corruption before it aborts, so a crash is not taken for a "
++              "sandbox kill; it writes no more than write() does"),
+         allowWhen(
+             SystemCall::Mmap,
+             MappingRelease,
+             "the allocator, the engine's code and stacks, and guest memory mapped over its reservation"),
+         allow(SystemCall::Munmap, "the allocator, and released instances"),
+         allow(SystemCall::Madvise, "the allocator and the engine return pages"),
+-        allowWhen(SystemCall::Mprotect,
+-                  ProtectionRelease,
+-                  "compiled code turns executable once written, and guest memory opens as it grows"),
+         allow(SystemCall::Mremap, "the allocator grows large blocks"),
+         allow(SystemCall::Brk, "the allocator's main arena"),
+         allow(SystemCall::Close, "released descriptors: granted objects, and the channels at the end"),
+         allow(SystemCall::Shutdown, "the host ends its channels as it stops"),
+         allow(SystemCall::RtSigreturn, "a guest trap returns from the engine's signal handler"),
+         allow(SystemCall::Sigaltstack, "a thread's alternate signal stack is queried and removed as it ends"),
+         allow(SystemCall::RtSigprocmask, "a thread blocks signals as it ends"),
++        allow(SystemCall::RtSigaction,
++              "a fault that is no guest's is handed on by restoring the default action, so the host dies "
++              "of the fault itself; a handler changes only what the process does with its own signals"),
+         allow(SystemCall::SchedYield, "spin locks back off"),
+         allow(SystemCall::ClockGettime, "the clock, where the vDSO cannot read it"),
+         allow(SystemCall::Getrandom, "hash seeds of tables made after lockdown"),
+         allow(SystemCall::Fstat, "a granted object's size is checked before it is mapped"),
+         allowWhen(
+             SystemCall::Newfstatat, StatOfDescriptorAt3, "fstat() where the C library makes it fstatat()"),
+         allowWhen(SystemCall::Statx, StatOfDescriptorAt2, "fstat() where the C library makes it statx()"),
+         refuse(SystemCall::Ioctl, ENOTTY, "the engine asks whether stderr is a terminal: it is not"),
+         allow(SystemCall::Getpid, "abort() signals its own process"),
+         allow(SystemCall::Gettid, "abort() signals its own thread"),
+@@ -231,35 +238,64 @@ namespace
+         allow(SystemCall::RestartSyscall, "a call interrupted by a stop resumes"),
+         allow(SystemCall::Exit, "a thread ends"),
+         allow(SystemCall::ExitGroup, "the host ends"),
+         refuse(SystemCall::Socket, EPERM, "no network and no new channel"),
+         refuse(SystemCall::Socketpair, EPERM, "no new channel"),
+         refuse(SystemCall::Openat,
+                EACCES,
+                "no file: the C library's probes (overcommit_memory as an arena shrinks) do without"),
+         refuse(SystemCall::Open, EACCES, "no file"),
+         refuse(SystemCall::Openat2, EACCES, "no file"),
++    };
++
++    constexpr auto CompiledTable = std::array {
++        allowWhen(SystemCall::Mprotect,
++                  ProtectionRelease,
++                  "compiled code turns executable once written, and guest memory opens as it grows"),
+         allow(SystemCall::Membarrier,
+               "the engine flushes other cores' instruction caches once it wrote code",
+               Architectures::AArch64),
+     };
+ 
++    /// Asks for a descriptor's status flags: F_GETFL, and nothing fcntl() changes.
++    constexpr auto StatusFlagsQuery = std::array {
++        ArgumentCheck { .index = 1, .test = ArgumentTest::Equals, .mask = IntBits, .value = F_GETFL },
++    };
++
++    // As the WAMR helper suite measured them: an interpreter writes no code, so nothing turns executable.
++    constexpr auto InterpretedTable = std::array {
++        allowWhen(
++            SystemCall::Mprotect,
++            NeverExecutable,
++            "guest memory and the interpreter's stacks open as they grow; an interpreter writes no code"),
++        allowWhen(SystemCall::Fcntl,
++                  StatusFlagsQuery,
++                  "WAMR's WASI asks the null device for its flags as it binds a guest's standard streams"),
++        allow(SystemCall::Lseek,
++              "a guest's fd_seek on a standard stream, which WAMR's WASI hands to the null device"),
++        refuse(SystemCall::SchedGetaffinity,
++               ENOSYS,
++               "pthread_getattr_np() asks for a thread's CPUs as WAMR finds the thread's stack; without "
++               "them, the C library answers all the same"),
++    };
++
+     constexpr auto SanitizerTable = std::array {
+         allow(SystemCall::Openat,
+-              "a report reads /proc/self/maps; the file system restriction allows /proc only"),
++              "a report reads /proc/self/maps; the file system restriction allows the host's own /proc "
++              "entries only"),
+         allow(SystemCall::Gettimeofday, "the thread sanitizer's clock"),
+         allow(SystemCall::Nanosleep, "the thread sanitizer's background thread sleeps"),
+     };
+ 
+     constexpr auto CoverageTable = std::array {
+         allowWhen(SystemCall::Mmap,
+-                  MappingCoverage,
++                  NeverExecutable,
+                   "counter files are mapped shared to be merged; the release row's other uses still pass"),
+         allow(SystemCall::Openat, "counter files; the file system restriction allows the build tree only"),
+         allow(SystemCall::Fcntl, "counter files are locked while they are merged"),
+         allow(SystemCall::Lseek, "counter files are read and written in place"),
+         allow(SystemCall::Ftruncate, "a counter file new to the build tree is sized before it is mapped"),
+     };
+ 
+     /// @return @p specs numbered for @p arch, without those that do not exist or apply there.
+     [[nodiscard]] std::vector<SystemCallRow> numbered(std::span<RowSpec const> specs, AuditArch arch)
+     {
+@@ -271,20 +307,44 @@ namespace
+             if (auto const number = systemCallNumber(spec.call, arch))
+                 rows.push_back(SystemCallRow { .number = *number,
+                                                .checks = spec.checks,
+                                                .action = spec.action,
+                                                .error = spec.error,
+                                                .reason = spec.reason });
+         }
+         return rows;
+     }
+ 
++    /// @return The rows @p code adds, numbered for @p arch.
++    [[nodiscard]] std::vector<SystemCallRow> guestCodeRows(GuestCode code, AuditArch arch)
++    {
++        switch (code)
++        {
++            case GuestCode::Interpreted: return interpretedRows(arch);
++            case GuestCode::Compiled: return compiledRows(arch);
++        }
++        return {};
++    }
++
++    /// Replaces each row of @p rows by the row of @p added of the same call, and appends the others.
++    void overlay(std::vector<SystemCallRow>& rows, std::vector<SystemCallRow> const& added)
++    {
++        for (auto const& row: added)
++        {
++            auto const same = std::ranges::find(rows, row.number, &SystemCallRow::number);
++            if (same != rows.end())
++                *same = row;
++            else
++                rows.push_back(row);
++        }
++    }
++
+     /// @return The rows @p instrumentation adds, numbered for @p arch.
+     [[nodiscard]] std::vector<SystemCallRow> instrumentationRows(BuildInstrumentation instrumentation,
+                                                                  AuditArch arch)
+     {
+         switch (instrumentation)
+         {
+             case BuildInstrumentation::None: return {};
+             case BuildInstrumentation::Coverage: return coverageRows(arch);
+             case BuildInstrumentation::Sanitizers: return sanitizerRows(arch);
+         }
+@@ -304,40 +364,44 @@ std::optional<long> systemCallNumber(SystemCall call, AuditArch arch) noexcept
+     if (number == NoSystemCall)
+         return std::nullopt;
+     return number;
+ }
+ 
+ std::vector<SystemCallRow> releaseRows(AuditArch arch)
+ {
+     return numbered(ReleaseTable, arch);
+ }
+ 
++std::vector<SystemCallRow> compiledRows(AuditArch arch)
++{
++    return numbered(CompiledTable, arch);
++}
++
++std::vector<SystemCallRow> interpretedRows(AuditArch arch)
++{
++    return numbered(InterpretedTable, arch);
++}
++
+ std::vector<SystemCallRow> sanitizerRows(AuditArch arch)
+ {
+     return numbered(SanitizerTable, arch);
+ }
+ 
+ std::vector<SystemCallRow> coverageRows(AuditArch arch)
+ {
+     return numbered(CoverageTable, arch);
+ }
+ 
+-std::vector<SystemCallRow> rowsFor(BuildInstrumentation instrumentation, AuditArch arch)
++std::vector<SystemCallRow> rowsFor(GuestCode code, BuildInstrumentation instrumentation, AuditArch arch)
+ {
+     auto rows = releaseRows(arch);
+-    for (auto const& added: instrumentationRows(instrumentation, arch))
+-    {
+-        auto const same = std::ranges::find(rows, added.number, &SystemCallRow::number);
+-        if (same != rows.end())
+-            *same = added;
+-        else
+-            rows.push_back(added);
+-    }
++    overlay(rows, guestCodeRows(code, arch));
++    overlay(rows, instrumentationRows(instrumentation, arch));
+     return rows;
+ }
+ 
+-std::vector<SystemCallRow> buildRows(AuditArch arch)
++std::vector<SystemCallRow> buildRows(GuestCode code, AuditArch arch)
+ {
+-    return rowsFor(ThisBuildInstrumentation, arch);
++    return rowsFor(code, ThisBuildInstrumentation, arch);
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/linux/SystemCallRows.hpp b/src/vtextension/wasm/host/linux/SystemCallRows.hpp
+index 2b830bbe5..08c53b52a 100644
+--- a/src/vtextension/wasm/host/linux/SystemCallRows.hpp
++++ b/src/vtextension/wasm/host/linux/SystemCallRows.hpp
+@@ -2,30 +2,32 @@
+ #pragma once
+ 
+ /// @file
+ /// Which system calls the extension host may make once it is locked down on Linux, as data: a row per call,
+ /// each saying what becomes of it and why. SeccompFilter.hpp assembles the rows into the filter the kernel
+ /// runs; a call no row names kills the process.
+ ///
+ /// The rows were measured, not guessed: every call the unsandboxed helper made after it locked down, across
+ /// the helper suites in the release, sanitizer and coverage trees, is a row here, or refused where refusing
+ /// it is what the caller handles (a library probing a file it may do without). The release rows are the
+-/// product's; the sanitizer and coverage rows widen them only in builds made for those, and replace a release
+-/// row of the same call.
++/// product's, for every engine; the rows of the engine's GuestCode follow, an engine that compiles making
++/// memory executable and one that interprets never; the sanitizer and coverage rows widen them only in builds
++/// made for those. Each later set replaces an earlier row of the same call.
+ 
+ #include <cstdint>
+ #include <optional>
+ #include <span>
+ #include <string_view>
+ #include <vector>
+ 
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
++#include <vtextension/wasm/host/GuestCode.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// The architectures a filter is assembled for, by the value the kernel reports in `seccomp_data.arch`
+ /// (AUDIT_ARCH_*). The values are ours, so that both are known wherever the filter is tested.
+ enum class AuditArch : uint32_t
+ {
+     Amd64 = 0xC000'003E,   ///< AUDIT_ARCH_X86_64: x86_64.
+     AArch64 = 0xC000'00B7, ///< AUDIT_ARCH_AARCH64.
+@@ -93,36 +95,38 @@ enum class SystemCall : uint8_t
+     ProcessVmReadv,
+     ProcessVmWritev,
+     Ptrace,
+     Read,
+     Recvfrom,
+     Recvmsg,
+     RestartSyscall,
+     RtSigaction,
+     RtSigprocmask,
+     RtSigreturn,
++    SchedGetaffinity,
+     SchedYield,
+     Seccomp,
+     Sendmmsg,
+     Sendmsg,
+     Sendto,
+     Setns,
+     Setsockopt,
+     Shutdown,
+     Sigaltstack,
+     Socket,
+     Socketpair,
+     Statx,
+     Tgkill,
+     Unshare,
+     Vfork,
+     Write,
++    Writev,
+ };
+ 
+ /// What an architecture numbers a call it does not have.
+ inline constexpr auto NoSystemCall = long { -1 };
+ 
+ /// A system call's numbers.
+ struct SystemCallNumbers
+ {
+     SystemCall call;       ///< The call.
+     std::string_view name; ///< Its name, as strace prints it.
+@@ -173,30 +177,42 @@ struct SystemCallRow
+     std::span<ArgumentCheck const> checks; ///< What its arguments must pass; all of them.
+     SystemCallAction action;               ///< What becomes of it when they pass.
+     int error;                             ///< The errno a `Refuse` fails it with; 0 otherwise.
+     std::string_view reason;               ///< Why, for whoever reads the table.
+ };
+ 
+ /// @param arch The architecture the rows are numbered for.
+ /// @return What every build allows or refuses, most frequent first.
+ [[nodiscard]] std::vector<SystemCallRow> releaseRows(AuditArch arch);
+ 
++/// @param arch The architecture the rows are numbered for.
++/// @return What an engine that compiles its modules to native code needs beyond the release rows.
++[[nodiscard]] std::vector<SystemCallRow> compiledRows(AuditArch arch);
++
++/// @param arch The architecture the rows are numbered for.
++/// @return What an engine that interprets its modules needs beyond the release rows.
++[[nodiscard]] std::vector<SystemCallRow> interpretedRows(AuditArch arch);
++
+ /// @param arch The architecture the rows are numbered for.
+ /// @return What a sanitizer's runtime needs beyond them.
+ [[nodiscard]] std::vector<SystemCallRow> sanitizerRows(AuditArch arch);
+ 
+ /// @param arch The architecture the rows are numbered for.
+ /// @return What writing coverage counters needs beyond them.
+ [[nodiscard]] std::vector<SystemCallRow> coverageRows(AuditArch arch);
+ 
++/// @param code How the host's engine runs a module's code.
+ /// @param instrumentation How the build is instrumented.
+ /// @param arch The architecture the rows are numbered for.
+-/// @return The rows such a build locks down with: releaseRows(), each replaced by a row of the same call in
+-/// the
+-///         set @p instrumentation names, and that set's other rows after them.
+-[[nodiscard]] std::vector<SystemCallRow> rowsFor(BuildInstrumentation instrumentation, AuditArch arch);
+-
++/// @return The rows such a host locks down with: releaseRows(), then the set @p code names, then the set
++///         @p instrumentation names; a row of a later set replaces an earlier row of the same call, and its
++///         other rows follow.
++[[nodiscard]] std::vector<SystemCallRow> rowsFor(GuestCode code,
++                                                 BuildInstrumentation instrumentation,
++                                                 AuditArch arch);
++
++/// @param code How the host's engine runs a module's code.
+ /// @param arch The architecture the rows are numbered for.
+-/// @return The rows this build locks down with: rowsFor(ThisBuildInstrumentation).
+-[[nodiscard]] std::vector<SystemCallRow> buildRows(AuditArch arch);
++/// @return The rows a host of this build locks down with: rowsFor(@p code, ThisBuildInstrumentation).
++[[nodiscard]] std::vector<SystemCallRow> buildRows(GuestCode code, AuditArch arch);
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 487a43808..cdd1ac99f 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -244,39 +244,44 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+         contour::wasmtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+     if(CONTOUR_WASM_GUESTS)
+         # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
+         foreach(_guest IN ITEMS echo hostile sleeper spawner)
+             add_dependencies(vtextension_remote_test ${_guest}_wasm)
+         endforeach()
+         add_dependencies(vtextension_remote_test contour_bundled_extensions)
+         target_compile_definitions(vtextension_remote_test PRIVATE
+             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+     endif()
++    if(TARGET vtextension_wamr_engine)
++        # The same composition on WAMR's engine: the contract through the protocol on both engines.
++        target_sources(vtextension_remote_test PRIVATE ../wamr/RemoteWamrEngine_test.cpp)
++        target_link_libraries(vtextension_remote_test PRIVATE vtextension_wamr_engine)
++    endif()
+     if(_process_source)
+         # The process connector, driven through the handshake by a host a fake launcher plays.
+         target_sources(vtextension_remote_test PRIVATE
+             process/LockdownRefusal_test.cpp
+             process/testing/FakeProcessLauncher.cpp
+             process/testing/FakeProcessLauncher.hpp
+         )
+     endif()
+     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+ 
+-if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
+-    # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
+-    # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host
+-    # only for the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
++if(VTEXTENSION_TESTING AND CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wasmtime" AND _process_source)
++    # The extension host executable itself (../../../contour-extension-host, on Wasmtime's engine, as here),
++    # started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host only for
++    # the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
+     #
+     # Beside them, the contract and the suites vtextension_test runs on the default backend, here composed by
+     # testing/ProcessDefaultBackend.cpp as the remote backend over real helper processes: their real guests
+     # run through a process boundary.
+     add_executable(vtextension_helper_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         Helper_test.cpp
+         HostileMemory_test.cpp
+         ProcessBackend_test.cpp
+         Hostility_test.cpp
+@@ -311,10 +316,55 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
+         add_dependencies(vtextension_helper_test contour_bundled_extensions)
+         target_compile_definitions(vtextension_helper_test PRIVATE
+             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+     endif()
+     add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
++
++if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_source)
++    # The extension host on WAMR's engine, started as Contour starts it: contour-extension-host where the build
++    # runs WAMR's, its test-only twin contour-extension-host-wamr where it runs another
++    # (../../../contour-extension-host). The contract, the bundled extensions and the process cases of
++    # vtextension_helper_test, composed by testing/ProcessDefaultBackend.cpp over that helper, locked down where
++    # the build has a sandbox.
++    set(_wamr_helper contour-extension-host-wamr)
++    if(CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wamr")
++        set(_wamr_helper contour-extension-host)
++    endif()
++    add_executable(vtextension_wamr_helper_test
++        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
++        ProcessBackend_test.cpp
++        ReviewFocusProcess_test.cpp
++        WamrHelper_test.cpp
++        process/testing/HelperComposition.cpp
++        process/testing/HelperComposition.hpp
++        process/testing/LaunchedHelper.cpp
++        process/testing/LaunchedHelper.hpp
++        testing/ProcessDefaultBackend.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
++    )
++    target_link_libraries(vtextension_wamr_helper_test PRIVATE
++        vtextension vtextension_host vtextension_remote vtextension_remote_process vtextension_remote_wire
++        glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
++    add_dependencies(vtextension_wamr_helper_test ${_wamr_helper} contour-extension-host-hostile)
++    target_compile_definitions(vtextension_wamr_helper_test PRIVATE
++        VTEXTENSION_HELPER_PATH="$<TARGET_FILE:${_wamr_helper}>"
++        VTEXTENSION_HOSTILE_HELPER_PATH="$<TARGET_FILE:contour-extension-host-hostile>")
++    if(CONTOUR_WASM_GUESTS)
++        # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
++        foreach(_guest IN ITEMS echo hostile sleeper spawner)
++            add_dependencies(vtextension_wamr_helper_test ${_guest}_wasm)
++        endforeach()
++        add_dependencies(vtextension_wamr_helper_test contour_bundled_extensions)
++        target_compile_definitions(vtextension_wamr_helper_test PRIVATE
++            VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
++    endif()
++    add_test(NAME vtextension_wamr_helper_test COMMAND vtextension_wamr_helper_test)
++    if(NOT WIN32)
++        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
++        target_compile_options(vtextension_wamr_helper_test PRIVATE -Wno-c2y-extensions)
++    endif()
++endif()
+diff --git a/src/vtextension/wasm/remote/ReviewFocusProcess_test.cpp b/src/vtextension/wasm/remote/ReviewFocusProcess_test.cpp
+index 498e10bf4..491dea01b 100644
+--- a/src/vtextension/wasm/remote/ReviewFocusProcess_test.cpp
++++ b/src/vtextension/wasm/remote/ReviewFocusProcess_test.cpp
+@@ -70,26 +70,26 @@ using vtextension::wasm::IWasmBackend;
+ using vtextension::wasm::IWasmInstance;
+ using vtextension::wasm::LockdownRequirement;
+ using namespace std::chrono_literals;
+ 
+ namespace
+ {
+ 
+ /// How long any one thing a case waits for may take; it fails, rather than hang, beyond it.
+ constexpr auto Patience = std::chrono::seconds { 5 };
+ 
+-/// @return The real helper, held to @p timeouts.
++/// @return The real helper, held to @p timeouts, and locked down where the build has a sandbox.
+ [[nodiscard]] HelperBackendConfig realHelper(HostTimeouts timeouts = {})
+ {
+     return HelperBackendConfig { .helper = VTEXTENSION_HELPER_PATH,
+                                  .extraArguments = {},
+-                                 .lockdown = LockdownRequirement::AcceptUnsandboxed,
++                                 .lockdown = process::testing::HelperLockdown,
+                                  .timeouts = timeouts };
+ }
+ 
+ /// Ends the test run, rather than wait forever on a thread or a future that a regression keeps from
+ /// finishing: their destructors would join or wait.
+ [[noreturn]] void abandon(char const* what)
+ {
+     FAIL_CHECK(what);
+     std::println(stderr, "ReviewFocusProcess: {}", what);
+     std::abort();
+diff --git a/src/vtextension/wasm/remote/WamrHelper_test.cpp b/src/vtextension/wasm/remote/WamrHelper_test.cpp
+new file mode 100644
+index 000000000..5d07df8b4
+--- /dev/null
++++ b/src/vtextension/wasm/remote/WamrHelper_test.cpp
+@@ -0,0 +1,49 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The extension host on WAMR's engine, started as Contour starts it: what it says of itself.
++#include <catch2/catch_test_macros.hpp>
++
++#include <utility>
++
++#include <vtextension/wasm/host/Sandbox.hpp>
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++#include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
++#include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/PduStream.hpp>
++
++namespace proto = vtextension::wasm::remote::proto;
++namespace process = vtextension::wasm::remote::process;
++using vtextension::wasm::remote::transport::PduStream;
++
++TEST_CASE("Helper.wamrHelperSaysCopy", "[vtextension]")
++{
++    // It copies memory wherever it runs, as WAMR places a linear memory where it chooses; and it locks itself
++    // down where the build has a sandbox, its engine opening nothing once it did.
++    constexpr auto Lockdown =
++        vtextension::wasm::host::ThisPlatformSandbox == vtextension::wasm::host::PlatformSandbox::None
++            ? proto::LockdownState::Unsandboxed
++            : proto::LockdownState::LockedDown;
++    auto helper = process::testing::launchHelper(
++        process::makeSystemProcessLauncher(),
++        process::testing::HelperLaunch { .executable = VTEXTENSION_HELPER_PATH,
++                                         .environment = process::testing::helperEnvironment() });
++    REQUIRE(helper.has_value());
++    auto control = PduStream { std::move(helper->control),
++                               proto::ChannelKind::Control,
++                               proto::Direction::ToParent,
++                               proto::PduLimits {} };
++    auto const hello = control.receive();
++    REQUIRE(hello.has_value());
++    CHECK(*hello
++          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
++                                         .memoryMode = proto::MemoryMode::Copy,
++                                         .lockdown = Lockdown } });
++
++    // Contour closes the connection: the helper exits cleanly.
++    {
++        auto const closed = std::move(control);
++    }
++    CHECK(process::testing::awaitReap(*helper->launcher, *helper->process)
++          == process::ExitStatus { .kind = process::ExitKind::Exited, .value = 0 });
++}
+diff --git a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+index 640ca478a..d42f3aa90 100644
+--- a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
++++ b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+@@ -141,20 +141,25 @@ TEST_CASE("Sandbox.forbiddenOperationsFailFromAnExecutor", "[vtextension][sandbo
+     {
+         std::string_view op;
+         std::optional<int> refusedWith; ///< Nothing: the process is killed.
+         /// The instrumented build whose rows allow it after all: a coverage build maps its counter files
+         /// shared.
+         std::optional<vtextension::wasm::BuildInstrumentation> allowedIn = std::nullopt;
+     };
+     constexpr auto Expectations = std::array {
+         Expectation { .op = "open-file", .refusedWith = EACCES },
+         Expectation { .op = "open-directory", .refusedWith = EACCES },
++        // A sanitizer build reads its own maps for a report, and no other process's.
++        Expectation { .op = "open-own-process",
++                      .refusedWith = EACCES,
++                      .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
++        Expectation { .op = "open-other-process", .refusedWith = EACCES },
+         Expectation { .op = "socket-inet", .refusedWith = EPERM },
+         Expectation { .op = "socket-unix", .refusedWith = EPERM },
+         Expectation { .op = "send-descriptor", .refusedWith = std::nullopt },
+         Expectation { .op = "fork", .refusedWith = std::nullopt },
+         Expectation { .op = "spawn-thread", .refusedWith = std::nullopt },
+         Expectation { .op = "execve", .refusedWith = std::nullopt },
+         Expectation { .op = "ptrace-traceme", .refusedWith = std::nullopt },
+         Expectation { .op = "signal-parent", .refusedWith = std::nullopt },
+         Expectation { .op = "map-writable-executable", .refusedWith = std::nullopt },
+         Expectation { .op = "map-shared-unfixed",
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+index dc6651654..cd51e402d 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+@@ -108,20 +108,32 @@ namespace
+     [[nodiscard]] std::string openFile(OperationContext&)
+     {
+         return openPath("/etc/hostname", O_RDONLY);
+     }
+ 
+     [[nodiscard]] std::string openDirectory(OperationContext&)
+     {
+         return openPath("/", O_RDONLY | O_DIRECTORY);
+     }
+ 
++    /// What a sanitizer's report reads: its own process's maps.
++    [[nodiscard]] std::string openOwnProcess(OperationContext&)
++    {
++        return openPath("/proc/self/maps", O_RDONLY);
++    }
++
++    /// Another process's entry, which no build's host may read.
++    [[nodiscard]] std::string openOtherProcess(OperationContext& context)
++    {
++        return openPath(std::format("/proc/{}/maps", context.parentProcess).c_str(), O_RDONLY);
++    }
++
+     [[nodiscard]] std::string socketOf(int family)
+     {
+         auto const descriptor = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0);
+         auto outcome = outcomeOf(descriptor);
+         if (descriptor >= 0)
+             ::close(descriptor);
+         return outcome;
+     }
+ 
+     [[nodiscard]] std::string socketInet(OperationContext&)
+@@ -282,20 +294,22 @@ namespace
+     struct Operation
+     {
+         std::string_view name;
+         std::string (*run)(OperationContext& context);
+     };
+ 
+     constexpr auto Operations = std::array {
+         Operation { .name = "none", .run = &nothing },
+         Operation { .name = "open-file", .run = &openFile },
+         Operation { .name = "open-directory", .run = &openDirectory },
++        Operation { .name = "open-own-process", .run = &openOwnProcess },
++        Operation { .name = "open-other-process", .run = &openOtherProcess },
+         Operation { .name = "socket-inet", .run = &socketInet },
+         Operation { .name = "socket-unix", .run = &socketUnix },
+         Operation { .name = "send-descriptor", .run = &sendDescriptor },
+         Operation { .name = "fork", .run = &forkProcess },
+         Operation { .name = "spawn-thread", .run = &spawnThread },
+         Operation { .name = "execve", .run = &executeProgram },
+         Operation { .name = "ptrace-traceme", .run = &traceMe },
+         Operation { .name = "signal-parent", .run = &signalParent },
+         Operation { .name = "map-writable-executable", .run = &mapWritableExecutable },
+         Operation { .name = "map-shared-unfixed", .run = &mapSharedUnfixed },
+@@ -537,21 +551,23 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
+         openNow.wait();
+         beforeRestrict = openPath("/etc/hostname", O_RDONLY);
+         opened.count_down();
+         finish.wait();
+     });
+     if (!early)
+         return exitWith(SandboxProbeExit::SetupFailed);
+ 
+     auto const sandbox =
+         request->sandboxing == Sandboxing::System
+-            ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor })
++            // The wider row set, of an engine that compiles: what it forbids, every engine's forbids.
++            ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor },
++                                      host::GuestCode::Compiled)
+             : std::unique_ptr<host::ISandbox> {};
+     auto const restricted =
+         sandbox ? sandbox->restrictBeforeThreads() : std::expected<void, host::ConfinementFailure> {};
+ 
+     auto context = OperationContext { .control = control,
+                                       .controlDescriptor = controlDescriptor,
+                                       .parentProcess = ::getppid() };
+     auto go = std::latch { 1 };
+     auto reported = std::latch { 1 };
+     auto reportSent = false;
+diff --git a/src/vtextension/wasm/testing/DecoratedEngine.hpp b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+index 95de5634d..d814027b5 100644
+--- a/src/vtextension/wasm/testing/DecoratedEngine.hpp
++++ b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+@@ -145,20 +145,22 @@ class DecoratedEngine final: public host::IHostedEngine
+         return _inner->capabilities();
+     }
+ 
+     [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+     {
+         return _inner->memoryMode();
+     }
+ 
+     [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
+ 
++    [[nodiscard]] host::GuestCode guestCode() const noexcept override { return _inner->guestCode(); }
++
+     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+     {
+         return _inner->prepareThread();
+     }
+ 
+   private:
+     std::unique_ptr<host::IHostedEngine> _inner;
+     InstanceDecorator _decorate;
+ };
+ 
+diff --git a/src/vtextension/wasm/testing/PreparationHookEngine.hpp b/src/vtextension/wasm/testing/PreparationHookEngine.hpp
+index 09286d964..3b2461a38 100644
+--- a/src/vtextension/wasm/testing/PreparationHookEngine.hpp
++++ b/src/vtextension/wasm/testing/PreparationHookEngine.hpp
+@@ -53,20 +53,22 @@ class PreparationHookEngine final: public host::IHostedEngine
+         return _inner->capabilities();
+     }
+ 
+     [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+     {
+         return _inner->memoryMode();
+     }
+ 
+     [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
+ 
++    [[nodiscard]] host::GuestCode guestCode() const noexcept override { return _inner->guestCode(); }
++
+     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+     {
+         return _onPrepare().and_then([this] { return _inner->prepareThread(); });
+     }
+ 
+   private:
+     std::unique_ptr<host::IHostedEngine> _inner;
+     PreparationHook _onPrepare;
+ };
+ 
+diff --git a/src/vtextension/wasm/wamr/CMakeLists.txt b/src/vtextension/wasm/wamr/CMakeLists.txt
+index e56dac0eb..5abcc0cb1 100644
+--- a/src/vtextension/wasm/wamr/CMakeLists.txt
++++ b/src/vtextension/wasm/wamr/CMakeLists.txt
+@@ -13,21 +13,38 @@ add_library(vtextension_wamr STATIC
+     WamrThreadEnv.cpp
+     HiddenExports.hpp
+     TableCaps.hpp
+     WamrBackend.hpp
+     WamrHandles.hpp
+     WamrRuntime.hpp
+     WamrThreadEnv.hpp
+ )
+ target_link_libraries(vtextension_wamr PUBLIC vtextension PRIVATE contour::wamr)
+ 
++# The engine an extension host process drives (WamrEngine.hpp): the backend, holding the null device and the
++# runtime it needs before the host locks itself down.
++add_library(vtextension_wamr_engine STATIC
++    WamrEngine.cpp
++    WamrEngine.hpp
++)
++target_link_libraries(vtextension_wamr_engine PUBLIC vtextension_wamr vtextension_remote_wire)
++
++# The engine the extension host executable runs (../host/HelperEngine.hpp), where it runs WAMR's
++# (CONTOUR_EXTENSION_HOST_ENGINE, ../../../CMakeLists.txt).
++add_library(vtextension_wamr_helper_engine STATIC
++    HelperEngine.cpp
++    ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/host/HelperEngine.hpp
++)
++target_link_libraries(vtextension_wamr_helper_engine PUBLIC vtextension_host PRIVATE vtextension_wamr_engine)
++
+ if(TARGET vtextension_test)
+     # The backend's own tests drive WAMR's C API directly, so they, and only they, need WAMR's headers.
+     # PreparedGeneration.cpp defines the probe runtime-agnostic tests read (../testing/PreparedGeneration.hpp).
+     target_sources(vtextension_test PRIVATE
+         HiddenExports_test.cpp
+         PreparedGeneration.cpp
+         TableCaps_test.cpp
+         WamrBackend_test.cpp
++        WamrEngine_test.cpp
+     )
+-    target_link_libraries(vtextension_test PRIVATE contour::wamr)
++    target_link_libraries(vtextension_test PRIVATE vtextension_wamr_engine contour::wamr)
+ endif()
+diff --git a/src/vtextension/wasm/wamr/HelperEngine.cpp b/src/vtextension/wasm/wamr/HelperEngine.cpp
+new file mode 100644
+index 000000000..0e981873e
+--- /dev/null
++++ b/src/vtextension/wasm/wamr/HelperEngine.cpp
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The engine of the extension host executable: WAMR's, where the build selected it.
++#include <vtextension/wasm/host/HelperEngine.hpp>
++
++#include <vtextension/wasm/wamr/WamrEngine.hpp>
++
++namespace vtextension::wasm::host
++{
++
++std::unique_ptr<IHostedEngine> makeHelperEngine()
++{
++    // WAMR places linear memory where it chooses, so its instances copy memory wherever they run, and its
++    // Hello says so. Every engine shares WAMR's one process-wide state.
++    return wamr::makeWamrEngine();
++}
++
++std::unique_ptr<IHostedEngine> makeCopyingHelperEngine()
++{
++    return wamr::makeWamrEngine();
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp b/src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp
+new file mode 100644
+index 000000000..733ce996a
+--- /dev/null
++++ b/src/vtextension/wasm/wamr/RemoteWamrEngine_test.cpp
+@@ -0,0 +1,39 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The contract, through the protocol, on the WAMR engine an extension host process drives: the remote backend
++// over hosts serving in this process. Compiled into vtextension_remote_test, beside the same composition on
++// the engine that binary otherwise links.
++#include <memory>
++
++#include <vtextension/wasm/BackendConfig.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/host/HostServer.hpp>
++#include <vtextension/wasm/host/InProcessHost.hpp>
++#include <vtextension/wasm/remote/RemoteBackend.hpp>
++#include <vtextension/wasm/remote/RemoteKindState.hpp>
++#include <vtextension/wasm/testing/BackendContract.hpp>
++#include <vtextension/wasm/wamr/WamrEngine.hpp>
++
++namespace
++{
++
++/// Hosts in this process on the WAMR engine, whose memory is copied to the parent.
++struct RemoteWamrTraits
++{
++    [[nodiscard]] static std::unique_ptr<vtextension::wasm::IWasmBackend> make()
++    {
++        using namespace vtextension::wasm;
++        // One kind for every backend made here, as a program composes one.
++        static auto const kind = remote::makeRemoteKindState();
++        return remote::makeRemoteBackend(
++            kind,
++            BackendConfig { .timeouts = {},
++                            .connector = std::make_shared<host::InProcessHostConnector>(
++                                [] { return wamr::makeWamrEngine(); }, host::HostServerConfig {}),
++                            .lockdown = LockdownRequirement::AcceptUnsandboxed });
++    }
++};
++
++} // namespace
++
++CONTOUR_WASM_BACKEND_CONTRACT(RemoteWamrTraits)
+diff --git a/src/vtextension/wasm/wamr/WamrBackend.cpp b/src/vtextension/wasm/wamr/WamrBackend.cpp
+index 15dc3a2e8..0c3ce6c4a 100644
+--- a/src/vtextension/wasm/wamr/WamrBackend.cpp
++++ b/src/vtextension/wasm/wamr/WamrBackend.cpp
+@@ -58,20 +58,53 @@ namespace detail
+     void closeNullDevice(int64_t handle) noexcept
+     {
+ #ifdef _WIN32
+         CloseHandle(reinterpret_cast<HANDLE>(static_cast<intptr_t>(handle)));
+ #else
+         ::close(static_cast<int>(handle));
+ #endif
+     }
+ } // namespace detail
+ 
++NullDeviceOpener systemNullDeviceOpener()
++{
++    return &detail::openNullDevice;
++}
++
++OpenNullDevice::~OpenNullDevice()
++{
++    detail::closeNullDevice(_handle);
++}
++
++NullDevice NullDevice::openPerRuntime(NullDeviceOpener open)
++{
++    return NullDevice { std::move(open), nullptr };
++}
++
++std::expected<NullDevice, ExtensionError> NullDevice::openShared(NullDeviceOpener const& open)
++{
++    auto const handle = open();
++    if (!handle)
++        return std::unexpected(ExtensionError::RuntimeUnavailable);
++    return NullDevice { {}, std::make_shared<OpenNullDevice const>(*handle) };
++}
++
++std::expected<std::shared_ptr<OpenNullDevice const>, ExtensionError> NullDevice::forRuntime() const
++{
++    if (_shared)
++        return _shared;
++    auto const handle = _open();
++    if (!handle)
++        return std::unexpected(ExtensionError::RuntimeUnavailable);
++    return std::make_shared<OpenNullDevice const>(*handle);
++}
++
+ /// The host functions of one runtime, as registered with WAMR: one native-symbol array per import
+ /// module. WAMR keeps (and sorts) the very arrays, and the names they point to, until they are
+ /// unregistered, so each group owns its own and never moves them. What a module links to (trampoline,
+ /// signature, attachment) lives as long as the process (@see HostNative).
+ class HostRegistrations
+ {
+   public:
+     /// Registers @p hostFunctions with the running runtime.
+     /// @return The registrations; `RuntimeUnavailable` if WAMR refused one, or there is no trampoline
+     ///         for one (more than MaxHostFunctions, or one taking more than MaxHostParameters).
+@@ -158,72 +191,68 @@ class HostRegistrations
+             return **existing;
+         auto& group = *_groups.emplace_back(std::make_unique<Group>());
+         group.module = std::string { module };
+         return group;
+     }
+ 
+     std::vector<std::unique_ptr<Group>> _groups;
+ };
+ 
+ std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> WamrRuntime::create(
+-    RuntimeLimits limits, std::span<HostFunction const> hostFunctions)
++    RuntimeLimits limits, std::span<HostFunction const> hostFunctions, NullDevice const& nullDevice)
+ {
+     // WAMR caps a table at MaxTableElements at the least (TableCaps.hpp): a higher cap it would not keep.
+     if (limits.tableElements > MaxTableElements)
+         return std::unexpected(ExtensionError::RuntimeUnavailable);
++    auto device = nullDevice.forRuntime();
++    if (!device)
++        return std::unexpected(device.error());
+     if (auto acquired = acquireRuntime(); !acquired)
+         return std::unexpected(acquired.error());
+ 
+-    auto const fail = [] {
+-        releaseRuntime();
+-        return std::unexpected(ExtensionError::RuntimeUnavailable);
+-    };
+-
+     detail::installMemoryGrowthHandler();
+     auto hostRegistrations = HostRegistrations::create(hostFunctions);
+     if (!hostRegistrations)
+-        return fail();
+-    auto const nullDevice = detail::openNullDevice();
+-    if (!nullDevice)
+     {
+-        hostRegistrations->reset();
+-        return fail();
++        releaseRuntime();
++        return std::unexpected(ExtensionError::RuntimeUnavailable);
+     }
+ 
+     try
+     {
+         return std::make_shared<WamrRuntime>(
+-            PrivateTag {}, limits, *nullDevice, std::move(*hostRegistrations));
++            PrivateTag {}, limits, std::move(*device), std::move(*hostRegistrations));
+     }
+     catch (...)
+     {
+         // The runtime's constructor did not complete, so what it was to be handed is released here,
+         // the registrations while the runtime they are registered with is still up.
+         hostRegistrations->reset();
+-        detail::closeNullDevice(*nullDevice);
+         releaseRuntime();
+         throw;
+     }
+ }
+ 
+ WamrRuntime::WamrRuntime(PrivateTag /*unused*/,
+                          RuntimeLimits limits,
+-                         int64_t nullDevice,
++                         std::shared_ptr<OpenNullDevice const> nullDevice,
+                          std::unique_ptr<HostRegistrations> hostRegistrations) noexcept:
+-    _limits { limits }, _nullDevice { nullDevice }, _hostRegistrations { std::move(hostRegistrations) }
++    _limits { limits },
++    _nullDevice { std::move(nullDevice) },
++    _hostRegistrations { std::move(hostRegistrations) }
+ {
+ }
+ 
+ WamrRuntime::~WamrRuntime()
+ {
+     _hostRegistrations.reset();
+-    detail::closeNullDevice(_nullDevice);
++    _nullDevice.reset();
+     releaseRuntime();
+ }
+ 
+ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WamrRuntime::load(ModuleIdentity /*identity*/,
+                                                                               std::vector<std::byte> bytes)
+ {
+     return loadModule(shared_from_this(), std::move(bytes));
+ }
+ 
+ namespace
+@@ -237,24 +266,26 @@ namespace
+         [[nodiscard]] uint64_t generation() const noexcept override { return _threadEnv.generation(); }
+ 
+       private:
+         ThreadEnv _threadEnv;
+     };
+ 
+     /// The facade over WAMR's process-wide state.
+     class WamrBackend final: public IWasmBackend
+     {
+       public:
++        explicit WamrBackend(WamrConfig config) noexcept: _config { std::move(config) } {}
++
+         [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
+             RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
+         {
+-            return WamrRuntime::create(limits, hostFunctions)
++            return WamrRuntime::create(limits, hostFunctions, _config.nullDevice)
+                 .transform([](std::shared_ptr<WamrRuntime> runtime) -> std::shared_ptr<IWasmRuntime> {
+                     return runtime;
+                 });
+         }
+ 
+         [[nodiscard]] std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread() override
+         {
+             return ThreadEnv::enter().transform([](ThreadEnv threadEnv) -> std::unique_ptr<IThreadGuard> {
+                 return std::make_unique<WamrThreadGuard>(std::move(threadEnv));
+             });
+@@ -267,19 +298,22 @@ namespace
+ 
+         [[nodiscard]] uint64_t runtimeGeneration() const noexcept override
+         {
+             return wamr::runtimeGeneration();
+         }
+ 
+         [[nodiscard]] BackendCapabilities capabilities() const noexcept override
+         {
+             return BackendCapabilities { .memoryGrowth = MemoryGrowthReporting::Reported };
+         }
++
++      private:
++        WamrConfig _config;
+     };
+ } // namespace
+ 
+-std::unique_ptr<IWasmBackend> makeWamrBackend()
++std::unique_ptr<IWasmBackend> makeWamrBackend(WamrConfig config)
+ {
+-    return std::make_unique<WamrBackend>();
++    return std::make_unique<WamrBackend>(std::move(config));
+ }
+ 
+ } // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrBackend.hpp b/src/vtextension/wasm/wamr/WamrBackend.hpp
+index a57391bd5..ee8e05197 100644
+--- a/src/vtextension/wasm/wamr/WamrBackend.hpp
++++ b/src/vtextension/wasm/wamr/WamrBackend.hpp
+@@ -1,22 +1,94 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The WAMR backend of the WebAssembly runtime interface: the fast interpreter, with WASI preview 1.
+ #pragma once
+ 
++#include <cstdint>
++#include <expected>
++#include <functional>
+ #include <memory>
++#include <optional>
++#include <utility>
+ 
++#include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension::wasm::wamr
+ {
+ 
++/// Opens a null device.
++/// @return Its raw handle (a file descriptor, or a HANDLE on Windows); nothing if it cannot be opened.
++using NullDeviceOpener = std::function<std::optional<int64_t>()>;
++
++/// @return The opener of the system's null device: `/dev/null`, or `NUL` on Windows.
++[[nodiscard]] NullDeviceOpener systemNullDeviceOpener();
++
++/// An open null device, closed as it is destroyed.
++class OpenNullDevice
++{
++  public:
++    /// @param handle The raw handle an opener returned; owned from here on.
++    explicit OpenNullDevice(int64_t handle) noexcept: _handle { handle } {}
++    ~OpenNullDevice();
++
++    OpenNullDevice(OpenNullDevice const&) = delete;
++    OpenNullDevice(OpenNullDevice&&) = delete;
++    OpenNullDevice& operator=(OpenNullDevice const&) = delete;
++    OpenNullDevice& operator=(OpenNullDevice&&) = delete;
++
++    /// @return The raw handle.
++    [[nodiscard]] int64_t handle() const noexcept { return _handle; }
++
++  private:
++    int64_t _handle;
++};
++
++/// The null device a backend's runtimes bind their guests' WASI standard streams to, which WAMR needs for
++/// every module that imports WASI: opened by each runtime as it is created, or opened once and shared.
++class NullDevice
++{
++  public:
++    /// Each runtime opens a device of its own as it is created: what a backend in Contour's own process does.
++    /// @param open Opens each.
++    /// @return The policy.
++    [[nodiscard]] static NullDevice openPerRuntime(NullDeviceOpener open = systemNullDeviceOpener());
++
++    /// One device, opened now, which every runtime shares: what a host that may open no file once it locked
++    /// itself down needs.
++    /// @param open Opens it, once.
++    /// @return The device; `RuntimeUnavailable` if it could not be opened.
++    [[nodiscard]] static std::expected<NullDevice, ExtensionError> openShared(
++        NullDeviceOpener const& open = systemNullDeviceOpener());
++
++    /// @return The device a runtime created now binds to: the shared one, or one opened for it;
++    ///         `RuntimeUnavailable` if none could be opened.
++    [[nodiscard]] std::expected<std::shared_ptr<OpenNullDevice const>, ExtensionError> forRuntime() const;
++
++  private:
++    NullDevice(NullDeviceOpener open, std::shared_ptr<OpenNullDevice const> shared) noexcept:
++        _open { std::move(open) }, _shared { std::move(shared) }
++    {
++    }
++
++    NullDeviceOpener _open;                        ///< Opens a runtime's own; empty when one is shared.
++    std::shared_ptr<OpenNullDevice const> _shared; ///< The one every runtime shares; null when each opens.
++};
++
++/// How a WAMR backend is set up.
++struct WamrConfig
++{
++    /// The null device its runtimes bind guests' standard streams to.
++    NullDevice nullDevice = NullDevice::openPerRuntime();
++};
++
+ /// Creates a WAMR backend.
+ ///
+ /// WAMR's runtime, its reference-counted initialization and its per-thread environment are process-wide,
+ /// so the backend is a facade over that one state (@see ThreadEnv, acquireRuntime): any number of WAMR
+ /// backends may exist in a process, and all of them behave as one. Refused memory growth is reported
+ /// (MemoryGrowthReporting::Reported).
++/// @param config How it is set up.
+ /// @return The backend.
+-[[nodiscard]] std::unique_ptr<IWasmBackend> makeWamrBackend();
++[[nodiscard]] std::unique_ptr<IWasmBackend> makeWamrBackend(WamrConfig config = {});
+ 
+ } // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrEngine.cpp b/src/vtextension/wasm/wamr/WamrEngine.cpp
+new file mode 100644
+index 000000000..d3afa5c96
+--- /dev/null
++++ b/src/vtextension/wasm/wamr/WamrEngine.cpp
+@@ -0,0 +1,136 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/wamr/WamrEngine.hpp>
++
++#include <cstdint>
++#include <expected>
++#include <memory>
++#include <optional>
++#include <span>
++#include <utility>
++
++#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
++
++namespace vtextension::wasm::wamr
++{
++
++namespace
++{
++    /// The thread environment prepareThread() entered on the calling thread: kept until the thread ends,
++    /// whose exit ends it there. WAMR's state is the process's, so one per thread serves every engine.
++    thread_local std::optional<ThreadEnv> preparedThread;
++
++    /// A WAMR backend holding WAMR's runtime up for as long as it lives.
++    class WamrEngine final: public host::IHostedEngine
++    {
++        struct PrivateTag
++        {
++        };
++
++      public:
++        /// Takes a hold on WAMR's runtime for the engine.
++        /// @param backend The backend it is a facade over.
++        /// @return The engine; `RuntimeUnavailable` if WAMR could not initialize.
++        [[nodiscard]] static std::expected<std::unique_ptr<WamrEngine>, ExtensionError> create(
++            std::unique_ptr<IWasmBackend> backend)
++        {
++            if (auto acquired = acquireRuntime(); !acquired)
++                return std::unexpected(acquired.error());
++            try
++            {
++                return std::make_unique<WamrEngine>(PrivateTag {}, std::move(backend));
++            }
++            catch (...)
++            {
++                releaseRuntime();
++                throw;
++            }
++        }
++
++        /// Use create(); public only so that std::make_unique can reach it. Takes over the hold create()
++        /// took.
++        WamrEngine(PrivateTag /*unused*/, std::unique_ptr<IWasmBackend> backend) noexcept:
++            _backend { std::move(backend) }
++        {
++        }
++
++        WamrEngine(WamrEngine const&) = delete;
++        WamrEngine(WamrEngine&&) = delete;
++        WamrEngine& operator=(WamrEngine const&) = delete;
++        WamrEngine& operator=(WamrEngine&&) = delete;
++
++        /// Releases the engine's hold on the runtime, after the backend.
++        ~WamrEngine() override
++        {
++            _backend.reset();
++            releaseRuntime();
++        }
++
++        [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
++            RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
++        {
++            return _backend->createRuntime(limits, hostFunctions);
++        }
++
++        [[nodiscard]] std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread() override
++        {
++            return _backend->enterThread();
++        }
++
++        [[nodiscard]] bool isCurrentThreadPrepared() const override
++        {
++            return _backend->isCurrentThreadPrepared();
++        }
++
++        [[nodiscard]] uint64_t runtimeGeneration() const noexcept override
++        {
++            return _backend->runtimeGeneration();
++        }
++
++        [[nodiscard]] BackendCapabilities capabilities() const noexcept override
++        {
++            return _backend->capabilities();
++        }
++
++        [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
++        {
++            return remote::proto::MemoryMode::Copy;
++        }
++
++        [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return 0; }
++
++        /// The build's WAMR has the interpreter alone: no JIT and no AOT code
++        /// (cmake/ContourThirdParties.cmake).
++        [[nodiscard]] host::GuestCode guestCode() const noexcept override
++        {
++            return host::GuestCode::Interpreted;
++        }
++
++        /// Enters WAMR's thread environment on the calling thread, unless it holds one of the running
++        /// runtime already. The interpreter installs no signal handler, so this is all a thread needs.
++        [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
++        {
++            if (preparedThread && preparedThread->generation() == wamr::runtimeGeneration())
++                return {};
++            preparedThread.reset();
++            return ThreadEnv::enter().transform(
++                [](ThreadEnv entered) { preparedThread.emplace(std::move(entered)); });
++        }
++
++      private:
++        std::unique_ptr<IWasmBackend> _backend;
++    };
++} // namespace
++
++std::unique_ptr<host::IHostedEngine> makeWamrEngine(NullDeviceOpener const& openNullDevice)
++{
++    auto engine = NullDevice::openShared(openNullDevice)
++                      .transform([](NullDevice nullDevice) {
++                          return makeWamrBackend(WamrConfig { .nullDevice = std::move(nullDevice) });
++                      })
++                      .and_then(&WamrEngine::create);
++    if (!engine)
++        return nullptr;
++    return std::move(*engine);
++}
++
++} // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrEngine.hpp b/src/vtextension/wasm/wamr/WamrEngine.hpp
+new file mode 100644
+index 000000000..9be96be0b
+--- /dev/null
++++ b/src/vtextension/wasm/wamr/WamrEngine.hpp
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The WAMR engine an extension host process drives (host::IHostedEngine): the WAMR backend, interpreting its
++// modules, set up for a host that locks itself down once its threads are prepared.
++#pragma once
++
++#include <memory>
++
++#include <vtextension/wasm/host/IHostedEngine.hpp>
++#include <vtextension/wasm/wamr/WamrBackend.hpp>
++
++namespace vtextension::wasm::wamr
++{
++
++/// Creates the WAMR engine of an extension host process.
++///
++/// Everything it needs of the system it takes here, before the host locks itself down: one null device,
++/// which every runtime it creates shares, and a hold on WAMR's process-wide runtime for as long as it lives,
++/// so that its threads can be prepared before any runtime exists. Its instances' memory is copied to the
++/// parent (MemoryMode::Copy), as WAMR places a linear memory where it chooses, and it needs no guard
++/// (memoryGuardBytes() is 0). prepareThread() enters WAMR's thread environment on the calling thread, which
++/// keeps it until it ends.
++/// @param openNullDevice Opens the null device, once.
++/// @return The engine; null if WAMR could not initialize or the null device could not be opened.
++[[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWamrEngine(
++    NullDeviceOpener const& openNullDevice = systemNullDeviceOpener());
++
++} // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrEngine_test.cpp b/src/vtextension/wasm/wamr/WamrEngine_test.cpp
+new file mode 100644
+index 000000000..88db77721
+--- /dev/null
++++ b/src/vtextension/wasm/wamr/WamrEngine_test.cpp
+@@ -0,0 +1,114 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The WAMR engine an extension host process drives: how it shares memory, the one null device its runtimes
++// share, and how it prepares a thread.
++#include <catch2/catch_test_macros.hpp>
++
++#include <cstddef>
++#include <cstdint>
++#include <iterator>
++#include <memory>
++#include <optional>
++#include <thread>
++#include <vector>
++
++#ifdef __linux__
++    #include <filesystem>
++#endif
++
++#include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/testing/BackendContract.hpp>
++#include <vtextension/wasm/wamr/WamrBackend.hpp>
++#include <vtextension/wasm/wamr/WamrEngine.hpp>
++#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
++
++namespace contract = vtextension::wasm::testing::contract;
++using vtextension::wasm::IWasmRuntime;
++using vtextension::wasm::remote::proto::MemoryMode;
++using vtextension::wasm::wamr::makeWamrEngine;
++using vtextension::wasm::wamr::NullDeviceOpener;
++using vtextension::wasm::wamr::systemNullDeviceOpener;
++using vtextension::wasm::wamr::ThreadEnv;
++
++namespace
++{
++
++/// @return An opener of the system's null device that counts its calls in @p opened.
++[[nodiscard]] NullDeviceOpener countingOpener(std::size_t& opened)
++{
++    return [&opened, open = systemNullDeviceOpener()] {
++        ++opened;
++        return open();
++    };
++}
++
++/// @return How many descriptors this process holds open; nothing where the system does not say.
++[[nodiscard]] std::optional<std::ptrdiff_t> openDescriptors()
++{
++#ifdef __linux__
++    auto const entries = std::filesystem::directory_iterator { "/proc/self/fd" };
++    return std::distance(std::filesystem::begin(entries), std::filesystem::end(entries));
++#else
++    return std::nullopt;
++#endif
++}
++
++} // namespace
++
++TEST_CASE("WamrEngine.copiesMemory", "[vtextension][wamr]")
++{
++    auto const engine = makeWamrEngine();
++    REQUIRE(engine != nullptr);
++    CHECK(engine->memoryMode() == MemoryMode::Copy);
++    CHECK(engine->memoryGuardBytes() == 0);
++}
++
++TEST_CASE("WamrEngine.runtimesShareOneNullDevice", "[vtextension][wamr]")
++{
++    auto const before = openDescriptors();
++    auto opened = std::size_t { 0 };
++    {
++        auto const engine = makeWamrEngine(countingOpener(opened));
++        REQUIRE(engine != nullptr);
++        CHECK(opened == 1);
++        auto const afterEngine = openDescriptors();
++
++        // Three runtimes, each instantiating a module that imports WASI, which binds the device: none opens
++        // another, so a host that can no longer open one still runs them.
++        auto runtimes = std::vector<std::shared_ptr<IWasmRuntime>> {};
++        auto context = contract::RecordingHostContext {};
++        for ([[maybe_unused]] auto const index: { 0, 1, 2 })
++        {
++            auto const& runtime = runtimes.emplace_back(contract::createRuntime(*engine));
++            auto const module = contract::load(*runtime, contract::DescribedModule);
++            CHECK(module->instantiate(context).has_value());
++        }
++        CHECK(opened == 1);
++        CHECK(openDescriptors() == afterEngine);
++    }
++    // ... and it is closed with the engine and the last runtime.
++    CHECK(openDescriptors() == before);
++}
++
++TEST_CASE("WamrEngine.prepareThreadIsIdempotent", "[vtextension][wamr]")
++{
++    auto const engine = makeWamrEngine();
++    REQUIRE(engine != nullptr);
++    // Before any runtime exists, as a host prepares its threads before it locks itself down: on a thread
++    // that did not bring the runtime up, and on the one that did.
++    auto prepared = std::vector<bool> {};
++    auto worker = std::thread { [&] {
++        for ([[maybe_unused]] auto const index: { 0, 1 })
++        {
++            auto const result = engine->prepareThread();
++            prepared.push_back(result.has_value() && engine->isCurrentThreadPrepared());
++        }
++        prepared.push_back(ThreadEnv::preparedGeneration() == engine->runtimeGeneration());
++    } };
++    worker.join();
++    CHECK(prepared == std::vector { true, true, true });
++    CHECK(engine->prepareThread().has_value());
++    CHECK(engine->prepareThread().has_value());
++    CHECK(engine->isCurrentThreadPrepared());
++}
+diff --git a/src/vtextension/wasm/wamr/WamrRuntime.hpp b/src/vtextension/wasm/wamr/WamrRuntime.hpp
+index 202f50e65..082b4d3f3 100644
+--- a/src/vtextension/wasm/wamr/WamrRuntime.hpp
++++ b/src/vtextension/wasm/wamr/WamrRuntime.hpp
+@@ -10,70 +10,72 @@
+ #include <memory>
+ #include <optional>
+ #include <span>
+ #include <vector>
+ 
+ #include <wasm_export.h>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmBinary.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/wamr/WamrBackend.hpp>
+ 
+ namespace vtextension::wasm::wamr
+ {
+ 
+ class HostRegistrations;
+ 
+ /// One hold on WAMR's process-wide runtime, with the host functions registered for the modules it
+ /// loads, and the null device their WASI standard streams are bound to.
+ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_this<WamrRuntime>
+ {
+     struct PrivateTag
+     {
+     };
+ 
+   public:
+-    /// Brings the runtime up (or joins it), opens a null device and registers @p hostFunctions.
++    /// Brings the runtime up (or joins it), takes its null device and registers @p hostFunctions.
+     /// @param limits The limits every instance of the runtime is held to.
+     /// @param hostFunctions The host functions modules may import.
++    /// @param nullDevice Where its null device comes from: opened for it, or shared.
+     /// @return The runtime; `RuntimeUnavailable` if WAMR could not initialize, the null device could
+     ///         not be opened, or WAMR refused the host functions.
+     [[nodiscard]] static std::expected<std::shared_ptr<WamrRuntime>, ExtensionError> create(
+-        RuntimeLimits limits, std::span<HostFunction const> hostFunctions);
++        RuntimeLimits limits, std::span<HostFunction const> hostFunctions, NullDevice const& nullDevice);
+ 
+     /// Use create(); public only so that std::make_shared can reach it.
+     WamrRuntime(PrivateTag,
+                 RuntimeLimits limits,
+-                int64_t nullDevice,
++                std::shared_ptr<OpenNullDevice const> nullDevice,
+                 std::unique_ptr<HostRegistrations> hostRegistrations) noexcept;
+ 
+-    /// Unregisters the host functions, closes the null device, then releases the hold on the runtime.
++    /// Unregisters the host functions, lets go of the null device, then releases the hold on the runtime.
+     ~WamrRuntime() override;
+ 
+     WamrRuntime(WamrRuntime const&) = delete;
+     WamrRuntime(WamrRuntime&&) = delete;
+     WamrRuntime& operator=(WamrRuntime const&) = delete;
+     WamrRuntime& operator=(WamrRuntime&&) = delete;
+ 
+     /// Loads @p bytes in this process; the identity is ignored, as every module runs here.
+     [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
+         ModuleIdentity identity, std::vector<std::byte> bytes) override;
+ 
+     /// @return The limits every instance of the runtime is held to.
+     [[nodiscard]] RuntimeLimits const& limits() const noexcept { return _limits; }
+ 
+     /// @return The raw handle of the null device the guests' WASI standard streams are bound to.
+-    [[nodiscard]] int64_t nullDevice() const noexcept { return _nullDevice; }
++    [[nodiscard]] int64_t nullDevice() const noexcept { return _nullDevice->handle(); }
+ 
+   private:
+     RuntimeLimits _limits;
+-    int64_t _nullDevice;                                   ///< Owned; closed on destruction.
++    std::shared_ptr<OpenNullDevice const> _nullDevice;     ///< Closed with its last holder.
+     std::unique_ptr<HostRegistrations> _hostRegistrations; ///< Unregistered before the runtime is released.
+ };
+ 
+ /// Loads a module into WAMR and describes it.
+ /// @param runtime The runtime it is loaded on; the module keeps it alive.
+ /// @param bytes The module's bytes; the module keeps them, as WAMR refers into them.
+ /// @return The module; `InvalidComponent` if the bytes are not a valid core module.
+ [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
+     std::shared_ptr<WamrRuntime const> runtime, std::vector<std::byte> bytes);
+ 
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+index ba68e54e8..eaa7ab372 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+@@ -467,20 +467,26 @@ namespace
+         {
+             return _config.memory == MemorySharing::Provided ? remote::proto::MemoryMode::Shared
+                                                              : remote::proto::MemoryMode::Copy;
+         }
+ 
+         [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override
+         {
+             return memoryGuardBytesOf(_config);
+         }
+ 
++        /// Cranelift compiles each module to native code, which is made executable once written.
++        [[nodiscard]] host::GuestCode guestCode() const noexcept override
++        {
++            return host::GuestCode::Compiled;
++        }
++
+         /// Runs PrimingModule on the calling thread, which installs Wasmtime's signal handlers (once in the
+         /// process, under TrapMode::Signals) and the thread's alternate signal stack, both of which Wasmtime
+         /// does lazily, the first time a guest runs. Compiled once per engine, on the first thread primed.
+         [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+         {
+             if (threadPrimedFor == _serial)
+                 return {};
+             return priming()
+                 .and_then([](Priming const* priming) { return runPriming(*priming); })
+                 .transform([this] { threadPrimedFor = _serial; });

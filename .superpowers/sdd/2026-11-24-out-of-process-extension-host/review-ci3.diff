@@ -1,0 +1,574 @@
+2f64305cd feat(vtextension): an extension host the loader ends is logged with why
+3d281cf73 fix(vtextension): an instance refused for its answer's size is gone before the refusal is sent
+3ef95a025 fix(vtextension): a contained extension host's environment names its container's own folders
+
+ src/vtextension/wasm/remote/CMakeLists.txt         |  12 +-
+ .../wasm/remote/process/AppContainer_test.cpp      | 168 +++++++++++++++++++--
+ .../remote/process/ExtensionHostSupervisor.cpp     |   4 +-
+ .../wasm/remote/process/ProcessLauncher.hpp        |  36 +++++
+ .../wasm/remote/process/ProcessLauncher_test.cpp   |  20 +++
+ .../wasm/remote/process/testing/LaunchedHelper.cpp |   4 +-
+ .../wasm/remote/process/testing/LaunchedHelper.hpp |   6 +-
+ 7 files changed, 226 insertions(+), 24 deletions(-)
+
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 311849d82..f5a1ea93c 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -109,22 +109,28 @@ if(_process_source)
+         process/HostTimers.cpp
+         process/HostTimers.hpp
+         process/ProcessHostConnector.cpp
+         process/ProcessHostConnector.hpp
+         process/ProcessLauncher.hpp
+         ${_process_source}
+     )
+     target_link_libraries(vtextension_remote_process PUBLIC core::platform)
+     if(WIN32)
+         # The extension host's AppContainer profile and its folder, which CoTaskMemFree() releases
+-        # (process/AppContainer_win32.cpp).
++        # (process/AppContainer_win32.cpp). Both delay-loaded, into every executable that links the launcher:
++        # only a launcher preparing a container calls them, and a contained process that merely links it (the
++        # probe) must not load ole32 as it starts -- ole32 loads user32, whose initialisation connects to a
++        # window station, and a service's (a CI runner's, an SSH session's) admits no app container: the
++        # loader then ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) before its main().
+         target_link_libraries(vtextension_remote_process PRIVATE userenv ole32)
++        target_link_libraries(vtextension_remote_process INTERFACE delayimp)
++        target_link_options(vtextension_remote_process INTERFACE /DELAYLOAD:userenv.dll /DELAYLOAD:ole32.dll)
+     endif()
+     # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
+     target_compile_definitions(vtextension_remote_process PUBLIC
+         CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
+ 
+     if(VTEXTENSION_TESTING)
+         # The probe the launcher's tests start: it binds itself to its parent and caps itself as the host does,
+         # reports what it was started with -- working directory, environment, caps, open handles -- on its
+         # control channel, and exits once that channel ends. Never installed.
+         # With --parent it is a hosting process instead: it supervises a helper of its own, for the tests of a
+@@ -180,20 +186,24 @@ if(_process_source)
+                 ../host/linux/Landlock_test.cpp
+                 ../host/linux/SeccompFilter_test.cpp
+                 ../host/linux/testing/BpfEvaluator.hpp
+             )
+         endif()
+         if(VTEXTENSION_LINUX_SANDBOX OR VTEXTENSION_FREEBSD_SANDBOX OR VTEXTENSION_MACOS_SANDBOX)
+             target_sources(vtextension_process_test PRIVATE process/SandboxProbe_test.cpp)
+         endif()
+         if(WIN32)
+             target_sources(vtextension_process_test PRIVATE process/LaunchSpelling_test.cpp)
++            # AppContainer.containedExecutablesLoadNoWindowStation reads the extension host's imports.
++            add_dependencies(vtextension_process_test contour-extension-host)
++            target_compile_definitions(vtextension_process_test PRIVATE
++                VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>")
+             # Sandbox.windowsHelperRunsContained listens on loopback for the contained probe.
+             target_link_libraries(vtextension_process_test PRIVATE ws2_32)
+         endif()
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+         add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+         if(NOT WIN32)
+             # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+             target_compile_options(vtextension_process_test PRIVATE -Wno-c2y-extensions)
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_test.cpp b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+index a50e46316..00f41f767 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_test.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+@@ -25,22 +25,26 @@
+ #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+ #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #include <algorithm>
+     #include <array>
++    #include <cctype>
++    #include <cstddef>
++    #include <cstring>
+     #include <format>
+     #include <fstream>
++    #include <iterator>
+     #include <ranges>
+     #include <thread>
+ 
+     #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
+     #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
+     #include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
+     #include <vtextension/wasm/remote/process/Process_win32.hpp>
+ 
+     #define WIN32_LEAN_AND_MEAN
+     #include <AclAPI.h>
+@@ -645,27 +649,29 @@ using ProbeReport = std::vector<std::string>;
+         FAIL("no report: " << process::testing::endOf(
+                  *probe->launcher, *probe->process, [&] { return standardError->text(); }));
+     for (auto const& line: *report)
+         UNSCOPED_INFO(line);
+     probe->closeControl();
+     process::testing::checkEndedCleanly(
+         *probe->launcher, *probe->process, [&] { return standardError->text(); });
+     return *std::move(report);
+ }
+ 
+-/// @return The value of @p key in @p report; empty if it has none.
+-[[nodiscard]] std::string valueOf(ProbeReport const& report, std::string_view key)
++/// @return The value of @p key in @p report; nothing if it has no line for @p key.
++[[nodiscard]] std::optional<std::string> valueOf(ProbeReport const& report, std::string_view key)
+ {
+     auto const prefix = std::string { key } + '=';
+     auto const line =
+         std::ranges::find_if(report, [&](auto const& entry) { return entry.starts_with(prefix); });
+-    return line == report.end() ? std::string {} : line->substr(prefix.size());
++    if (line == report.end())
++        return std::nullopt;
++    return line->substr(prefix.size());
+ }
+ 
+ /// What a loopback connection from an AppContainer without a network capability may fail with. Windows
+ /// documents only that the Windows Filtering Platform's default block filter drops it, not the error a
+ /// caller sees: WSAEACCES (10013) where the connect is refused at authorization, WSAECONNREFUSED (10061),
+ /// which is what UWP apps are widely reported to see (0x8007274D), WSAETIMEDOUT (10060) where the packet is
+ /// dropped silently, and WSAENETUNREACH (10051) or WSAEHOSTUNREACH (10065) where no route is offered. Each is
+ /// the container's refusal: the listener accepts every connection, and the uncontained run proves it.
+ constexpr auto ContainedConnectRefusals = std::array<std::string_view, 5> { "refused:connect:10013",
+                                                                             "refused:connect:10061",
+@@ -681,38 +687,57 @@ constexpr auto ContainedConnectRefusals = std::array<std::string_view, 5> { "ref
+     auto const name = std::wstring { process::AppContainerName };
+     PSID sid = nullptr;
+     REQUIRE(SUCCEEDED(api.deriveSid(name.c_str(), &sid)));
+     auto const ownedSid = process::OwnedSid { sid };
+     auto folder = api.folderPath(sid);
+     REQUIRE(folder.has_value());
+     REQUIRE_FALSE(folder->empty());
+     return *std::move(folder);
+ }
+ 
+-/// Checks what @p report says each variable that names a container folder holds: exactly its folder beneath
+-/// @p containerFolder, or nothing when there is none.
++/// @return Whether @p a and @p b name one path as Windows compares paths: ordinal, ignoring case, and
++/// ignoring
++///         one trailing backslash on either side. Exact otherwise: a path beneath the other is not it.
++[[nodiscard]] bool isSamePath(std::wstring_view a, std::wstring_view b)
++{
++    auto const trimmed = [](std::wstring_view path) {
++        return path.ends_with(L'\\') ? path.substr(0, path.size() - 1) : path;
++    };
++    a = trimmed(a);
++    b = trimmed(b);
++    return ::CompareStringOrdinal(
++               a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE)
++           == CSTR_EQUAL;
++}
++
++/// Checks what @p report says each variable that names a container folder holds -- a line for each, which
++/// must be there: its folder beneath @p containerFolder (isSamePath()), or nothing when there is none.
+ void checkContainerVariables(ProbeReport const& report,
+                              std::optional<std::filesystem::path> const& containerFolder)
+ {
+     for (auto const& variable: process::ContainerVariables)
+     {
+         INFO(variable.name);
+-        auto expected = std::string {};
+-        if (containerFolder)
++        // A probe that stopped reporting a variable fails here, rather than reading as one it lacks.
++        auto const value = valueOf(report, std::format("value-{}", variable.name));
++        REQUIRE(value.has_value());
++        INFO("value=" << *value);
++        if (!containerFolder)
+         {
+-            auto const folder = variable.subfolder.empty()
+-                                    ? *containerFolder
+-                                    : *containerFolder / std::wstring { variable.subfolder };
+-            auto const utf8 = folder.u8string();
+-            expected.assign(utf8.begin(), utf8.end());
++            CHECK(value->empty());
++            continue;
+         }
+-        CHECK(valueOf(report, std::format("value-{}", variable.name)) == expected);
++        auto const folder = variable.subfolder.empty()
++                                ? *containerFolder
++                                : *containerFolder / std::wstring { variable.subfolder };
++        auto const utf8 = std::u8string { value->begin(), value->end() };
++        CHECK(isSamePath(std::filesystem::path { utf8 }.native(), folder.native()));
+     }
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
+ {
+     // A file of the user's, and a loopback port that listens: both open to the probe uncontained, both shut
+     // to it contained, as is starting a process -- refused by the container's child process policy
+     // (ERROR_ACCESS_DENIED), not only by the job's process count (ERROR_NOT_ENOUGH_QUOTA, 1816).
+@@ -749,21 +774,21 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
+                                    : std::format("it failed: {}{}{}",
+                                                  process::launchErrorText(probe.error()),
+                                                  refusals.empty() ? "" : " -- ",
+                                                  refusals.empty() ? std::string {} : refusals.front());
+         SKIP(std::format("wine stubs AppContainers; the contained launch was asked for and {}", outcome));
+     }
+     INFO("contained");
+     auto const report = probeReportIn(ProcessIsolation::AppContainer, profileFile, *listener.port());
+     CHECK(valueOf(report, "container") == "yes");
+     CHECK(valueOf(report, "profile-file") == "refused:CreateFileW:5");
+-    auto const connect = valueOf(report, "connect");
++    auto const connect = valueOf(report, "connect").value_or("(no line)");
+     INFO("connect=" << connect);
+     CHECK(std::ranges::contains(ContainedConnectRefusals, std::string_view { connect }));
+     CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:5");
+     // Each names exactly the container's own folder, as this process asks the system for it.
+     checkContainerVariables(report, expectedContainerFolder());
+ }
+ TEST_CASE("LaunchRefusal.lineNamesTheStepAndTheCode", "[vtextension]")
+ {
+     auto const win32 =
+         process::launchRefusalLine(process::LaunchRefusal { .error = process::LaunchError::Io,
+@@ -804,11 +829,126 @@ TEST_CASE("LaunchRefusal.refusalALaunchErrorLosesIsSaidOnce", "[vtextension]")
+     }
+ 
+     // One its text says all of is not logged.
+     auto const missing = launcher->launch(process::LaunchSpec {
+         .executable =
+             std::filesystem::path { VTEXTENSION_PROBE_PATH }.replace_filename("no-such-program.exe") });
+     REQUIRE_FALSE(missing.has_value());
+     CHECK(missing.error() == process::LaunchError::NotFound);
+     CHECK(lines.size() == 1);
+ }
++
++TEST_CASE("AppContainer.pathsCompareAsWindowsComparesThem", "[vtextension]")
++{
++    struct Row
++    {
++        std::wstring_view a;
++        std::wstring_view b;
++        bool same;
++    };
++    auto const rows = std::to_array<Row>({
++        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC)", .same = true },
++        { .a = LR"(c:\users\U\ac)", .b = LR"(C:\Users\u\AC)", .same = true },
++        { .a = LR"(C:\Users\u\AC\)", .b = LR"(C:\Users\u\AC)", .same = true },
++        { .a = LR"(C:\Users\u\AC)", .b = LR"(C:\Users\u\AC\)", .same = true },
++        { .a = LR"(C:\Users\u\AC\Temp)", .b = LR"(C:\Users\u\AC)", .same = false },
++        { .a = LR"(C:\Users\u\AC\AC)", .b = LR"(C:\Users\u\AC)", .same = false },
++        { .a = LR"(C:\Users\u\AC\\)", .b = LR"(C:\Users\u\AC)", .same = false },
++        { .a = L"", .b = LR"(C:\Users\u\AC)", .same = false },
++    });
++    for (auto const& row: rows)
++        CHECK(isSamePath(row.a, row.b) == row.same);
++}
++
++namespace
++{
++
++/// What a process that may run contained must not load as it starts: user32, whose initialisation connects
++/// to the process's window station -- which, a service's (a CI runner's, an SSH session's), admits no app
++/// container, so that the loader ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) -- and the system
++/// libraries that load it themselves.
++constexpr auto WindowStationLibraries = std::to_array<std::string_view>({
++    "user32.dll",
++    "gdi32.dll",
++    "ole32.dll",
++    "oleaut32.dll",
++    "shell32.dll",
++    "shlwapi.dll",
++    "comctl32.dll",
++});
++
++/// @return The libraries the executable @p file imports as it starts, lower-cased: its import directory's,
++///         not those it delay-loads.
++[[nodiscard]] std::vector<std::string> startupImportsOf(std::filesystem::path const& file)
++{
++    auto stream = std::ifstream { file, std::ios::binary };
++    REQUIRE(stream.good());
++    auto const bytes = std::vector<char> { std::istreambuf_iterator<char> { stream }, {} };
++    auto const read = [&]<typename T>(std::size_t offset) {
++        REQUIRE(offset + sizeof(T) <= bytes.size());
++        auto value = T {};
++        std::memcpy(&value, bytes.data() + offset, sizeof(T));
++        return value;
++    };
++    auto const dos = read.operator()<IMAGE_DOS_HEADER>(0);
++    REQUIRE(dos.e_magic == IMAGE_DOS_SIGNATURE);
++    auto const headersAt = static_cast<std::size_t>(dos.e_lfanew);
++    auto const headers = read.operator()<IMAGE_NT_HEADERS64>(headersAt);
++    REQUIRE(headers.Signature == IMAGE_NT_SIGNATURE);
++    REQUIRE(headers.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
++    auto const sectionsAt =
++        headersAt + offsetof(IMAGE_NT_HEADERS64, OptionalHeader) + headers.FileHeader.SizeOfOptionalHeader;
++    // Where in the file the image's address @p rva lies.
++    auto const fileOffsetOf = [&](DWORD rva) -> std::size_t {
++        for (auto const index: std::views::iota(WORD { 0 }, headers.FileHeader.NumberOfSections))
++        {
++            auto const section =
++                read.operator()<IMAGE_SECTION_HEADER>(sectionsAt + (index * sizeof(IMAGE_SECTION_HEADER)));
++            auto const size = std::max<DWORD>(section.Misc.VirtualSize, section.SizeOfRawData);
++            if (rva >= section.VirtualAddress && rva < section.VirtualAddress + size)
++                return rva - section.VirtualAddress + section.PointerToRawData;
++        }
++        FAIL("address 0x" << std::hex << rva << " lies in no section");
++        return 0;
++    };
++    auto const directory = headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
++    auto imports = std::vector<std::string> {};
++    if (directory.VirtualAddress == 0)
++        return imports;
++    auto const first = fileOffsetOf(directory.VirtualAddress);
++    for (auto const index: std::views::iota(std::size_t { 0 }))
++    {
++        auto const descriptor =
++            read.operator()<IMAGE_IMPORT_DESCRIPTOR>(first + (index * sizeof(IMAGE_IMPORT_DESCRIPTOR)));
++        if (descriptor.Name == 0)
++            break;
++        auto const nameAt = fileOffsetOf(descriptor.Name);
++        auto name =
++            std::string { bytes.data() + nameAt, ::strnlen(bytes.data() + nameAt, bytes.size() - nameAt) };
++        std::ranges::transform(name, name.begin(), [](char c) {
++            return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++        });
++        imports.push_back(std::move(name));
++    }
++    return imports;
++}
++
++} // namespace
++
++TEST_CASE("AppContainer.containedExecutablesLoadNoWindowStation", "[vtextension][appcontainer]")
++{
++    // What starts contained -- the extension host, and the probe that stands in for it -- must start without
++    // a window station: one it may not use ends it in the loader, before it can say why.
++    for (auto const* const executable: { VTEXTENSION_HELPER_PATH, VTEXTENSION_PROBE_PATH })
++    {
++        INFO(executable);
++        auto const imports = startupImportsOf(executable);
++        // Read at all: every executable imports kernel32.
++        CHECK(std::ranges::contains(imports, std::string { "kernel32.dll" }));
++        for (auto const& library: imports)
++        {
++            INFO(library);
++            CHECK_FALSE(std::ranges::contains(WindowStationLibraries, std::string_view { library }));
++        }
++    }
++}
+ #endif
+diff --git a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp
+index 54225396e..eba516938 100644
+--- a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp
++++ b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp
+@@ -694,23 +694,21 @@ void SupervisorLoop::reapEnded(Observation observation)
+         helper.process.reset();
+         helper.steps.clear();
+         _timers.disarmHelper(key);
+         forgetLanes(key, helper);
+         ++_counters.reaped;
+         if (observation == Observation::Running)
+             ++_counters.deathsObserved;
+         if (isUnclean(status, helper.killed))
+         {
+             ++_counters.uncleanExits;
+-            errorLog()("An extension host ended unexpectedly ({} {}).",
+-                       status.kind == ExitKind::Exited ? "exit code" : "signal",
+-                       status.value);
++            errorLog()("An extension host ended unexpectedly ({}).", exitStatusText(status));
+         }
+         announceDeath(helper);
+         if (helper.holding == Holding::Dropped)
+             _helpers.erase(key);
+     }
+ }
+ 
+ void SupervisorLoop::observeLanes()
+ {
+     for (auto& [key, helper]: _helpers)
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+index 2969169c0..8514654bb 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+@@ -8,24 +8,26 @@
+ /// A child starts with exactly the handles it is given (`LaunchSpec::inherited`), the environment it is given
+ /// and nothing of the parent's, the null device as its stdin and stdout, the stderr it is given or else the
+ /// null device, the root directory as its working directory, and no terminal of the parent's: on POSIX in a
+ /// session of its own, which has no controlling terminal; on Windows with a console of its own, which shows
+ /// no window. On POSIX the i-th inherited handle is descriptor 3 + i in the child;
+ /// on Windows a child sees inheritable duplicates under values known only once they exist, which is why the
+ /// command line is a function of them.
+ 
+ #include <core/Clock.hpp>
+ 
++#include <algorithm>
+ #include <array>
+ #include <cstdint>
+ #include <expected>
+ #include <filesystem>
++#include <format>
+ #include <functional>
+ #include <memory>
+ #include <optional>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+@@ -136,20 +138,54 @@ struct ExitStatus
+     ExitKind kind = ExitKind::Exited;
+     int value = 0; ///< The exit code, or the signal's number.
+ 
+     bool operator==(ExitStatus const&) const = default;
+ };
+ 
+ /// How a process ended that another reaped -- a SIGCHLD handler of this process's -- or that could not be
+ /// waited for: its status is lost.
+ inline constexpr auto LostExitStatus = ExitStatus { .kind = ExitKind::Exited, .value = -1 };
+ 
++/// An exit code that says why a process ended: on Windows, an NTSTATUS the loader ends a process with before
++/// its main() runs. POSIX exit codes are 0 to 255, so none of these is mistaken for one.
++struct KnownExitCode
++{
++    uint32_t code;           ///< The exit code, as its bits read unsigned.
++    std::string_view reason; ///< Why the process ended, completing "it ended: ...".
++};
++
++/// Every exit code with a reason of its own.
++inline constexpr auto KnownExitCodes = std::to_array<KnownExitCode>({
++    { .code = 0xC0000022, .reason = "it was denied access to a library it loads (STATUS_ACCESS_DENIED)" },
++    { .code = 0xC0000135, .reason = "a library it needs was not found (STATUS_DLL_NOT_FOUND)" },
++    { .code = 0xC0000142,
++      .reason =
++          "a library it loads failed to initialise (STATUS_DLL_INIT_FAILED); contained, usually one that "
++          "connects to a window station the app container may not use" },
++});
++
++/// @return How @p status says a process ended, for a log line: `signal N`, `exit code N`, or -- for a
++///         negative code, an NTSTATUS -- `exit code 0xXXXXXXXX`, with its reason where KnownExitCodes has
++///         one.
++[[nodiscard]] inline std::string exitStatusText(ExitStatus status)
++{
++    if (status.kind == ExitKind::Signalled)
++        return std::format("signal {}", status.value);
++    if (status.value >= 0)
++        return std::format("exit code {}", status.value);
++    auto const code = static_cast<uint32_t>(status.value);
++    auto const known = std::ranges::find(KnownExitCodes, code, &KnownExitCode::code);
++    if (known == KnownExitCodes.end())
++        return std::format("exit code 0x{:08X}", code);
++    return std::format("exit code 0x{:08X}: {}", code, known->reason);
++}
++
+ /// The caps on a child's resources.
+ struct ResourceCaps
+ {
+     /// The cap on its data memory, in bytes; 0 for none. Windows: the job's memory limit, applied here.
+     /// POSIX: handed to the helper as `--data-bytes`, which applies it itself.
+     uint64_t dataBytes = DefaultDataBytes;
+ };
+ 
+ #ifdef _WIN32
+ /// What a process's exit is waited on by: the process HANDLE.
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 7f8b2101f..8c0895d68 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -133,20 +133,40 @@ struct ProbeOptions
+                     return result;
+                 },
+             .parentProcessId = options.parentProcessId,
+             .dataBytes = ProbeDataBytes,
+             .environment = std::move(options.environment),
+             .standardError = options.standardError });
+ }
+ 
+ } // namespace
+ 
++TEST_CASE("ProcessLauncher.exitStatusSaysWhyWhereItKnows", "[vtextension]")
++{
++    struct Row
++    {
++        ExitStatus status;
++        std::string_view text;
++    };
++    auto const rows = std::to_array<Row>({
++        { .status = { .kind = ExitKind::Exited, .value = 3 }, .text = "exit code 3" },
++        { .status = { .kind = ExitKind::Signalled, .value = 9 }, .text = "signal 9" },
++        { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000005U) },
++          .text = "exit code 0xC0000005" },
++        { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000142U) },
++          .text = "exit code 0xC0000142: a library it loads failed to initialise (STATUS_DLL_INIT_FAILED); "
++                  "contained, usually one that connects to a window station the app container may not use" },
++    });
++    for (auto const& row: rows)
++        CHECK(process::exitStatusText(row.status) == row.text);
++}
++
+ TEST_CASE("ProcessLauncher.childGetsACleanEnvironment", "[vtextension]")
+ {
+     auto const leak = core::testing::ScopedEnv { "VTEXTENSION_LEAK", "1" };
+     auto probe =
+         launchProbe(process::makeSystemProcessLauncher(), ProbeOptions { .environment = { { "A", "1" } } });
+     REQUIRE(probe.has_value());
+     auto const report = readReport(probe->control);
+     REQUIRE(report.has_value());
+     auto names = valuesOf(*report, "env=");
+ #ifdef _WIN32
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+index b7c6d5bb0..fc610e9e6 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+@@ -128,23 +128,21 @@ std::string CapturedStandardError::text() const
+ }
+ #endif
+ 
+ namespace
+ {
+     /// @return How @p status says a process ended: its exit code in hex, or its signal.
+     [[nodiscard]] std::string endingOf(std::optional<ExitStatus> const& status)
+     {
+         if (!status)
+             return "it still runs, or could not be waited for";
+-        if (status->kind == ExitKind::Exited)
+-            return std::format("it exited with 0x{:08X}", static_cast<uint32_t>(status->value));
+-        return std::format("a signal ended it: {}", status->value);
++        return std::format("it ended: {}", exitStatusText(*status));
+     }
+ 
+     /// @return @p ending, then what the process wrote: @p written.
+     [[nodiscard]] std::string withStandardError(std::string const& ending, std::string const& written)
+     {
+         if (written.empty())
+             return std::format("{}; it wrote nothing to stderr", ending);
+         return std::format("{}; its stderr: {}", ending, written);
+     }
+ } // namespace
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+index 81c18230c..48bbde494 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+@@ -79,23 +79,23 @@ class CapturedStandardError
+     explicit CapturedStandardError(transport::NativeHandle file) noexcept: _file { file } {}
+ 
+     transport::NativeHandle _file;
+ };
+ #endif
+ 
+ /// What a child wrote to its stderr, read when asked: only once the child was reaped, so that a write it made
+ /// as it ended is not lost.
+ using StandardErrorReader = std::function<std::string()>;
+ 
+-/// Reaps @p process, which ended before it did what it was started for, and says how it ended: its exit
+-/// code in hex, so that an NTSTATUS such as 0xC0000135 (a DLL not found) or 0xC0000022 (access denied) is
+-/// recognised, or its signal; then what it wrote, read through @p standardError once it was reaped.
++/// Reaps @p process, which ended before it did what it was started for, and says how it ended
++/// (exitStatusText(), which names an NTSTATUS such as 0xC0000142 and why); then what it wrote, read through
++/// @p standardError once it was reaped.
+ /// @return One line for a test's INFO or FAIL.
+ [[nodiscard]] std::string endOf(IProcessLauncher& launcher,
+                                 IProcessHandle& process,
+                                 StandardErrorReader const& standardError);
+ 
+ /// Reaps @p process and checks that it exited 0; if it did not, the check says how it ended and what it
+ /// wrote (endOf()), as a helper's sanitizer report at teardown would explain.
+ void checkEndedCleanly(IProcessLauncher& launcher,
+                        IProcessHandle& process,
+                        StandardErrorReader const& standardError);

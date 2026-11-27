@@ -1,0 +1,1756 @@
+4491235ab fix(vtextension): a host short of memory as it starts is retried, and a lacking sandbox is a warning
+a39001183 fix(vtextension): unlink a WAMR execution environment under its thread cluster's lock
+cc810ccb7 feat(vtextension): the extension host on FreeBSD maps no memory both writable and executable
+99c905bb6 feat(vtextension): Contour says what an extension host's confinement failed with, and went without
+1ffc38d3f fix(vtextension): lock WAMR's process-wide state around every call that changes it
+dbde5a7f7 ci: run the arm legs on pull requests labelled for them
+b1ba84b2c fix(vtextension): register no native unwind tables for guest code on Wasmtime
+6c6bd9945 test(vtextension): measure the extension host on WAMR's engine too
+d914aecd2 test(vtextension): run the extension host's engine-free tests wherever the host is built
+1b4fc3532 build: the containment gate refuses an executable that links two WebAssembly runtimes
+8c74f2463 feat(vtextension): the extension host runs in an AppContainer on Windows
+e182dfdab feat(vtextension): grant app containers read access to the extension host once
+bf9da3aff build: sign the macOS extension host with the one entitlement its compiler needs
+18c2a5375 feat(vtextension): the extension host runs in a deny-by-default sandbox on macOS
+b512bfb26 build: pick wamr by default where the extension host's sandbox cannot run wasmtime
+c93ad5072 ci: run the FreeBSD job on pull requests labelled for it
+38afe93c5 feat(vtextension): the extension host enters capability mode on FreeBSD
+5a1af7099 refactor(vtextension): the extension host names every descriptor it keeps, and what for
+591a75d09 build: select where extensions run and which engine the extension host uses
+b0c0ce295 feat(vtextension): run extensions in a sandboxed extension host process by default on Linux
+46735b5ac refactor(vtextension): small cleanups in the extension host and its engines
+ea0f30853 test(vtextension): the sandbox probe locks down with either engine's system call rows
+15748fab7 fix(vtextension): a host refused for a lasting reason is the last its connector starts
+de5b296ae build: package the extension host in the Fedora RPM
+12f21139f build: refuse an installed WAMR that compiles to native code
+ce4287f5e fix(vtextension): every engine withholds the CPU-time clocks alike
+27fba3e93 build: build the extension host with whichever engine the build selected
+1fd139a24 feat(vtextension): the extension host can run its modules interpreted
+ae230fa66 fix(vtextension): a sanitizer build's extension host reads only its own process entries
+37583bf65 fix(vtextension): an outer filter refusing one argument value lets every other value through
+c375c1fa8 fix(vtextension): a crash in the locked-down extension host is no longer taken for a sandbox kill
+617a48bcd fix(vtextension): a kernel refusing what our Landlock row claims for its ABI falls back to the row before
+048d8ec65 fix(vtextension): a sanitizer build's extension host no longer dies by its own filter as it exits
+83c5b6bd8 fix(vtextension): an outer sandbox refusing descriptor control no longer stops every extension host
+e13271cfb feat(vtextension): the extension host gives up file system access on Linux before it starts a thread
+92c5fe7de feat(vtextension): the extension host restricts its system calls on Linux
+35e515d15 fix(vtextension): refuse an older extension host for its version, not as a broken peer
+29b021ce8 feat(vtextension): say which confinement step of an extension host failed, and start it only once
+81eb7d1dc feat(vtextension): the extension host locks down in a fixed order, its threads prepared first
+
+ .github/workflows/build.yml                        |  7 +--
+ cmake/ContourThirdParties.cmake                    |  6 +++
+ .../wamr-unlink-exec-env-under-cluster-lock.patch  | 25 +++++++++
+ src/vtextension/wasm/host/ExecutorThread_test.cpp  | 18 +++++--
+ src/vtextension/wasm/host/HostServer.cpp           |  3 --
+ src/vtextension/wasm/host/HostServer_test.cpp      | 16 +-----
+ src/vtextension/wasm/host/IHostedEngine.hpp        |  6 ---
+ src/vtextension/wasm/remote/DefaultBackend.cpp     |  3 +-
+ src/vtextension/wasm/remote/HelperIncarnation.cpp  |  4 ++
+ src/vtextension/wasm/remote/HostRefusals.cpp       | 55 ++++++++++++++++---
+ src/vtextension/wasm/remote/HostRefusals.hpp       | 35 ++++++++----
+ src/vtextension/wasm/remote/HostRefusals_test.cpp  | 30 ++++++++++-
+ .../wasm/remote/ProcessMeasure_test.cpp            |  2 +-
+ src/vtextension/wasm/remote/RemoteBackend.cpp      |  2 +-
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp | 10 +++-
+ .../wasm/remote/process/AppContainer_test.cpp      | 31 ++++++++---
+ .../wasm/remote/process/AppContainer_win32.cpp     |  7 ++-
+ .../wasm/remote/process/AppContainer_win32.hpp     |  2 +-
+ .../wasm/remote/process/HostComposition.hpp        |  4 +-
+ .../wasm/remote/process/HostComposition_test.cpp   |  5 +-
+ .../wasm/remote/process/LockdownRefusal_test.cpp   |  4 +-
+ .../wasm/remote/process/ProcessHostConnector.hpp   |  2 +-
+ .../remote/process/ProcessHostConnector_test.cpp   |  7 ++-
+ .../wasm/remote/process/Process_win32.cpp          |  4 +-
+ .../remote/process/testing/HelperComposition.cpp   |  2 +-
+ .../wasm/remote/process/testing/LaunchProbe.cpp    |  2 +-
+ .../wasm/remote/proto/LockdownSteps.cpp            |  2 +-
+ src/vtextension/wasm/remote/proto/Pdu.hpp          |  4 ++
+ src/vtextension/wasm/testing/DecoratedEngine.hpp   |  2 -
+ .../wasm/testing/PreparationHookEngine.hpp         | 20 +------
+ src/vtextension/wasm/wamr/WamrBackend_test.cpp     | 62 ++++++++++++++++++++--
+ src/vtextension/wasm/wamr/WamrEngine.cpp           |  3 --
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp   | 31 +++--------
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          | 11 +---
+ 34 files changed, 287 insertions(+), 140 deletions(-)
+
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index daff9694a..bf73aeb26 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -1976,23 +1976,24 @@ jobs:
+         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+         with:
+           name: "msi-upgrade-check-logs"
+           path: ${{ runner.temp }}/msi-*
+           if-no-files-found: ignore
+           retention-days: 7
+   # }}}
+   # {{{ Ubuntu 24.04 CC matrix
+   ubuntu_2404_cc_matrix:
+     # Each leg queues behind its own previous run on the same ref. Three of the four legs run on master
+-    # alone (the two arm legs also on a pull request labelled `ci-arm`) and take over an hour; without this, the legs of consecutive pushes ran side by side and
+-    # pull requests waited for a runner. The pull-request leg (Clang on x86) queues too: a newer push's
+-    # leg replaces one still pending, so the newest commit always saves the cache.
++    # alone (the two arm legs also on a pull request labelled `ci-arm`) and take over an hour; without
++    # this, the legs of consecutive pushes ran side by side and pull requests waited for a runner. The
++    # pull-request leg (Clang on x86) queues too: a newer push's leg replaces one still pending, so the
++    # newest commit always saves the cache.
+     concurrency:
+       group: ${{ github.ref }}-ubuntu_2404_cc_matrix-${{ strategy.job-index }}
+       cancel-in-progress: false
+     strategy:
+       fail-fast: false
+       matrix:
+         # Chosen by event, as data: a pull request builds one leg -- Clang 22 on x86, the compiler
+         # that also gates -Werror -- while master, the merge queue and release tags
+         # build all four. `werror` is OFF only where the leg is not known to build clean with it
+         # (GCC: a local GCC 16 build stops on -Werror=bidi-chars; GCC 15 is unverified). `artifacts`
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index d5f752d73..4470dbec5 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -302,20 +302,26 @@ if(CONTOUR_EXTENSIONS)
+                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
+                 "${_wamr_found} "
+                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+         endif()
+         message(STATUS "Using CPM to fetch WAMR")
+         CPMAddPackage(
+             NAME wamr
+             VERSION ${WAMR_MINIMAL_VERSION}
+             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
+             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
++            # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
++            # while setting or clearing any instance's exception walks every cluster under that lock: a data
++            # race between one extension's call or trap and another's unload. The patch unlinks under the lock.
++            # An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory, as
++            # the cluster and the environment are freed only after the walk's list lock is released.
++            PATCHES "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch"
+             OPTIONS
+                 "WAMR_BUILD_INTERP 1"
+                 "WAMR_BUILD_FAST_INTERP 1"
+                 "WAMR_BUILD_AOT 0"
+                 "WAMR_BUILD_JIT 0"
+                 "WAMR_BUILD_FAST_JIT 0"
+                 "WAMR_BUILD_LIBC_WASI 1"
+                 "WAMR_BUILD_LIBC_BUILTIN 0"
+                 "WAMR_BUILD_THREAD_MGR 1"
+                 "WAMR_BUILD_LIB_PTHREAD 0"
+diff --git a/cmake/patches/wamr-unlink-exec-env-under-cluster-lock.patch b/cmake/patches/wamr-unlink-exec-env-under-cluster-lock.patch
+new file mode 100644
+index 000000000..e21168834
+--- /dev/null
++++ b/cmake/patches/wamr-unlink-exec-env-under-cluster-lock.patch
+@@ -0,0 +1,25 @@
++diff --git a/core/iwasm/libraries/thread-mgr/thread_manager.c b/core/iwasm/libraries/thread-mgr/thread_manager.c
++index 8f3a6317..d3e2f4a5 100644
++--- a/core/iwasm/libraries/thread-mgr/thread_manager.c
+++++ b/core/iwasm/libraries/thread-mgr/thread_manager.c
++@@ -424,11 +424,19 @@ wasm_cluster_del_exec_env_internal(WASMCluster *cluster, WASMExecEnv *exec_env,
++         os_mutex_unlock(&cluster->debug_inst->wait_lock);
++     }
++ #endif
+++    /* The caller that may destroy the cluster (wasm_exec_env_destroy) holds
+++       no lock, while wasm_clusters_search_exec_env walks this list under
+++       cluster->lock from any thread: unlink under it. */
+++    if (can_destroy_cluster)
+++        os_mutex_lock(&cluster->lock);
++     if (bh_list_remove(&cluster->exec_env_list, exec_env) != 0)
++         ret = false;
+++    bool emptied = cluster->exec_env_list.len == 0;
+++    if (can_destroy_cluster)
+++        os_mutex_unlock(&cluster->lock);
++ 
++     if (can_destroy_cluster) {
++-        if (cluster->exec_env_list.len == 0) {
+++        if (emptied) {
++             /* exec_env_list empty, destroy the cluster */
++             wasm_cluster_destroy(cluster);
++         }
+diff --git a/src/vtextension/wasm/host/ExecutorThread_test.cpp b/src/vtextension/wasm/host/ExecutorThread_test.cpp
+index 4b7a294be..213d48e86 100644
+--- a/src/vtextension/wasm/host/ExecutorThread_test.cpp
++++ b/src/vtextension/wasm/host/ExecutorThread_test.cpp
+@@ -1,46 +1,54 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // A thread whose stack size is chosen: it runs its body, is running by the time it is returned, and a stack
+ // the platform cannot give is an error, not an exception.
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <atomic>
++#include <chrono>
+ #include <cstddef>
+ #include <latch>
+ #include <limits>
++#include <thread>
+ 
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+ 
+ using vtextension::wasm::host::ExecutorThread;
+ 
+ TEST_CASE("ExecutorThread.runsItsBody", "[vtextension][host]")
+ {
+     auto ran = std::atomic<int> { 0 };
+     {
+         auto thread = ExecutorThread::start(std::size_t { 1024 } * 1024, [&] { ++ran; });
+         REQUIRE(thread.has_value());
+     }
+     CHECK(ran.load() == 1);
+ }
+ 
+-TEST_CASE("ExecutorThread.startReturnsOnceTheBodyRuns", "[vtextension][host]")
++TEST_CASE("ExecutorThread.startReturnsOnceTheThreadRuns", "[vtextension][host]")
+ {
+-    // The host locks down right after starting its threads: none may still be starting by then.
+-    auto entered = std::atomic<int> { 0 };
++    // The host locks down right after starting its threads: none may still be starting by then. start()
++    // returns once the thread has entered the function that runs the body -- the C library's start-up done --
++    // which may be just before the body's first statement: so the body is waited for, not raced. It is still
++    // waited for with a bound, as a thread start() returned for that never runs is a failure, not a hang.
++    auto entered = std::latch { 1 };
+     auto release = std::latch { 1 };
+     auto thread = ExecutorThread::start(std::size_t { 1024 } * 1024, [&] {
+-        ++entered;
++        entered.count_down();
+         release.wait();
+     });
+     REQUIRE(thread.has_value());
+-    CHECK(entered.load() == 1);
++    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
++    while (!entered.try_wait() && std::chrono::steady_clock::now() < deadline)
++        std::this_thread::yield();
++    CHECK(entered.try_wait());
+     release.count_down();
+ }
+ 
+ TEST_CASE("ExecutorThread.unavailableStackIsAnError", "[vtextension][host]")
+ {
+     // More address space than any platform reserves for one thread.
+     auto ran = std::atomic<int> { 0 };
+     auto const thread = ExecutorThread::start(std::numeric_limits<std::size_t>::max() / 2, [&] { ++ran; });
+     REQUIRE(!thread.has_value());
+     CHECK(thread.error() != std::error_code {});
+diff --git a/src/vtextension/wasm/host/HostServer.cpp b/src/vtextension/wasm/host/HostServer.cpp
+index c1baab6c9..e39c82810 100644
+--- a/src/vtextension/wasm/host/HostServer.cpp
++++ b/src/vtextension/wasm/host/HostServer.cpp
+@@ -391,23 +391,20 @@ ServerExit HostServer::Impl::run()
+         });
+         if (!started)
+             break;
+         executors.push_back(std::move(*started));
+     }
+     if (executors.size() == _lanes.size())
+     {
+         // The control thread runs start functions: it is prepared too, then waits for every lane's.
+         priming.note(_engine.prepareThread());
+         lanesPrepared.wait();
+-        // Every thread that runs guests was prepared: what preparing them took goes before the host is
+-        // confined.
+-        _engine.primingDone();
+         if (auto const failure = priming.failure())
+         {
+             // A host that cannot run guests on every thread says so, unconfined, and ends.
+             sendUnprimed(*failure);
+             finish(ServerExit::ExecutorUnavailable);
+         }
+         else
+             sendHello();
+     }
+     else
+diff --git a/src/vtextension/wasm/host/HostServer_test.cpp b/src/vtextension/wasm/host/HostServer_test.cpp
+index ddf6786dd..060e29404 100644
+--- a/src/vtextension/wasm/host/HostServer_test.cpp
++++ b/src/vtextension/wasm/host/HostServer_test.cpp
+@@ -913,23 +913,20 @@ namespace
+ 
+ /// What a counting engine and the server's starts saw, each on the thread it ran on.
+ struct PreparedThreads
+ {
+     std::mutex mutex;                       ///< Guards what follows.
+     std::vector<std::thread::id> prepared;  ///< Each thread prepared, in order.
+     std::vector<std::thread::id> executors; ///< Each executor's thread, as it began.
+     std::size_t preparedAtConfine = 0;      ///< How many were prepared when confine ran.
+     std::thread::id confinedOn;             ///< The thread confine ran on: the control thread.
+     std::size_t confines = 0;               ///< How often confine ran.
+-    std::size_t primingsDone = 0;           ///< How often the engine was told every thread was prepared.
+-    std::size_t preparedAtPrimingDone = 0;  ///< How many were prepared then.
+-    std::size_t confinesAtPrimingDone = 0;  ///< How often confine had run then.
+ };
+ 
+ /// The index of the lane whose executor runs on this thread, from 1; 0 on any other thread.
+ thread_local auto executorLane = std::size_t { 0 };
+ 
+ /// @return A server configuration that records, in @p seen, each executor's thread as it begins and what
+ ///         confine finds, its executors' threads told their lane (executorLane).
+ [[nodiscard]] HostServerConfig recordingThreads(std::shared_ptr<PreparedThreads> const& seen)
+ {
+     auto config = HostServerConfig {};
+@@ -957,53 +954,42 @@ thread_local auto executorLane = std::size_t { 0 };
+     return config;
+ }
+ 
+ /// @return An engine that records each thread it prepares in @p seen, and fails lane @p failingLane's
+ ///         (0: none).
+ [[nodiscard]] std::unique_ptr<vtextension::wasm::host::IHostedEngine> countingEngine(
+     std::shared_ptr<PreparedThreads> seen, std::size_t failingLane = 0)
+ {
+     return std::make_unique<PreparationHookEngine>(
+         makeHostedEngine(proto::MemoryMode::Copy),
+-        [seen, failingLane]() -> std::expected<void, ExtensionError> {
++        [seen = std::move(seen), failingLane]() -> std::expected<void, ExtensionError> {
+             {
+                 auto const lock = std::scoped_lock { seen->mutex };
+                 seen->prepared.push_back(std::this_thread::get_id());
+             }
+             if (failingLane != 0 && executorLane == failingLane)
+                 return std::unexpected(ExtensionError::RuntimeUnavailable);
+             return {};
+-        },
+-        [seen] {
+-            auto const lock = std::scoped_lock { seen->mutex };
+-            seen->preparedAtPrimingDone = seen->prepared.size();
+-            seen->confinesAtPrimingDone = seen->confines;
+-            ++seen->primingsDone;
+         });
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("HostServer.everyThreadIsPreparedBeforeConfinement", "[vtextension][host]")
+ {
+     auto const seen = std::make_shared<PreparedThreads>();
+     auto parent = ScriptedParent { countingEngine(seen), recordingThreads(seen) };
+     parent.skipHello();
+     auto const lock = std::scoped_lock { seen->mutex };
+     CHECK(seen->confines == 1);
+     // Every lane's thread and the control thread, each once, all before the host was confined.
+     CHECK(seen->preparedAtConfine == MaxLaneChannels + 1);
+-    // The engine heard once that every thread was prepared, and before the host was confined: what it
+-    // releases then, it may still unmap.
+-    CHECK(seen->primingsDone == 1);
+-    CHECK(seen->preparedAtPrimingDone == MaxLaneChannels + 1);
+-    CHECK(seen->confinesAtPrimingDone == 0);
+     auto const distinct = std::set<std::thread::id>(seen->prepared.begin(), seen->prepared.end());
+     CHECK(distinct.size() == MaxLaneChannels + 1);
+     CHECK(distinct.contains(seen->confinedOn));
+     for (auto const executor: seen->executors)
+         CHECK(distinct.contains(executor));
+ }
+ 
+ TEST_CASE("HostServer.unpreparedThreadEndsTheHost", "[vtextension][host]")
+ {
+     auto const seen = std::make_shared<PreparedThreads>();
+diff --git a/src/vtextension/wasm/host/IHostedEngine.hpp b/src/vtextension/wasm/host/IHostedEngine.hpp
+index e157936b2..32e47161f 100644
+--- a/src/vtextension/wasm/host/IHostedEngine.hpp
++++ b/src/vtextension/wasm/host/IHostedEngine.hpp
+@@ -42,22 +42,16 @@ class IHostedEngine: public IWasmBackend
+     ///         engine that keeps none.
+     [[nodiscard]] virtual std::vector<remote::transport::NativeHandle> heldDevices() const = 0;
+ 
+     /// Prepares the calling thread to run guests, before the host locks itself down: does once what running
+     /// a guest on it would do the first time -- installing the engine's signal handlers, the thread's
+     /// alternate signal stack, its thread environment -- so that nothing a guest does later needs what the
+     /// locked-down host may no longer do. Called on every thread that runs guests, each once; idempotent per
+     /// thread.
+     /// @return Nothing once the thread is prepared; why not otherwise, which ends the host.
+     [[nodiscard]] virtual std::expected<void, ExtensionError> prepareThread() = 0;
+-
+-    /// Releases what preparing threads took and running guests does not need, once every thread that runs
+-    /// guests was prepared: called by the host after the last prepareThread() and before it locks itself
+-    /// down, which may refuse the unmapping that releasing takes. A thread prepared after it is prepared as
+-    /// the first was. Nothing for an engine whose preparation keeps nothing.
+-    virtual void primingDone() = 0;
+ };
+ 
+ /// Creates the engine one host runs on; null if none can be.
+ using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/remote/DefaultBackend.cpp b/src/vtextension/wasm/remote/DefaultBackend.cpp
+index 9111b4ec9..5ca31284c 100644
+--- a/src/vtextension/wasm/remote/DefaultBackend.cpp
++++ b/src/vtextension/wasm/remote/DefaultBackend.cpp
+@@ -34,15 +34,14 @@ namespace
+         return remote::process::locateExtensionHost(
+             *self, [&](std::filesystem::path const& path) { return fileSystem.isExecutableFile(path); });
+     }
+ } // namespace
+ 
+ std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
+ {
+     // A connector of the caller's starts the hosts: no helper to look for, and no composition to share.
+     if (config.connector)
+         return remote::makeRemoteBackend(remote::makeRemoteKindState(), std::move(config));
+-    return remote::process::makeProcessBackend(
+-        std::move(config), installedHelper(), remote::errorLogWriter());
++    return remote::process::makeProcessBackend(std::move(config), installedHelper(), remote::logWriter());
+ }
+ 
+ } // namespace vtextension::wasm
+diff --git a/src/vtextension/wasm/remote/HelperIncarnation.cpp b/src/vtextension/wasm/remote/HelperIncarnation.cpp
+index 2ca7af024..d76a2c3ee 100644
+--- a/src/vtextension/wasm/remote/HelperIncarnation.cpp
++++ b/src/vtextension/wasm/remote/HelperIncarnation.cpp
+@@ -62,20 +62,24 @@ namespace
+         return HostRefusal::LockdownFailed;
+     }
+ 
+     /// @return Why a host that said @p hello is not driven; nothing if it is: it speaks this protocol, and is
+     ///         confined as @p requirement asks. Whether it copies memory or shares it, both are driven.
+     [[nodiscard]] std::optional<HostRefusal> refusalOf(proto::Hello const& hello,
+                                                        LockdownRequirement requirement) noexcept
+     {
+         if (hello.version != proto::ProtocolVersion)
+             return HostRefusal::ProtocolVersion;
++        // A failure the next host may not meet is refused for a reason that does not last.
++        if (hello.lockdown == proto::LockdownState::Failed)
++            return lockdownFailureRefusal(
++                proto::LockdownFailure { .step = hello.failedStep, .code = hello.failureCode });
+         return lockdownRefusalOf(hello.lockdown, requirement);
+     }
+ 
+     /// @return The parent's end of @p channel as a stream of @p kind.
+     [[nodiscard]] PduStream parentEnd(transport::Channel channel, proto::ChannelKind kind)
+     {
+         return PduStream { std::move(channel), kind, proto::Direction::ToParent, ParentLimits };
+     }
+ } // namespace
+ 
+diff --git a/src/vtextension/wasm/remote/HostRefusals.cpp b/src/vtextension/wasm/remote/HostRefusals.cpp
+index 9c50c36df..dc52edb5a 100644
+--- a/src/vtextension/wasm/remote/HostRefusals.cpp
++++ b/src/vtextension/wasm/remote/HostRefusals.cpp
+@@ -5,20 +5,21 @@
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
+ #include <format>
+ #include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ 
++#include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ namespace
+ {
+     /// The line for a host that could not be started, around what the launcher says of why.
+     constexpr auto LaunchLine =
+@@ -41,23 +42,45 @@ namespace
+         HandshakeRefusalRow { .refusal = HostRefusal::LockdownFailed,
+                               .text =
+                                   "The extension host could not confine itself, and was refused. Extensions "
+                                   "do not run." },
+         HandshakeRefusalRow { .refusal = HostRefusal::Unsandboxed,
+                               .text =
+                                   "The extension host runs without a sandbox on this system, which Contour "
+                                   "requires, and was refused. Extensions do not run." },
+     };
+     static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
+-    static_assert(std::to_underlying(proto::LockdownStep::WriteXorExecute) < 32,
++    static_assert(std::to_underlying(proto::LastLockdownStep) < 32,
+                   "a bit per step in HostRefusalLog's word of unavailable steps");
+ 
++    /// A confinement failure a host started again may not meet, and the reason it is refused for instead of
++    /// the lasting `LockdownFailed`.
++    struct TransientLockdownFailure
++    {
++        proto::LockdownStep step; ///< The step.
++        uint32_t code;            ///< Its code, as the step's row reads it.
++        HostRefusal refusal;      ///< The reason, one that is `Transient`.
++    };
++
++    /// The failures that do not last: preparing a thread while the system was out of memory.
++    constexpr auto TransientLockdownFailures = std::array {
++        TransientLockdownFailure { .step = proto::LockdownStep::Priming,
++                                   .code = std::to_underlying(ExtensionError::OutOfMemory),
++                                   .refusal = HostRefusal::OutOfResources },
++    };
++    static_assert(std::ranges::all_of(TransientLockdownFailures,
++                                      [](TransientLockdownFailure const& row) {
++                                          return refusalPersistence(row.refusal)
++                                                 == RefusalPersistence::Transient;
++                                      }),
++                  "a transient lockdown failure is refused for a transient reason");
++
+     /// The line for a host that could not confine itself, around the step it named.
+     constexpr auto LockdownStepLine = std::string_view {
+         "The extension host could not confine itself, and was refused: {}. Extensions do not run."
+     };
+ 
+     /// The line for hosts that run confined without a step their system lacks, around that step.
+     constexpr auto UnavailableStepLine = std::string_view {
+         "The extension host runs confined, but this system lacks part of its sandbox: {}. Extensions run."
+     };
+ 
+@@ -100,50 +123,68 @@ std::string refusalLine(HostRefusal refusal)
+     return std::string { UnnamedLaunchLine };
+ }
+ 
+ std::string refusalLine(HostRefusal refusal, proto::LockdownFailure failure)
+ {
+     if (refusal == HostRefusal::LockdownFailed && failure.step != proto::LockdownStep::None)
+         return std::format(LockdownStepLine, proto::lockdownFailureText(failure));
+     return refusalLine(refusal);
+ }
+ 
++HostRefusal lockdownFailureRefusal(proto::LockdownFailure failure) noexcept
++{
++    for (auto const& row: TransientLockdownFailures)
++        if (row.step == failure.step && row.code == failure.code)
++            return row.refusal;
++    return HostRefusal::LockdownFailed;
++}
++
+ std::string unavailableStepLine(proto::LockdownStep step)
+ {
+     return std::format(UnavailableStepLine, proto::lockdownStepText(step));
+ }
+ 
+ HostRefusalLog::HostRefusalLog(Writer writer): _writer { std::move(writer) }
+ {
+ }
+ 
+ void HostRefusalLog::refused(HostRefusal refusal)
+ {
+     refused(refusal, proto::LockdownFailure { .step = proto::LockdownStep::None, .code = 0 });
+ }
+ 
+ void HostRefusalLog::refused(HostRefusal refusal, proto::LockdownFailure failure)
+ {
+     auto const bit = uint32_t { 1 } << std::to_underlying(refusal);
+     if ((_logged.fetch_or(bit) & bit) != 0)
+         return;
+-    _writer(refusalLine(refusal, failure));
++    _writer(LineSeverity::Error, refusalLine(refusal, failure));
+ }
+ 
+ void HostRefusalLog::unavailable(proto::LockdownStep step)
+ {
+-    if (step == proto::LockdownStep::None || std::to_underlying(step) >= proto::lockdownSteps().size())
++    if (step == proto::LockdownStep::None
++        || std::to_underlying(step) > std::to_underlying(proto::LastLockdownStep))
+         return;
+     auto const bit = uint32_t { 1 } << std::to_underlying(step);
+     if ((_unavailable.fetch_or(bit) & bit) != 0)
+         return;
+-    _writer(unavailableStepLine(step));
++    _writer(LineSeverity::Warning, unavailableStepLine(step));
+ }
+ 
+-HostRefusalLog::Writer errorLogWriter()
++HostRefusalLog::Writer logWriter()
+ {
+-    return [](std::string_view line) {
+-        errorLog()("{}", line);
++    return [](LineSeverity severity, std::string_view line) {
++        // A sandbox short of a step is worth knowing about whether or not anyone debugs extensions.
++        static auto const warningLog =
++            core::log::Category("vtextension.warning",
++                                "Warns of extensions running, but not quite as they should.",
++                                core::log::Category::State::Enabled);
++        switch (severity)
++        {
++            case LineSeverity::Warning: warningLog()("{}", line); return;
++            case LineSeverity::Error: errorLog()("{}", line); return;
++        }
+     };
+ }
+ 
+ } // namespace vtextension::wasm::remote
+diff --git a/src/vtextension/wasm/remote/HostRefusals.hpp b/src/vtextension/wasm/remote/HostRefusals.hpp
+index 34f89d40b..63afe41cc 100644
+--- a/src/vtextension/wasm/remote/HostRefusals.hpp
++++ b/src/vtextension/wasm/remote/HostRefusals.hpp
+@@ -136,46 +136,59 @@ static_assert(everyRefusalHasAPersistenceRow());
+ /// @param failure The step of its confinement a host refused as `LockdownFailed` named in its Hello, and the
+ ///        code it stated.
+ /// @return refusalLine(@p refusal); for `LockdownFailed` with a step, naming that step and what its code says
+ ///         as the confinement's own table phrases them (proto::lockdownFailureText()).
+ [[nodiscard]] std::string refusalLine(HostRefusal refusal, proto::LockdownFailure failure);
+ 
+ /// @param step A step of its confinement a host's Hello said this system lacks.
+ /// @return The line logged for it, user-readable, naming no engine: the host runs confined, without it.
+ [[nodiscard]] std::string unavailableStepLine(proto::LockdownStep step);
+ 
++/// @param failure The step of its confinement a host's Hello said failed, and its code.
++/// @return Why the host is refused: `LockdownFailed`, which lasts, but for a failure a host started again may
++///         not meet (a row of TransientLockdownFailures in HostRefusals.cpp), which is refused for that.
++[[nodiscard]] HostRefusal lockdownFailureRefusal(proto::LockdownFailure failure) noexcept;
++
++/// How a logged line weighs.
++enum class LineSeverity : uint8_t
++{
++    Warning, ///< Extensions run, though not quite as they should.
++    Error,   ///< Extensions do not run.
++};
++
+ /// Logs each reason the first time it comes up. Thread-safe; the reasons seen are kept wait-free.
+ class HostRefusalLog
+ {
+   public:
+-    /// Writes one logged line.
+-    using Writer = std::function<void(std::string_view line)>;
++    /// Writes one logged line, as heavy as @p severity says.
++    using Writer = std::function<void(LineSeverity severity, std::string_view line)>;
+ 
+-    /// @param writer Where the lines go: errorLogWriter() for Contour's error log, a recorder in a test.
++    /// @param writer Where the lines go: logWriter() for Contour's log, a recorder in a test.
+     explicit HostRefusalLog(Writer writer);
+ 
+     /// Logs @p refusal's line, unless it was logged already.
+     /// @param refusal Why no host serves.
+     void refused(HostRefusal refusal);
+ 
+     /// Logs @p refusal's line naming @p failure (refusalLine()), unless @p refusal was logged already.
+     /// @param refusal Why no host serves.
+     /// @param failure The step of its confinement the host named, and its code.
+     void refused(HostRefusal refusal, proto::LockdownFailure failure);
+ 
+-    /// Logs that hosts run without @p step, which their system lacks (unavailableStepLine()), unless that was
+-    /// logged already: once, though every host started says it. `None` is no step, and logs nothing.
++    /// Warns that hosts run without @p step, which their system lacks (unavailableStepLine()), unless that
++    /// was logged already: once, though every host started says it. `None` is no step, and logs nothing.
+     /// @param step The step a host's Hello said it went without.
+     void unavailable(proto::LockdownStep step);
+ 
+   private:
+     Writer _writer;
+-    std::atomic<uint32_t> _logged { 0 }; ///< A bit per reason logged, at its enumerator's value.
+-    std::atomic<uint32_t> _unavailable {
+-        0
+-    }; ///< A bit per unavailable step logged, at its enumerator's value.
++    /// A bit per reason logged, at its enumerator's value.
++    std::atomic<uint32_t> _logged { 0 };
++    /// A bit per unavailable step logged, at its enumerator's value.
++    std::atomic<uint32_t> _unavailable { 0 };
+ };
+ 
+-/// @return A writer to Contour's error log.
+-[[nodiscard]] HostRefusalLog::Writer errorLogWriter();
++/// @return A writer to Contour's log: an error to its error log, a warning to `vtextension.warning`, which is
++///         on unless turned off.
++[[nodiscard]] HostRefusalLog::Writer logWriter();
+ 
+ } // namespace vtextension::wasm::remote
+diff --git a/src/vtextension/wasm/remote/HostRefusals_test.cpp b/src/vtextension/wasm/remote/HostRefusals_test.cpp
+index a17f44689..0a5fc1f11 100644
+--- a/src/vtextension/wasm/remote/HostRefusals_test.cpp
++++ b/src/vtextension/wasm/remote/HostRefusals_test.cpp
+@@ -9,53 +9,60 @@
+ #include <format>
+ #include <memory>
+ #include <mutex>
+ #include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
++#include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ using vtextension::wasm::remote::HostRefusal;
+ using vtextension::wasm::remote::HostRefusalLog;
+ using vtextension::wasm::remote::LastHostRefusal;
++using vtextension::wasm::remote::LineSeverity;
++using vtextension::wasm::remote::lockdownFailureRefusal;
+ using vtextension::wasm::remote::refusalLine;
++using vtextension::wasm::remote::refusalPersistence;
++using vtextension::wasm::remote::RefusalPersistence;
+ using vtextension::wasm::remote::RefusalSource;
+ using vtextension::wasm::remote::refusalSource;
+ using vtextension::wasm::remote::unavailableStepLine;
+ using vtextension::wasm::remote::process::LaunchError;
+ using vtextension::wasm::remote::process::launchErrors;
+ using vtextension::wasm::remote::process::launchErrorText;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ 
+ namespace
+ {
+ 
+ /// The lines a log wrote, from any thread.
+ struct Lines
+ {
+     std::mutex mutex;
+     std::vector<std::string> written;
++    std::vector<LineSeverity> severities; ///< Each line's, in order.
+ 
+     /// @return A writer appending to these lines.
+     [[nodiscard]] HostRefusalLog::Writer writer()
+     {
+-        return [this](std::string_view line) {
++        return [this](LineSeverity severity, std::string_view line) {
+             auto const lock = std::scoped_lock { mutex };
+             written.emplace_back(line);
++            severities.push_back(severity);
+         };
+     }
+ };
+ 
+ /// @return @p text in lower case.
+ [[nodiscard]] std::string lowered(std::string_view text)
+ {
+     auto result = std::string { text };
+     for (auto& character: result)
+         character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+@@ -138,20 +145,22 @@ TEST_CASE("HostRefusals.lockdownLineNamesTheStep", "[vtextension]")
+ }
+ 
+ TEST_CASE("HostRefusals.unavailableStepIsLoggedOnce", "[vtextension]")
+ {
+     auto lines = Lines {};
+     auto log = HostRefusalLog { lines.writer() };
+     log.unavailable(proto::LockdownStep::None);
+     log.unavailable(proto::LockdownStep::FileSystem);
+     log.unavailable(proto::LockdownStep::FileSystem);
+     CHECK(lines.written == std::vector { unavailableStepLine(proto::LockdownStep::FileSystem) });
++    // Extensions run: a warning, not an error.
++    CHECK(lines.severities == std::vector { LineSeverity::Warning });
+     auto const& line = lines.written.front();
+     CHECK(line.contains(proto::lockdownStepText(proto::LockdownStep::FileSystem)));
+     for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
+         CHECK_FALSE(lowered(line).contains(engine));
+     // A value naming no step logs nothing.
+     log.unavailable(static_cast<proto::LockdownStep>(200));
+     CHECK(lines.written.size() == 1);
+ }
+ 
+ TEST_CASE("HostRefusals.eachReasonIsLoggedOnce", "[vtextension]")
+@@ -183,10 +192,29 @@ TEST_CASE("HostRefusals.oneLineHoweverManyThreadsRefuse", "[vtextension][threadi
+     {
+         auto threads = std::vector<std::jthread> {};
+         for ([[maybe_unused]] auto const index: std::views::iota(0, Threads))
+             threads.emplace_back([&log] {
+                 for ([[maybe_unused]] auto const attempt: std::views::iota(0, 100))
+                     log.refused(HostRefusal::Unsandboxed);
+             });
+     }
+     CHECK(lines.written.size() == 1);
+ }
++
++TEST_CASE("HostRefusals.primingOutOfMemoryDoesNotLast", "[vtextension]")
++{
++    // A host that could not prepare a thread for want of memory may well prepare it next time: refused for a
++    // reason that does not last. Any other priming failure, and every other step's, lasts.
++    using vtextension::ExtensionError;
++    auto const outOfMemory = lockdownFailureRefusal(
++        { .step = proto::LockdownStep::Priming, .code = std::to_underlying(ExtensionError::OutOfMemory) });
++    CHECK(outOfMemory == HostRefusal::OutOfResources);
++    CHECK(refusalPersistence(outOfMemory) == RefusalPersistence::Transient);
++    auto const unavailable =
++        lockdownFailureRefusal({ .step = proto::LockdownStep::Priming,
++                                 .code = std::to_underlying(ExtensionError::RuntimeUnavailable) });
++    CHECK(unavailable == HostRefusal::LockdownFailed);
++    CHECK(refusalPersistence(unavailable) == RefusalPersistence::Lasting);
++    CHECK(lockdownFailureRefusal({ .step = proto::LockdownStep::SystemCalls,
++                                   .code = std::to_underlying(ExtensionError::OutOfMemory) })
++          == HostRefusal::LockdownFailed);
++}
+diff --git a/src/vtextension/wasm/remote/ProcessMeasure_test.cpp b/src/vtextension/wasm/remote/ProcessMeasure_test.cpp
+index c773a15dd..016fa9f66 100644
+--- a/src/vtextension/wasm/remote/ProcessMeasure_test.cpp
++++ b/src/vtextension/wasm/remote/ProcessMeasure_test.cpp
+@@ -246,21 +246,21 @@ TEST_CASE("Process.measureSpawn", "[.measure]")
+     // asserted; the first incarnation's footprint is what an idle helper holds.
+     constexpr auto Incarnations = 20;
+     auto const limits = vtextension::ExtensionLimits {};
+     auto const runtime = proto::CreateRuntime { .runtimeId = HelperIncarnation::RuntimeId,
+                                                 .memoryBytes = limits.memoryBytes,
+                                                 .stackBytes = limits.stackBytes,
+                                                 .functions = {} };
+     auto const config = realHelper();
+     auto const connector = process::testing::binaryComposition().connector(config);
+     auto const policy = HelperPolicy { .timeouts = config.timeouts, .lockdown = config.lockdown };
+-    auto refusals = vtextension::wasm::remote::HostRefusalLog { vtextension::wasm::remote::errorLogWriter() };
++    auto refusals = vtextension::wasm::remote::HostRefusalLog { vtextension::wasm::remote::logWriter() };
+ 
+     auto& clock = core::defaultSteadyClock();
+     auto durations = std::vector<std::chrono::nanoseconds> {};
+     durations.reserve(Incarnations);
+     for (auto const incarnation: std::views::iota(0, Incarnations))
+     {
+         auto const start = clock.now();
+         auto const connected = HelperIncarnation::connect(*connector, runtime, policy, refusals);
+         durations.emplace_back(clock.now() - start);
+         REQUIRE(connected.has_value());
+diff --git a/src/vtextension/wasm/remote/RemoteBackend.cpp b/src/vtextension/wasm/remote/RemoteBackend.cpp
+index 2763c8451..7ebd9b89a 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend.cpp
+@@ -968,20 +968,20 @@ namespace
+             // Which engine a host runs is not known before one is started; refused growth is reported as a
+             // trap, which every engine can do.
+             return BackendCapabilities { .memoryGrowth = MemoryGrowthReporting::Unreported };
+         }
+ 
+       private:
+         std::shared_ptr<RemoteKindState> _kind;
+         BackendConfig _config;
+         std::shared_ptr<IncarnationRoster> _roster = std::make_shared<IncarnationRoster>();
+         /// Why its hosts were refused, each reason logged once for the backend.
+-        std::shared_ptr<HostRefusalLog> _refusals = std::make_shared<HostRefusalLog>(errorLogWriter());
++        std::shared_ptr<HostRefusalLog> _refusals = std::make_shared<HostRefusalLog>(logWriter());
+     };
+ } // namespace
+ 
+ std::unique_ptr<IWasmBackend> makeRemoteBackend(std::shared_ptr<RemoteKindState> kind, BackendConfig config)
+ {
+     return std::make_unique<RemoteBackend>(std::move(kind), std::move(config));
+ }
+ 
+ } // namespace vtextension::wasm::remote
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index dd0d37204..6979ed812 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -910,40 +910,45 @@ TEST_CASE("RemoteBackend.refusedHelloIsLoggedOncePerReason", "[vtextension][remo
+     versioned.version = proto::ProtocolVersion + 1;
+     auto failed = HonestHello;
+     failed.lockdown = proto::LockdownState::Failed;
+     failed.failedStep = proto::LockdownStep::FileSystem;
+     failed.failureCode = 13;
+     // A host that could not prepare a thread to run guests says so in a Hello of its own.
+     auto unprimed = HonestHello;
+     unprimed.lockdown = proto::LockdownState::Failed;
+     unprimed.failedStep = proto::LockdownStep::Priming;
+     unprimed.failureCode = std::to_underlying(ExtensionError::RuntimeUnavailable);
++    // One that could not for want of memory is refused for a reason the next host may not share.
++    auto starved = unprimed;
++    starved.failureCode = std::to_underlying(ExtensionError::OutOfMemory);
+     auto const rows = std::array {
+         RefusalRow { versioned, LockdownRequirement::AcceptUnsandboxed, HostRefusal::ProtocolVersion },
+         RefusalRow { failed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
+         RefusalRow { unprimed, LockdownRequirement::AcceptUnsandboxed, HostRefusal::LockdownFailed },
++        RefusalRow { starved, LockdownRequirement::AcceptUnsandboxed, HostRefusal::OutOfResources },
+         RefusalRow { HonestHello, LockdownRequirement::RequireLockedDown, HostRefusal::Unsandboxed },
+     };
+     auto const runtime = proto::CreateRuntime {
+         .runtimeId = HelperIncarnation::RuntimeId, .memoryBytes = 65536, .stackBytes = 65536, .functions = {}
+     };
+     for (auto const& row: rows)
+     {
+         INFO(std::to_underlying(row.refusal));
+         auto const connector = std::make_shared<ScriptedConnector>(
+             [hello = row.hello](HelperEnds& ends, std::size_t /*connection*/) {
+                 if (ends.send(hello))
+                     ends.drain();
+             });
+         auto lines = std::vector<std::string> {};
+         // One log, as one backend has: the same host refused again says nothing new.
+-        auto refusals = HostRefusalLog { [&lines](std::string_view line) { lines.emplace_back(line); } };
++        auto refusals = HostRefusalLog { [&lines](vtextension::wasm::remote::LineSeverity /*severity*/,
++                                                  std::string_view line) { lines.emplace_back(line); } };
+         for ([[maybe_unused]] auto const attempt: { 1, 2 })
+         {
+             auto const connected = HelperIncarnation::connect(
+                 *connector, runtime, HelperPolicy { .timeouts = {}, .lockdown = row.lockdown }, refusals);
+             REQUIRE_FALSE(connected.has_value());
+             CHECK(connected.error() == ExtensionError::HostUnavailable);
+         }
+         // A host that failed to confine itself is refused naming the step it failed at, and what its code
+         // says: what the system said, or what the engine did -- in release builds the only place it is seen.
+         CHECK(lines
+@@ -966,21 +971,22 @@ TEST_CASE("RemoteBackend.unavailableStepIsLoggedOnceAndServed", "[vtextension][r
+                 return;
+             if (auto const create = ends.receive<proto::CreateRuntime>())
+                 std::ignore = ends.send(
+                     proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt });
+             ends.drain();
+         });
+     auto const runtime = proto::CreateRuntime {
+         .runtimeId = HelperIncarnation::RuntimeId, .memoryBytes = 65536, .stackBytes = 65536, .functions = {}
+     };
+     auto lines = std::vector<std::string> {};
+-    auto refusals = HostRefusalLog { [&lines](std::string_view line) { lines.emplace_back(line); } };
++    auto refusals = HostRefusalLog { [&lines](vtextension::wasm::remote::LineSeverity /*severity*/,
++                                              std::string_view line) { lines.emplace_back(line); } };
+     for ([[maybe_unused]] auto const attempt: { 1, 2 })
+     {
+         auto const connected = HelperIncarnation::connect(
+             *connector,
+             runtime,
+             HelperPolicy { .timeouts = {}, .lockdown = LockdownRequirement::AcceptUnsandboxed },
+             refusals);
+         CHECK(connected.has_value());
+     }
+     CHECK(lines == std::vector { unavailableStepLine(proto::LockdownStep::FileSystem) });
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_test.cpp b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+index 23cb13415..36c037570 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_test.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+@@ -69,23 +69,25 @@ TEST_CASE("AppContainer.launchCarriesTheIsolation", "[vtextension]")
+             .launcher = fake, .clock = &clock, .teardownGrace = std::chrono::milliseconds { 0 } });
+         REQUIRE(supervisor.has_value());
+         auto config = process::ProcessHostConfig { .helper = "contour-extension-host",
+                                                    .environment = {},
+                                                    .extraArguments = {},
+                                                    .caps = {},
+                                                    .standardError = std::nullopt };
+         if (expectation.configured)
+             config.isolation = *expectation.configured;
+         {
+-            auto connector = process::ProcessHostConnector { (*supervisor)->mailbox(),
+-                                                             std::move(config),
+-                                                             [](std::string_view /*line*/) {} };
++            auto connector =
++                process::ProcessHostConnector { (*supervisor)->mailbox(),
++                                                std::move(config),
++                                                [](vtextension::wasm::remote::LineSeverity /*severity*/,
++                                                   std::string_view /*line*/) {} };
+             REQUIRE(connector.connect().has_value());
+             REQUIRE(connector.connect().has_value());
+         }
+         auto const launches = fake->launches();
+         REQUIRE(launches.size() == 2);
+         for (auto const& spec: launches)
+             CHECK(spec.isolation == expectation.launched);
+     }
+ }
+ 
+@@ -457,38 +459,55 @@ TEST_CASE("AppContainer.packageGrantIsIdempotent", "[vtextension][appcontainer]"
+         auto const api = apiThatMustNotWrite(writes);
+         auto const granted = process::ensurePackagesCanExecute(directory.path, api);
+         REQUIRE_FALSE(granted.has_value());
+         CHECK(granted.error() == process::LaunchError::NotGranted);
+         CHECK(*writes == 1);
+ 
+         auto lines = std::vector<std::string> {};
+         auto const calls = std::make_shared<ApiCalls>();
+         auto provisionApi = fakeApi(calls, S_OK);
+         provisionApi.readDacl = api.readDacl;
+-        provisionApi.writeDacl = api.writeDacl;
++        // Refused until an administrator grants it, as far as this test is concerned; then the system's own.
++        auto const refused = std::make_shared<bool>(true);
++        provisionApi.writeDacl = [writes, refused, system = process::systemAppContainerApi()](PCWSTR path,
++                                                                                              PACL dacl) {
++            ++*writes;
++            if (*refused)
++                return DWORD { ERROR_ACCESS_DENIED };
++            return system.writeDacl(path, dacl);
++        };
+         auto provision =
+             process::AppContainerProvision { std::move(provisionApi),
+                                              [&lines](std::string_view line) { lines.emplace_back(line); } };
+         auto const prepared = provision.prepare(directory.path);
+         REQUIRE_FALSE(prepared.has_value());
+         REQUIRE(lines.size() == 1);
+         INFO(lines.front());
+         CHECK(lines.front().contains(directory.path.filename().string()));
+         CHECK(lines.front().contains("installer"));
+         CHECK(lines.front().contains("S-1-15-2-1"));
+ 
+-        // The next launch is refused alike, without asking the system again or saying it a second time.
++        // The next launch asks again, and is refused alike without saying it a second time.
+         auto const again = provision.prepare(directory.path);
+         REQUIRE_FALSE(again.has_value());
+         CHECK(again.error() == process::LaunchError::NotGranted);
+         CHECK(lines.size() == 1);
+-        CHECK(*writes == 2);
++        CHECK(*writes == 3);
++
++        // Once it may be granted, the next launch is: nothing is remembered against it.
++        *refused = false;
++        CHECK(provision.prepare(directory.path).has_value());
++        CHECK(*writes == 4);
++        CHECK(lines.size() == 1);
++        // And granted, it is not asked again.
++        CHECK(provision.prepare(directory.path).has_value());
++        CHECK(*writes == 4);
+     }
+ }
+ 
+ TEST_CASE("AppContainer.programFilesGrantIsSeen", "[vtextension][appcontainer]")
+ {
+     // What a directory under `Program Files` inherits for ALL APPLICATION PACKAGES -- `(I)(RX)` for itself
+     // and
+     // `(I)(OI)(CI)(IO)(GR,GE)` for what it holds -- is a grant already: nothing is written, which an
+     // installation this user does not own could not take. Built in memory and read through the API, as not
+     // every system computes inheritance on creation (wine does not). Either entry alone is not enough.
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+index 0b2c294a4..553b40b2c 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+@@ -207,28 +207,27 @@ AppContainerProvision::AppContainerProvision(AppContainerApi api,
+ 
+ std::expected<PSID, LaunchError> AppContainerProvision::prepare(std::filesystem::path const& directory)
+ {
+     if (!_sid)
+     {
+         auto sid = ensureAppContainer(_api);
+         if (!sid)
+             return std::unexpected(sid.error());
+         _sid = *std::move(sid);
+     }
+-    // What this user may not grant stays so: asked once, and said once, not again at every launch.
+-    if (std::ranges::contains(_ungrantableDirectories, directory))
+-        return std::unexpected(LaunchError::NotGranted);
+     if (!std::ranges::contains(_grantedDirectories, directory))
+     {
++        // Asked at every launch, as an administrator may grant it meanwhile; said once, not at every launch.
+         if (auto const granted = ensurePackagesCanExecute(directory, _api); !granted)
+         {
+-            if (granted.error() == LaunchError::NotGranted)
++            if (granted.error() == LaunchError::NotGranted
++                && !std::ranges::contains(_ungrantableDirectories, directory))
+             {
+                 _ungrantableDirectories.push_back(directory);
+                 _diagnostics(
+                     std::format("The extension host in {} cannot run contained: Windows app containers "
+                                 "may not read and execute that directory, and this user may not "
+                                 "grant it. The installer must grant ALL APPLICATION PACKAGES ({}) "
+                                 "read and execute access there.",
+                                 utf8Of(directory),
+                                 utf8Of(std::filesystem::path { AllApplicationPackagesSid })));
+             }
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.hpp b/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
+index 5ee9d5899..6535a8d65 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
+@@ -78,21 +78,21 @@ struct AppContainerApi
+ /// directory's grant, ensured once. Used by one thread at a time (the supervisor's).
+ class AppContainerProvision
+ {
+   public:
+     /// @param api What the system is asked through.
+     /// @param diagnostics Where a grant this user may not make is said, with the directory and the fix:
+     ///        Contour's error log.
+     AppContainerProvision(AppContainerApi api, std::function<void(std::string_view line)> diagnostics);
+ 
+     /// Ensures the profile, once, and that executables in @p directory may run in it, once per directory. A
+-    /// directory this user may not grant is said once, and refused from then on without asking again.
++    /// directory this user may not grant is asked of again at every launch, but said only once.
+     /// @param directory The directory of the executable about to be started.
+     /// @return The container's SID, owned by this provision; why it cannot be used.
+     [[nodiscard]] std::expected<PSID, LaunchError> prepare(std::filesystem::path const& directory);
+ 
+   private:
+     AppContainerApi _api;
+     std::function<void(std::string_view line)> _diagnostics;
+     std::optional<OwnedSid> _sid;                           ///< Once ensured.
+     std::vector<std::filesystem::path> _grantedDirectories; ///< Each directory ensured.
+     std::vector<std::filesystem::path>
+diff --git a/src/vtextension/wasm/remote/process/HostComposition.hpp b/src/vtextension/wasm/remote/process/HostComposition.hpp
+index 0a09fc9c3..2ca03565f 100644
+--- a/src/vtextension/wasm/remote/process/HostComposition.hpp
++++ b/src/vtextension/wasm/remote/process/HostComposition.hpp
+@@ -45,21 +45,21 @@ namespace vtextension::wasm::remote::process
+ 
+ /// How a hosting process composes its extension hosts.
+ struct HostCompositionConfig
+ {
+     /// What starts and waits for the helpers: makeSystemProcessLauncher() in Contour.
+     std::shared_ptr<IProcessLauncher> launcher;
+     core::IClock* clock = nullptr; ///< What the supervisor times by; non-null, outlives the composition.
+     /// The extension host executable; or why it was not found, in which case no helper is ever started and
+     /// every load fails `HostUnavailable`.
+     std::expected<std::filesystem::path, HelperLocationError> helper;
+-    /// Where why no host serves is logged: errorLogWriter() in Contour.
++    /// Where why no host serves is logged: logWriter() in Contour.
+     remote::HostRefusalLog::Writer refusals;
+     /// How long a helper let go may take to exit on its own: as this build is instrumented.
+     std::chrono::milliseconds teardownGrace = teardownGraceFor(ThisBuildInstrumentation);
+ };
+ 
+ /// A supervisor over the configured launcher, the kind every backend made from it shares, and the connector
+ /// that starts the helper through the supervisor.
+ class HostComposition: public std::enable_shared_from_this<HostComposition>
+ {
+     struct Passkey
+@@ -120,18 +120,18 @@ class HostComposition: public std::enable_shared_from_this<HostComposition>
+ [[nodiscard]] std::shared_ptr<HostComposition> sharedHostComposition(std::filesystem::path helper,
+                                                                      LockdownRequirement lockdown,
+                                                                      remote::HostRefusalLog::Writer refusals);
+ 
+ /// The default backend of a program running its extensions out of process: the remote backend over the
+ /// shared composition (sharedHostComposition()) of @p helper; with no helper found, one that fails every load
+ /// `HostUnavailable` without starting anything, and says why once.
+ /// @param config Its budgets and lockdown requirement; a connector it names is used instead of the
+ ///        composition's.
+ /// @param helper The extension host executable; or why it was not found.
+-/// @param refusals Where why no host serves is logged: errorLogWriter() in Contour.
++/// @param refusals Where why no host serves is logged: logWriter() in Contour.
+ /// @return The backend.
+ [[nodiscard]] std::unique_ptr<IWasmBackend> makeProcessBackend(
+     BackendConfig config,
+     std::expected<std::filesystem::path, HelperLocationError> helper,
+     remote::HostRefusalLog::Writer refusals);
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/HostComposition_test.cpp b/src/vtextension/wasm/remote/process/HostComposition_test.cpp
+index 0b95d8f3a..331277b34 100644
+--- a/src/vtextension/wasm/remote/process/HostComposition_test.cpp
++++ b/src/vtextension/wasm/remote/process/HostComposition_test.cpp
+@@ -40,29 +40,30 @@ namespace
+ 
+ /// A helper no case starts: nothing here loads a module through a composition that has one.
+ [[nodiscard]] std::filesystem::path unstartedHelper()
+ {
+     return std::filesystem::temp_directory_path() / "contour-unstarted-extension-host";
+ }
+ 
+ /// @return A refusal log writer that drops every line: no case here that uses it starts a host.
+ [[nodiscard]] vtextension::wasm::remote::HostRefusalLog::Writer ignoredLines()
+ {
+-    return [](std::string_view /*line*/) {
++    return [](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view /*line*/) {
+     };
+ }
+ 
+ /// @return A writer appending to @p lines.
+ [[nodiscard]] vtextension::wasm::remote::HostRefusalLog::Writer recordingInto(
+     std::shared_ptr<std::vector<std::string>> lines)
+ {
+-    return [lines = std::move(lines)](std::string_view line) {
++    return [lines = std::move(lines)](vtextension::wasm::remote::LineSeverity /*severity*/,
++                                      std::string_view line) {
+         lines->emplace_back(line);
+     };
+ }
+ 
+ /// Loads a module three times through @p backend, and checks that every load fails `HostUnavailable`.
+ void checkEveryLoadIsHostUnavailable(vtextension::wasm::IWasmBackend& backend)
+ {
+     auto const runtime =
+         backend.createRuntime(RuntimeLimits { .memoryBytes = 65536, .stackBytes = 65536 }, {});
+     REQUIRE(runtime.has_value());
+diff --git a/src/vtextension/wasm/remote/process/LockdownRefusal_test.cpp b/src/vtextension/wasm/remote/process/LockdownRefusal_test.cpp
+index 9d87b6904..6e80cd572 100644
+--- a/src/vtextension/wasm/remote/process/LockdownRefusal_test.cpp
++++ b/src/vtextension/wasm/remote/process/LockdownRefusal_test.cpp
+@@ -112,21 +112,21 @@ void sayVersionThreeHello([[maybe_unused]] std::size_t index, process::LaunchSpe
+ } // namespace
+ 
+ TEST_CASE("HelperIncarnation.olderHostIsRefusedForItsVersion", "[vtextension][remote]")
+ {
+     auto const fake = std::make_shared<process::testing::FakeProcessLauncher>(&sayVersionThreeHello);
+     auto clock = core::ManualClock {};
+     auto supervisor = process::ExtensionHostSupervisor::start(process::SupervisorConfig {
+         .launcher = fake, .clock = &clock, .teardownGrace = std::chrono::milliseconds { 0 } });
+     REQUIRE(supervisor.has_value());
+     auto lines = std::make_shared<std::vector<std::string>>();
+-    auto const writer = [lines](std::string_view line) {
++    auto const writer = [lines](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view line) {
+         lines->emplace_back(line);
+     };
+     {
+         auto connector = connectorOf(**supervisor, writer);
+         auto refusals = HostRefusalLog { writer };
+         auto const policy =
+             HelperPolicy { .timeouts = {}, .lockdown = LockdownRequirement::AcceptUnsandboxed };
+         auto const connected = HelperIncarnation::connect(connector, testRuntime(), policy, refusals);
+         REQUIRE_FALSE(connected.has_value());
+         CHECK(connected.error() == ExtensionError::HostUnavailable);
+@@ -138,21 +138,21 @@ TEST_CASE("HelperIncarnation.olderHostIsRefusedForItsVersion", "[vtextension][re
+ TEST_CASE("ProcessHostConnector.lockdownFailureIsNotRelaunched", "[vtextension][remote]")
+ {
+     auto const fake = std::make_shared<process::testing::FakeProcessLauncher>(&sayLockdownFailed);
+     auto clock = core::ManualClock {};
+     auto supervisor = process::ExtensionHostSupervisor::start(process::SupervisorConfig {
+         .launcher = fake, .clock = &clock, .teardownGrace = std::chrono::milliseconds { 0 } });
+     REQUIRE(supervisor.has_value());
+     // Contour's error log, which the connector and the backend both write to; read once both are gone, as
+     // they write on this thread.
+     auto lines = std::make_shared<std::vector<std::string>>();
+-    auto const writer = [lines](std::string_view line) {
++    auto const writer = [lines](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view line) {
+         lines->emplace_back(line);
+     };
+     {
+         auto connector = connectorOf(**supervisor, writer);
+         auto refusals = HostRefusalLog { writer };
+         auto const runtime = testRuntime();
+         auto const policy =
+             HelperPolicy { .timeouts = {}, .lockdown = LockdownRequirement::AcceptUnsandboxed };
+ 
+         // The first host is started, says it failed, and is refused.
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp b/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
+index 689866fbf..b41c1f51a 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
+@@ -49,21 +49,21 @@ enum class RefusalHistory : uint8_t
+ 
+ /// Starts each host as a process the supervisor launches and owns, connected over inherited channels, an
+ /// interrupt page and a wake signal. Once a host it started was refused for a lasting reason -- it failed to
+ /// confine itself, runs without the sandbox required, or speaks another protocol version -- it starts none
+ /// again: a host would be refused the same way, on this system and build, for every extension.
+ class ProcessHostConnector final: public remote::IHostConnector
+ {
+   public:
+     /// @param supervisor What launches and supervises the processes.
+     /// @param config How each one is started.
+-    /// @param refusals Where why a host could not be started is logged, once per reason: errorLogWriter() in
++    /// @param refusals Where why a host could not be started is logged, once per reason: logWriter() in
+     ///        Contour.
+     ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor,
+                          ProcessHostConfig config,
+                          remote::HostRefusalLog::Writer refusals);
+ 
+     /// Creates the channels, the page and the wake signal, and has the supervisor start a host on their
+     /// helper ends, which close here once it started.
+     /// @return The connection; `HostUnavailable` if any of it could not be created, or the host not started
+     ///         -- logged the first time for each reason the system gave -- and, without starting one, once a
+     ///         host it started was refused for a lasting reason (refused()).
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp b/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp
+index 14127f1b2..075c22ca1 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp
+@@ -41,21 +41,23 @@ TEST_CASE("ProcessHostConnector.launchFailureIsLoggedOncePerReason", "[vtextensi
+     auto lines = std::make_shared<std::vector<std::string>>();
+     {
+         auto connector = process::ProcessHostConnector {
+             (*supervisor)->mailbox(),
+             process::ProcessHostConfig { .helper = std::filesystem::temp_directory_path()
+                                                    / "contour-no-such-extension-host",
+                                          .environment = process::defaultHelperEnvironment(),
+                                          .extraArguments = {},
+                                          .caps = {},
+                                          .standardError = std::nullopt },
+-            [lines](std::string_view line) { lines->emplace_back(line); }
++            [lines](vtextension::wasm::remote::LineSeverity /*severity*/, std::string_view line) {
++                lines->emplace_back(line);
++            }
+         };
+         // Every attempt fails; the first says why.
+         for ([[maybe_unused]] auto const attempt: { 1, 2, 3 })
+         {
+             auto const connected = connector.connect();
+             REQUIRE_FALSE(connected.has_value());
+             CHECK(connected.error() == ExtensionError::HostUnavailable);
+         }
+     }
+     CHECK(*lines == std::vector<std::string> { refusalLine(HostRefusal::HelperNotFound) });
+@@ -87,21 +89,22 @@ TEST_CASE("ProcessHostConnector.lastingRefusalsStartNoOtherHost", "[vtextension]
+         .launcher = fake, .clock = &clock, .teardownGrace = std::chrono::milliseconds { 0 } });
+     REQUIRE(supervisor.has_value());
+     {
+         auto connector =
+             process::ProcessHostConnector { (*supervisor)->mailbox(),
+                                             process::ProcessHostConfig { .helper = "contour-extension-host",
+                                                                          .environment = {},
+                                                                          .extraArguments = {},
+                                                                          .caps = {},
+                                                                          .standardError = std::nullopt },
+-                                            [](std::string_view /*line*/) {} };
++                                            [](vtextension::wasm::remote::LineSeverity /*severity*/,
++                                               std::string_view /*line*/) {} };
+         // The host of a first connection was refused, as the handshake tells the connector.
+         REQUIRE(connector.connect().has_value());
+         connector.refused(expectation.refusal);
+ 
+         auto const again = connector.connect();
+         if (expectation.persistence == RefusalPersistence::Lasting)
+         {
+             REQUIRE_FALSE(again.has_value());
+             CHECK(again.error() == ExtensionError::HostUnavailable);
+         }
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.cpp b/src/vtextension/wasm/remote/process/Process_win32.cpp
+index 00026ed8f..58b6287b8 100644
+--- a/src/vtextension/wasm/remote/process/Process_win32.cpp
++++ b/src/vtextension/wasm/remote/process/Process_win32.cpp
+@@ -555,21 +555,23 @@ namespace
+         }
+ 
+       private:
+         AppContainerProvision _containers; ///< Ensured on the first isolated launch; used on this one thread.
+     };
+ } // namespace
+ 
+ std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
+ {
+     return std::make_shared<Win32ProcessLauncher>(
+-        AppContainerProvision { systemAppContainerApi(), errorLogWriter() });
++        AppContainerProvision { systemAppContainerApi(), [writer = logWriter()](std::string_view line) {
++                                   writer(LineSeverity::Error, line);
++                               } });
+ }
+ 
+ ProcessId currentProcessId() noexcept
+ {
+     return static_cast<ProcessId>(::GetCurrentProcessId());
+ }
+ 
+ std::optional<transport::NativeHandle> defaultHelperStandardError()
+ {
+     if constexpr (ThisBuildInstrumentation != BuildInstrumentation::None)
+diff --git a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+index 2211990db..adaf97745 100644
+--- a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
++++ b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+@@ -136,21 +136,21 @@ HelperComposition::HelperComposition(std::chrono::milliseconds teardownGrace, Ar
+ 
+ std::shared_ptr<ProcessHostConnector> HelperComposition::connector(HelperBackendConfig const& config) const
+ {
+     return std::make_shared<ProcessHostConnector>(_supervisor->mailbox(),
+                                                   ProcessHostConfig { .helper = config.helper,
+                                                                       .environment = helperEnvironment(),
+                                                                       .extraArguments = config.extraArguments,
+                                                                       .caps = {},
+                                                                       .standardError = originalStandardError,
+                                                                       .isolation = config.isolation },
+-                                                  errorLogWriter());
++                                                  logWriter());
+ }
+ 
+ std::unique_ptr<IWasmBackend> HelperComposition::backend(HelperBackendConfig const& config) const
+ {
+     return makeRemoteBackend(_kind,
+                              BackendConfig { .timeouts = config.timeouts,
+                                              .connector = connector(config),
+                                              .lockdown = config.lockdown });
+ }
+ 
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index 04d70598b..c61c8d97e 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -301,21 +301,21 @@ enum class StandardStream : uint8_t
+     auto connector = process::ProcessHostConnector {
+         (*supervisor)->mailbox(),
+         process::ProcessHostConfig { .helper = std::filesystem::path { *firstOther },
+                                      .environment = process::defaultHelperEnvironment(),
+                                      .extraArguments = { std::next(firstOther), arguments.end() },
+                                      .caps = {},
+                                      .standardError = std::nullopt,
+                                      // What is proved here is the parent's end, not the helper's confinement;
+                                      // an uncontained helper starts under wine too.
+                                      .isolation = process::ProcessIsolation::None },
+-        vtextension::wasm::remote::errorLogWriter()
++        vtextension::wasm::remote::logWriter()
+     };
+     auto connection = connector.connect();
+     if (!connection || recording->processIds().empty())
+         return ProbeExit::NoHelper;
+     // Told only once the helper bound itself to this process: it says Hello after that, never before.
+     auto helperControl = vtextension::wasm::remote::transport::PduStream {
+         std::move(connection->control),
+         vtextension::wasm::remote::proto::ChannelKind::Control,
+         vtextension::wasm::remote::proto::Direction::ToParent,
+         vtextension::wasm::remote::proto::PduLimits {}
+diff --git a/src/vtextension/wasm/remote/proto/LockdownSteps.cpp b/src/vtextension/wasm/remote/proto/LockdownSteps.cpp
+index eeff69a67..2a5251bb0 100644
+--- a/src/vtextension/wasm/remote/proto/LockdownSteps.cpp
++++ b/src/vtextension/wasm/remote/proto/LockdownSteps.cpp
+@@ -68,21 +68,21 @@ namespace
+         ExtensionCodeRow { .error = ExtensionError::RuntimeUnavailable,
+                            .text = "the extension runtime is unavailable" },
+         ExtensionCodeRow { .error = ExtensionError::OutOfMemory, .text = "out of memory" },
+     };
+ 
+     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, LockdownStepTable.size()),
+                                       [](std::size_t index) {
+                                           return std::to_underlying(LockdownStepTable[index].step) == index;
+                                       }),
+                   "LockdownStepTable lists every LockdownStep at its own index");
+-    static_assert(LockdownStepTable.back().step == LockdownStep::WriteXorExecute,
++    static_assert(LockdownStepTable.back().step == LastLockdownStep,
+                   "LockdownStepTable ends at the last LockdownStep");
+ } // namespace
+ 
+ std::span<LockdownStepRow const> lockdownSteps() noexcept
+ {
+     return LockdownStepTable;
+ }
+ 
+ std::string_view lockdownStepText(LockdownStep step) noexcept
+ {
+diff --git a/src/vtextension/wasm/remote/proto/Pdu.hpp b/src/vtextension/wasm/remote/proto/Pdu.hpp
+index 0a7ef9d68..ab382ea2e 100644
+--- a/src/vtextension/wasm/remote/proto/Pdu.hpp
++++ b/src/vtextension/wasm/remote/proto/Pdu.hpp
+@@ -112,20 +112,24 @@ enum class LockdownStep : uint8_t
+     Capabilities,     ///< Capability mode (FreeBSD: cap_enter).
+     DescriptorRights, ///< Each descriptor limited to what it is used for (FreeBSD: cap_rights_limit).
+     Profile,          ///< A sandbox profile (macOS: Seatbelt).
+     Container,        ///< A container of its own (Windows: AppContainer).
+     Mitigations,      ///< The process mitigations it runs under (Windows).
+     Job,              ///< A job that ends it with Contour and limits what it starts (Windows).
+     Priming,          ///< Each thread that runs guests prepared before the rest is taken (every system).
+     WriteXorExecute,  ///< No memory both writable and executable (FreeBSD: PROC_WXMAP_CTL).
+ };
+ 
++/// The last step: what lockdownSteps() ends at, checked there, and so what bounds every table and mask over
++/// the steps at compile time.
++inline constexpr auto LastLockdownStep = LockdownStep::WriteXorExecute;
++
+ /// Which way a PDU travels.
+ enum class Direction : uint8_t
+ {
+     ToHelper, ///< From Contour to the extension host process.
+     ToParent, ///< From the extension host process to Contour.
+ };
+ 
+ /// Which channel a PDU travels on.
+ enum class ChannelKind : uint8_t
+ {
+diff --git a/src/vtextension/wasm/testing/DecoratedEngine.hpp b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+index b2482f87d..954ff7d89 100644
+--- a/src/vtextension/wasm/testing/DecoratedEngine.hpp
++++ b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+@@ -157,18 +157,16 @@ class DecoratedEngine final: public host::IHostedEngine
+     [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override
+     {
+         return _inner->heldDevices();
+     }
+ 
+     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+     {
+         return _inner->prepareThread();
+     }
+ 
+-    void primingDone() override { _inner->primingDone(); }
+-
+   private:
+     std::unique_ptr<host::IHostedEngine> _inner;
+     InstanceDecorator _decorate;
+ };
+ 
+ } // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/testing/PreparationHookEngine.hpp b/src/vtextension/wasm/testing/PreparationHookEngine.hpp
+index 0b288a701..f4d9c7fb8 100644
+--- a/src/vtextension/wasm/testing/PreparationHookEngine.hpp
++++ b/src/vtextension/wasm/testing/PreparationHookEngine.hpp
+@@ -15,37 +15,29 @@
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ 
+ namespace vtextension::wasm::testing
+ {
+ 
+ /// What runs as a thread is prepared, on that thread: nothing to go on, or why the thread is not prepared.
+ using PreparationHook = std::function<std::expected<void, ExtensionError>()>;
+ 
+-/// What runs as the host says every thread was prepared (IHostedEngine::primingDone()).
+-using PrimingDoneHook = std::function<void()>;
+-
+ /// A hosted engine whose prepareThread() runs a hook first, then the wrapped engine's own unless the hook
+ /// failed; everything else is the engine it wraps.
+ class PreparationHookEngine final: public host::IHostedEngine
+ {
+   public:
+     /// @param inner The engine forwarded to.
+     /// @param onPrepare What runs as each thread is prepared, on that thread.
+-    /// @param onPrimingDone What runs as the host says every thread was prepared, before the inner engine's.
+-    PreparationHookEngine(std::unique_ptr<host::IHostedEngine> inner,
+-                          PreparationHook onPrepare,
+-                          PrimingDoneHook onPrimingDone = {}):
+-        _inner { std::move(inner) },
+-        _onPrepare { std::move(onPrepare) },
+-        _onPrimingDone { std::move(onPrimingDone) }
++    PreparationHookEngine(std::unique_ptr<host::IHostedEngine> inner, PreparationHook onPrepare):
++        _inner { std::move(inner) }, _onPrepare { std::move(onPrepare) }
+     {
+     }
+ 
+     [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
+         RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
+     {
+         return _inner->createRuntime(limits, hostFunctions);
+     }
+ 
+     [[nodiscard]] std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread() override
+@@ -74,24 +66,16 @@ class PreparationHookEngine final: public host::IHostedEngine
+     [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override
+     {
+         return _inner->heldDevices();
+     }
+ 
+     [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+     {
+         return _onPrepare().and_then([this] { return _inner->prepareThread(); });
+     }
+ 
+-    void primingDone() override
+-    {
+-        if (_onPrimingDone)
+-            _onPrimingDone();
+-        _inner->primingDone();
+-    }
+-
+   private:
+     std::unique_ptr<host::IHostedEngine> _inner;
+     PreparationHook _onPrepare;
+-    PrimingDoneHook _onPrimingDone;
+ };
+ 
+ } // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/wamr/WamrBackend_test.cpp b/src/vtextension/wasm/wamr/WamrBackend_test.cpp
+index 32eecf72e..ad5008b8c 100644
+--- a/src/vtextension/wasm/wamr/WamrBackend_test.cpp
++++ b/src/vtextension/wasm/wamr/WamrBackend_test.cpp
+@@ -50,20 +50,32 @@ constexpr auto RawStackBytes = std::uint32_t { 64 * 1024 };
+ 
+ /// A module needing no toolchain: (module (func (export "idle"))).
+ constexpr auto IdleModule = std::to_array<std::uint8_t>({
+     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,             // magic, version
+     0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                         // type 0: () -> ()
+     0x03, 0x02, 0x01, 0x00,                                     // func 0: type 0
+     0x07, 0x08, 0x01, 0x04, 'i',  'd',  'l',  'e',  0x00, 0x00, // export "idle" = 0
+     0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,                         // 0: (empty)
+ });
+ 
++/// Exports a function that returns and one that traps:
++/// (module (func (export "idle")) (func (export "trap") unreachable)).
++constexpr auto TrapModule = std::to_array<std::uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,             // magic, version
++    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                         // type 0: () -> ()
++    0x03, 0x03, 0x02, 0x00, 0x00,                               // func 0, 1: type 0
++    0x07, 0x0f, 0x02, 0x04, 'i',  'd',  'l',  'e',  0x00, 0x00, // export "idle" = 0
++    0x04, 't',  'r',  'a',  'p',  0x00, 0x01,                   // export "trap" = 1
++    0x0a, 0x08, 0x02, 0x02, 0x00, 0x0b,                         // 0: (empty)
++    0x03, 0x00, 0x00, 0x0b,                                     // 1: unreachable
++});
++
+ /// Calls a host function taking no parameter at all:
+ /// (module (import "arity" "nop" (func)) (func (export "call-nop") (call 0))).
+ constexpr auto ZeroArityModule = std::to_array<std::uint8_t>({
+     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                                        // magic, version
+     0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                                                    // type 0: () -> ()
+     0x02, 0x0d, 0x01, 0x05, 'a',  'r',  'i',  't',  'y', 0x03, 'n', 'o', 'p',  0x00, 0x00, // import 0: type 0
+     0x03, 0x02, 0x01, 0x00,                                                                // func 1: type 0
+     0x07, 0x0c, 0x01, 0x08, 'c',  'a',  'l',  'l',  '-', 'n',  'o', 'p', 0x00, 0x01, // export "call-nop" = 1
+     0x0a, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0b,                                  // 1: call 0
+ });
+@@ -218,23 +230,21 @@ TEST_CASE("Wamr.hostFunctionArities")
+     }
+ }
+ 
+ TEST_CASE("Wamr.registrationsRaceLoads", "[threading]")
+ {
+     // WAMR keeps every runtime's host functions on one process-wide list, which creating and dropping a
+     // runtime changes and loading a module walks. Runtimes with registrations of their own come and go on
+     // several threads while each loads and instantiates a module importing its own: no load may walk a node
+     // another thread frees (ThreadSanitizer and AddressSanitizer see it if one does), and every load links
+     // the import to the function its own runtime registered. (Catch2's assertions are not thread-safe: the
+-    // workers count, the test thread checks.) Nothing is called here: clearing an instance's exception walks
+-    // WAMR's list of thread clusters, which destroying another instance's environment changes unlocked -- a
+-    // race of WAMR's own, apart from this one.
++    // workers count, the test thread checks.) Calls racing unloads are Wamr.callsAndTrapsRaceUnloads'.
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::HostFunction;
+     constexpr auto Workers = std::size_t { 4 };
+     static constexpr auto Rounds = 50;
+     // Where ZeroArityModule spells its import module, "arity": after the header (8 bytes), the type section
+     // (6) and the import section's id, size, count and name length (4).
+     constexpr auto ImportModuleNameOffset = 18;
+ 
+     auto const backend = makeWamrBackend();
+     // Keeps WAMR up throughout, so that the workers race each other's registrations, not its bring-up.
+@@ -276,16 +286,62 @@ TEST_CASE("Wamr.registrationsRaceLoads", "[threading]")
+                         return;
+                     ++served.at(worker);
+                 }
+             });
+     }
+ 
+     for (auto const count: served)
+         CHECK(count == Rounds);
+ }
+ 
++TEST_CASE("Wamr.callsAndTrapsRaceUnloads", "[threading]")
++{
++    // Setting or clearing an instance's exception -- every call clears it, every trap sets it -- walks WAMR's
++    // list of every instance's thread cluster, which destroying an instance's execution environment unlinks
++    // from. Instances are called, trap and are dropped on several threads at once: no walk may read a link
++    // another thread writes unlocked (ThreadSanitizer sees it if one does; WAMR is patched for it,
++    // cmake/patches/). Every call returns and every trap is reported. (Catch2's assertions are not
++    // thread-safe: the workers count, the test thread checks.)
++    namespace contract = vtextension::wasm::testing::contract;
++    constexpr auto Workers = std::size_t { 4 };
++    static constexpr auto Rounds = 100;
++
++    auto const backend = makeWamrBackend();
++    auto const runtime = contract::createRuntime(*backend);
++
++    auto served = std::array<int, Workers> {};
++    {
++        auto workers = std::vector<std::jthread> {};
++        for (auto const worker: std::views::iota(std::size_t { 0 }, Workers))
++            workers.emplace_back([&backend, &runtime, &served, worker] {
++                auto const guard = backend->enterThread();
++                if (!guard)
++                    return;
++                for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
++                {
++                    auto const module = runtime->load(vtextension::wasm::ModuleIdentity {},
++                                                      vtextension::testing::toModule(TrapModule));
++                    if (!module)
++                        return;
++                    auto context = contract::RecordingHostContext {};
++                    auto const instance = (*module)->instantiate(context);
++                    if (!instance)
++                        return;
++                    auto const idle = (*instance)->function("idle");
++                    auto const trap = (*instance)->function("trap");
++                    if (!idle || !trap || !(*instance)->call(*idle, {}) || (*instance)->call(*trap, {}))
++                        return;
++                    ++served.at(worker);
++                }
++            });
++    }
++
++    for (auto const count: served)
++        CHECK(count == Rounds);
++}
++
+ TEST_CASE("Wamr.measureRender", "[.measure]")
+ {
+     // Reported, not asserted; vtextension_wasmtime_test's twin measures Wasmtime the same way.
+     auto const backend = makeWamrBackend();
+     vtextension::wasm::testing::measureBundledRender(*backend, "WAMR");
+ }
+diff --git a/src/vtextension/wasm/wamr/WamrEngine.cpp b/src/vtextension/wasm/wamr/WamrEngine.cpp
+index 7e727cddc..9df716a41 100644
+--- a/src/vtextension/wasm/wamr/WamrEngine.cpp
++++ b/src/vtextension/wasm/wamr/WamrEngine.cpp
+@@ -139,23 +139,20 @@ namespace
+         /// runtime already. The interpreter installs no signal handler, so this is all a thread needs.
+         [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+         {
+             if (preparedThread && preparedThread->generation() == wamr::runtimeGeneration())
+                 return {};
+             preparedThread.reset();
+             return ThreadEnv::enter().transform(
+                 [](ThreadEnv entered) { preparedThread.emplace(std::move(entered)); });
+         }
+ 
+-        /// Nothing: each thread's environment is what it runs guests in.
+-        void primingDone() override {}
+-
+       private:
+         std::unique_ptr<IWasmBackend> _backend;
+         std::vector<remote::transport::NativeHandle> _devices;
+     };
+ 
+     /// @return @p handle, a raw handle as a null device opener returns it, as the transport names one.
+     [[nodiscard]] remote::transport::NativeHandle nativeHandleOf(int64_t handle) noexcept
+     {
+ #ifdef _WIN32
+         return reinterpret_cast<remote::transport::NativeHandle>(static_cast<intptr_t>(handle));
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+index cb4cd1f52..9208d4fdc 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+@@ -491,59 +491,44 @@ namespace
+         [[nodiscard]] std::vector<remote::transport::NativeHandle> heldDevices() const override { return {}; }
+ 
+         /// Runs PrimingModule on the calling thread, which installs Wasmtime's signal handlers (once in the
+         /// process, under TrapMode::Signals) and the thread's alternate signal stack, both of which Wasmtime
+         /// does lazily, the first time a guest runs. Compiled once per engine, on the first thread primed.
+         [[nodiscard]] std::expected<void, ExtensionError> prepareThread() override
+         {
+             if (threadPrimedFor == _serial)
+                 return {};
+             return priming()
+-                .and_then([](std::shared_ptr<Priming const> const& priming) { return runPriming(*priming); })
++                .and_then([](Priming const* priming) { return runPriming(*priming); })
+                 .transform([this] { threadPrimedFor = _serial; });
+         }
+ 
+-        /// Drops the priming module and the engine it was compiled on, which no guest runs on: Wasmtime's
+-        /// signal handlers are the process's and each thread's alternate signal stack is the thread's,
+-        /// neither the priming engine's. A thread prepared later compiles it again; one priming now, for
+-        /// another host on this engine, keeps what it runs until it is done.
+-        void primingDone() override
+-        {
+-            auto released = std::shared_ptr<Priming const> {};
+-            {
+-                auto const lock = std::scoped_lock { _primingMutex };
+-                released.swap(_priming);
+-            }
+-        }
+-
+       private:
+-        /// @return This engine's priming, compiled by the first call since it was last dropped; shared with
+-        /// the
+-        ///         caller, so that primingDone() leaves it what it runs.
+-        [[nodiscard]] std::expected<std::shared_ptr<Priming const>, ExtensionError> priming()
++        /// @return This engine's priming, compiled by the first call.
++        [[nodiscard]] std::expected<Priming const*, ExtensionError> priming()
+         {
+             auto const lock = std::scoped_lock { _primingMutex };
+             if (!_priming)
+             {
+                 auto compiled = compilePriming(_config);
+                 if (!compiled)
+                     return std::unexpected(compiled.error());
+-                _priming = std::make_shared<Priming const>(*std::move(compiled));
++                _priming = std::move(*compiled);
+             }
+-            return _priming;
++            return &*_priming;
+         }
+ 
+         std::shared_ptr<KindState> _kind;
+         WasmtimeConfig _config;
+-        uint64_t _serial;                        ///< Which engine primed a thread (threadPrimedFor).
+-        std::mutex _primingMutex;                ///< Guards _priming.
+-        std::shared_ptr<Priming const> _priming; ///< What threads are primed with; compiled by the first.
++        uint64_t _serial;                ///< Which engine primed a thread (threadPrimedFor).
++        std::mutex _primingMutex;        ///< Guards _priming.
++        std::optional<Priming> _priming; ///< What threads are primed with; compiled by the first.
+     };
+ } // namespace
+ 
+ KindState::KindState() noexcept: _serial { nextSerial.fetch_add(1) }
+ {
+ }
+ 
+ void KindState::acquireRuntime() noexcept
+ {
+     auto const lock = std::scoped_lock { _mutex };
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index e495dde71..af71ce5b6 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -1042,33 +1042,24 @@ void checkPrepareThread(TrapMode trapMode)
+ #endif
+     namespace contract = vtextension::wasm::testing::contract;
+     auto const runtime = contract::createRuntime(*engine);
+     auto const guard = contract::enterThread(*engine);
+     auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+     auto context = contract::RecordingHostContext {};
+     auto const instance = contract::instantiate(*module, context);
+     auto grown = std::array<uint32_t, 1> { 1 };
+     CHECK(instance->call(contract::functionOf(*instance, "grow"), grown).has_value());
+ 
+-    // Released once every thread was prepared: guests run here as before, traps included, and a thread
+-    // prepared later compiles it again.
+-    engine->primingDone();
+-    CHECK(instance->call(contract::functionOf(*instance, "grow"), grown).has_value());
+-    auto const [lateOk, lateAgainOk, lateBefore, lateAfter] = prepareOnANewThread().get();
+-    CHECK(lateOk);
+-    CHECK(lateAgainOk);
+-    CHECK(primingCompilations() == compiledBefore + 2);
+-
+     // Another engine compiles its own.
+     auto const other = makeWasmtimeEngine(WasmtimeTraits::kind(), WasmtimeConfig { .trapMode = trapMode });
+     REQUIRE(other->prepareThread().has_value());
+-    CHECK(primingCompilations() == compiledBefore + 3);
++    CHECK(primingCompilations() == compiledBefore + 2);
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("WasmtimeEngine.prepareThreadRunsTheGuestPath", "[wasmtime]")
+ {
+     SECTION("software traps")
+     {
+         checkPrepareThread(TrapMode::Software);
+     }

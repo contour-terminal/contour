@@ -1,0 +1,1268 @@
+# Review package: fbfcb6778..HEAD
+
+## Commits
+16cdbe78d fix(vtextension): bound decoded lists, and end the peer's stream on shutdown
+
+## Files changed
+ src/vtextension/wasm/remote/CMakeLists.txt         |  16 +-
+ src/vtextension/wasm/remote/proto/Codec.cpp        | 213 ++++++++++++++-------
+ src/vtextension/wasm/remote/proto/Codec.hpp        |   4 +-
+ src/vtextension/wasm/remote/proto/Codec_test.cpp   |  55 ++++++
+ src/vtextension/wasm/remote/proto/Pdu.hpp          |  31 ++-
+ src/vtextension/wasm/remote/transport/Channel.hpp  |  14 +-
+ .../wasm/remote/transport/Channel_test.cpp         |  39 +++-
+ .../wasm/remote/transport/Channel_win32.cpp        | 177 +++++++++++++----
+ 8 files changed, 422 insertions(+), 127 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 536a01b02..438f8e9ec 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -1,14 +1,15 @@
+ # vtextension_remote_wire: the protocol Contour speaks with its extension host process, and the channels it
+ # travels on. The codec (proto/) is pure bytes-in/PDUs-out and the transport (transport/) is the operating
+ # system's byte channels; neither links a WebAssembly engine or vtextension itself, so that both the parent and
+-# the helper process link them, and both are always built.
++# the helper process link them, and both are always built. On Windows the channel's owner-only pipe DACL
++# needs advapi32.
+ 
+ set(_channel_source transport/Channel_posix.cpp)
+ if(WIN32)
+     set(_channel_source transport/Channel_win32.cpp)
+ endif()
+ 
+ add_library(vtextension_remote_wire STATIC
+     proto/Codec.cpp
+     proto/Codec.hpp
+     proto/Pdu.hpp
+@@ -19,22 +20,31 @@ add_library(vtextension_remote_wire STATIC
+     transport/PduStream.cpp
+     transport/PduStream.hpp
+ )
+ # The codec names the runtime vocabulary (WasmRuntime.hpp, ExtensionError.hpp), which is header-only and
+ # std-only: the include path is all it takes.
+ target_include_directories(vtextension_remote_wire PUBLIC
+     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+ )
+ 
++if(WIN32)
++    target_link_libraries(vtextension_remote_wire PRIVATE advapi32)
++endif()
++
+ option(VTEXTENSION_FUZZING "Builds the extension host protocol's libFuzzer target (Clang only) [default: OFF]" OFF)
+ if(VTEXTENSION_FUZZING)
+     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+         message(FATAL_ERROR "VTEXTENSION_FUZZING needs Clang, for -fsanitize=fuzzer.")
+     endif()
+     # Decodes its input as every (direction, channel) pair, and checks that what decodes encodes again to
+     # the same PDU. CI runs the fixed-seed mutation case in vtextension_test instead.
+-    add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp)
++    #
++    # The codec is compiled into the fuzzer itself, with the fuzzer's coverage instrumentation, rather than
++    # linked from vtextension_remote_wire: the fuzzer is guided by the decoder's branches, and the library
++    # every other target links stays uninstrumented (-fsanitize=fuzzer-no-link there would need the
++    # coverage runtime in each of them).
++    add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp proto/Codec.cpp)
++    target_include_directories(vtextension_remote_fuzz PRIVATE ${PROJECT_SOURCE_DIR}/src)
+     target_compile_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+     target_link_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+-    target_link_libraries(vtextension_remote_fuzz PRIVATE vtextension_remote_wire)
+ endif()
+diff --git a/src/vtextension/wasm/remote/proto/Codec.cpp b/src/vtextension/wasm/remote/proto/Codec.cpp
+index 2942d08d3..607047e82 100644
+--- a/src/vtextension/wasm/remote/proto/Codec.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec.cpp
+@@ -31,172 +31,235 @@ namespace
+     using Status = std::expected<void, DecodeError>;
+ 
+     /// Whether @p T is @p U, or a const @p U.
+     template <typename T, typename U>
+     concept Of = std::same_as<std::remove_const_t<T>, U>;
+ 
+     /// An enumeration the wire carries as one byte.
+     template <typename T>
+     concept WireEnum = std::is_enum_v<T> && sizeof(T) == 1;
+ 
+-    // The last enumerator of every enumeration the wire carries: a byte naming one past it is BadEnum. A new
+-    // enumeration on the wire needs one here, or its read does not compile.
+-    constexpr ValueType lastEnumerator(ValueType) noexcept
++    // Whether a byte names an enumerator, for every enumeration the wire carries; a byte that does not is
++    // BadEnum. A switch without a default, so that the pedantic build's -Wswitch stops it compiling when an
++    // enumerator is added and not named here; ExtensionError is checked against its description table, which
++    // its own static_assert keeps complete.
++    constexpr bool isEnumerator(ValueType value) noexcept
+     {
+-        return ValueType::F64;
++        switch (value)
++        {
++            case ValueType::Other:
++            case ValueType::I32:
++            case ValueType::I64:
++            case ValueType::F32:
++            case ValueType::F64: return true;
++        }
++        return false;
+     }
+-    constexpr ExternKind lastEnumerator(ExternKind) noexcept
++    constexpr bool isEnumerator(ExternKind value) noexcept
+     {
+-        return ExternKind::Global;
++        switch (value)
++        {
++            case ExternKind::Function:
++            case ExternKind::Memory:
++            case ExternKind::Table:
++            case ExternKind::Global: return true;
++        }
++        return false;
+     }
+-    constexpr Linkage lastEnumerator(Linkage) noexcept
++    constexpr bool isEnumerator(Linkage value) noexcept
+     {
+-        return Linkage::Satisfied;
++        switch (value)
++        {
++            case Linkage::Unsatisfied:
++            case Linkage::Satisfied: return true;
++        }
++        return false;
+     }
+-    constexpr CallFailure lastEnumerator(CallFailure) noexcept
++    constexpr bool isEnumerator(CallFailure value) noexcept
+     {
+-        return CallFailure::HostFailure;
++        switch (value)
++        {
++            case CallFailure::Trap:
++            case CallFailure::Interrupted:
++            case CallFailure::MemoryGrowthRefused:
++            case CallFailure::HostFailure: return true;
++        }
++        return false;
+     }
+-    constexpr ExtensionError lastEnumerator(ExtensionError) noexcept
++    constexpr bool isEnumerator(ExtensionError value) noexcept
+     {
+-        return ExtensionError::ModuleTooLarge;
++        return std::to_underlying(value) < ExtensionErrorTexts.size();
+     }
+-    constexpr MemoryMode lastEnumerator(MemoryMode) noexcept
++    constexpr bool isEnumerator(MemoryMode value) noexcept
+     {
+-        return MemoryMode::Shared;
++        switch (value)
++        {
++            case MemoryMode::Copy:
++            case MemoryMode::Shared: return true;
++        }
++        return false;
+     }
+-    constexpr LockdownState lastEnumerator(LockdownState) noexcept
++    constexpr bool isEnumerator(LockdownState value) noexcept
+     {
+-        return LockdownState::LockedDown;
++        switch (value)
++        {
++            case LockdownState::Failed:
++            case LockdownState::Unsandboxed:
++            case LockdownState::LockedDown: return true;
++        }
++        return false;
+     }
+-    constexpr ReleaseTarget lastEnumerator(ReleaseTarget) noexcept
++    constexpr bool isEnumerator(ReleaseTarget value) noexcept
+     {
+-        return ReleaseTarget::Runtime;
++        switch (value)
++        {
++            case ReleaseTarget::Instance:
++            case ReleaseTarget::Module:
++            case ReleaseTarget::Runtime: return true;
++        }
++        return false;
+     }
+-    constexpr MemoryStatus lastEnumerator(MemoryStatus) noexcept
++    constexpr bool isEnumerator(MemoryStatus value) noexcept
+     {
+-        return MemoryStatus::Ok;
++        switch (value)
++        {
++            case MemoryStatus::OutOfBounds:
++            case MemoryStatus::Ok: return true;
++        }
++        return false;
++    }
++
++    /// A vector field, with the most elements the wire lets it hold. Its count is checked before a single
++    /// element is read: the byte caps bound the body, not what its elements cost once decoded, and a
++    /// description costs a hundred times its smallest encoding.
++    /// @tparam Vector The field's type: a std::vector, const or not.
++    template <typename Vector>
++    struct Capped
++    {
++        Vector& values;       ///< The field.
++        std::size_t maxCount; ///< The most elements it may hold.
++    };
++
++    /// @return @p values, capped at @p maxCount elements.
++    template <typename Vector>
++    constexpr Capped<Vector> capped(Vector& values, std::size_t maxCount) noexcept
++    {
++        return Capped<Vector> { .values = values, .maxCount = maxCount };
++    }
++
++    /// @return The fields a members() lists: references to scalar fields, and Capped vector fields by value.
++    template <typename... Fields>
++    constexpr std::tuple<Fields...> fields(Fields&&... list) noexcept
++    {
++        return std::tuple<Fields...> { std::forward<Fields>(list)... };
+     }
+ 
+     // The fields of every struct the wire carries, in wire order. Each takes the struct const or not, so that
+-    // the writers and the readers walk the one list.
++    // the writers and the readers walk the one list. A vector is listed Capped, and only so: no reader or
++    // writer takes a plain std::vector of elements, so an uncapped one does not compile.
+     constexpr auto members(Of<FunctionSignature> auto& value) noexcept
+     {
+-        return std::tie(value.parameters, value.results);
++        return fields(capped(value.parameters, MaxSignatureValues),
++                      capped(value.results, MaxSignatureValues));
+     }
+     constexpr auto members(Of<ImportDescription> auto& value) noexcept
+     {
+-        return std::tie(value.module, value.name, value.kind, value.signature, value.linkage);
++        return fields(value.module, value.name, value.kind, value.signature, value.linkage);
+     }
+     constexpr auto members(Of<ExportDescription> auto& value) noexcept
+     {
+-        return std::tie(value.name, value.kind, value.signature, value.initialPages);
++        return fields(value.name, value.kind, value.signature, value.initialPages);
+     }
+     constexpr auto members(Of<WireHostFunction> auto& value) noexcept
+     {
+-        return std::tie(value.module, value.name, value.parameterCount);
++        return fields(value.module, value.name, value.parameterCount);
+     }
+     constexpr auto members(Of<Hello> auto& value) noexcept
+     {
+-        return std::tie(value.version, value.memoryMode, value.lockdown);
++        return fields(value.version, value.memoryMode, value.lockdown);
+     }
+     constexpr auto members(Of<CreateRuntime> auto& value) noexcept
+     {
+-        return std::tie(value.runtimeId, value.memoryBytes, value.stackBytes, value.functions);
++        return fields(
++            value.runtimeId, value.memoryBytes, value.stackBytes, capped(value.functions, MaxHostFunctions));
+     }
+     constexpr auto members(Of<RuntimeCreated> auto& value) noexcept
+     {
+-        return std::tie(value.runtimeId, value.error);
++        return fields(value.runtimeId, value.error);
+     }
+     constexpr auto members(Of<Load> auto& value) noexcept
+     {
+-        return std::tie(value.runtimeId, value.moduleId, value.bytes);
++        return fields(value.runtimeId, value.moduleId, value.bytes);
+     }
+     constexpr auto members(Of<Loaded> auto& value) noexcept
+     {
+-        return std::tie(value.moduleId, value.error, value.imports, value.exports);
++        return fields(value.moduleId,
++                      value.error,
++                      capped(value.imports, MaxImports),
++                      capped(value.exports, MaxExports));
+     }
+     constexpr auto members(Of<Instantiate> auto& value) noexcept
+     {
+-        return std::tie(value.moduleId, value.instanceId);
++        return fields(value.moduleId, value.instanceId);
+     }
+     constexpr auto members(Of<Instantiated> auto& value) noexcept
+     {
+-        return std::tie(value.instanceId, value.error, value.callableExports);
++        return fields(value.instanceId, value.error, capped(value.callableExports, MaxExports));
+     }
+     constexpr auto members(Of<Release> auto& value) noexcept
+     {
+-        return std::tie(value.target, value.id);
++        return fields(value.target, value.id);
+     }
+     constexpr auto members(Of<Call> auto& value) noexcept
+     {
+-        return std::tie(value.instanceId, value.exportOrdinal, value.argv);
++        return fields(value.instanceId, value.exportOrdinal, capped(value.argv, MaxCallValues));
+     }
+     constexpr auto members(Of<CallHost> auto& value) noexcept
+     {
+-        return std::tie(value.functionIndex, value.arguments);
++        return fields(value.functionIndex, capped(value.arguments, MaxHostParameters));
+     }
+     constexpr auto members(Of<HostResult> auto& value) noexcept
+     {
+-        return std::tie(value.error);
++        return fields(value.error);
+     }
+     constexpr auto members(Of<CallResult> auto& value) noexcept
+     {
+-        return std::tie(value.failure, value.argv);
++        return fields(value.failure, capped(value.argv, MaxCallValues));
+     }
+     constexpr auto members(Of<MemoryRead> auto& value) noexcept
+     {
+-        return std::tie(value.instanceId, value.address, value.size);
++        return fields(value.instanceId, value.address, value.size);
+     }
+     constexpr auto members(Of<MemoryData> auto& value) noexcept
+     {
+-        return std::tie(value.status, value.bytes);
++        return fields(value.status, value.bytes);
+     }
+     constexpr auto members(Of<MemoryWrite> auto& value) noexcept
+     {
+-        return std::tie(value.instanceId, value.address, value.bytes);
++        return fields(value.instanceId, value.address, value.bytes);
+     }
+ 
+     /// A struct whose fields members() lists.
+     template <typename T>
+     concept Described = requires(T& value) { members(value); };
+ 
+-    // The element counts a body's byte cap does not bound tightly enough: a one-byte varint per value lets a
+-    // Call's cap hold five times MaxCallValues values.
+-    [[nodiscard]] constexpr bool withinCounts(auto const&) noexcept
+-    {
+-        return true;
+-    }
+-    [[nodiscard]] constexpr bool withinCounts(Call const& value) noexcept
+-    {
+-        return value.argv.size() <= MaxCallValues;
+-    }
+-    [[nodiscard]] constexpr bool withinCounts(CallResult const& value) noexcept
+-    {
+-        return value.argv.size() <= MaxCallValues;
+-    }
+-    [[nodiscard]] constexpr bool withinCounts(CallHost const& value) noexcept
+-    {
+-        return value.arguments.size() <= MaxHostParameters;
+-    }
+-
+     // Writers, declared before any is defined, so that each finds the others whatever it nests.
+     void write(Writer& writer, uint32_t value);
+     void write(Writer& writer, uint64_t value);
+     template <WireEnum E>
+     void write(Writer& writer, E value);
+     template <WireEnum E>
+     void write(Writer& writer, std::optional<E> const& value);
+     void write(Writer& writer, std::string const& value);
+     void write(Writer& writer, std::vector<std::byte> const& value);
+     template <typename T>
+-    void write(Writer& writer, std::vector<T> const& values);
++    void write(Writer& writer, Capped<std::vector<T> const> const& field);
+     template <Described T>
+     void write(Writer& writer, T const& value);
+ 
+     void write(Writer& writer, uint32_t value)
+     {
+         writer.varint(value);
+     }
+ 
+     void write(Writer& writer, uint64_t value)
+     {
+@@ -222,80 +285,82 @@ namespace
+         writer.bytes(std::as_bytes(std::span { value }));
+     }
+ 
+     void write(Writer& writer, std::vector<std::byte> const& value)
+     {
+         writer.varint(value.size());
+         writer.bytes(value);
+     }
+ 
+     template <typename T>
+-    void write(Writer& writer, std::vector<T> const& values)
++    void write(Writer& writer, Capped<std::vector<T> const> const& field)
+     {
+-        writer.varint(values.size());
+-        for (auto const& value: values)
++        writer.varint(field.values.size());
++        for (auto const& value: field.values)
+             write(writer, value);
+     }
+ 
+     template <Described T>
+     void write(Writer& writer, T const& value)
+     {
+-        std::apply([&writer](auto const&... fields) { (write(writer, fields), ...); }, members(value));
++        std::apply([&writer](auto const&... list) { (write(writer, list), ...); }, members(value));
+     }
+ 
+     // Readers, likewise declared first.
+     Status read(Reader& reader, uint32_t& value);
+     Status read(Reader& reader, uint64_t& value);
+     template <WireEnum E>
+     Status read(Reader& reader, E& value);
+     template <WireEnum E>
+     Status read(Reader& reader, std::optional<E>& value);
+     Status read(Reader& reader, std::string& value);
+     Status read(Reader& reader, std::vector<std::byte>& value);
+     template <typename T>
+-    Status read(Reader& reader, std::vector<T>& values);
++    Status read(Reader& reader, Capped<std::vector<T>> const& field);
+     template <Described T>
+     Status read(Reader& reader, T& value);
+ 
+     Status read(Reader& reader, uint32_t& value)
+     {
+         return reader.varint32().transform([&value](uint32_t read) { value = read; });
+     }
+ 
+     Status read(Reader& reader, uint64_t& value)
+     {
+         return reader.varint64().transform([&value](uint64_t read) { value = read; });
+     }
+ 
+     template <WireEnum E>
+     Status read(Reader& reader, E& value)
+     {
+         return reader.u8().and_then([&value](uint8_t byte) -> Status {
+-            if (byte > std::to_underlying(lastEnumerator(E {})))
++            auto const candidate = static_cast<E>(byte);
++            if (!isEnumerator(candidate))
+                 return std::unexpected(DecodeError::BadEnum);
+-            value = static_cast<E>(byte);
++            value = candidate;
+             return {};
+         });
+     }
+ 
+     template <WireEnum E>
+     Status read(Reader& reader, std::optional<E>& value)
+     {
+         return reader.u8().and_then([&value](uint8_t byte) -> Status {
+             if (byte == 0)
+             {
+                 value.reset();
+                 return {};
+             }
+-            if (byte - 1 > std::to_underlying(lastEnumerator(E {})))
++            auto const candidate = static_cast<E>(byte - 1);
++            if (!isEnumerator(candidate))
+                 return std::unexpected(DecodeError::BadEnum);
+-            value = static_cast<E>(byte - 1);
++            value = candidate;
+             return {};
+         });
+     }
+ 
+     Status read(Reader& reader, std::string& value)
+     {
+         return reader.varint64()
+             .and_then([&](uint64_t count) { return reader.bytes(count); })
+             .transform(
+                 [&value](std::span<uint8_t const> bytes) { value.assign(bytes.begin(), bytes.end()); });
+@@ -305,42 +370,44 @@ namespace
+     {
+         return reader.varint64()
+             .and_then([&](uint64_t count) { return reader.bytes(count); })
+             .transform([&value](std::span<uint8_t const> bytes) {
+                 auto const view = std::as_bytes(bytes);
+                 value.assign(view.begin(), view.end());
+             });
+     }
+ 
+     template <typename T>
+-    Status read(Reader& reader, std::vector<T>& values)
++    Status read(Reader& reader, Capped<std::vector<T>> const& field)
+     {
+         auto const count = reader.varint64();
+         if (!count)
+             return std::unexpected(count.error());
++        if (*count > field.maxCount)
++            return std::unexpected(DecodeError::OverCap);
++        auto& values = field.values;
+         values.clear();
+         values.reserve(boundedReserveCount<T>(*count, reader.remaining()));
+-        // Every element takes at least one byte, so a lying count runs the reader short, not this loop long.
+         for ([[maybe_unused]] auto const index: std::views::iota(uint64_t { 0 }, *count))
+         {
+             auto& element = values.emplace_back();
+             if (auto const status = read(reader, element); !status)
+                 return status;
+         }
+         return {};
+     }
+ 
+     template <Described T>
+     Status read(Reader& reader, T& value)
+     {
+         auto status = Status {};
+-        std::apply([&](auto&... fields) { static_cast<void>(((status = read(reader, fields)) && ...)); },
++        std::apply([&](auto&&... list) { static_cast<void>(((status = read(reader, list)) && ...)); },
+                    members(value));
+         return status;
+     }
+ 
+     /// @return The largest frame length any kind may declare under @p limits: its body and its kind.
+     [[nodiscard]] uint64_t largestFrameLength(PduLimits const& limits) noexcept
+     {
+         return std::ranges::max(PduTable | std::views::transform([&limits](PduRow const& row) {
+                                     return row.sizeCap(limits);
+                                 }))
+@@ -350,22 +417,20 @@ namespace
+ } // namespace
+ 
+ template <typename Body>
+ std::expected<Pdu, DecodeError> decodeBody(std::span<uint8_t const> body)
+ {
+     auto reader = Reader { body };
+     auto value = Body {};
+     return read(reader, value).and_then([&]() -> std::expected<Pdu, DecodeError> {
+         if (!reader.atEnd())
+             return std::unexpected(DecodeError::TrailingBytes);
+-        if (!withinCounts(value))
+-            return std::unexpected(DecodeError::OverCap);
+         return Pdu { std::move(value) };
+     });
+ }
+ 
+ PduKind kindOf(Pdu const& pdu) noexcept
+ {
+     return static_cast<PduKind>(pdu.index() + 1);
+ }
+ 
+ std::vector<uint8_t> encodeFrame(Pdu const& pdu)
+diff --git a/src/vtextension/wasm/remote/proto/Codec.hpp b/src/vtextension/wasm/remote/proto/Codec.hpp
+index d5d70d2da..cdad39637 100644
+--- a/src/vtextension/wasm/remote/proto/Codec.hpp
++++ b/src/vtextension/wasm/remote/proto/Codec.hpp
+@@ -24,22 +24,22 @@
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/proto/Wire.hpp>
+ 
+ namespace vtextension::wasm::remote::proto
+ {
+ 
+ /// @return The kind of @p pdu.
+ [[nodiscard]] PduKind kindOf(Pdu const& pdu) noexcept;
+ 
+ /// Encodes @p pdu as one frame.
+-/// @param pdu The PDU to encode. Its element counts are the caller's to keep within MaxCallValues and
+-///            MaxHostParameters; a reader refuses a frame that exceeds them.
++/// @param pdu The PDU to encode. Its element counts are the caller's to keep within the caps Pdu.hpp names
++///            (MaxCallValues, MaxImports, ...); a reader refuses a frame that exceeds them.
+ /// @return The frame's bytes.
+ [[nodiscard]] std::vector<uint8_t> encodeFrame(Pdu const& pdu);
+ 
+ /// One frame read off the front of a buffer.
+ struct DecodedFrame
+ {
+     Pdu pdu;              ///< The PDU it carries.
+     std::size_t consumed; ///< How many bytes of the buffer the frame spans.
+ };
+ 
+diff --git a/src/vtextension/wasm/remote/proto/Codec_test.cpp b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+index ac3e93823..f700f50e6 100644
+--- a/src/vtextension/wasm/remote/proto/Codec_test.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+@@ -7,20 +7,21 @@
+ 
+ #include <array>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <initializer_list>
+ #include <optional>
+ #include <random>
+ #include <ranges>
+ #include <span>
++#include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/PduTable.hpp>
+ 
+ using namespace vtextension::wasm::remote::proto;
+ using vtextension::ExtensionError;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::ExportDescription;
+@@ -291,20 +292,74 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
+             Call { .instanceId = 1, .exportOrdinal = 0, .argv = std::vector<uint32_t>(MaxCallValues) });
+         CHECK(errorOf(atMost, callRow) == std::nullopt);
+ 
+         auto const& hostRow = PduTable.at(std::to_underlying(PduKind::CallHost) - 1);
+         auto const host = encodeFrame(
+             CallHost { .functionIndex = 0, .arguments = std::vector<uint32_t>(MaxHostParameters + 1) });
+         CHECK(errorOf(host, hostRow) == DecodeError::OverCap);
+     }
+ }
+ 
++TEST_CASE("PduCodec.lyingCountsAreRefusedBeforeReading", "[vtextension]")
++{
++    // Each list's count is checked against its cap before an element is read: a count one past the cap is
++    // OverCap from a body of a few bytes, where at the cap the same body runs short (Truncated).
++    struct Case
++    {
++        std::string_view description;
++        PduKind kind;
++        std::vector<uint64_t> prefix; ///< The varints before the count: ids, statuses, enums.
++        std::size_t cap;              ///< The count's cap.
++    };
++    auto const cases = std::vector<Case> {
++        { .description = "imports", .kind = PduKind::Loaded, .prefix = { 1, 0 }, .cap = MaxImports },
++        { .description = "exports", .kind = PduKind::Loaded, .prefix = { 1, 0, 0 }, .cap = MaxExports },
++        // One import, of module "", name "", kind Function, then its parameters' count.
++        { .description = "signature parameters",
++          .kind = PduKind::Loaded,
++          .prefix = { 1, 0, 1, 0, 0, 0 },
++          .cap = MaxSignatureValues },
++        { .description = "signature results",
++          .kind = PduKind::Loaded,
++          .prefix = { 1, 0, 1, 0, 0, 0, 0 },
++          .cap = MaxSignatureValues },
++        { .description = "callable exports",
++          .kind = PduKind::Instantiated,
++          .prefix = { 1, 0 },
++          .cap = MaxExports },
++        { .description = "host functions",
++          .kind = PduKind::CreateRuntime,
++          .prefix = { 1, 2, 3 },
++          .cap = MaxHostFunctions },
++        { .description = "call values", .kind = PduKind::Call, .prefix = { 1, 2 }, .cap = MaxCallValues },
++        { .description = "host call arguments",
++          .kind = PduKind::CallHost,
++          .prefix = { 1 },
++          .cap = MaxHostParameters },
++        { .description = "call results", .kind = PduKind::CallResult, .prefix = { 0 }, .cap = MaxCallValues },
++    };
++    for (auto const& [description, kind, prefix, cap]: cases)
++    {
++        INFO(description);
++        auto const& row = PduTable.at(std::to_underlying(kind) - 1);
++        auto const bodyWith = [&prefix](uint64_t count) {
++            auto writer = Writer {};
++            for (auto const value: prefix)
++                writer.varint(value);
++            writer.varint(count);
++            return writer.take();
++        };
++        CHECK(errorOf(frameOf(std::to_underlying(kind), bodyWith(cap + 1)), row) == DecodeError::OverCap);
++        CHECK(errorOf(frameOf(std::to_underlying(kind), bodyWith(cap)), row) == DecodeError::Truncated);
++    }
++}
++
+ TEST_CASE("PduCodec.directionAndChannelAreChecked", "[vtextension]")
+ {
+     auto const call = encodeFrame(Call { .instanceId = 1, .exportOrdinal = 2, .argv = {} });
+     CHECK(decodeFrame(call, Direction::ToParent, ChannelKind::Lane, PduLimits {}).error()
+           == DecodeError::WrongDirection);
+     auto const load = encodeFrame(Load { .runtimeId = 1, .moduleId = 2, .bytes = {} });
+     CHECK(decodeFrame(load, Direction::ToHelper, ChannelKind::Lane, PduLimits {}).error()
+           == DecodeError::WrongChannel);
+ }
+ 
+diff --git a/src/vtextension/wasm/remote/proto/Pdu.hpp b/src/vtextension/wasm/remote/proto/Pdu.hpp
+index b1ee6ee9d..327885d89 100644
+--- a/src/vtextension/wasm/remote/proto/Pdu.hpp
++++ b/src/vtextension/wasm/remote/proto/Pdu.hpp
+@@ -25,20 +25,36 @@ namespace vtextension::wasm::remote::proto
+ 
+ /// The protocol version both ends must speak; the helper states it in its Hello.
+ inline constexpr uint32_t ProtocolVersion = 1;
+ 
+ /// The most values a Call carries as arguments, or a CallResult as results.
+ inline constexpr std::size_t MaxCallValues = 64;
+ 
+ /// The most arguments a CallHost carries: the most parameters a host function takes, on every engine.
+ inline constexpr std::size_t MaxHostParameters = wasm::MaxHostParameters;
+ 
++// The most elements each list a PDU carries may hold, checked against its count before any element is read:
++// what a list costs once decoded is far more than its encoding, which is all the byte caps bound. The module
++// limits are those Wasmtime's parser applies, so that no module it loads is described past them.
++
++/// The most imports a Loaded describes.
++inline constexpr std::size_t MaxImports = 100'000;
++
++/// The most exports a Loaded describes, and the most callable exports an Instantiated names.
++inline constexpr std::size_t MaxExports = 100'000;
++
++/// The most parameters, and separately the most results, a described function signature has.
++inline constexpr std::size_t MaxSignatureValues = 1'000;
++
++/// The most host functions a CreateRuntime provides.
++inline constexpr std::size_t MaxHostFunctions = 1'024;
++
+ /// How the helper shares an instance's linear memory with the parent.
+ enum class MemoryMode : uint8_t
+ {
+     Copy,   ///< Memory is read and written through MemoryRead, MemoryData and MemoryWrite PDUs.
+     Shared, ///< Memory lives in an object both processes map.
+ };
+ 
+ /// How far the helper confined itself before it said Hello.
+ enum class LockdownState : uint8_t
+ {
+@@ -124,24 +140,25 @@ struct Hello
+     uint32_t version = 0;                           ///< The protocol version it speaks.
+     MemoryMode memoryMode = MemoryMode::Copy;       ///< How it shares instance memory.
+     LockdownState lockdown = LockdownState::Failed; ///< How far it confined itself.
+ 
+     bool operator==(Hello const&) const = default;
+ };
+ 
+ /// Creates a runtime in the helper.
+ struct CreateRuntime
+ {
+-    uint32_t runtimeId = 0;                  ///< The parent-chosen id the runtime is known by.
+-    uint64_t memoryBytes = 0;                ///< RuntimeLimits::memoryBytes.
+-    uint64_t stackBytes = 0;                 ///< RuntimeLimits::stackBytes.
+-    std::vector<WireHostFunction> functions; ///< The host functions it provides, indexed by CallHost.
++    uint32_t runtimeId = 0;   ///< The parent-chosen id the runtime is known by.
++    uint64_t memoryBytes = 0; ///< RuntimeLimits::memoryBytes.
++    uint64_t stackBytes = 0;  ///< RuntimeLimits::stackBytes.
++    std::vector<WireHostFunction>
++        functions; ///< Its host functions, indexed by CallHost; at most MaxHostFunctions.
+ 
+     bool operator==(CreateRuntime const&) const = default;
+ };
+ 
+ /// Answers CreateRuntime.
+ struct RuntimeCreated
+ {
+     uint32_t runtimeId = 0;              ///< The runtime it answers for.
+     std::optional<ExtensionError> error; ///< Why it was not created; nothing if it was.
+ 
+@@ -156,41 +173,41 @@ struct Load
+     std::vector<std::byte> bytes; ///< The module's bytes.
+ 
+     bool operator==(Load const&) const = default;
+ };
+ 
+ /// Answers Load.
+ struct Loaded
+ {
+     uint32_t moduleId = 0;                  ///< The module it answers for.
+     std::optional<ExtensionError> error;    ///< Why it was not loaded; nothing if it was.
+-    std::vector<ImportDescription> imports; ///< What the module imports, in declaration order.
+-    std::vector<ExportDescription> exports; ///< What the module exports, in declaration order.
++    std::vector<ImportDescription> imports; ///< What the module imports, in order; at most MaxImports.
++    std::vector<ExportDescription> exports; ///< What the module exports, in order; at most MaxExports.
+ 
+     bool operator==(Loaded const&) const = default;
+ };
+ 
+ /// Instantiates a module.
+ struct Instantiate
+ {
+     uint32_t moduleId = 0;   ///< The module to instantiate.
+     uint32_t instanceId = 0; ///< The parent-chosen id the instance is known by.
+ 
+     bool operator==(Instantiate const&) const = default;
+ };
+ 
+ /// Answers Instantiate.
+ struct Instantiated
+ {
+     uint32_t instanceId = 0;               ///< The instance it answers for.
+     std::optional<ExtensionError> error;   ///< Why it was not instantiated; nothing if it was.
+-    std::vector<uint32_t> callableExports; ///< The ordinals of the exports a Call may name.
++    std::vector<uint32_t> callableExports; ///< The export ordinals a Call may name; at most MaxExports.
+ 
+     bool operator==(Instantiated const&) const = default;
+ };
+ 
+ /// Releases a runtime, module or instance the parent no longer holds.
+ struct Release
+ {
+     ReleaseTarget target = ReleaseTarget::Instance; ///< What kind of object is released.
+     uint32_t id = 0;                                ///< Its id.
+ 
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index daa8fdffa..6353356c0 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -1,18 +1,18 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// A reliable, ordered byte channel between Contour and its extension host process: one end of a connected
+ /// pair. A Unix-domain stream socket on POSIX, an overlapped named pipe on Windows.
+ ///
+-/// Its I/O blocks. shutdown() is what makes a blocked receive return, from any thread.
++/// Its I/O blocks. shutdown() is what makes a blocked receive return, from any thread, on both ends.
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <span>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+@@ -52,26 +52,32 @@ class Channel
+     /// @param bytes The bytes to send.
+     /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
+     [[nodiscard]] std::expected<void, ChannelError> send(std::span<uint8_t const> bytes);
+ 
+     /// Receives at least one byte, blocking until one arrives.
+     /// @param buffer Where the bytes go. Not empty.
+     /// @return How many bytes arrived, at least one; `Closed` at the peer's end of stream, or once this end
+     ///         was shut down.
+     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSome(std::span<uint8_t> buffer);
+ 
+-    /// Shuts this end down: a receive or send blocked on it now, from any thread, returns `Closed`, as does
+-    /// every later one. The end stays open until the channel is destroyed. Idempotent and thread-safe.
++    /// Ends the stream, both ways and for both ends: a receive or send blocked on this end now, from any
++    /// thread, returns `Closed`, as does every later one; and the peer's stream ends as if this end were
++    /// closed, so that its receives return `Closed` once they drained what was sent before, and its sends
++    /// return `Closed`. Idempotent and thread-safe.
++    ///
++    /// On POSIX the descriptor stays open until the channel is destroyed. On Windows, where nothing short of
++    /// closing a pipe's handle ends the peer's stream, the handle is closed as soon as no transfer on this
++    /// end is in flight, and nativeHandle() no longer names it.
+     void shutdown() noexcept;
+ 
+     /// @return The end's descriptor or handle, still owned by the channel: for handing it to a child
+-    ///         process, and for inspecting it.
++    ///         process, and for inspecting it. On Windows, INVALID_HANDLE_VALUE once shutdown() closed it.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     std::unique_ptr<Native> _native;
+ };
+ 
+ /// Two connected ends: what one sends, the other receives.
+ struct ChannelPair
+ {
+     Channel parent; ///< Contour's end.
+diff --git a/src/vtextension/wasm/remote/transport/Channel_test.cpp b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+index b92eed2bb..d4bfbf89b 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_test.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+@@ -11,21 +11,25 @@
+ #include <expected>
+ #include <future>
+ #include <optional>
+ #include <span>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+-#ifndef _WIN32
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #define NOMINMAX
++    #include <Windows.h>
++#else
+     #include <csignal>
+ 
+     #include <fcntl.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+ 
+ namespace
+@@ -79,20 +83,39 @@ TEST_CASE("Channel.shutdownUnblocksReceive", "[vtextension]")
+     std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
+     pair->parent.shutdown();
+     CHECK(received.get() == std::unexpected(ChannelError::Closed));
+ 
+     // And so does every later receive and send on that end.
+     auto buffer = std::array<uint8_t, 16> {};
+     CHECK(pair->parent.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
+     CHECK(pair->parent.send(std::vector<uint8_t> { 1 }) == std::unexpected(ChannelError::Closed));
+ }
+ 
++TEST_CASE("Channel.shutdownEndsThePeersStream", "[vtextension]")
++{
++    auto pair = makeChannelPair();
++    REQUIRE(pair.has_value());
++
++    auto result = std::promise<std::expected<std::size_t, ChannelError>> {};
++    auto received = result.get_future();
++    auto peer = std::jthread { [&] {
++        auto buffer = std::array<uint8_t, 16> {};
++        result.set_value(pair->helper.receiveSome(buffer));
++    } };
++    // Whether the peer blocked before the shutdown or arrives after it, its stream has ended.
++    std::this_thread::sleep_for(std::chrono::milliseconds { 50 });
++    pair->parent.shutdown();
++    CHECK(received.get() == std::unexpected(ChannelError::Closed));
++    CHECK(pair->helper.send(std::vector<uint8_t>(1024, uint8_t { 1 }))
++          == std::unexpected(ChannelError::Closed));
++}
++
+ TEST_CASE("Channel.peerCloseEndsTheStream", "[vtextension]")
+ {
+     auto pair = makeChannelPair();
+     REQUIRE(pair.has_value());
+     {
+         auto const helper = std::move(pair->helper);
+     }
+     auto buffer = std::array<uint8_t, 16> {};
+     CHECK(pair->parent.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
+ }
+@@ -124,10 +147,24 @@ TEST_CASE("Channel.endsAreCloseOnExec", "[vtextension]")
+     auto pair = makeChannelPair();
+     REQUIRE(pair.has_value());
+     for (auto const* channel: { &pair->parent, &pair->helper })
+     {
+         auto const flags = ::fcntl(channel->nativeHandle(), F_GETFD);
+         REQUIRE(flags != -1);
+         CHECK((flags & FD_CLOEXEC) != 0);
+     }
+ }
+ #endif
++
++#ifdef _WIN32
++TEST_CASE("Channel.endsAreNotInheritable", "[vtextension]")
++{
++    auto pair = makeChannelPair();
++    REQUIRE(pair.has_value());
++    for (auto const* channel: { &pair->parent, &pair->helper })
++    {
++        auto flags = DWORD { 0 };
++        REQUIRE(::GetHandleInformation(channel->nativeHandle(), &flags));
++        CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
++    }
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/transport/Channel_win32.cpp b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+index aa8f98c27..cdbd47b40 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+@@ -1,50 +1,57 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The channel on Windows: the two ends of a byte-mode named pipe, opened for overlapped I/O and waited on, so
+ // that shutdown() can cancel a read or write blocked on another thread. The pipe's name is random, the first
+ // instance is demanded (so that a pipe someone else created first fails the pair rather than joins it),
+-// remote clients are refused, and neither handle is inheritable.
++// remote clients are refused, only the current user may open it, and neither handle is inheritable.
++//
++// A pipe has no half-close: its peer's stream ends only when this end's handle is closed. So shutdown()
++// cancels what is in flight and closes the handle as soon as the last transfer on it has returned. Every
++// transfer is counted while it may touch the handle, and whichever of shutdown() and the last transfer finds
++// the end shut down with nothing in flight closes it, exactly once.
+ #include <algorithm>
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <format>
+ #include <memory>
+ #include <random>
+ #include <span>
+ #include <string>
+ #include <utility>
++#include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #define NOMINMAX
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ namespace
+ {
+     /// How large the pipe's buffers are, each way.
+     constexpr auto PipeBufferBytes = DWORD { 64 * 1024 };
+ 
+     /// The most bytes one ReadFile or WriteFile moves.
+     constexpr auto MaxTransferBytes = std::size_t { 1024 } * 1024 * 1024;
+ 
+-    /// Whether an end was shut down.
++    /// Where an end is in its life.
+     enum class EndState : uint8_t
+     {
+-        Open,
+-        ShutDown,
++        Open,     ///< Transfers run.
++        ShutDown, ///< Transfers fail `Closed`; the handle is closed once none is in flight.
++        Closed,   ///< The handle is closed.
+     };
+ 
+     /// An event an overlapped operation signals, closed with it.
+     class OverlappedEvent
+     {
+       public:
+         OverlappedEvent() noexcept: _event { ::CreateEventW(nullptr, TRUE, FALSE, nullptr) } {}
+         ~OverlappedEvent()
+         {
+             if (_event)
+@@ -73,75 +80,172 @@ namespace
+             case ERROR_OPERATION_ABORTED: return ChannelError::Closed;
+             default: return ChannelError::Io;
+         }
+     }
+ 
+     /// @return A pipe name no other pair uses: this process, a serial and 64 random bits.
+     [[nodiscard]] std::wstring uniquePipeName()
+     {
+         static auto serial = std::atomic<uint64_t> { 0 };
+         auto source = std::random_device {};
+-        auto const random = (static_cast<uint64_t>(source()) << 32) | source();
++        auto const high = static_cast<uint64_t>(source());
++        auto const random = (high << 32) | source();
+         return std::format(L"\\\\.\\pipe\\contour-extension-host-{}-{}-{:016x}",
+                            ::GetCurrentProcessId(),
+                            serial.fetch_add(1),
+                            random);
+     }
+ 
+     /// Closes a handle that is not owned by a channel yet.
+     struct HandleCloser
+     {
+         void operator()(HANDLE handle) const noexcept { ::CloseHandle(handle); }
+     };
+     using OwnedHandle = std::unique_ptr<void, HandleCloser>;
++
++    /// @return @p handle owned; nothing if it is INVALID_HANDLE_VALUE, as a failed create returns.
++    [[nodiscard]] OwnedHandle own(HANDLE handle) noexcept
++    {
++        return OwnedHandle { handle == INVALID_HANDLE_VALUE ? nullptr : handle };
++    }
++
++    /// Security attributes that let only the current user open the pipe, and no child inherit it. Not
++    /// movable: the attributes point into the descriptor, and the descriptor into the ACL.
++    class OwnerOnlySecurity
++    {
++        struct Key
++        {
++        };
++
++      public:
++        /// Builds a DACL with one entry, granting the process's user full access.
++        /// @return The attributes; `Io` if the token could not be read or the ACL not made.
++        [[nodiscard]] static std::expected<std::unique_ptr<OwnerOnlySecurity>, ChannelError> create()
++        {
++            auto security = std::make_unique<OwnerOnlySecurity>(Key {});
++            auto token = HANDLE { nullptr };
++            if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
++                return std::unexpected(ChannelError::Io);
++            auto const tokenOwner = OwnedHandle { token };
++            auto size = DWORD { 0 };
++            ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
++            if (size == 0)
++                return std::unexpected(ChannelError::Io);
++            // uint64_t storage, so that the TOKEN_USER and the ACL are aligned as their headers need.
++            auto tokenUser = std::vector<uint64_t>((size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
++            if (!::GetTokenInformation(token, TokenUser, tokenUser.data(), size, &size))
++                return std::unexpected(ChannelError::Io);
++            auto* const user = reinterpret_cast<TOKEN_USER const*>(tokenUser.data())->User.Sid;
++
++            auto const aclBytes = sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) + ::GetLengthSid(user);
++            security->_acl.resize((aclBytes + sizeof(uint64_t) - 1) / sizeof(uint64_t));
++            auto* const acl = reinterpret_cast<ACL*>(security->_acl.data());
++            // The ACE copies the SID, so the token's buffer may go once it is added.
++            if (!::InitializeAcl(
++                    acl, static_cast<DWORD>(security->_acl.size() * sizeof(uint64_t)), ACL_REVISION)
++                || !::AddAccessAllowedAce(acl, ACL_REVISION, GENERIC_ALL, user)
++                || !::InitializeSecurityDescriptor(&security->_descriptor, SECURITY_DESCRIPTOR_REVISION)
++                || !::SetSecurityDescriptorDacl(&security->_descriptor, TRUE, acl, FALSE))
++                return std::unexpected(ChannelError::Io);
++            security->_attributes = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
++                                                          .lpSecurityDescriptor = &security->_descriptor,
++                                                          .bInheritHandle = FALSE };
++            return security;
++        }
++
++        /// Constructs empty attributes; only create() can, and it fills them before handing them out.
++        explicit OwnerOnlySecurity(Key /*key*/) noexcept {}
++        OwnerOnlySecurity(OwnerOnlySecurity const&) = delete;
++        OwnerOnlySecurity& operator=(OwnerOnlySecurity const&) = delete;
++        OwnerOnlySecurity(OwnerOnlySecurity&&) = delete;
++        OwnerOnlySecurity& operator=(OwnerOnlySecurity&&) = delete;
++        ~OwnerOnlySecurity() = default;
++
++        /// @return The attributes to create both ends with.
++        [[nodiscard]] SECURITY_ATTRIBUTES* attributes() noexcept { return &_attributes; }
++
++      private:
++        std::vector<uint64_t> _acl;
++        SECURITY_DESCRIPTOR _descriptor {};
++        SECURITY_ATTRIBUTES _attributes {};
++    };
+ } // namespace
+ 
+-/// One end of the pipe, closed when it is destroyed.
++/// One end of the pipe: closed by shutdown() once it drained, or else when it is destroyed.
+ struct Channel::Native
+ {
+     HANDLE pipe;
+     std::atomic<EndState> state { EndState::Open };
++    std::atomic<uint32_t> inFlight { 0 }; ///< Transfers that may touch the handle.
+ 
+     explicit Native(HANDLE pipe) noexcept: pipe { pipe } {}
+-    ~Native() { ::CloseHandle(pipe); }
++    ~Native()
++    {
++        if (state.load() != EndState::Closed)
++            ::CloseHandle(pipe);
++    }
+     Native(Native const&) = delete;
+     Native& operator=(Native const&) = delete;
+     Native(Native&&) = delete;
+     Native& operator=(Native&&) = delete;
+ 
++    /// Closes the handle if the end is shut down and nothing is in flight; whoever gets here first does.
++    void closeIfDrained() noexcept
++    {
++        if (inFlight.load() != 0)
++            return;
++        auto expected = EndState::ShutDown;
++        if (state.compare_exchange_strong(expected, EndState::Closed))
++            ::CloseHandle(pipe);
++    }
++
+     /// Runs one overlapped transfer to completion, or until the end is shut down.
+     /// @param start Starts it: ReadFile or WriteFile on the pipe with the given OVERLAPPED.
+     /// @return How many bytes it moved.
+     template <typename Start>
+     [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(Start start)
+     {
+-        if (state.load() == EndState::ShutDown)
++        // Counted before the state is read, and shutdown() stores the state before it reads the count: either
++        // this sees the end shut down, or shutdown() sees this in flight and leaves the handle to it.
++        inFlight.fetch_add(1);
++        auto const result = transferCounted(start);
++        inFlight.fetch_sub(1);
++        if (state.load() != EndState::Open)
++            closeIfDrained();
++        return result;
++    }
++
++  private:
++    template <typename Start>
++    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(Start start)
++    {
++        if (state.load() != EndState::Open)
+             return std::unexpected(ChannelError::Closed);
+         auto const event = OverlappedEvent {};
+         if (!event.handle())
+             return std::unexpected(ChannelError::Io);
+         auto overlapped = OVERLAPPED {};
+         overlapped.hEvent = event.handle();
+         if (!start(overlapped))
+         {
+             auto const error = ::GetLastError();
+             if (error != ERROR_IO_PENDING)
+                 return std::unexpected(channelErrorOf(error));
+         }
+         // shutdown() sets the state before it cancels: a transfer started before the cancel is cancelled by
+         // it, and one started after sees the state here and cancels itself.
+-        if (state.load() == EndState::ShutDown)
++        if (state.load() != EndState::Open)
+             ::CancelIoEx(pipe, &overlapped);
+         auto moved = DWORD { 0 };
+         if (!::GetOverlappedResult(pipe, &overlapped, &moved, TRUE))
+             return std::unexpected(channelErrorOf(::GetLastError()));
+-        if (state.load() == EndState::ShutDown)
++        if (state.load() != EndState::Open)
+             return std::unexpected(ChannelError::Closed);
+         return static_cast<std::size_t>(moved);
+     }
+ };
+ 
+ Channel::Channel(std::unique_ptr<Native> native) noexcept: _native { std::move(native) }
+ {
+ }
+ 
+ Channel::~Channel() = default;
+@@ -173,58 +277,59 @@ std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t>
+     });
+     if (received && *received == 0)
+         return std::unexpected(ChannelError::Closed);
+     return received;
+ }
+ 
+ void Channel::shutdown() noexcept
+ {
+     if (!_native)
+         return;
+-    _native->state.store(EndState::ShutDown);
++    auto expected = EndState::Open;
++    if (!_native->state.compare_exchange_strong(expected, EndState::ShutDown))
++        return;
+     ::CancelIoEx(_native->pipe, nullptr);
++    _native->closeIfDrained();
+ }
+ 
+ NativeHandle Channel::nativeHandle() const noexcept
+ {
+-    return _native ? _native->pipe : INVALID_HANDLE_VALUE;
++    return _native && _native->state.load() != EndState::Closed ? _native->pipe : INVALID_HANDLE_VALUE;
+ }
+ 
+ std::expected<ChannelPair, ChannelError> makeChannelPair()
+ {
++    auto const security = OwnerOnlySecurity::create();
++    if (!security)
++        return std::unexpected(security.error());
++
+     auto const name = uniquePipeName();
+-    auto server = OwnedHandle { ::CreateNamedPipeW(
+-        name.c_str(),
+-        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+-        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+-        1,
+-        PipeBufferBytes,
+-        PipeBufferBytes,
+-        0,
+-        nullptr) };
+-    if (server.get() == INVALID_HANDLE_VALUE)
+-    {
+-        static_cast<void>(server.release());
++    auto server =
++        own(::CreateNamedPipeW(name.c_str(),
++                               PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
++                               PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
++                               1,
++                               PipeBufferBytes,
++                               PipeBufferBytes,
++                               0,
++                               (*security)->attributes()));
++    if (!server)
+         return std::unexpected(ChannelError::Io);
+-    }
+-    auto client = OwnedHandle { ::CreateFileW(name.c_str(),
+-                                              GENERIC_READ | GENERIC_WRITE,
+-                                              0,
+-                                              nullptr,
+-                                              OPEN_EXISTING,
+-                                              FILE_FLAG_OVERLAPPED,
+-                                              nullptr) };
+-    if (client.get() == INVALID_HANDLE_VALUE)
+-    {
+-        static_cast<void>(client.release());
++    auto client = own(::CreateFileW(name.c_str(),
++                                    GENERIC_READ | GENERIC_WRITE,
++                                    0,
++                                    (*security)->attributes(),
++                                    OPEN_EXISTING,
++                                    FILE_FLAG_OVERLAPPED,
++                                    nullptr));
++    if (!client)
+         return std::unexpected(ChannelError::Io);
+-    }
+     // The client connected when it opened the pipe; the server's connect only confirms it.
+     auto const event = OverlappedEvent {};
+     if (!event.handle())
+         return std::unexpected(ChannelError::Io);
+     auto overlapped = OVERLAPPED {};
+     overlapped.hEvent = event.handle();
+     if (!::ConnectNamedPipe(server.get(), &overlapped))
+     {
+         auto const error = ::GetLastError();
+         auto connected = DWORD { 0 };

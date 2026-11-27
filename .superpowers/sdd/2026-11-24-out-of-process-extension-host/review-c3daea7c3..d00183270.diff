@@ -1,0 +1,927 @@
+# Review package: c3daea7c3..HEAD
+
+## Commits
+d00183270 fix(vtextension): make the supervisor's edge cases bounded, and their tests fail rather than hang
+
+## Files changed
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp |  48 ++++----
+ .../remote/process/ExtensionHostSupervisor.cpp     |  96 +++++++++++-----
+ .../remote/process/ExtensionHostSupervisor.hpp     |  16 ++-
+ .../process/ExtensionHostSupervisor_test.cpp       | 122 ++++++++++++++++++++-
+ .../remote/process/testing/FakeProcessLauncher.cpp |  31 +++---
+ .../remote/process/testing/FakeProcessLauncher.hpp |   5 +-
+ 6 files changed, 246 insertions(+), 72 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index bc3a3d081..e34eb3f2b 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -557,31 +557,45 @@ struct ScriptedInstance
+ };
+ 
+ /// @return What calling `load(0)` of @p instance fails with; nothing if it returned.
+ [[nodiscard]] std::optional<CallFailure> loadFailure(IWasmInstance& instance)
+ {
+     auto argv = std::array<uint32_t, 1> { 0 };
+     auto const called = instance.call(contract::functionOf(instance, "load"), argv);
+     return called ? std::nullopt : std::optional { called.error() };
+ }
+ 
+-/// Loads PeekModule through a scripted host that opens with @p hello, driven as @p lockdown asks.
++/// Loads PeekModule through a scripted host that opens with @p hello, driven as @p lockdown asks. The host
++/// answers whatever it is asked, so that a parent that wrongly accepted it gets as far as a loaded module --
++/// and the case fails -- rather than waiting for an answer forever.
+ /// @return What the load failed with; nothing if it succeeded.
+ [[nodiscard]] std::optional<ExtensionError> loadAfterHello(
+     proto::Hello hello,
+     int& terminations,
+     LockdownRequirement lockdown = LockdownRequirement::AcceptUnsandboxed)
+ {
+     auto const connector =
+         std::make_shared<ScriptedConnector>([hello](HelperEnds& ends, std::size_t /*connection*/) {
+-            if (ends.send(hello))
+-                ends.drain();
++            auto const created = [&] {
++                if (!ends.send(hello))
++                    return false;
++                auto const create = ends.receive<proto::CreateRuntime>();
++                return create
++                       && ends.send(
++                           proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt });
++            }();
++            if (created)
++            {
++                if (auto const load = ends.receive<proto::Load>())
++                    std::ignore = ends.sendFrame(frameOf(peekDescription(load->moduleId)));
++            }
++            ends.drain();
+         });
+     {
+         auto const backend = makeBackend(connector, lockdown);
+         auto const runtime = contract::createRuntime(*backend);
+         auto const loaded = runtime->load(ModuleIdentity {}, toModule(PeekModule));
+         terminations = connector->terminations();
+         if (!loaded)
+             return loaded.error();
+     }
+     return std::nullopt;
+@@ -752,45 +766,27 @@ TEST_CASE("RemoteBackend.lockdownFailureIsHostUnavailable", "[vtextension][remot
+     CHECK(terminations == 1);
+ }
+ 
+ TEST_CASE("RemoteBackend.unsandboxedIsRefusedUnlessAccepted", "[vtextension][remote]")
+ {
+     auto terminations = 0;
+     CHECK(loadAfterHello(HonestHello, terminations, LockdownRequirement::RequireLockedDown)
+           == ExtensionError::HostUnavailable);
+     CHECK(terminations == 1);
+ 
+-    // A host in its sandbox is driven under either requirement: it gets as far as creating the runtime.
++    // The same host is driven once it accepts hosts without a sandbox, and one in its sandbox under either.
++    CHECK(loadAfterHello(HonestHello, terminations, LockdownRequirement::AcceptUnsandboxed) == std::nullopt);
++    CHECK(terminations == 0);
+     auto lockedDown = HonestHello;
+     lockedDown.lockdown = proto::LockdownState::LockedDown;
+-    auto const connector =
+-        std::make_shared<ScriptedConnector>([lockedDown](HelperEnds& ends, std::size_t /*connection*/) {
+-            auto const created = [&] {
+-                if (!ends.send(lockedDown))
+-                    return false;
+-                auto const create = ends.receive<proto::CreateRuntime>();
+-                return create
+-                       && ends.send(
+-                           proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt });
+-            }();
+-            if (created)
+-            {
+-                auto const load = ends.receive<proto::Load>();
+-                if (load)
+-                    std::ignore = ends.sendFrame(frameOf(peekDescription(load->moduleId)));
+-            }
+-            ends.drain();
+-        });
+-    auto const backend = makeBackend(connector, LockdownRequirement::RequireLockedDown);
+-    auto const runtime = contract::createRuntime(*backend);
+-    CHECK(runtime->load(ModuleIdentity {}, toModule(PeekModule)).has_value());
+-    CHECK(connector->terminations() == 0);
++    CHECK(loadAfterHello(lockedDown, terminations, LockdownRequirement::RequireLockedDown) == std::nullopt);
++    CHECK(terminations == 0);
+ }
+ 
+ TEST_CASE("RemoteBackend.eachStepIsWatched", "[vtextension][remote]")
+ {
+     auto const connector = scriptedConnector(HelperScript {});
+     {
+         auto const backend = makeRemoteBackend(
+             sharedKind(),
+             BackendConfig { .helper = {},
+                             .timeouts = { .load = std::chrono::milliseconds { 11 },
+diff --git a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp
+index 4119d593a..40a633373 100644
+--- a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp
++++ b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.cpp
+@@ -155,50 +155,52 @@ SupervisedHelper& SupervisedHelper::operator=(SupervisedHelper&& other) noexcept
+ }
+ 
+ SupervisedHelper::~SupervisedHelper()
+ {
+     release();
+ }
+ 
+ void SupervisedHelper::release() noexcept
+ {
+     if (_key != 0)
+-        _mailbox->post(SupervisorMailbox::Command { DropCommand { .helper = std::exchange(_key, 0) } });
++        std::ignore =
++            _mailbox->post(SupervisorMailbox::Command { DropCommand { .helper = std::exchange(_key, 0) } });
+ }
+ 
+ void SupervisedHelper::kill() noexcept
+ {
+     if (_key != 0)
+-        _mailbox->post(SupervisorMailbox::Command { KillCommand { .helper = _key } });
++        std::ignore = _mailbox->post(SupervisorMailbox::Command { KillCommand { .helper = _key } });
+ }
+ 
+ StepWatch SupervisedHelper::watch(HostStep step, std::chrono::milliseconds budget)
+ {
+     if (_key == 0)
+         return StepWatch {};
+     // Timed from the caller's instant, not from when the supervisor gets to it.
+     auto const start = _mailbox->now();
+     if (!start)
+         return StepWatch {};
+     auto const timer = TimerKey { .helper = _key, .serial = _mailbox->nextSerial() };
+-    if (!_mailbox->post(SupervisorMailbox::Command {
+-            WatchCommand { .timer = timer, .step = step, .start = *start, .budget = budget } }))
++    if (_mailbox->post(SupervisorMailbox::Command {
++            WatchCommand { .timer = timer, .step = step, .start = *start, .budget = budget } })
++        == SupervisorMailbox::Delivery::Dropped)
+         return StepWatch {};
+     return StepWatch { [mailbox = _mailbox, timer] {
+-        mailbox->post(SupervisorMailbox::Command { DisarmCommand { .timer = timer } });
++        std::ignore = mailbox->post(SupervisorMailbox::Command { DisarmCommand { .timer = timer } });
+     } };
+ }
+ 
+ void SupervisedHelper::attach(HostAttachment attachment)
+ {
+     if (_key != 0)
+-        _mailbox->post(SupervisorMailbox::Command {
++        std::ignore = _mailbox->post(SupervisorMailbox::Command {
+             AttachCommand { .helper = _key, .attachment = std::move(attachment) } });
+ }
+ 
+ void SupervisedHelper::nudge() noexcept
+ {
+     if (_mailbox)
+         _mailbox->wake();
+ }
+ 
+ // }}}
+@@ -212,79 +214,87 @@ SupervisorMailbox::SupervisorMailbox(Passkey /*passkey*/,
+ }
+ 
+ SupervisorMailbox::~SupervisorMailbox() = default;
+ 
+ std::expected<SupervisedHelper, LaunchError> SupervisorMailbox::launch(LaunchSpec spec)
+ {
+     // The supervisor would wait for itself.
+     Require(std::this_thread::get_id() != _supervisorThread);
+     auto launched = std::promise<LaunchResult> {};
+     auto result = launched.get_future();
+-    if (!post(Command { LaunchCommand { .spec = std::move(spec), .launched = std::move(launched) } }))
++    if (post(Command { LaunchCommand { .spec = std::move(spec), .launched = std::move(launched) } })
++        == Delivery::Dropped)
+         return std::unexpected(LaunchError::Stopped);
+     auto const outcome = [&]() -> LaunchResult {
+         try
+         {
+             return result.get();
+         }
+         catch (std::future_error const&)
+         {
+             // The supervisor stopped before it got to it.
+             return std::unexpected(LaunchError::Stopped);
+         }
+     }();
+     return outcome.transform([&](LaunchedProcess const& process) {
+         return SupervisedHelper { shared_from_this(), process.key, process.processId };
+     });
+ }
+ 
+-bool SupervisorMailbox::post(Command command) noexcept
++SupervisorMailbox::Delivery SupervisorMailbox::post(Command command) noexcept
+ {
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         if (_state == MailboxState::Closed)
+-            return false;
++            return Delivery::Dropped;
+         _commands.push_back(std::move(command));
+     }
+     _posted.notify_one();
+     wake();
+-    return true;
++    return Delivery::Queued;
+ }
+ 
+ std::vector<SupervisorMailbox::Command> SupervisorMailbox::take() noexcept
+ {
+     auto const lock = std::scoped_lock { _mutex };
+     return std::exchange(_commands, {});
+ }
+ 
+-void SupervisorMailbox::waitForCommands(std::chrono::milliseconds timeout)
++void SupervisorMailbox::waitForCommands(std::optional<std::chrono::milliseconds> timeout)
+ {
+     auto lock = std::unique_lock { _mutex };
+-    std::ignore = _posted.wait_for(lock, timeout, [this] { return !_commands.empty(); });
++    auto const posted = [this] {
++        return !_commands.empty();
++    };
++    if (timeout)
++        std::ignore = _posted.wait_for(lock, *timeout, posted);
++    else
++        _posted.wait(lock, posted);
+ }
+ 
+ void SupervisorMailbox::close(Command stop) noexcept
+ {
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         _commands.push_back(std::move(stop));
+         _state = MailboxState::Closed;
+     }
+     _posted.notify_one();
+     wake();
+ }
+ 
+ std::optional<core::SteadyTimePoint> SupervisorMailbox::now() const noexcept
+ {
+     auto const lock = std::scoped_lock { _mutex };
+     if (_state == MailboxState::Closed)
+         return std::nullopt;
++    _clock->refresh();
+     return _clock->now();
+ }
+ 
+ uint32_t SupervisorMailbox::nextSerial() noexcept
+ {
+     auto serial = _nextSerial.fetch_add(1);
+     if (serial == TeardownSerial) // after 2^32 watches
+         serial = _nextSerial.fetch_add(1);
+     return serial;
+ }
+@@ -360,47 +370,58 @@ class SupervisorLoop
+         Running,  ///< It waits for more.
+     };
+ 
+     /// Whether the wait set still works.
+     enum class WaitState : uint8_t
+     {
+         Broken,  ///< A wait failed: the loop polls, and launches nothing more.
+         Working, ///< It waits on the set.
+     };
+ 
++    /// How the loop learns of a helper's end.
++    enum class Watching : uint8_t
++    {
++        Polled,  ///< The set refused it: the loop looks every DegradedPollPeriod, by the injected clock.
++        Watched, ///< The set reports it.
++    };
++
+     /// One helper.
+     struct Supervised
+     {
+         std::unique_ptr<IProcessHandle> process; ///< Null once reaped.
+         std::function<void()> onDeath;           ///< The attachment's; null until attached, and once run.
+         DeathNotice notice = DeathNotice::Alive;
+         Holding holding = Holding::Held;
+         KillState killed = KillState::None;
++        Watching watching = Watching::Watched;
+         std::map<uint32_t, HostStep> steps; ///< The steps its armed watches watch, by serial.
+     };
+ 
+     void launch(LaunchCommand& command);
+     void watch(WatchCommand const& command);
+     void disarm(DisarmCommand const& command);
+     void attach(AttachCommand& command);
+     void kill(KillCommand const& command);
+     void drop(DropCommand const& command);
+ 
+     /// Reaps every helper that ended. @param observation Whether the loop still runs.
+     void reapEnded(Observation observation);
+ 
+     /// Kills each helper whose timer is due.
+     void expireTimers();
+ 
+     /// Blocks until the set reports an end, a command wakes it, or the next timer is due.
+     void waitForWork();
+ 
++    /// @return When the loop must look again: the next timer, or the next poll of a helper the set refused.
++    [[nodiscard]] std::optional<core::SteadyTimePoint> nextWake() const;
++
+     /// Kills every helper and reaps what ends within the budget, after `teardownGrace` for them to exit.
+     void stop();
+ 
+     /// Reaps until no helper is left, or @p deadline (by the injected clock) passed.
+     void reapUntil(core::SteadyTimePoint deadline);
+ 
+     /// Sends @p helper a kill for @p reason, unless it was reaped.
+     void killProcess(Supervised& helper, KillReason reason) noexcept;
+ 
+     /// Declares @p helper dead: runs its onDeath now, or once attached.
+@@ -479,42 +500,47 @@ void SupervisorLoop::launch(LaunchCommand& command)
+         command.launched.set_value(std::unexpected(LaunchError::Stopped));
+         return;
+     }
+     auto process = _launcher->launch(command.spec);
+     if (!process)
+     {
+         command.launched.set_value(std::unexpected(process.error()));
+         return;
+     }
+     auto const key = _nextKey++;
++    ++_counters.launches;
+     if (auto const watched = _waitSet.watch(key, **process); !watched)
+     {
+-        // A helper nobody can wait for does not run: killed, and reaped when the loop next looks.
+-        (*process)->kill();
+-        _helpers.emplace(key,
+-                         Supervised { .process = std::move(*process),
+-                                      .onDeath = nullptr,
+-                                      .notice = DeathNotice::Given,
+-                                      .holding = Holding::Dropped,
+-                                      .killed = KillState::Sent,
+-                                      .steps = {} });
++        // A helper the set cannot wait for does not run: killed as the supervisor kills what it cannot wait
++        // for, and reaped by polling, as the loop looks every DegradedPollPeriod until it is gone.
++        auto& refused = _helpers
++                            .emplace(key,
++                                     Supervised { .process = std::move(*process),
++                                                  .onDeath = nullptr,
++                                                  .notice = DeathNotice::Given,
++                                                  .holding = Holding::Dropped,
++                                                  .killed = KillState::None,
++                                                  .watching = Watching::Polled,
++                                                  .steps = {} })
++                            .first->second;
++        killProcess(refused, KillReason::Shutdown);
+         command.launched.set_value(std::unexpected(watched.error()));
+         return;
+     }
+-    ++_counters.launches;
+     auto const processId = (*process)->id();
+     _helpers.emplace(key,
+                      Supervised { .process = std::move(*process),
+                                   .onDeath = nullptr,
+                                   .notice = DeathNotice::Alive,
+                                   .holding = Holding::Held,
+                                   .killed = KillState::None,
++                                  .watching = Watching::Watched,
+                                   .steps = {} });
+     command.launched.set_value(LaunchedProcess { .key = key, .processId = processId });
+ }
+ 
+ void SupervisorLoop::watch(WatchCommand const& command)
+ {
+     auto const helper = _helpers.find(command.timer.helper);
+     // A helper that ended, or was let go, takes no step any more.
+     if (helper == _helpers.end() || !helper->second.process || helper->second.holding == Holding::Dropped)
+         return;
+@@ -628,24 +654,26 @@ void SupervisorLoop::expireTimers()
+         }
+         killProcess(supervised, KillReason::StepTimeout);
+         announceDeath(supervised);
+     }
+ }
+ 
+ void SupervisorLoop::waitForWork()
+ {
+     if (_wait == WaitState::Broken)
+     {
+-        _mailbox.waitForCommands(DegradedPollPeriod);
++        // Nothing left to poll for: only a command can change anything.
++        auto const isIdle = liveCount() == 0 && _timers.armed() == 0;
++        _mailbox.waitForCommands(isIdle ? std::nullopt : std::optional { DegradedPollPeriod });
+         return;
+     }
+-    if (_waitSet.wait(_timers.nextDeadline()))
++    if (_waitSet.wait(nextWake()))
+         return;
+     // Waiting again would fail again at once. Without the set no end is noticed in time, and no timeout fires
+     // in time: every helper is stopped, none is started any more, and the loop polls for the ends and for its
+     // commands until it is told to stop.
+     _wait = WaitState::Broken;
+     errorLog()("Contour can no longer wait for its extension hosts; it stops them all and starts no more.");
+     for (auto& [key, helper]: _helpers)
+     {
+         killProcess(helper, KillReason::Shutdown);
+         announceDeath(helper);
+@@ -677,23 +705,38 @@ void SupervisorLoop::reapUntil(core::SteadyTimePoint deadline)
+         reapEnded(Observation::Stopping);
+         if (liveCount() == 0 || _clock.now() >= deadline)
+             return;
+         if (_wait == WaitState::Broken)
+             _mailbox.waitForCommands(DegradedPollPeriod);
+         else if (!_waitSet.wait(deadline))
+             _wait = WaitState::Broken;
+     }
+ }
+ 
++std::optional<core::SteadyTimePoint> SupervisorLoop::nextWake() const
++{
++    auto wake = _timers.nextDeadline();
++    auto const isPolled = [](auto const& entry) {
++        return entry.second.process && entry.second.watching == Watching::Polled;
++    };
++    if (std::ranges::any_of(_helpers, isPolled))
++    {
++        auto const poll = _clock.now() + DegradedPollPeriod;
++        wake = wake ? std::min(*wake, poll) : poll;
++    }
++    return wake;
++}
++
+ void SupervisorLoop::killProcess(Supervised& helper, KillReason reason) noexcept
+ {
+-    if (!helper.process)
++    // Killed once: a second kill would count a second reason for the same end.
++    if (!helper.process || helper.killed == KillState::Sent)
+         return;
+     helper.process->kill();
+     helper.killed = KillState::Sent;
+     ++_counters.kills.at(std::to_underlying(reason));
+ }
+ 
+ void SupervisorLoop::announceDeath(Supervised& helper)
+ {
+     if (helper.notice != DeathNotice::Alive)
+         return;
+@@ -751,21 +794,22 @@ ExtensionHostSupervisor::ExtensionHostSupervisor(Passkey /*passkey*/,
+ ExtensionHostSupervisor::~ExtensionHostSupervisor()
+ {
+     _mailbox->close(SupervisorMailbox::Command { StopCommand {} });
+     _thread.join();
+ }
+ 
+ void ExtensionHostSupervisor::sync()
+ {
+     auto done = std::promise<void> {};
+     auto processed = done.get_future();
+-    if (_mailbox->post(SupervisorMailbox::Command { SyncCommand { .done = std::move(done) } }))
++    if (_mailbox->post(SupervisorMailbox::Command { SyncCommand { .done = std::move(done) } })
++        == SupervisorMailbox::Delivery::Queued)
+         processed.wait();
+ }
+ 
+ SupervisorCounters ExtensionHostSupervisor::counters() const
+ {
+     return _loop->counters();
+ }
+ 
+ std::size_t ExtensionHostSupervisor::liveProcesses() const
+ {
+diff --git a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp
+index 87cf0d4e8..0bcc51750 100644
+--- a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp
++++ b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp
+@@ -161,33 +161,43 @@ class SupervisorMailbox: public std::enable_shared_from_this<SupervisorMailbox>
+     friend class ExtensionHostSupervisor;
+     friend class SupervisorLoop;
+ 
+     /// Whether commands are taken.
+     enum class MailboxState : uint8_t
+     {
+         Closed, ///< The supervisor stopped: every command is dropped.
+         Open,   ///< The supervisor takes them.
+     };
+ 
++    /// What became of a posted command.
++    enum class Delivery : uint8_t
++    {
++        Dropped, ///< The mailbox closed: the supervisor is gone.
++        Queued,  ///< The supervisor will process it.
++    };
++
+     /// Queues @p command and wakes the supervisor.
+     /// @return Whether it was queued; not once the mailbox closed.
+-    bool post(Command command) noexcept;
++    [[nodiscard]] Delivery post(Command command) noexcept;
+ 
+     /// @return Every command queued, in order; the queue empty.
+     [[nodiscard]] std::vector<Command> take() noexcept;
+ 
+-    /// Blocks until a command is queued, or @p timeout passed. For a supervisor that cannot wait on its set.
+-    void waitForCommands(std::chrono::milliseconds timeout);
++    /// Blocks until a command is queued, or @p timeout passed; with no timeout, until a command is queued.
++    /// For a supervisor that cannot wait on its set.
++    void waitForCommands(std::optional<std::chrono::milliseconds> timeout);
+ 
+     /// Queues the last command, and closes. @param stop The Stop command.
+     void close(Command stop) noexcept;
+ 
++    /// Refreshes the supervisor's clock first, which an idle supervisor does not: a caching clock would
++    /// otherwise tell the time of its last wake-up.
+     /// @return The time by the supervisor's clock; nothing once the mailbox closed, when the clock may be
+     /// gone.
+     [[nodiscard]] std::optional<core::SteadyTimePoint> now() const noexcept;
+ 
+     /// @return A timer serial not handed out before; never 0, which a helper's teardown timer uses.
+     [[nodiscard]] uint32_t nextSerial() noexcept;
+ 
+     /// Wakes the supervisor. Wait-free.
+     void wake() noexcept { _waitSet->wake(); }
+ 
+diff --git a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp
+index 5c30f495e..6c12a32b1 100644
+--- a/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp
++++ b/src/vtextension/wasm/remote/process/ExtensionHostSupervisor_test.cpp
+@@ -1,26 +1,31 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The supervisor over a fake launcher and a manual clock: every timeout is the clock's, and sync() makes each
+ // step of a case deterministic.
+ #include <core/Clock.hpp>
+ 
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <algorithm>
+ #include <array>
+ #include <atomic>
+ #include <chrono>
+ #include <cstddef>
++#include <cstdio>
++#include <cstdlib>
+ #include <future>
+ #include <memory>
++#include <mutex>
+ #include <optional>
+ #include <string>
++#include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/BackendConfig.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+ 
+ using vtextension::wasm::HostTimeouts;
+@@ -320,21 +325,28 @@ TEST_CASE("Supervisor.stopIsBounded", "[vtextension]")
+     auto stopping = std::async(std::launch::async, [&] { rig.supervisor.reset(); });
+ 
+     // The reap budget is the manual clock's: it passes as the test moves the clock on, and wakes the
+     // supervisor to look.
+     auto rounds = 0;
+     while (stopping.wait_for(10ms) != std::future_status::ready && ++rounds < 100)
+     {
+         rig.clock.advance(ShutdownReapBudget);
+         helpers.front().nudge();
+     }
+-    REQUIRE(stopping.wait_for(1s) == std::future_status::ready);
++    if (stopping.wait_for(1s) != std::future_status::ready)
++    {
++        // The future's destructor would wait for the stop forever, and the rig cannot go while the stop runs
++        // on it: the run ends here, rather than hang.
++        FAIL_CHECK("the supervisor did not stop within its budget");
++        std::fputs("Supervisor.stopIsBounded: the supervisor did not stop within its budget\n", stderr);
++        std::abort();
++    }
+     CHECK(rig.fake->kills().size() == 3);
+ }
+ 
+ TEST_CASE("Supervisor.mailboxOutlivesTheSupervisor", "[vtextension]")
+ {
+     auto rig = Rig {};
+     auto const mailbox = rig.supervisor->mailbox();
+     auto helper = rig.launch();
+     rig.supervisor.reset();
+     CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 }); // the supervisor's own, as it stopped
+@@ -364,20 +376,128 @@ TEST_CASE("Supervisor.failedWaitStopsEveryHelper", "[vtextension]")
+     rig.fake->failWaits(LaunchError::Io);
+     rig.supervisor->sync();
+     CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
+     CHECK(rig.deaths->load() == 1);
+     CHECK(rig.supervisor->counters().reaped == 1);
+     CHECK(rig.supervisor->counters().uncleanExits == 0);
+     CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Stopped);
+     CHECK(rig.fake->launches().size() == 1);
+ }
+ 
++TEST_CASE("Supervisor.refusedWatchIsPolledAndReaped", "[vtextension]")
++{
++    // A helper the set cannot wait for is killed at once, and looked for until it is gone.
++    auto rig = Rig {};
++    rig.fake->survivesKill(0);
++    rig.fake->failWatches(LaunchError::Unsupported);
++    CHECK(rig.supervisor->mailbox()->launch(fakeSpec()).error() == LaunchError::Unsupported);
++    rig.settle();
++    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
++    CHECK(killsFor(*rig.supervisor, KillReason::Shutdown) == 1);
++    CHECK(rig.supervisor->counters().launches == 1);
++    CHECK(rig.supervisor->liveProcesses() == 1);
++    CHECK(rig.fake->lastDeadline() == rig.clock.now() + 100ms);
++
++    // It ends; no wait reports it, the next poll does.
++    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Signalled, .value = 9 });
++    rig.advance(100ms);
++    CHECK(rig.supervisor->liveProcesses() == 0);
++    CHECK(rig.supervisor->counters().reaped == 1);
++    CHECK(rig.supervisor->counters().uncleanExits == 0);
++    rig.settle();
++    CHECK(rig.fake->lastDeadline() == std::nullopt);
++}
++
++TEST_CASE("Supervisor.killIsCountedOnce", "[vtextension]")
++{
++    // A helper killed for a timeout is told to die again by its holder (markDead() terminates): one kill.
++    auto rig = Rig {};
++    auto helper = rig.launch();
++    rig.fake->survivesKill(0);
++    auto const watch = helper.watch(HostStep::Load, 10ms);
++    rig.advance(10ms);
++    helper.kill();
++    rig.supervisor->sync();
++    CHECK(rig.fake->kills() == std::vector<std::size_t> { 0 });
++    auto const kills = rig.supervisor->counters().kills;
++    CHECK(kills.at(std::to_underlying(KillReason::StepTimeout)) == 1);
++    CHECK(kills.at(std::to_underlying(KillReason::Requested)) == 0);
++    rig.fake->exit(0, ExitStatus { .kind = ExitKind::Signalled, .value = 9 });
++    rig.supervisor->sync();
++}
++
++namespace
++{
++/// A manual clock that records the threads it is refreshed on: a caching clock is stale until refreshed.
++class RefreshRecordingClock final: public core::IClock
++{
++  public:
++    [[nodiscard]] core::SteadyTimePoint now() const noexcept override { return _clock.now(); }
++
++    void refresh() noexcept override
++    {
++        auto const lock = std::scoped_lock { _mutex };
++        _refreshes.push_back(std::this_thread::get_id());
++    }
++
++    /// @return The threads it was refreshed on, in order.
++    [[nodiscard]] std::vector<std::thread::id> refreshes() const
++    {
++        auto const lock = std::scoped_lock { _mutex };
++        return _refreshes;
++    }
++
++  private:
++    core::ManualClock _clock;
++    mutable std::mutex _mutex;
++    std::vector<std::thread::id> _refreshes;
++};
++
++/// @return A supervisor over @p fake, timed by @p clock, which must start.
++[[nodiscard]] std::unique_ptr<ExtensionHostSupervisor> startOver(std::shared_ptr<FakeProcessLauncher> fake,
++                                                                 core::IClock& clock)
++{
++    auto started = ExtensionHostSupervisor::start(
++        SupervisorConfig { .launcher = std::move(fake), .clock = &clock, .teardownGrace = 0ms });
++    REQUIRE(started.has_value());
++    return std::move(*started);
++}
++} // namespace
++
++TEST_CASE("Supervisor.watchRefreshesTheClock", "[vtextension]")
++{
++    // An idle supervisor refreshes nothing: a watch's start is the time of the watch, not of the last
++    // wake-up.
++    auto clock = RefreshRecordingClock {};
++    auto const fake = std::make_shared<FakeProcessLauncher>();
++    auto const supervisor = startOver(fake, clock);
++    auto launched = supervisor->mailbox()->launch(fakeSpec());
++    REQUIRE(launched.has_value());
++    auto const watch = launched->watch(HostStep::Load, 10ms);
++    CHECK(std::ranges::contains(clock.refreshes(), std::this_thread::get_id()));
++}
++
++TEST_CASE("Supervisor.failedWaitIdlesOnceNothingIsLeft", "[vtextension]")
++{
++    // With its set broken, the supervisor polls while helpers or timers are left, and only waits for
++    // commands once none is: it then stops refreshing its clock.
++    auto clock = RefreshRecordingClock {};
++    auto const fake = std::make_shared<FakeProcessLauncher>();
++    auto const supervisor = startOver(fake, clock);
++    fake->failWaits(LaunchError::Io);
++    supervisor->sync();
++    supervisor->sync();
++    auto const before = clock.refreshes().size();
++    std::this_thread::sleep_for(350ms); // three polls, were it polling
++    CHECK(clock.refreshes().size() == before);
++}
++
+ TEST_CASE("Supervisor.moveHandsTheHelperOn", "[vtextension]")
+ {
+     auto rig = Rig {};
+     auto first = rig.launch();
+     auto second = std::move(first);
+     rig.supervisor->sync();
+     CHECK(rig.fake->kills().empty());
+     second = rig.launch(); // lets the first go
+     rig.supervisor->sync();
+     CHECK(killsFor(*rig.supervisor, KillReason::Dropped) == 1);
+diff --git a/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp b/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp
+index 1be552a46..7380befaa 100644
+--- a/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp
++++ b/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp
+@@ -2,54 +2,49 @@
+ #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+ 
+ #include <condition_variable>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <map>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
++#include <set>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+ namespace
+ {
+-    /// What a process does when killed.
+-    enum class KillResponse : uint8_t
+-    {
+-        Ends,    ///< It ends, as FakeKilledStatus.
+-        Ignored, ///< It runs on (FakeProcessLauncher::survivesKill()).
+-    };
+-
+     /// One process launched.
+     struct LaunchRecord
+     {
+         LaunchSpec spec;
+         std::thread::id thread;
+         std::optional<ExitStatus> exit; ///< How it ended; nothing while it runs.
+-        KillResponse onKill = KillResponse::Ends;
+     };
+ } // namespace
+ 
+ struct FakeProcessLauncher::State
+ {
+     mutable std::mutex mutex;
+     std::condition_variable changed; ///< Notified on every exit and every wake.
+     std::vector<LaunchRecord> launches;
+     std::vector<std::size_t> kills;
+     std::optional<core::SteadyTimePoint> lastDeadline;
+-    std::optional<LaunchError> waitFailure; ///< What every wait() fails with; nothing while they work.
++    std::optional<LaunchError> waitFailure;  ///< What every wait() fails with; nothing while they work.
++    std::optional<LaunchError> watchFailure; ///< What every watch() fails with; nothing while they work.
++    std::set<std::size_t> survivors;         ///< The processes kill() does not end.
+ };
+ 
+ namespace
+ {
+     using State = FakeProcessLauncher::State;
+ 
+     class FakeProcessHandle final: public IProcessHandle
+     {
+       public:
+         FakeProcessHandle(std::shared_ptr<State> state, std::size_t index) noexcept:
+@@ -60,21 +55,21 @@ namespace
+         [[nodiscard]] ProcessId id() const noexcept override
+         {
+             return FirstFakeProcessId + static_cast<ProcessId>(_index);
+         }
+ 
+         void kill() noexcept override
+         {
+             auto const lock = std::scoped_lock { _state->mutex };
+             _state->kills.push_back(_index);
+             auto& record = _state->launches[_index];
+-            if (!record.exit && record.onKill == KillResponse::Ends)
++            if (!record.exit && !_state->survivors.contains(_index))
+             {
+                 record.exit = FakeKilledStatus;
+                 _state->changed.notify_all();
+             }
+         }
+ 
+         [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override
+         {
+             auto const lock = std::scoped_lock { _state->mutex };
+             return _state->launches[_index].exit;
+@@ -95,20 +90,22 @@ namespace
+       public:
+         explicit FakeExitWaitSet(std::shared_ptr<State> state) noexcept: _state { std::move(state) } {}
+ 
+         [[nodiscard]] std::expected<void, LaunchError> watch(uint64_t key,
+                                                              IProcessHandle const& process) override
+         {
+             auto const* const fake = dynamic_cast<FakeProcessHandle const*>(&process);
+             if (fake == nullptr)
+                 return std::unexpected(LaunchError::Unsupported);
+             auto const lock = std::scoped_lock { _state->mutex };
++            if (_state->watchFailure)
++                return std::unexpected(*_state->watchFailure);
+             _watched.insert_or_assign(key, fake->index());
+             return {};
+         }
+ 
+         void unwatch(uint64_t key) noexcept override
+         {
+             auto const lock = std::scoped_lock { _state->mutex };
+             _watched.erase(key);
+         }
+ 
+@@ -155,44 +152,48 @@ namespace
+ FakeProcessLauncher::FakeProcessLauncher(): _state { std::make_shared<State>() }
+ {
+ }
+ 
+ FakeProcessLauncher::~FakeProcessLauncher() = default;
+ 
+ std::expected<std::unique_ptr<IProcessHandle>, LaunchError> FakeProcessLauncher::launch(
+     LaunchSpec const& spec)
+ {
+     auto const lock = std::scoped_lock { _state->mutex };
+-    _state->launches.push_back(LaunchRecord { .spec = spec,
+-                                              .thread = std::this_thread::get_id(),
+-                                              .exit = std::nullopt,
+-                                              .onKill = KillResponse::Ends });
++    _state->launches.push_back(
++        LaunchRecord { .spec = spec, .thread = std::this_thread::get_id(), .exit = std::nullopt });
+     return std::make_unique<FakeProcessHandle>(_state, _state->launches.size() - 1);
+ }
+ 
+ std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> FakeProcessLauncher::makeWaitSet(
+     [[maybe_unused]] core::IClock& clock)
+ {
+     return std::make_unique<FakeExitWaitSet>(_state);
+ }
+ 
+ void FakeProcessLauncher::exit(std::size_t index, ExitStatus status)
+ {
+     auto const lock = std::scoped_lock { _state->mutex };
+     _state->launches.at(index).exit = status;
+     _state->changed.notify_all();
+ }
+ 
+ void FakeProcessLauncher::survivesKill(std::size_t index)
+ {
+     auto const lock = std::scoped_lock { _state->mutex };
+-    _state->launches.at(index).onKill = KillResponse::Ignored;
++    _state->survivors.insert(index);
++}
++
++void FakeProcessLauncher::failWatches(LaunchError error)
++{
++    auto const lock = std::scoped_lock { _state->mutex };
++    _state->watchFailure = error;
+ }
+ 
+ void FakeProcessLauncher::failWaits(LaunchError error)
+ {
+     auto const lock = std::scoped_lock { _state->mutex };
+     _state->waitFailure = error;
+     _state->changed.notify_all();
+ }
+ 
+ std::vector<std::size_t> FakeProcessLauncher::kills() const
+diff --git a/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp b/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp
+index fb9fc4483..075829211 100644
+--- a/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp
+@@ -50,23 +50,26 @@ class FakeProcessLauncher final: public IProcessLauncher
+     [[nodiscard]] std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makeWaitSet(
+         core::IClock& clock) override;
+ 
+     /// Ends the @p index-th process launched with @p status, and wakes every set that watches it.
+     /// @param index The process, counted from 0 in launch order.
+     /// @param status How it ended.
+     void exit(std::size_t index, ExitStatus status);
+ 
+     /// Makes the @p index-th process ignore kill(): it is recorded, and the process runs on until exit(). A
+     /// process stuck in the kernel behaves so.
+-    /// @param index The process, counted from 0 in launch order.
++    /// @param index The process, counted from 0 in launch order; it may be launched later.
+     void survivesKill(std::size_t index);
+ 
++    /// Makes every watch() of every set fail with @p error from now on.
++    void failWatches(LaunchError error);
++
+     /// Makes every wait() of every set fail with @p error from now on, a wait blocked now included.
+     void failWaits(LaunchError error);
+ 
+     /// @return The index of the process each kill() was called on, in call order -- also those that did
+     ///         nothing, on a process that had ended already.
+     [[nodiscard]] std::vector<std::size_t> kills() const;
+ 
+     /// @return Every spec launched, in order.
+     [[nodiscard]] std::vector<LaunchSpec> launches() const;
+ 

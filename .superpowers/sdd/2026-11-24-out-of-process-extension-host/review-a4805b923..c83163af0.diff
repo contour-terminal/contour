@@ -1,0 +1,420 @@
+# Review package: a4805b923..HEAD
+
+## Commits
+c83163af0 build: match only Wasmtime's own headers in the containment gate
+3087e16d9 build: take an installed Wasmtime only if it has the features the backend switches
+d0bc39031 fix(vtextension): keep the Wasmtime tests off the process's signals, and refuse a zero stack
+
+## Files changed
+ cmake/ContourThirdParties.cmake                    | 34 +++++++++++++++++++++
+ scripts/check-wasm-runtime-containment.py          |  3 +-
+ src/vtextension/wasm/testing/BackendContract.hpp   | 26 ++++++++++++++++
+ src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp  |  3 ++
+ .../wasm/wasmtime/WasmtimeBackend_test.cpp         | 35 ++++++++++++++++++++--
+ src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp  |  3 +-
+ 6 files changed, 100 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index 0b7785807..22745949d 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -360,20 +360,46 @@ endif()
+ # months) and moves from LTS to LTS; security advisories in between are taken as patch releases. With
+ # CPM, the prebuilt c-api archive for this platform is fetched, pinned by its SHA-256; a platform without
+ # a row below, or CONTOUR_USE_CPM=OFF, looks for an installed wasmtime of the same major instead. Without
+ # either, the extension host runs WAMR and CONTOUR_HAVE_WASMTIME stays OFF.
+ #
+ # Bumping: take the newest patch release of the LTS major, download each archive below and replace its
+ # SHA-256 (GitHub shows the same digest on the release page).
+ #
+ # First-party code links contour::wasmtime, and only where CONTOUR_HAVE_WASMTIME is ON.
+ set(WASMTIME_VERSION "48.0.10")
++
++# The Wasmtime build features whose switches the backend drives (src/vtextension/wasm/wasmtime/
++# WasmtimeBackend.cpp, which stops the build without them as a backstop). The pinned archives have them
++# all; an installed Wasmtime is taken only if its wasmtime/conf.h defines each WASMTIME_FEATURE_<name>.
++set(_WASMTIME_REQUIRED_FEATURES COMPILER GC THREADS PARALLEL_COMPILATION COMPONENT_MODEL COMPONENT_MODEL_ASYNC)
++
++# ContourThirdParties_WasmtimeMissingFeatures(<target> <result-variable>)
++#
++# Sets <result-variable> to the features of _WASMTIME_REQUIRED_FEATURES the Wasmtime behind <target> was
++# built without, as a list; empty if it has them all. Compiles against its headers only, links nothing.
++function(ContourThirdParties_WasmtimeMissingFeatures target resultVar)
++    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
++    set(_missing "")
++    foreach(_feature IN LISTS _WASMTIME_REQUIRED_FEATURES)
++        try_compile(_wasmtime_has_feature
++            SOURCE_FROM_CONTENT wasmtime_feature.cpp
++                "#include <wasmtime.h>\n#ifndef WASMTIME_FEATURE_${_feature}\n#error missing\n#endif\nint probe() { return 0; }\n"
++            LINK_LIBRARIES ${target}
++            NO_CACHE
++        )
++        if(NOT _wasmtime_has_feature)
++            list(APPEND _missing ${_feature})
++        endif()
++    endforeach()
++    set(${resultVar} "${_missing}" PARENT_SCOPE)
++endfunction()
+ # <CMAKE_SYSTEM_NAME>|<processor>|<archive name after "wasmtime-v<version>-">|<SHA-256 of the archive>
+ # The processor is CMAKE_SYSTEM_PROCESSOR lowercased, with amd64 read as x86_64 and arm64 as aarch64.
+ # Windows rows are for the MSVC ABI; MinGW has no row.
+ set(_WASMTIME_ARCHIVES
+     "Linux|x86_64|x86_64-linux-c-api.tar.xz|5fc9a0b8c825ae7e2730f41f6260ec38556236f28bcd34fbb9b76e15c9f56e27"
+     "Linux|aarch64|aarch64-linux-c-api.tar.xz|7be1929dd01708212668696cf55b224b4c82bd562bc231596122563e2eb32a3d"
+     "Darwin|x86_64|x86_64-macos-c-api.tar.xz|3bd16df4a8beedb510e8b92a9a3063da8b4187a6ebbc4f363b25397d436ef232"
+     "Darwin|aarch64|aarch64-macos-c-api.tar.xz|868e59b586157b2497d5cd3004a588dde85c8542b4ff2366acc069a7da5d6927"
+     "Windows|x86_64|x86_64-windows-c-api.zip|2c5cd1a231c0b6aee80ecc700d68946bca4afaa09b728f6f8c43db64207ae682"
+ )
+@@ -435,21 +461,29 @@ if(CONTOUR_EXTENSIONS)
+             set(CONTOUR_HAVE_WASMTIME ON)
+             set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "Wasmtime ${WASMTIME_VERSION}")
+             set(THIRDPARTY_BUILTIN_wasmtime "CPM (Wasmtime ${WASMTIME_VERSION}, prebuilt, static)")
+         else()
+             # CPM_USE_LOCAL_PACKAGES or CPM_LOCAL_PACKAGES_ONLY resolved the package without the archive, so
+             # there is no archive to take the headers and library from.
+             set(_wasmtime_reason "CPM resolved Wasmtime ${WASMTIME_VERSION} without fetching its archive")
+         endif()
+     else()
+         find_package(wasmtime ${_wasmtime_major} QUIET)
++        set(_wasmtime_missing "")
+         if(TARGET wasmtime::wasmtime)
++            ContourThirdParties_WasmtimeMissingFeatures(wasmtime::wasmtime _wasmtime_missing)
++        endif()
++        if(_wasmtime_missing)
++            list(JOIN _wasmtime_missing ", " _wasmtime_missing_text)
++            set(_wasmtime_reason
++                "the installed Wasmtime ${wasmtime_VERSION} was built without features it needs: ${_wasmtime_missing_text}")
++        elseif(TARGET wasmtime::wasmtime)
+             add_library(contour_wasmtime INTERFACE)
+             add_library(contour::wasmtime ALIAS contour_wasmtime)
+             target_link_libraries(contour_wasmtime INTERFACE wasmtime::wasmtime)
+             set(CONTOUR_HAVE_WASMTIME ON)
+             set(CONTOUR_EXTENSION_HOST_ENGINE_STRING "Wasmtime ${wasmtime_VERSION}")
+             set(THIRDPARTY_BUILTIN_wasmtime "system package (Wasmtime ${wasmtime_VERSION})")
+         elseif(NOT CONTOUR_USE_CPM)
+             set(_wasmtime_reason "CONTOUR_USE_CPM is OFF and no Wasmtime ${_wasmtime_major} is installed")
+         else()
+             string(CONCAT _wasmtime_reason
+diff --git a/scripts/check-wasm-runtime-containment.py b/scripts/check-wasm-runtime-containment.py
+index 541f810c8..abed57f1a 100644
+--- a/scripts/check-wasm-runtime-containment.py
++++ b/scripts/check-wasm-runtime-containment.py
+@@ -49,21 +49,21 @@ BACKENDS = (
+     Backend(
+         name="WAMR",
+         directory=Path("src/vtextension/wasm/wamr"),
+         c_header=re.compile(r'#include\s*[<"](wasm_export|wasm_c_api|lib_export|wasm_runtime)\.h[>"]'),
+         backend_header=re.compile(r'#include\s*[<"](vtextension/)?wasm/wamr/'),
+         link=re.compile(r"contour::wamr\b"),
+     ),
+     Backend(
+         name="Wasmtime",
+         directory=Path("src/vtextension/wasm/wasmtime"),
+-        c_header=re.compile(r'#include\s*[<"](wasmtime\.h|wasm\.h|wasi\.h|wasmtime/)'),
++        c_header=re.compile(r'#include\s*[<"]((wasmtime|wasm|wasi)\.h[>"]|wasmtime/)'),
+         backend_header=re.compile(r'#include\s*[<"](vtextension/)?wasm/wasmtime/'),
+         link=re.compile(r"contour::wasmtime\b"),
+     ),
+ )
+ 
+ WAMR, WASMTIME = BACKENDS
+ 
+ # The build files of the libraries that must not link the runtime themselves.
+ RUNTIME_FREE_BUILD_FILES = (Path("src/vtextension/CMakeLists.txt"), Path("src/vthost/CMakeLists.txt"))
+ 
+@@ -130,20 +130,21 @@ def self_test() -> int:
+         ("backend named in a comment", bool(WAMR.backend_header.search("// a backend (wasm/wamr/ for WAMR)")), False),
+         ("link of contour::wamr", bool(WAMR.link.search("target_link_libraries(x PRIVATE contour::wamr)")), True),
+         ("link of the runtime target", bool(WAMR.link.search("target_link_libraries(x vtextension_runtime)")), False),
+         ("WAMR dir is exempt", is_within(Path("src/vtextension/wasm/wamr/WamrRuntime.hpp"), WAMR.directory), True),
+         ("sibling dir is not exempt", is_within(Path("src/vtextension/wasm/WasmRuntime.hpp"), WAMR.directory), False),
+         ("wasmtime.h", bool(WASMTIME.c_header.search("#include <wasmtime.h>")), True),
+         ("wasm.h", bool(WASMTIME.c_header.search("#include <wasm.h>")), True),
+         ("wasi.h", bool(WASMTIME.c_header.search('#include "wasi.h"')), True),
+         ("a wasmtime/ header", bool(WASMTIME.c_header.search("#include <wasmtime/config.h>")), True),
+         ("WAMR header is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm_export.h>")), False),
++        ("a .hpp of the same stem is not Wasmtime", bool(WASMTIME.c_header.search("#include <wasm.hpp>")), False),
+         ("similar name is not Wasmtime", bool(WASMTIME.c_header.search("#include <my_wasm.h>")), False),
+         ("Wasmtime backend header", bool(WASMTIME.backend_header.search("#include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>")), True),
+         ("WAMR backend header is not Wasmtime's", bool(WASMTIME.backend_header.search("#include <vtextension/wasm/wamr/WamrBackend.hpp>")), False),
+         ("link of contour::wasmtime", bool(WASMTIME.link.search("target_link_libraries(x PRIVATE contour::wasmtime)")), True),
+         ("contour::wasmtime is not contour::wamr", bool(WAMR.link.search("target_link_libraries(x contour::wasmtime)")), False),
+         ("Wasmtime dir is exempt", is_within(Path("src/vtextension/wasm/wasmtime/WasmtimeModule.cpp"), WASMTIME.directory), True),
+         ("WAMR dir is not Wasmtime's", is_within(Path("src/vtextension/wasm/wamr/WamrBackend.cpp"), WASMTIME.directory), False),
+     ]
+     failures = [description for description, actual, expected in cases if actual != expected]
+     for description in failures:
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index 863647abd..0f827075a 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -90,20 +90,34 @@ inline constexpr auto UnknownImportModule = std::to_array<uint8_t>({
+ 
+ /// Imports the host function with one parameter too many.
+ ///
+ ///     (module (import "contract:test/host@0" "ping" (func (param i32 i32))))
+ inline constexpr auto WrongSignatureModule = std::to_array<uint8_t>({
+     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x00,
+     0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74, 0x65, 0x73,
+     0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00, 0x00,
+ });
+ 
++/// Imports an allowed WASI function with another signature than preview 1 gives it: `fd_seek` with an i32
++/// offset where preview 1 has an i64. It exports a memory, as WAMR requires of any module importing WASI.
++///
++///     (module
++///       (import "wasi_snapshot_preview1" "fd_seek" (func (param i32 i32 i32 i32) (result i32)))
++///       (memory (export "memory") 1))
++inline constexpr auto WrongSignatureWasiModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x01, 0x60, 0x04, 0x7f, 0x7f,
++    0x7f, 0x7f, 0x01, 0x7f, 0x02, 0x22, 0x01, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e,
++    0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
++    0x07, 0x66, 0x64, 0x5f, 0x73, 0x65, 0x65, 0x6b, 0x00, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01,
++    0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
++});
++
+ /// Imports every allowed WASI preview 1 function, with its preview 1 signature.
+ ///
+ ///     (module
+ ///       (import "wasi_snapshot_preview1" "args_get" (func (param i32 i32) (result i32)))
+ ///       (import "wasi_snapshot_preview1" "args_sizes_get" (func (param i32 i32) (result i32)))
+ ///       (import "wasi_snapshot_preview1" "environ_get" (func (param i32 i32) (result i32)))
+ ///       (import "wasi_snapshot_preview1" "environ_sizes_get" (func (param i32 i32) (result i32)))
+ ///       (import "wasi_snapshot_preview1" "clock_time_get" (func (param i32 i64 i32) (result i32)))
+ ///       (import "wasi_snapshot_preview1" "clock_res_get" (func (param i32 i32) (result i32)))
+ ///       (import "wasi_snapshot_preview1" "fd_write" (func (param i32 i32 i32 i32) (result i32)))
+@@ -469,20 +483,31 @@ void wrongSignatureImportIsUnsatisfied()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+     auto const module = load(*runtime, WrongSignatureModule);
+     auto const& ping = importOf(*module, HostModule, "ping");
+     CHECK(ping.signature
+           == FunctionSignature { .parameters = { ValueType::I32, ValueType::I32 }, .results = {} });
+     CHECK(ping.linkage == Linkage::Unsatisfied);
+ }
+ 
++/// An allowed WASI function imported with another signature than preview 1 gives it is unsatisfied,
++/// rather than linked and then reading its arguments wrongly.
++template <typename T>
++void wrongSignatureWasiIsUnsatisfied()
++{
++    auto const backend = T::make();
++    auto const runtime = createRuntime(*backend);
++    auto const module = load(*runtime, WrongSignatureWasiModule);
++    CHECK(importOf(*module, WasiModule, "fd_seek").linkage == Linkage::Unsatisfied);
++}
++
+ /// Every WASI preview 1 function the extension host allows is provided.
+ template <typename T>
+ void allowListedWasiIsSatisfied()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+     auto const module = load(*runtime, AllowedWasiModule);
+     CHECK(module->imports().size() == AllowedWasiFunctions.size());
+     for (auto const name: AllowedWasiFunctions)
+     {
+@@ -1017,20 +1042,21 @@ void wasiStdioGoesNowhere()
+     }
+ 
+ /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
+ #define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                        \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)              \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)            \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
+index e81cac3f4..8062dfbb9 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
+@@ -307,20 +307,23 @@ uint64_t KindState::preparedGeneration() noexcept
+ {
+     return threadStamp.generation;
+ }
+ 
+ std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> WasmtimeRuntime::create(
+     std::shared_ptr<KindState> kind,
+     WasmtimeConfig config,
+     RuntimeLimits limits,
+     std::span<HostFunction const> hostFunctions)
+ {
++    // Wasmtime aborts the process, rather than failing, on an engine with no stack at all.
++    if (limits.stackBytes == 0)
++        return std::unexpected(ExtensionError::RuntimeUnavailable);
+     // wasm_engine_new_with_config takes the configuration over.
+     auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(config, limits)) };
+     if (!engine)
+         return std::unexpected(ExtensionError::RuntimeUnavailable);
+     auto hostBindings = std::vector<HostBinding> {};
+     hostBindings.reserve(hostFunctions.size());
+     for (auto const [index, function]: core::views::enumerate(hostFunctions))
+         hostBindings.push_back(HostBinding { .module = std::string { function.module },
+                                              .name = std::string { function.name },
+                                              .index = static_cast<std::size_t>(index),
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+index 7ba35d332..be80c846e 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+@@ -5,86 +5,117 @@
+ #include <catch2/catch_message.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <memory>
+ #include <span>
+ 
+ #include <wasmtime.h>
+ 
++#ifndef _WIN32
++    #include <csignal>
++#endif
++
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/FeatureModules.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::wasm::FeatureState;
+ using vtextension::wasm::IWasmBackend;
+ using vtextension::wasm::MemoryGrowthReporting;
++using vtextension::wasm::RuntimeLimits;
+ using vtextension::wasm::wasmtime::makeKindState;
+ using vtextension::wasm::wasmtime::makeWasmtimeBackend;
+ using vtextension::wasm::wasmtime::TrapMode;
+ using vtextension::wasm::wasmtime::WasmtimeConfig;
+ 
+ namespace
+ {
+ 
+ /// Makes the backend under test, for the contract suite.
+ struct WasmtimeTraits
+ {
+     /// @return A Wasmtime backend of the one kind state this test binary shares, as a process would.
+     [[nodiscard]] static std::unique_ptr<IWasmBackend> make()
+     {
+         static auto const kind = makeKindState();
+         return makeWasmtimeBackend(kind, WasmtimeConfig { .trapMode = TrapMode::Software });
+     }
+ };
+ 
+-/// @return Whether an engine left at Wasmtime's defaults compiles @p bytes.
++/// @return Whether an engine left at Wasmtime's feature defaults compiles @p bytes. Its traps are checked
++///         in software all the same: an engine with signal-based traps would install Wasmtime's handlers
++///         for the rest of this process, over the sanitizer's, and blind the signal-handler case.
+ [[nodiscard]] bool defaultEngineAccepts(std::span<std::uint8_t const> bytes)
+ {
+     namespace detail = vtextension::wasm::wasmtime::detail;
+-    auto const engine = detail::EngineHandle { wasm_engine_new() };
++    auto* const config = wasm_config_new();
++    wasmtime_config_signals_based_traps_set(config, false);
++    wasmtime_config_macos_use_mach_ports_set(config, false);
++    auto const engine = detail::EngineHandle { wasm_engine_new_with_config(config) };
+     REQUIRE(engine);
+     auto* module = static_cast<wasmtime_module_t*>(nullptr);
+     auto const error =
+         detail::ErrorHandle { wasmtime_module_new(engine.get(), bytes.data(), bytes.size(), &module) };
+     auto const owned = detail::ModuleHandle { module };
+     return !error;
+ }
+ 
+ } // namespace
+ 
+ CONTOUR_WASM_BACKEND_CONTRACT(WasmtimeTraits)
+ 
+ TEST_CASE("WasmtimeBackend.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
+ {
+     // A feature Wasmtime enables unless told otherwise is refused only because the backend switched it
+     // off. Each such module is checked against both: a default engine accepts it, the backend refuses it.
++#ifndef _WIN32
++    struct sigaction before {};
++    sigaction(SIGSEGV, nullptr, &before);
++#endif
+     auto const backend = WasmtimeTraits::make();
+     auto const runtime = vtextension::wasm::testing::contract::createRuntime(*backend);
+     auto enabledByDefault = std::size_t { 0 };
+     for (auto const& [feature, bytes]: vtextension::wasm::testing::FeatureModules)
+     {
+         auto const& row = vtextension::wasm::featureRow(feature);
+         if (row.state != FeatureState::Off || !defaultEngineAccepts(bytes))
+             continue;
+         ++enabledByDefault;
+         INFO("feature: " << row.name);
+         auto const module = std::as_bytes(bytes);
+         auto const loaded = runtime->load({ module.begin(), module.end() });
+         REQUIRE_FALSE(loaded.has_value());
+         CHECK(loaded.error() == ExtensionError::InvalidComponent);
+     }
+     // Wasmtime 48 enables GC, exceptions, 64-bit memories, typed function references, threads, tail
+     // calls, multiple memories, SIMD and relaxed SIMD by default; were none of them, this case checked
+     // nothing.
+     CHECK(enabledByDefault >= 9);
++#ifndef _WIN32
++    // Neither the backend's engines nor the default ones compared against took the process's SIGSEGV.
++    struct sigaction after {};
++    sigaction(SIGSEGV, nullptr, &after);
++    CHECK(after.sa_sigaction == before.sa_sigaction);
++#endif
++}
++
++TEST_CASE("WasmtimeBackend.refusesAZeroStack", "[wasmtime]")
++{
++    // Wasmtime aborts the process on an engine whose stack cap is zero; the backend refuses it first.
++    auto const runtime = WasmtimeTraits::make()->createRuntime(
++        RuntimeLimits { .memoryBytes = vtextension::wasm::testing::contract::Limits.memoryBytes,
++                        .stackBytes = 0 },
++        vtextension::wasm::testing::contract::HostFunctions);
++    REQUIRE_FALSE(runtime.has_value());
++    CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
+ }
+ 
+ TEST_CASE("WasmtimeBackend.leavesMemoryGrowthUnreported", "[wasmtime]")
+ {
+     CHECK(WasmtimeTraits::make()->capabilities().memoryGrowth == MemoryGrowthReporting::Unreported);
+ }
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+index aa6ed1949..7a7400fc8 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+@@ -63,21 +63,22 @@ struct HostBinding
+ /// A runtime: one engine, configured from EngineFeatures and the runtime's limits, and one linker
+ /// providing its host functions.
+ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from_this<WasmtimeRuntime>
+ {
+   public:
+     /// Brings up an engine and its linker.
+     /// @param kind The state of the backends of the kind; counts this runtime alive while it lives.
+     /// @param config How the engine is set up.
+     /// @param limits What every instance is held to.
+     /// @param hostFunctions What modules may import; copied.
+-    /// @return The runtime; `RuntimeUnavailable` if the engine or the linker could not be set up.
++    /// @return The runtime; `RuntimeUnavailable` if @p limits allow no stack at all, or the engine or the
++    ///         linker could not be set up.
+     [[nodiscard]] static std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> create(
+         std::shared_ptr<KindState> kind,
+         WasmtimeConfig config,
+         RuntimeLimits limits,
+         std::span<HostFunction const> hostFunctions);
+ 
+     /// Use create(). Public for std::make_shared only.
+     WasmtimeRuntime(std::shared_ptr<KindState> kind,
+                     RuntimeLimits limits,
+                     detail::EngineHandle engine,

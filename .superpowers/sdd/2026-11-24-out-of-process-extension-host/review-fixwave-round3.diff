@@ -1,0 +1,585 @@
+9aefa2abe fix(vtextension): a host short of memory as it starts is retried, and a lacking sandbox is a warning
+a5f1295dd fix(vtextension): unlink a WAMR execution environment under its thread cluster's lock
+b9cc6d9d9 feat(vtextension): the extension host on FreeBSD maps no memory both writable and executable
+cbc313fb6 feat(vtextension): Contour says what an extension host's confinement failed with, and went without
+9c50fd9d8 fix(vtextension): lock WAMR's process-wide state around every call that changes it
+2773b7f77 ci: run the arm legs on pull requests labelled for them
+dfa92536a fix(vtextension): register no native unwind tables for guest code on Wasmtime
+9c2b20019 test(vtextension): measure the extension host on WAMR's engine too
+484a91078 test(vtextension): run the extension host's engine-free tests wherever the host is built
+09c4b77d9 build: the containment gate refuses an executable that links two WebAssembly runtimes
+f1de8cfa3 feat(vtextension): the extension host runs in an AppContainer on Windows
+7fe4ac8fb feat(vtextension): grant app containers read access to the extension host once
+7ba7830b2 build: sign the macOS extension host with the one entitlement its compiler needs
+a63cb92a7 feat(vtextension): the extension host runs in a deny-by-default sandbox on macOS
+684b317e0 build: pick wamr by default where the extension host's sandbox cannot run wasmtime
+e3a8ec0b3 ci: run the FreeBSD job on pull requests labelled for it
+ce1fb6b22 feat(vtextension): the extension host enters capability mode on FreeBSD
+ac6154a0c refactor(vtextension): the extension host names every descriptor it keeps, and what for
+c8403b5f2 build: select where extensions run and which engine the extension host uses
+c91520ffa feat(vtextension): run extensions in a sandboxed extension host process by default on Linux
+7df0676a0 refactor(vtextension): small cleanups in the extension host and its engines
+e21788e96 test(vtextension): the sandbox probe locks down with either engine's system call rows
+d400f0f27 fix(vtextension): a host refused for a lasting reason is the last its connector starts
+65ae29eb8 build: package the extension host in the Fedora RPM
+63cbfa843 build: refuse an installed WAMR that compiles to native code
+3723845f1 fix(vtextension): every engine withholds the CPU-time clocks alike
+abe668823 build: build the extension host with whichever engine the build selected
+a2f21171b feat(vtextension): the extension host can run its modules interpreted
+905dcfaed fix(vtextension): a sanitizer build's extension host reads only its own process entries
+e3060fc80 fix(vtextension): an outer filter refusing one argument value lets every other value through
+f67f72569 fix(vtextension): a crash in the locked-down extension host is no longer taken for a sandbox kill
+9c6ad2082 fix(vtextension): a kernel refusing what our Landlock row claims for its ABI falls back to the row before
+244f74bed fix(vtextension): a sanitizer build's extension host no longer dies by its own filter as it exits
+f53282dd8 fix(vtextension): an outer sandbox refusing descriptor control no longer stops every extension host
+57f4d9ba4 feat(vtextension): the extension host gives up file system access on Linux before it starts a thread
+307b59ee4 feat(vtextension): the extension host restricts its system calls on Linux
+a5b682853 fix(vtextension): refuse an older extension host for its version, not as a broken peer
+7bc4f9d43 feat(vtextension): say which confinement step of an extension host failed, and start it only once
+303b1c7bb feat(vtextension): the extension host locks down in a fixed order, its threads prepared first
+
+ CMakeLists.txt                                     | 11 +++
+ cmake/ApplyPatchOnce.cmake                         | 43 ++++++++----
+ cmake/ApplyPatchOnceTest.cmake                     | 78 ++++++++++++++++++++++
+ cmake/ContourThirdParties.cmake                    | 18 +----
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp   | 52 ++++++++-------
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp   | 14 +++-
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          | 43 ++++++++++--
+ 7 files changed, 200 insertions(+), 59 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 670922b4d..81d12dcbe 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -365,20 +365,31 @@ if(CONTOUR_TESTING)
+         # The production-build check, tested against inline fixtures; the real check, which reads a
+         # build's compile database and binary, is registered beside the binary it reads.
+         contour_add_lint_gate(check_production_build_selftest check-production-build.py --self-test)
+ 
+         # How a macOS bundle is signed (scripts/macos-bundle.py sign): the extension host alone carries its
+         # entitlement, and only on a compiling engine, signed before the bundle, which alone carries the app's.
+         # Checked against a stand-in
+         # bundle, on every platform, without codesign.
+         contour_add_lint_gate(check_macos_bundle_selftest macos-bundle.py --self-test)
+ 
++        # How a fetched dependency's patch is applied (cmake/ApplyPatchOnce.cmake): an unpatched tree is patched,
++        # a patched one left alone, a half-patched one refused, without a terminal to answer any question.
++        find_package(Git QUIET)
++        if(GIT_EXECUTABLE)
++            add_test(NAME check_apply_patch_once_selftest
++                     COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
++                             -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/apply-patch-once-test"
++                             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApplyPatchOnceTest.cmake")
++            list(APPEND CONTOUR_LINT_GATES check_apply_patch_once_selftest)
++        endif()
++
+         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
+         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
+         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
+         contour_add_lint_gate(check_spelling check-spelling.py)
+ 
+         # The justification rule in `_typos.toml` is the only thing keeping the exception list from
+         # growing back into the 2,237-entry allow-list it replaced, and its parser has been wrong
+         # before. This case needs no network, so it stays meaningful on an offline clone where the
+         # gate above skips.
+         contour_add_lint_gate(check_spelling_selftest check-spelling.py --self-test)
+diff --git a/cmake/ApplyPatchOnce.cmake b/cmake/ApplyPatchOnce.cmake
+index 68279fdf0..ef4717e5c 100644
+--- a/cmake/ApplyPatchOnce.cmake
++++ b/cmake/ApplyPatchOnce.cmake
+@@ -1,30 +1,45 @@
+ # Applies PATCH_FILE to the source tree in the working directory, once: a tree it is already applied to (a
+ # reconfigure, or a populated source cache) is left as it is. Run as the PATCH_COMMAND of a fetched dependency:
+ #
+-#   ${CMAKE_COMMAND} -D PATCH_EXECUTABLE=<patch> -D PATCH_FILE=<file> -P ApplyPatchOnce.cmake
++#   ${CMAKE_COMMAND} -D GIT_EXECUTABLE=<git> -D PATCH_FILE=<file> -P ApplyPatchOnce.cmake
+ #
+-# `patch -R --dry-run` succeeds only where the whole patch is in place; otherwise it is applied forward with
+-# -N, which refuses rather than reverses a hunk found applied, so that a tree patched halfway fails loudly.
++# Through `git apply`, which asks nothing and behaves alike everywhere (BSD patch answers its own "reversed
++# patch?" prompt when it has no terminal): applied in reverse cleanly, the patch is in place; applied forward
++# cleanly, it is not, and is applied; neither, the tree holds part of it, or something else, and that fails.
++# The working directory need not be a repository; GIT_CEILING_DIRECTORIES keeps git from taking an enclosing
++# one's paths for the patch's.
+ cmake_minimum_required(VERSION 3.25)
+-foreach(_required IN ITEMS PATCH_EXECUTABLE PATCH_FILE)
++foreach(_required IN ITEMS GIT_EXECUTABLE PATCH_FILE)
+     if(NOT ${_required})
+         message(FATAL_ERROR "ApplyPatchOnce.cmake needs -D ${_required}=...")
+     endif()
+ endforeach()
+ 
+-execute_process(
+-    COMMAND "${PATCH_EXECUTABLE}" -p1 -R --dry-run --silent --input "${PATCH_FILE}"
+-    RESULT_VARIABLE _applied
+-    OUTPUT_QUIET ERROR_QUIET
+-)
++get_filename_component(_tree "." ABSOLUTE)
++get_filename_component(_ceiling "${_tree}" DIRECTORY)
++
++function(_git_apply result)
++    execute_process(
++        COMMAND "${CMAKE_COMMAND}" -E env "GIT_CEILING_DIRECTORIES=${_ceiling}"
++                "${GIT_EXECUTABLE}" apply ${ARGN} "${PATCH_FILE}"
++        RESULT_VARIABLE _status
++        OUTPUT_QUIET ERROR_QUIET
++    )
++    set(${result} ${_status} PARENT_SCOPE)
++endfunction()
++
++_git_apply(_applied --check --reverse)
+ if(_applied EQUAL 0)
+     message(STATUS "Already applied: ${PATCH_FILE}")
+     return()
+ endif()
+-execute_process(
+-    COMMAND "${PATCH_EXECUTABLE}" -p1 -N --forward --input "${PATCH_FILE}"
+-    RESULT_VARIABLE _patched
+-)
++_git_apply(_applicable --check)
++if(NOT _applicable EQUAL 0)
++    message(FATAL_ERROR "${PATCH_FILE} is neither applied to ${_tree} nor applicable to it: the tree holds part of "
++                        "it, or something else.")
++endif()
++_git_apply(_patched)
+ if(NOT _patched EQUAL 0)
+-    message(FATAL_ERROR "Could not apply ${PATCH_FILE}")
++    message(FATAL_ERROR "Could not apply ${PATCH_FILE} to ${_tree}.")
+ endif()
++message(STATUS "Applied: ${PATCH_FILE}")
+diff --git a/cmake/ApplyPatchOnceTest.cmake b/cmake/ApplyPatchOnceTest.cmake
+new file mode 100644
+index 000000000..11bbe8168
+--- /dev/null
++++ b/cmake/ApplyPatchOnceTest.cmake
+@@ -0,0 +1,78 @@
++# Self-test of ApplyPatchOnce.cmake, in a scratch tree under WORK_DIR: a tree without the patch is patched, a
++# tree with it is left alone, and a tree holding part of it fails -- each through `git apply`, which asks no
++# question, run without a terminal (stdin from the null device) as a build runs it.
++#
++#   ${CMAKE_COMMAND} -D GIT_EXECUTABLE=<git> -D WORK_DIR=<dir> -P ApplyPatchOnceTest.cmake
++cmake_minimum_required(VERSION 3.25)
++foreach(_required IN ITEMS GIT_EXECUTABLE WORK_DIR)
++    if(NOT ${_required})
++        message(FATAL_ERROR "ApplyPatchOnceTest.cmake needs -D ${_required}=...")
++    endif()
++endforeach()
++
++set(_script "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake")
++set(_tree "${WORK_DIR}/tree")
++set(_patch "${WORK_DIR}/two-hunks.patch")
++if(CMAKE_HOST_WIN32)
++    set(_null NUL)
++else()
++    set(_null /dev/null)
++endif()
++
++# Two hunks, far enough apart to apply one without the other.
++set(_original "")
++foreach(_line RANGE 1 20)
++    string(APPEND _original "line ${_line}\n")
++endforeach()
++string(REPLACE "line 2\n" "line 2 patched\n" _first "${_original}")
++string(REPLACE "line 19\n" "line 19 patched\n" _both "${_first}")
++file(WRITE "${_patch}"
++     "--- a/file.txt\n+++ b/file.txt\n"
++     "@@ -1,5 +1,5 @@\n line 1\n-line 2\n+line 2 patched\n line 3\n line 4\n line 5\n"
++     "@@ -16,5 +16,5 @@\n line 16\n line 17\n line 18\n-line 19\n+line 19 patched\n line 20\n")
++
++# Runs the script on the scratch tree holding @p content; @p status and @p output what it came to.
++function(_run_on content status output)
++    file(REMOVE_RECURSE "${_tree}")
++    file(WRITE "${_tree}/file.txt" "${content}")
++    execute_process(
++        COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}" -D "PATCH_FILE=${_patch}" -P "${_script}"
++        WORKING_DIRECTORY "${_tree}"
++        INPUT_FILE "${_null}"
++        RESULT_VARIABLE _status
++        OUTPUT_VARIABLE _output
++        ERROR_VARIABLE _output
++        TIMEOUT 60
++    )
++    set(${status} "${_status}" PARENT_SCOPE)
++    set(${output} "${_output}" PARENT_SCOPE)
++endfunction()
++
++# Fails the test, naming what was expected, unless the condition (given as if() takes it) holds.
++macro(_expect description)
++    if(NOT (${ARGN}))
++        message(SEND_ERROR "apply-patch-once: FAILED: ${description}")
++    endif()
++endmacro()
++
++# Not applied: applied.
++_run_on("${_original}" _status _output)
++file(READ "${_tree}/file.txt" _after)
++_expect("an unpatched tree is patched (exit ${_status}: ${_output})" _status EQUAL 0)
++_expect("an unpatched tree ends up with both hunks" _after STREQUAL _both)
++
++# Applied: left alone, and said so.
++_run_on("${_both}" _status _output)
++file(READ "${_tree}/file.txt" _after)
++_expect("a patched tree passes (exit ${_status}: ${_output})" _status EQUAL 0)
++_expect("a patched tree is left as it was" _after STREQUAL _both)
++_expect("a patched tree is said to be patched" _output MATCHES "Already applied")
++
++# Half applied: fails, and changes nothing.
++_run_on("${_first}" _status _output)
++file(READ "${_tree}/file.txt" _after)
++_expect("a half-patched tree fails" NOT _status EQUAL 0)
++_expect("a half-patched tree is left as it was" _after STREQUAL _first)
++
++file(REMOVE_RECURSE "${WORK_DIR}")
++message(STATUS "apply-patch-once: 3 states checked")
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index ad00b498a..622812736 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -301,47 +301,35 @@ if(CONTOUR_EXTENSIONS)
+             message(FATAL_ERROR "Could not find a usable WAMR >= ${WAMR_MINIMAL_VERSION}: one built with "
+                 "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
+                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
+                 "${_wamr_found} "
+                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+         endif()
+         message(STATUS "Using CPM to fetch WAMR")
+         set(_wamr_patch "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch")
+         file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
+         string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
+-        # The patch program; on Windows, the one Git for Windows carries if none is on the PATH (as CPM's PATCHES
+-        # looks for it).
+-        find_program(_wamr_patch_executable patch)
+-        if(NOT _wamr_patch_executable AND CMAKE_HOST_WIN32)
+-            find_package(Git QUIET)
+-            if(GIT_EXECUTABLE)
+-                get_filename_component(_git_directory "${GIT_EXECUTABLE}" DIRECTORY)
+-                find_program(_wamr_patch_executable patch
+-                             HINTS "${_git_directory}/../usr/bin" "${_git_directory}/../../usr/bin")
+-            endif()
+-        endif()
+-        if(NOT _wamr_patch_executable)
+-            message(FATAL_ERROR "Fetching WAMR needs the patch program, to apply ${_wamr_patch}.")
+-        endif()
++        # git applies it (cmake/ApplyPatchOnce.cmake); CPM, which clones WAMR, needs git already.
++        find_package(Git REQUIRED)
+         CPMAddPackage(
+             NAME wamr
+             VERSION ${WAMR_MINIMAL_VERSION}
+             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
+             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
+             # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
+             # while setting or clearing any instance's exception walks every cluster under that lock: a data
+             # race between one extension's call or trap and another's unload. The patch unlinks under the lock.
+             # An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory, as
+             # the cluster and the environment are freed only after the walk's list lock is released. Applied
+             # once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a patched tree succeeds; the
+             # patch's own hash keys the source cache, so that a changed patch is never served an old tree.
+-            PATCH_COMMAND "${CMAKE_COMMAND}" -D "PATCH_EXECUTABLE=${_wamr_patch_executable}"
++            PATCH_COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
+                           -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake"
+             CUSTOM_CACHE_KEY "25bd7eb63e82-${_wamr_patch_hash}"
+             OPTIONS
+                 "WAMR_BUILD_INTERP 1"
+                 "WAMR_BUILD_FAST_INTERP 1"
+                 "WAMR_BUILD_AOT 0"
+                 "WAMR_BUILD_JIT 0"
+                 "WAMR_BUILD_FAST_JIT 0"
+                 "WAMR_BUILD_LIBC_WASI 1"
+                 "WAMR_BUILD_LIBC_BUILTIN 0"
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+index 9db8a3f34..571fc3adc 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+@@ -368,46 +368,41 @@ namespace
+     thread_local auto threadPrimedFor = uint64_t { 0 };
+ 
+     /// What a thread is primed with: an engine configured as every runtime's engine of a facade is, as to
+     /// how it traps, and PrimingModule compiled on it.
+     struct Priming
+     {
+         detail::EngineHandle engine;
+         detail::ModuleHandle module;
+     };
+ 
+-    /// What an operating system says when memory or address space ran out, as Wasmtime passes it on: the
+-    /// texts of ENOMEM on POSIX and of ERROR_NOT_ENOUGH_MEMORY, ERROR_OUTOFMEMORY and ERROR_COMMITMENT_LIMIT
+-    /// on Windows, the error numbers Rust's io::Error appends, and Wasmtime's own words.
++    /// What this operating system says when memory or address space ran out, as Wasmtime passes it on: the
++    /// error's text, the number Rust's io::Error appends to it -- each system's own, as the same number means
++    /// something else on the other (12 is ERROR_INVALID_ACCESS on Windows; 8 and 14, ENOEXEC and EFAULT on
++    /// POSIX) -- and Wasmtime's own words.
++#ifdef _WIN32
+     constexpr auto ResourceErrorMarkers = std::to_array<std::string_view>({
+-        "Cannot allocate memory",
+-        "os error 12)",
+-        "Not enough memory resources",
+-        "Not enough storage",
+-        "paging file is too small",
++        "Not enough memory resources", // ERROR_NOT_ENOUGH_MEMORY
+         "os error 8)",
++        "Not enough storage", // ERROR_OUTOFMEMORY
+         "os error 14)",
++        "paging file is too small", // ERROR_COMMITMENT_LIMIT
+         "os error 1455)",
+         "out of memory",
+     });
+-
+-    /// @return What @p error says, as resourceErrorOf() reads it; `RuntimeUnavailable` for no error.
+-    [[nodiscard]] ExtensionError extensionErrorOf(wasmtime_error_t const* error)
+-    {
+-        if (error == nullptr)
+-            return ExtensionError::RuntimeUnavailable;
+-        auto message = wasm_name_t {};
+-        wasmtime_error_message(error, &message);
+-        auto const kind = resourceErrorOf(std::string_view { message.data, message.size });
+-        wasm_byte_vec_delete(&message);
+-        return kind;
+-    }
++#else
++    constexpr auto ResourceErrorMarkers = std::to_array<std::string_view>({
++        "Cannot allocate memory", // ENOMEM
++        "os error 12)",
++        "out of memory",
++    });
++#endif
+ 
+     /// Compiles PrimingModule on an engine configured by @p config as to how it traps.
+     /// @return The engine and the module; `OutOfMemory` if compiling it ran out of memory
+     /// (resourceErrorOf()),
+     ///         `RuntimeUnavailable` if either cannot be made otherwise. A null engine is a refused
+     ///         configuration: Wasmtime aborts where it cannot allocate one.
+     [[nodiscard]] std::expected<Priming, ExtensionError> compilePriming(WasmtimeConfig const& config)
+     {
+         // Its own memory: the module has none, and so needs no provision.
+         auto primingConfig = WasmtimeConfig { .trapMode = config.trapMode,
+@@ -415,21 +410,21 @@ namespace
+                                               .memory = MemorySharing::Private };
+         auto engine = detail::EngineHandle { wasm_engine_new_with_config(engineConfig(
+             primingConfig,
+             RuntimeLimits { .memoryBytes = 0, .stackBytes = PrimingStackBytes, .tableElements = 0 })) };
+         if (!engine)
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         auto* module = static_cast<wasmtime_module_t*>(nullptr);
+         auto const error = detail::ErrorHandle { wasmtime_module_new(
+             engine.get(), PrimingModule.data(), PrimingModule.size(), &module) };
+         if (error || module == nullptr)
+-            return std::unexpected(extensionErrorOf(error.get()));
++            return std::unexpected(detail::extensionErrorOf(error.get()));
+         primingCompilationCount.fetch_add(1);
+         return Priming { .engine = std::move(engine), .module = detail::ModuleHandle { module } };
+     }
+ 
+     /// Instantiates @p priming's module and calls its function on the calling thread: what the engine does
+     /// the first time a guest runs on a thread, and once in the process.
+     /// @return Nothing once it returned; `OutOfMemory` if instantiating or calling it ran out of memory
+     ///         (resourceErrorOf()); `RuntimeUnavailable` if anything else failed or it trapped.
+     [[nodiscard]] std::expected<void, ExtensionError> runPriming(Priming const& priming)
+     {
+@@ -438,36 +433,36 @@ namespace
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         auto* const context = wasmtime_store_context(store.get());
+         // Epoch interruption is on, as on every engine; nothing moves this engine's epoch past one tick.
+         wasmtime_context_set_epoch_deadline(context, 1);
+         auto instance = wasmtime_instance_t {};
+         auto* rawTrap = static_cast<wasm_trap_t*>(nullptr);
+         auto const error = detail::ErrorHandle { wasmtime_instance_new(
+             context, priming.module.get(), nullptr, 0, &instance, &rawTrap) };
+         auto const trap = detail::TrapHandle { rawTrap };
+         if (error || trap)
+-            return std::unexpected(extensionErrorOf(error.get()));
++            return std::unexpected(detail::extensionErrorOf(error.get()));
+         auto item = wasmtime_extern_t {};
+         if (!wasmtime_instance_export_get(
+                 context, &instance, PrimingExport.data(), PrimingExport.size(), &item))
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         if (item.kind != WASMTIME_EXTERN_FUNC)
+         {
+             wasmtime_extern_delete(&item);
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         }
+         auto* rawCallTrap = static_cast<wasm_trap_t*>(nullptr);
+         auto const callError = detail::ErrorHandle { wasmtime_func_call(
+             context, &item.of.func, nullptr, 0, nullptr, 0, &rawCallTrap) };
+         auto const callTrap = detail::TrapHandle { rawCallTrap };
+         if (callError || callTrap)
+-            return std::unexpected(extensionErrorOf(callError.get()));
++            return std::unexpected(detail::extensionErrorOf(callError.get()));
+         return {};
+     }
+ 
+     /// A Wasmtime engine: a facade over the kind's shared state.
+     class WasmtimeEngine final: public host::IHostedEngine
+     {
+       public:
+         WasmtimeEngine(std::shared_ptr<KindState> kind, WasmtimeConfig config) noexcept:
+             _kind { std::move(kind) },
+             _config { std::move(config) },
+@@ -668,20 +663,31 @@ std::shared_ptr<KindState> makeKindState()
+ {
+     return std::make_shared<KindState>();
+ }
+ 
+ std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
+                                                         WasmtimeConfig config)
+ {
+     return std::make_unique<WasmtimeEngine>(std::move(kind), std::move(config));
+ }
+ 
++ExtensionError detail::extensionErrorOf(wasmtime_error const* error)
++{
++    if (error == nullptr)
++        return ExtensionError::RuntimeUnavailable;
++    auto message = wasm_name_t {};
++    wasmtime_error_message(error, &message);
++    auto const kind = resourceErrorOf(std::string_view { message.data, message.size });
++    wasm_byte_vec_delete(&message);
++    return kind;
++}
++
+ ExtensionError resourceErrorOf(std::string_view message) noexcept
+ {
+     return std::ranges::any_of(ResourceErrorMarkers,
+                                [message](std::string_view marker) { return message.contains(marker); })
+                ? ExtensionError::OutOfMemory
+                : ExtensionError::RuntimeUnavailable;
+ }
+ 
+ } // namespace vtextension::wasm::wasmtime
+ 
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
+index 4c928e1a6..90e1aba9b 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
+@@ -2,25 +2,28 @@
+ //
+ // The Wasmtime engine: the WebAssembly runtime interface on Wasmtime, extensions compiled to native code by
+ // Cranelift, one Wasmtime engine per runtime, configured from the one feature table (../EngineFeatures.hpp).
+ // An engine an extension host process drives (host::IHostedEngine), and an in-process backend for tests.
+ #pragma once
+ 
+ #include <cstdint>
+ #include <memory>
+ #include <string_view>
+ 
++#include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/wasi/Preview1Shim.hpp>
+ #include <vtextension/wasm/wasi/SystemEnvironment.hpp>
+ 
++struct wasmtime_error;
++
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ /// How compiled guest code detects an out-of-bounds access or a stack overflow.
+ enum class TrapMode : uint8_t
+ {
+     Software, ///< Explicit bounds and stack checks in the compiled code; no signal handler is installed.
+     Signals,  ///< Guard pages and a process signal handler, as Wasmtime does by default.
+ };
+ 
+@@ -64,24 +67,33 @@ class KindState;
+ ///         guest's memory.grow returns -1, and whatever the guest does about it fails the call. Its memory is
+ ///         copied to the parent (MemoryMode::Copy) under MemorySharing::Private, and shared with it
+ ///         (MemoryMode::Shared) under MemorySharing::Provided.
+ ///         Each thread it runs guests on is primed by prepareThread(), which runs a built-in module of one
+ ///         empty function there.
+ [[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
+                                                                       WasmtimeConfig config);
+ 
+ /// @param message What Wasmtime said of a failure (wasmtime_error_message()).
+ /// @return `OutOfMemory` where it says the system ran out of memory or address space, as an allocation or a
+-///         mapping the operating system refused (a row of ResourceErrorMarkers in WasmtimeEngine.cpp);
++///         mapping the operating system refused (a row of this system's ResourceErrorMarkers in
++///         WasmtimeEngine.cpp);
+ ///         `RuntimeUnavailable` otherwise.
+ [[nodiscard]] ExtensionError resourceErrorOf(std::string_view message) noexcept;
+ 
++namespace detail
++{
++    /// @param error What a Wasmtime call failed with, or null: what priming an engine's threads maps each of
++    ///        its failures through.
++    /// @return resourceErrorOf() its message; `RuntimeUnavailable` for no error.
++    [[nodiscard]] ExtensionError extensionErrorOf(::wasmtime_error const* error);
++} // namespace detail
++
+ } // namespace vtextension::wasm::wasmtime
+ 
+ namespace vtextension::wasm::wasmtime::testing
+ {
+ 
+ /// Test-only: how many times any engine of this process compiled its built-in priming module.
+ /// @return The count, since the process started.
+ [[nodiscard]] uint64_t primingCompilations() noexcept;
+ 
+ } // namespace vtextension::wasm::wasmtime::testing
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index 962f8d70e..47f083894 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -1102,27 +1102,58 @@ TEST_CASE("WasmtimeEngine.privateMemoryIsUnchanged", "[wasmtime]")
+ 
+ TEST_CASE("Wasmtime.measureRender", "[.measure]")
+ {
+     // Reported, not asserted; vtextension_test's twin measures WAMR the same way.
+     auto const backend = WasmtimeTraits::make();
+     vtextension::wasm::testing::measureBundledRender(*backend, "Wasmtime");
+ }
+ 
+ TEST_CASE("WasmtimeEngine.resourceErrorsAreOutOfMemory", "[wasmtime]")
+ {
+-    // What Wasmtime passes on from the operating system when a mapping or an allocation is refused reads as
+-    // the system being out of memory, which a host refuses for a reason that does not last; anything else
+-    // stays the runtime being unavailable.
++    // What Wasmtime passes on from this operating system when a mapping or an allocation is refused reads as
++    // the system being out of memory, which a host refuses for a reason that does not last; anything else --
++    // the other system's numbers for it among them, which mean something else here -- stays the runtime being
++    // unavailable.
+     using vtextension::wasm::wasmtime::resourceErrorOf;
+-    CHECK(resourceErrorOf("failed to create stack pool mapping: Cannot allocate memory (os error 12)")
+-          == ExtensionError::OutOfMemory);
++#ifdef _WIN32
+     CHECK(resourceErrorOf(
+               "failed to allocate memory: Not enough memory resources are available to process this "
+               "command. (os error 8)")
+           == ExtensionError::OutOfMemory);
++    CHECK(resourceErrorOf("VirtualAlloc failed (os error 14)") == ExtensionError::OutOfMemory);
+     CHECK(resourceErrorOf("mmap failed: The paging file is too small for this operation to complete. "
+                           "(os error 1455)")
+           == ExtensionError::OutOfMemory);
++    // ENOMEM's number is ERROR_INVALID_ACCESS here.
++    CHECK(resourceErrorOf("The access code is invalid. (os error 12)") == ExtensionError::RuntimeUnavailable);
++#else
++    CHECK(resourceErrorOf("failed to create stack pool mapping: Cannot allocate memory (os error 12)")
++          == ExtensionError::OutOfMemory);
++    CHECK(resourceErrorOf("mmap failed (os error 12)") == ExtensionError::OutOfMemory);
++    // Windows' out-of-memory numbers are ENOEXEC and EFAULT here.
++    CHECK(resourceErrorOf("Exec format error (os error 8)") == ExtensionError::RuntimeUnavailable);
++    CHECK(resourceErrorOf("Bad address (os error 14)") == ExtensionError::RuntimeUnavailable);
++#endif
++    CHECK(resourceErrorOf("allocation failed: out of memory") == ExtensionError::OutOfMemory);
+     CHECK(resourceErrorOf("failed to parse WebAssembly module") == ExtensionError::RuntimeUnavailable);
+-    CHECK(resourceErrorOf("Permission denied (os error 13)") == ExtensionError::RuntimeUnavailable);
+     CHECK(resourceErrorOf("") == ExtensionError::RuntimeUnavailable);
+ }
++
++TEST_CASE("WasmtimeEngine.primingErrorsAreReadForMemory", "[wasmtime]")
++{
++    // What priming maps each Wasmtime failure through (compilePriming, runPriming): the error's own message,
++    // read out of a real wasmtime_error_t.
++    using vtextension::wasm::wasmtime::detail::extensionErrorOf;
++#ifdef _WIN32
++    auto* const exhausted = wasmtime_error_new("failed to allocate memory: Not enough memory resources are "
++                                               "available to process this command. (os error 8)");
++#else
++    auto* const exhausted =
++        wasmtime_error_new("failed to create stack pool mapping: Cannot allocate memory (os error 12)");
++#endif
++    auto* const other = wasmtime_error_new("failed to parse WebAssembly module");
++    CHECK(extensionErrorOf(exhausted) == ExtensionError::OutOfMemory);
++    CHECK(extensionErrorOf(other) == ExtensionError::RuntimeUnavailable);
++    CHECK(extensionErrorOf(nullptr) == ExtensionError::RuntimeUnavailable);
++    wasmtime_error_delete(other);
++    wasmtime_error_delete(exhausted);
++}

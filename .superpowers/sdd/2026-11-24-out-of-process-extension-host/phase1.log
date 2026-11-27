@@ -1,0 +1,24 @@
+38b58d1ec test(vtextension): time a bundled extension's render on each backend
+1d1313dc7 fix(vtextension): a nested WAMR call keeps what the outer call recorded
+9b1e098f4 fix(vtextension): an interrupt during a host function call stops the Wasmtime guest
+db0658c58 feat(vtextension): interrupt Wasmtime calls by epoch, never polling while idle
+97e7f0108 refactor(vtextension): Wasmtime calls allocate nothing and re-enter through the caller
+3e8212fc3 fix(vtextension): an unexported memory over the cap is out of memory under Wasmtime
+f9ac285df fix(vtextension): a nested call's host failure stays with the nested call
+de7e324e4 fix(vtextension): a WAMR instance runs again after one of its calls failed
+7543d4865 test(vtextension): keep the WASI module's WebAssembly text readable
+6f2ad62a0 fix(vtextension): a refusing random source fails random_get, not the process
+c9b6169d1 feat(vtextension): our own WASI preview-1 functions, identical under every engine
+6a96a4a89 feat(vtextension): instantiate and call Wasmtime modules under the host's limits
+0dfbafa8a build: keep the Wasmtime features the backend needs in one list
+c83163af0 build: match only Wasmtime's own headers in the containment gate
+3087e16d9 build: take an installed Wasmtime only if it has the features the backend switches
+d0bc39031 fix(vtextension): keep the Wasmtime tests off the process's signals, and refuse a zero stack
+a4805b923 feat(vtextension): a Wasmtime backend that loads and describes modules
+a5185317e build: hold Wasmtime to the same containment as WAMR
+4987865ac test(vtextension): hold every engine to refusing the features Wasmtime enables by default
+1e63d04d4 build: create contour::wasmtime only once a Wasmtime is resolved
+ad9d60955 docs(vtextension): say what the engine feature table's switches mean
+f25bdada8 test(vtextension): one set of feature modules for the contract and the WAMR probe
+afcf521bf feat(vtextension): one table of WebAssembly features extensions may use
+69a89b1d7 build: fetch a pinned Wasmtime for the extension host

@@ -1,0 +1,720 @@
+a954a9112 test(vtextension): the macOS sandbox probe expects what Seatbelt refuses
+09f559217 fix(vtextension): the macOS sandbox lets the extension host learn its page size
+eb4e5f294 fix(vtextension): WAMR maps memory MAP_JIT only where it is to run code
+410012ba0 fix(vtextension): a descriptor that comes unasked is closed on macOS
+7b5d1cbd3 fix(vtextension): an extension host's channel never waits to send on macOS
+
+## tree diff ff4e3d5e1 -> a954a9112
+ cmake/ContourThirdParties.cmake                    |  17 ++-
+ src/vtextension/wasm/remote/CMakeLists.txt         |   4 +
+ src/vtextension/wasm/remote/HostRefusals.cpp       |   8 +-
+ src/vtextension/wasm/remote/WarningLog.cpp         |  11 ++
+ src/vtextension/wasm/remote/WarningLog.hpp         |  18 ++++
+ .../wasm/remote/process/SandboxProbe_test.cpp      |  27 ++++-
+ .../wasm/remote/process/testing/SandboxProbe.cpp   | 117 ++++++++++++++++++++-
+ src/vtextension/wasm/remote/transport/Channel.hpp  |  12 ++-
+ .../wasm/remote/transport/Channel_posix.cpp        |  20 +++-
+ 9 files changed, 215 insertions(+), 19 deletions(-)
+
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index a1fd20ca9..e35588269 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -254,38 +254,53 @@ function(ContourThirdParties_WamrTerminates target resultVar)
+     endforeach()
+     set(${resultVar}_REASON "${_reason}" PARENT_SCOPE)
+ endfunction()
+ 
+ if(CONTOUR_EXTENSIONS)
+     add_library(contour_wamr INTERFACE)
+     add_library(contour::wamr ALIAS contour_wamr)
+ 
+     set(_wamr_target "")
+     set(_wamr_rejected "")
++    # On macOS a WAMR without Contour's MAP_JIT patch (cmake/patches/) maps every instance's memory for code
++    # made at run time, which the hardened runtime refuses the interpreting extension host, which holds no
++    # allow-jit entitlement: every instantiation would fail. Only the fetched, patched WAMR is usable there.
++    set(_wamr_unpatched_refusal "")
++    if(APPLE)
++        set(_wamr_unpatched_refusal "on macOS only a WAMR with Contour's MAP_JIT patch can instantiate under "
++            "the hardened runtime, and an installed or embedded one has none")
++    endif()
+     if(TARGET iwasm::vmlib)
++        if(_wamr_unpatched_refusal)
++            message(FATAL_ERROR "The embedded WAMR (iwasm::vmlib) cannot be used: ${_wamr_unpatched_refusal}. "
++                "Let Contour fetch its own (CONTOUR_USE_CPM=ON), or configure with -DCONTOUR_EXTENSIONS=OFF.")
++        endif()
+         set(_wamr_target iwasm::vmlib)
+         set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's patches")
+     elseif(NOT CONTOUR_BUILD_STATIC)
+         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
+         set(_wamr_candidate "")
+         if(TARGET iwasm::vmlib)
+             set(_wamr_candidate iwasm::vmlib)
+         else()
+             find_package(PkgConfig QUIET)
+             if(PkgConfig_FOUND)
+                 pkg_check_modules(PC_WAMR QUIET IMPORTED_TARGET GLOBAL iwasm>=${WAMR_MINIMAL_VERSION})
+                 if(TARGET PkgConfig::PC_WAMR)
+                     set(_wamr_candidate PkgConfig::PC_WAMR)
+                 endif()
+             endif()
+         endif()
+-        if(_wamr_candidate)
++        if(_wamr_candidate AND _wamr_unpatched_refusal)
++            set(_wamr_rejected "${_wamr_unpatched_refusal}")
++            message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
++        elseif(_wamr_candidate)
+             ContourThirdParties_WamrTerminates(${_wamr_candidate} _wamr_terminates)
+             if(_wamr_terminates)
+                 set(_wamr_target ${_wamr_candidate})
+                 set(THIRDPARTY_BUILTIN_wamr
+                     "system package, without Contour's patches (its interrupt verified)")
+             else()
+                 set(_wamr_rejected "${_wamr_terminates_REASON}")
+                 message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
+             endif()
+         endif()
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index c6f4e4efc..196fac1e5 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -48,22 +48,26 @@ add_library(vtextension_remote_wire STATIC
+     transport/HelperArguments.cpp
+     transport/HelperArguments.hpp
+     transport/OwnedHandle.hpp
+     transport/PduStream.cpp
+     transport/PduStream.hpp
+     transport/SharedObject.cpp
+     transport/SharedObject.hpp
+     transport/SharedObjectName.hpp
+     transport/WakeSignal.hpp
+     transport/WouldBlock.hpp
++    WarningLog.cpp
++    WarningLog.hpp
+     ${_transport_sources}
+ )
++# The warning log (WarningLog.hpp), which a channel writes to as well as the parent's code.
++target_link_libraries(vtextension_remote_wire PUBLIC core::log)
+ # The codec names the runtime vocabulary (WasmRuntime.hpp, ExtensionError.hpp), which is header-only and
+ # std-only: the include path is all it takes.
+ target_include_directories(vtextension_remote_wire PUBLIC
+     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+ )
+ 
+ if(WIN32)
+     target_link_libraries(vtextension_remote_wire PRIVATE advapi32)
+ endif()
+diff --git a/src/vtextension/wasm/remote/HostRefusals.cpp b/src/vtextension/wasm/remote/HostRefusals.cpp
+index 67784d6c4..d37ab73a2 100644
+--- a/src/vtextension/wasm/remote/HostRefusals.cpp
++++ b/src/vtextension/wasm/remote/HostRefusals.cpp
+@@ -6,35 +6,29 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
+ #include <format>
+ #include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ 
+ #include <vtextension/ExtensionError.hpp>
++#include <vtextension/wasm/remote/WarningLog.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/proto/LockdownSteps.hpp>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ namespace
+ {
+-    /// Warnings of extensions running, but not quite as they should: a sandbox short of a step is worth
+-    /// knowing about whether or not anyone debugs extensions, so it is on unless turned off. At namespace
+-    /// scope, so that it is registered -- listed, and turned off by a filter -- before anything logs.
+-    auto const warningLog = core::log::Category("vtextension.warning",
+-                                                "Warns of extensions running, but not quite as they should.",
+-                                                core::log::Category::State::Enabled);
+-
+     /// The line for a host that could not be started, around what the launcher says of why.
+     constexpr auto LaunchLine =
+         std::string_view { "The extension host cannot be started: {}. Extensions do not run." };
+ 
+     /// A reason a host was refused at the handshake, and the line logged for it.
+     struct HandshakeRefusalRow
+     {
+         HostRefusal refusal;   ///< The reason.
+         std::string_view text; ///< The line logged.
+     };
+diff --git a/src/vtextension/wasm/remote/WarningLog.cpp b/src/vtextension/wasm/remote/WarningLog.cpp
+new file mode 100644
+index 000000000..b44ae72b9
+--- /dev/null
++++ b/src/vtextension/wasm/remote/WarningLog.cpp
+@@ -0,0 +1,11 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/remote/WarningLog.hpp>
++
++namespace vtextension::wasm::remote
++{
++
++core::log::Category const warningLog { "vtextension.warning",
++                                       "Warns of extensions running, but not quite as they should.",
++                                       core::log::Category::State::Enabled };
++
++} // namespace vtextension::wasm::remote
+diff --git a/src/vtextension/wasm/remote/WarningLog.hpp b/src/vtextension/wasm/remote/WarningLog.hpp
+new file mode 100644
+index 000000000..cf0e6e603
+--- /dev/null
++++ b/src/vtextension/wasm/remote/WarningLog.hpp
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// The log of extensions running, but not quite as they should, which both processes' code writes to.
++
++#include <core/log/LogStore.hpp>
++
++namespace vtextension::wasm::remote
++{
++
++/// Warns of extensions running, but not quite as they should: a sandbox short of a step, or a channel that
++/// took in what no peer of it should send, is worth knowing about whether or not anyone debugs extensions, so
++/// it is on unless turned off. At namespace scope, so that it is registered -- listed, and turned off by a
++/// filter -- before anything logs.
++extern core::log::Category const warningLog;
++
++} // namespace vtextension::wasm::remote
+diff --git a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+index 5a1a9c883..443192039 100644
+--- a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
++++ b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+@@ -200,20 +200,26 @@ constexpr auto ForbiddenOperations = std::array {
+     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EACCES },
+     Expectation { .op = "open-own-process",
+                   .fate = Fate::Refused,
+                   .error = EACCES,
+                   .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
+     Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = EACCES },
+     Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = EPERM },
++    // Every socket is refused as it is made, whatever the family, so whatever it would have been used for is.
++    Expectation { .op = "sendto-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "listen-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "bind-unix", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "socket-route", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "list-interfaces", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "send-descriptor", .fate = Fate::Killed },
+     Expectation { .op = "fork", .fate = Fate::Killed },
+     Expectation { .op = "spawn-thread", .fate = Fate::Killed },
+     Expectation { .op = "execve", .fate = Fate::Killed },
+     Expectation { .op = "ptrace-traceme", .fate = Fate::Killed },
+     Expectation { .op = "signal-parent", .fate = Fate::Killed },
+     Expectation { .op = "map-writable-executable", .fate = Fate::Killed },
+     Expectation { .op = "map-shared-unfixed",
+                   .fate = Fate::Killed,
+                   .allowedIn = vtextension::wasm::BuildInstrumentation::Coverage },
+@@ -228,45 +234,62 @@ constexpr auto ForbiddenOperations = std::array {
+ // started the probe, as it starts the host, with W^X enforced (Process_freebsd.cpp).
+ constexpr auto ForbiddenOperations = std::array {
+     Expectation { .op = "open-file", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "open-own-process", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "socket-inet", .fate = Fate::Allowed },
+     Expectation { .op = "socket-unix", .fate = Fate::Allowed },
+     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "sendto-inet", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "listen-inet", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "bind-unix", .fate = Fate::Refused, .error = ECAPMODE },
++    // What capability mode says of a routing socket, and of listing the interfaces through a socket,
++    // recorded.
++    Expectation { .op = "socket-route", .fate = Fate::Unasserted },
++    Expectation { .op = "list-interfaces", .fate = Fate::Unasserted },
+     Expectation { .op = "ioctl-control", .fate = Fate::Refused, .error = ENOTCAPABLE },
+     Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
+     Expectation { .op = "fork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+     Expectation {
+         .op = "pdfork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+     Expectation { .op = "execve", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "ptrace-traceme", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "map-writable-executable", .fate = Fate::Refused, .error = EACCES },
+     Expectation { .op = "protect-writable-executable", .fate = Fate::Refused, .error = EACCES },
+ };
+ #elifdef __APPLE__
+ // The profile refuses what it does not allow with EPERM: a file, an address of any family, a new process, a
+ // program, a signal to another process. A Mach service lookup it refuses is refused as unprivileged. It does
+ // not refuse a new Internet or Unix-domain socket: the first macOS run made both under the profile that, in
+ // the same run, refused every file, connect, fork and lookup above -- so it was in force, and Seatbelt does
+-// not ask it about these sockets' creation. As on FreeBSD, such a socket reaches nothing without an address,
+-// and every address is refused, by path as by number.
++// not ask it about these sockets' creation. What such a socket would be for is refused, and asserted here:
++// reaching an address by connect (by number and by path) or by an unconnected datagram (sendto-inet), and
++// being reached -- bound and listening on a number, or bound to a path. Seatbelt asks the profile at each of
++// these as the kernel's MAC hooks do (network-outbound, network-bind) before the call goes on, as it did for
++// connect-inet in that run. What it says of the sockets other families make -- routing (AF_ROUTE), kernel
++// control (AF_SYSTEM) -- and of listing the interfaces is recorded until a run shows it.
+ constexpr auto ForbiddenOperations = std::array {
+     Expectation { .op = "open-file", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "socket-inet", .fate = Fate::Allowed },
+     Expectation { .op = "socket-unix", .fate = Fate::Allowed },
+     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "sendto-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "listen-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "bind-unix", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "socket-route", .fate = Fate::Unasserted },
++    Expectation { .op = "socket-system", .fate = Fate::Unasserted },
++    Expectation { .op = "list-interfaces", .fate = Fate::Unasserted },
+     Expectation { .op = "fork", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "execve", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "mach-lookup", .fate = Fate::Refused, .error = BOOTSTRAP_NOT_PRIVILEGED },
+     // What the profile leaves to other guards, or the system decides on its own, recorded: a descriptor sent
+     // up (Contour's end discards it), tracing, a thread, memory both writable and executable, and memory for
+     // code made at run time (MAP_JIT), which no engine of the host maps (cmake/patches/).
+     Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
+     Expectation { .op = "ptrace-traceme", .fate = Fate::Unasserted },
+     Expectation { .op = "spawn-thread", .fate = Fate::Unasserted },
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+index 88b760bb5..ccc1e522a 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+@@ -2,26 +2,33 @@
+ #include <vtextension/wasm/remote/process/testing/SandboxProbe.hpp>
+ 
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <sys/ptrace.h>
+ #include <sys/random.h>
+ #include <sys/socket.h>
+ #include <sys/syscall.h>
+ #include <sys/un.h>
+ #include <sys/wait.h>
++
++#include <net/if.h>
+ #ifdef __linux__
+     #include <sys/prctl.h>
+ #elifdef __FreeBSD__
+     #include <sys/procctl.h>
+     #include <sys/procdesc.h>
++    #include <sys/sockio.h>
+ #elifdef __APPLE__
++    #include <sys/sockio.h>
++    #include <sys/sys_domain.h>
++    #include <sys/sysctl.h>
++
+     #include <mach/mach.h>
+     #include <servers/bootstrap.h>
+ #endif
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <chrono>
+ #include <condition_variable>
+ #include <csignal>
+@@ -184,23 +191,23 @@ namespace
+     {
+         return openPath("/proc/self/maps", O_RDONLY);
+     }
+ 
+     /// Another process's entry, which no build's host may read.
+     [[nodiscard]] std::string openOtherProcess(OperationContext& context)
+     {
+         return openPath(std::format("/proc/{}/maps", context.parentProcess).c_str(), O_RDONLY);
+     }
+ 
+-    [[nodiscard]] std::string socketOf(int family)
++    [[nodiscard]] std::string socketOf(int family, int type = StreamSocket, int protocol = 0)
+     {
+-        auto const descriptor = ::socket(family, StreamSocket, 0);
++        auto const descriptor = ::socket(family, type, protocol);
+         auto outcome = outcomeOf(descriptor);
+         if (descriptor >= 0)
+             ::close(descriptor);
+         return outcome;
+     }
+ 
+     [[nodiscard]] std::string socketInet(OperationContext&)
+     {
+         return socketOf(AF_INET);
+     }
+@@ -237,20 +244,107 @@ namespace
+             return outcomeOf(descriptor);
+         auto address = sockaddr_un {};
+         address.sun_family = AF_UNIX;
+         std::ranges::copy(ListeningSocketPath, std::begin(address.sun_path));
+         auto const outcome =
+             outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+         ::close(descriptor);
+         return outcome;
+     }
+ 
++    /// Sends a datagram to an Internet address, on a socket made for it and never connected: what a sandbox
++    /// that lets a socket be made must refuse by the address.
++    [[nodiscard]] std::string sendToInet(OperationContext&)
++    {
++        auto const descriptor = ::socket(AF_INET, SOCK_DGRAM, 0);
++        if (descriptor < 0)
++            return outcomeOf(descriptor);
++        constexpr auto DiscardPort = uint16_t { 9 };
++        auto address = sockaddr_in {};
++        address.sin_family = AF_INET;
++        address.sin_port = htons(DiscardPort);
++        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++        auto const byte = std::array<std::byte, 1> {};
++        auto const outcome = outcomeOf(::sendto(descriptor,
++                                                byte.data(),
++                                                byte.size(),
++                                                SendFlags,
++                                                reinterpret_cast<sockaddr const*>(&address),
++                                                sizeof(address)));
++        ::close(descriptor);
++        return outcome;
++    }
++
++    /// Binds an Internet stream socket to the loopback and listens on it: a server of its own.
++    [[nodiscard]] std::string listenInet(OperationContext&)
++    {
++        auto const descriptor = ::socket(AF_INET, StreamSocket, 0);
++        if (descriptor < 0)
++            return outcomeOf(descriptor);
++        auto address = sockaddr_in {};
++        address.sin_family = AF_INET;
++        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++        auto outcome =
++            outcomeOf(::bind(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
++        if (outcome == "ok")
++            outcome = outcomeOf(::listen(descriptor, 1));
++        ::close(descriptor);
++        return outcome;
++    }
++
++    /// Binds a Unix-domain socket to a path of its own: a file made, and a server reachable by it.
++    [[nodiscard]] std::string bindUnix(OperationContext&)
++    {
++        auto const descriptor = ::socket(AF_UNIX, StreamSocket, 0);
++        if (descriptor < 0)
++            return outcomeOf(descriptor);
++        auto const path = std::format("/tmp/contour-sandbox-probe-{}.socket", ::getpid());
++        auto address = sockaddr_un {};
++        address.sun_family = AF_UNIX;
++        std::ranges::copy(path, std::begin(address.sun_path));
++        auto const outcome =
++            outcomeOf(::bind(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
++        if (outcome == "ok")
++            ::unlink(path.c_str());
++        ::close(descriptor);
++        return outcome;
++    }
++
++    /// Makes a routing socket, which reads the system's routes and interfaces as they change.
++    [[nodiscard]] std::string socketRoute(OperationContext&)
++    {
++        return socketOf(AF_ROUTE, SOCK_RAW, 0);
++    }
++
++#ifdef __APPLE__
++    /// Makes a kernel control socket (AF_SYSTEM), through which a process talks to kernel extensions.
++    [[nodiscard]] std::string socketSystem(OperationContext&)
++    {
++        return socketOf(AF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
++    }
++#endif
++
++    /// Lists the system's network interfaces (SIOCGIFCONF) through an Internet socket made for it.
++    [[nodiscard]] std::string listInterfaces(OperationContext&)
++    {
++        auto const descriptor = ::socket(AF_INET, SOCK_DGRAM, 0);
++        if (descriptor < 0)
++            return outcomeOf(descriptor);
++        auto requests = std::array<ifreq, 16> {};
++        auto configuration = ifconf {};
++        configuration.ifc_len = static_cast<int>(sizeof(requests));
++        configuration.ifc_req = requests.data();
++        auto const outcome = outcomeOf(::ioctl(descriptor, SIOCGIFCONF, &configuration));
++        ::close(descriptor);
++        return outcome;
++    }
++
+     /// Asks the control channel how much it holds, by an ioctl no descriptor of the host needs.
+     [[nodiscard]] std::string ioctlControl(OperationContext& context)
+     {
+         auto pending = 0;
+         return outcomeOf(::ioctl(context.controlDescriptor, FIONREAD, &pending));
+     }
+ 
+     /// Sends a byte to Contour with this process's stderr attached, as a helper handing a descriptor up
+     /// would.
+     [[nodiscard]] std::string sendDescriptor(OperationContext& context)
+@@ -481,24 +575,33 @@ namespace
+             if (!handle)
+                 return "failed:claim";
+             auto mapping = transport::GuestMemoryMapping::map(
+                 handle->get(), instantiate->memory.objectBytes, instantiate->memory.initialBytes, 0);
+             if (!mapping)
+                 return "failed:map";
+             std::ignore = std::move(*handle).adopt();
+             constexpr auto Mark = std::string_view { "probe" };
+             std::ranges::copy(std::as_bytes(std::span { Mark }), mapping->base());
+         }
+-        // As an engine that maps an instance's memory itself asks (WAMR's os_mmap()): the C library may ask
+-        // the kernel every time (macOS), where a sandbox must answer.
++        // The page size, as an engine that maps an instance's memory itself asks it (WAMR's os_mmap()). On
++        // macOS by the sysctl the C library asks, which it may have cached before the lockdown: asked here
++        // directly, so that the profile's rule for it is what answers.
++#ifdef __APPLE__
++        auto pageSize = 0;
++        auto pageSizeLength = sizeof(pageSize);
++        if (::sysctlbyname("hw.pagesize_compat", &pageSize, &pageSizeLength, nullptr, 0) != 0
++            || pageSize <= 0)
++            return "failed:page-size";
++#else
+         if (::getpagesize() <= 0)
+             return "failed:page-size";
++#endif
+         auto random = std::array<std::byte, 8> {};
+ #ifdef __APPLE__
+         // macOS has no getrandom(); getentropy() is what its C++ library draws on.
+         if (::getentropy(random.data(), random.size()) != 0)
+             return "failed:getentropy";
+ #else
+         if (::getrandom(random.data(), random.size(), 0) != static_cast<ssize_t>(random.size()))
+             return "failed:getrandom";
+ #endif
+         auto now = timespec {};
+@@ -536,20 +639,25 @@ namespace
+     constexpr auto Operations = std::array {
+         Operation { .name = "none", .run = &nothing },
+         Operation { .name = "open-file", .run = &openFile },
+         Operation { .name = "open-directory", .run = &openDirectory },
+         Operation { .name = "open-own-process", .run = &openOwnProcess },
+         Operation { .name = "open-other-process", .run = &openOtherProcess },
+         Operation { .name = "socket-inet", .run = &socketInet },
+         Operation { .name = "socket-unix", .run = &socketUnix },
+         Operation { .name = "connect-inet", .run = &connectInet },
+         Operation { .name = "connect-unix", .run = &connectUnix },
++        Operation { .name = "sendto-inet", .run = &sendToInet },
++        Operation { .name = "listen-inet", .run = &listenInet },
++        Operation { .name = "bind-unix", .run = &bindUnix },
++        Operation { .name = "socket-route", .run = &socketRoute },
++        Operation { .name = "list-interfaces", .run = &listInterfaces },
+         Operation { .name = "ioctl-control", .run = &ioctlControl },
+         Operation { .name = "send-descriptor", .run = &sendDescriptor },
+         Operation { .name = "fork", .run = &forkProcess },
+ #ifdef __FreeBSD__
+         Operation { .name = "pdfork", .run = &forkToDescriptor },
+ #endif
+         Operation { .name = "spawn-thread", .run = &spawnThread },
+         Operation { .name = "execve", .run = &executeProgram },
+         Operation { .name = "ptrace-traceme", .run = &traceMe },
+         Operation { .name = "signal-parent", .run = &signalParent },
+@@ -558,20 +666,21 @@ namespace
+         Operation { .name = "protect-writable-executable", .run = &protectWritableExecutable },
+         Operation { .name = "map-executable", .run = &mapExecutable },
+         Operation { .name = "protect-executable", .run = &protectExecutable },
+         Operation { .name = "protect-readable", .run = &protectReadable },
+         Operation { .name = "channel-pair", .run = &channelPair },
+         Operation { .name = "held-limits", .run = &heldLimits },
+         Operation { .name = "permitted", .run = &permitted },
+ #ifdef __APPLE__
+         Operation { .name = "mach-lookup", .run = &lookUpMachService },
+         Operation { .name = "map-jit", .run = &mapForJit },
++        Operation { .name = "socket-system", .run = &socketSystem },
+ #endif
+     };
+ 
+ #ifdef __linux__
+     /// An outer sandbox's filter: what it refuses, and with which errno; only when the call's arguments pass
+     /// `checks`, if any.
+     struct OuterRefusal
+     {
+         host::SystemCall call;
+         int error;
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index 60ac6f27f..32fd38204 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -1,19 +1,23 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// A reliable, ordered byte channel between Contour and its extension host process: one end of a connected
+ /// pair. A Unix-domain stream socket on POSIX, an overlapped named pipe on Windows.
+ ///
+ /// Its I/O blocks, but for trySend(). shutdown() is what makes a blocked receive return, from any thread, on
+ /// both ends.
++///
++/// One thread at a time sends on an end -- send(), trySend() or sendWithHandle() -- while a receive may run
++/// beside it. trySend() relies on that where the system ignores MSG_DONTWAIT (macOS): the room it found free
++/// is still free when it sends.
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <span>
+ #include <vector>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+@@ -67,21 +71,22 @@ class Channel
+     Channel(Channel&&) noexcept;
+     Channel& operator=(Channel&&) noexcept;
+     Channel(Channel const&) = delete;
+     Channel& operator=(Channel const&) = delete;
+ 
+     /// Sends all of @p bytes, blocking until the channel took them.
+     /// @param bytes The bytes to send.
+     /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
+     [[nodiscard]] std::expected<void, ChannelError> send(std::span<uint8_t const> bytes);
+ 
+-    /// Sends as much of @p bytes as the channel takes now, without blocking.
++    /// Sends as much of @p bytes as the channel takes now, without blocking. No other send may run on this
++    /// end meanwhile (see the class).
+     /// @param bytes The bytes to send.
+     /// @return How many of them, from the front, were sent: 0 if none fit; `Closed` if the peer is gone or
+     ///         this end was shut down.
+     [[nodiscard]] std::expected<std::size_t, ChannelError> trySend(std::span<uint8_t const> bytes);
+ 
+     /// Receives at least one byte, blocking until one arrives. A descriptor the peer attached to them is
+     /// never kept: the system discards it, or, where it installs it all the same (macOS), it is closed at
+     /// once.
+     /// @param buffer Where the bytes go. Not empty.
+     /// @return How many bytes arrived, at least one; `Closed` at the peer's end of stream, or once this end
+@@ -129,23 +134,22 @@ class Channel
+     ///         handle may be closed, and its value reused, at any moment after shutdown() begins.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     std::unique_ptr<Native> _native;
+ };
+ 
+ /// What becomes of a descriptor the extension host process attaches to what it sends Contour.
+ ///
+ /// Contour reads its ends with plain receives, so nothing a helper attaches is ever kept. But where the
+-/// system merely discards such a descriptor -- or installs it all the same, as macOS does, for the receive to
+-/// close
+-/// -- it is closed in the receiving thread, and a last close can block without bound (a socket lingering on a
++/// system merely discards such a descriptor, or installs it all the same for the receive to close (macOS),
++/// it is closed in the receiving thread, and a last close can block without bound (a socket lingering on a
+ /// full send buffer): a compromised helper could hang a thread of Contour's. Where the system lets an end
+ /// refuse descriptors outright (Linux 6.16 and later, `SO_PASSRIGHTS`), the helper's send fails instead, and
+ /// no descriptor ever reaches Contour's process.
+ enum class UpwardDescriptors : uint8_t
+ {
+     Discarded, ///< They are taken in and closed, in the receiving thread (older kernels, BSDs, macOS).
+     Refused,   ///< The system refuses to send them: nothing reaches Contour (Linux 6.16+, and Windows, where
+                ///< no handle travels beside the bytes).
+ };
+ 
+diff --git a/src/vtextension/wasm/remote/transport/Channel_posix.cpp b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+index 6aeb84b0d..ac27c82ca 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+@@ -21,30 +21,32 @@
+ #include <sys/uio.h>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+ #include <expected>
+ #include <memory>
++#include <mutex>
+ #include <ranges>
+ #include <span>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <fcntl.h>
+ #include <poll.h>
+ #include <unistd.h>
+ 
++#include <vtextension/wasm/remote/WarningLog.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+ #include <vtextension/wasm/remote/transport/WouldBlock.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ namespace
+ {
+ #ifdef MSG_NOSIGNAL
+@@ -318,20 +320,32 @@ namespace
+         Unconfigured, ///< Descriptors, one of which could not be made close-on-exec.
+     };
+ 
+     /// What one receive took in.
+     struct Receipt
+     {
+         std::size_t bytes = 0; ///< How many bytes; 0 at the peer's end of stream.
+         Ancillary ancillary = Ancillary::Descriptors;
+     };
+ 
++    /// Tells once, in the warning log, that a channel took in what no peer of it sends beside its bytes, and
++    /// closed or dropped it.
++    void warnOfForeignAncillaryData()
++    {
++        static auto told = std::once_flag {};
++        std::call_once(told, [] {
++            warningLog()(
++                "An extension host channel received data beside its bytes that no peer sends, or more "
++                "than a message can carry; it was discarded.");
++        });
++    }
++
+     /// Receives at least one byte from @p descriptor into @p buffer, blocking until one arrives, with what
+     /// came beside them.
+     /// @param arrived Where every descriptor installed is appended, owned at once, so that each is closed
+     ///                however the receive ends.
+     /// @return What arrived; why nothing did otherwise.
+     [[nodiscard]] std::expected<Receipt, ChannelError> receiveMessage(int descriptor,
+                                                                       std::span<uint8_t> buffer,
+                                                                       std::vector<OwnedHandle>& arrived)
+     {
+         auto iov = ::iovec { .iov_base = buffer.data(), .iov_len = buffer.size() };
+@@ -383,24 +397,28 @@ namespace
+             return Receipt { .bytes = static_cast<std::size_t>(received), .ancillary = Ancillary::Foreign };
+         return Receipt { .bytes = static_cast<std::size_t>(received),
+                          .ancillary = unconfigured ? Ancillary::Unconfigured : Ancillary::Descriptors };
+     }
+ } // namespace
+ 
+ std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)
+ {
+     if constexpr (ThisSystemUnclaimedDescriptors == UnclaimedDescriptors::Installed)
+     {
+-        // Whatever came beside the bytes is closed as this ends: the bytes are what was asked for.
++        // Whatever came beside the bytes is closed as this ends: the bytes are what was asked for. As where
++        // the system discards it, the stream goes on; what no peer sends -- ancillary data other than
++        // descriptors, or more than any message carries -- is told of once.
+         auto discarded = std::vector<OwnedHandle> {};
+         return receiveMessage(_native->descriptor, buffer, discarded)
+             .and_then([](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
++                if (receipt.ancillary == Ancillary::Foreign)
++                    warnOfForeignAncillaryData();
+                 if (receipt.bytes == 0)
+                     return std::unexpected(ChannelError::Closed);
+                 return receipt.bytes;
+             });
+     }
+     else
+     {
+         while (true)
+         {
+             auto const received = ::recv(_native->descriptor, buffer.data(), buffer.size(), 0);

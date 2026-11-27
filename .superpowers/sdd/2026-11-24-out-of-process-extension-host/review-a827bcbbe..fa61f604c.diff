@@ -1,0 +1,1393 @@
+# Review package: a827bcbbe..HEAD
+
+## Commits
+fa61f604c feat(vtextension): name a module's host at the runtime seam, and report a crashed one
+
+## Files changed
+ src/vtextension/CMakeLists.txt                     |  1 +
+ src/vtextension/CompiledExtension.cpp              |  9 ++--
+ src/vtextension/CompiledExtension.hpp              |  6 ++-
+ src/vtextension/ControlImports_test.cpp            |  5 +-
+ src/vtextension/Engine_test.cpp                    |  2 +-
+ src/vtextension/ExtensionError.hpp                 |  5 +-
+ src/vtextension/ExtensionError_test.cpp            | 30 +++++++++++
+ src/vtextension/ExtensionHost.cpp                  |  3 +-
+ src/vtextension/Instance.cpp                       | 10 +++-
+ src/vtextension/Instance_test.cpp                  | 62 +++++++++++++++++++---
+ src/vtextension/testing/FakeWasmBackend.hpp        | 44 +++++++++++++--
+ src/vtextension/testing/Harness.hpp                |  2 +-
+ src/vtextension/testing/RunnerHarness.hpp          |  2 +-
+ src/vtextension/wasm/WasmRuntime.hpp               | 16 +++++-
+ src/vtextension/wasm/remote/proto/Codec.cpp        |  3 +-
+ src/vtextension/wasm/remote/proto/Codec_test.cpp   | 11 ++--
+ src/vtextension/wasm/testing/BackendContract.hpp   | 18 ++++---
+ src/vtextension/wasm/testing/RenderMeasurement.hpp |  2 +-
+ src/vtextension/wasm/wamr/WamrBackend.cpp          |  3 +-
+ src/vtextension/wasm/wamr/WamrRuntime.hpp          |  3 +-
+ src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp  |  2 +-
+ .../wasm/wasmtime/WasmtimeBackend_test.cpp         | 17 +++---
+ src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp  |  3 +-
+ 23 files changed, 207 insertions(+), 52 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/CMakeLists.txt b/src/vtextension/CMakeLists.txt
+index b1b6952e0..cc7492918 100644
+--- a/src/vtextension/CMakeLists.txt
++++ b/src/vtextension/CMakeLists.txt
+@@ -98,20 +98,21 @@ if(VTEXTENSION_TESTING)
+         BundledExtensions_test.cpp
+         CanonicalAbi_test.cpp
+         CommandLine_test.cpp
+         CommandPolicy_test.cpp
+         ControlCodec_test.cpp
+         ControlImports_test.cpp
+         DeadlineGuard_test.cpp
+         Engine_test.cpp
+         EventQueue_test.cpp
+         ExtensionComposition_test.cpp
++        ExtensionError_test.cpp
+         ExtensionConsent_test.cpp
+         ExtensionGrantStore_test.cpp
+         ExtensionHost_test.cpp
+         ExtensionWorkerPool_test.cpp
+         HostState_test.cpp
+         Instance_test.cpp
+         Isolation_test.cpp
+         Manifest_test.cpp
+         Runner_test.cpp
+         SessionExtensions_test.cpp
+diff --git a/src/vtextension/CompiledExtension.cpp b/src/vtextension/CompiledExtension.cpp
+index 5fc26371e..b23bbbf8d 100644
+--- a/src/vtextension/CompiledExtension.cpp
++++ b/src/vtextension/CompiledExtension.cpp
+@@ -113,29 +113,32 @@ namespace
+ 
+ CompiledExtension::CompiledExtension(PrivateTag /*unused*/,
+                                      std::shared_ptr<Engine> engine,
+                                      std::optional<Manifest> manifest,
+                                      std::shared_ptr<wasm::IWasmModule> module):
+     _engine { std::move(engine) }, _manifest { std::move(manifest) }, _module { std::move(module) }
+ {
+ }
+ 
+ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtension::load(
+-    Engine& engine, std::vector<std::byte> bytes)
++    Engine& engine, wasm::ModuleIdentity identity, std::vector<std::byte> bytes)
+ {
+     // The manifest is read before the runtime sees the bytes, which its loader may rewrite in place.
+     auto manifest = parseManifest(bytes);
+     auto const startsItself = hasStartFunction(bytes);
+ 
+-    auto module = engine.runtime().load(std::move(bytes));
++    auto module = engine.runtime().load(std::move(identity), std::move(bytes));
++    // A host that cannot be reached says nothing about the module; any other refusal is the module's.
+     if (!module)
+-        return std::unexpected(ExtensionError::InvalidComponent);
++        return std::unexpected(module.error() == ExtensionError::HostUnavailable
++                                   ? ExtensionError::HostUnavailable
++                                   : ExtensionError::InvalidComponent);
+ 
+     // A module that is one, but whose manifest does not parse, is refused before anything else. One
+     // without a manifest declares no commands.
+     if (!manifest && manifest.error() != ExtensionError::ManifestMissing)
+         return std::unexpected(manifest.error());
+ 
+     // A start function would run during instantiation, which no deadline guards: the world has none,
+     // and initialization belongs in a WASI reactor's `_initialize`, which is called under one.
+     if (startsItself || !importsAreProvided(**module) || !exportsMatch(**module))
+         return std::unexpected(ExtensionError::WorldMismatch);
+diff --git a/src/vtextension/CompiledExtension.hpp b/src/vtextension/CompiledExtension.hpp
+index 43a2743cc..665bc1568 100644
+--- a/src/vtextension/CompiledExtension.hpp
++++ b/src/vtextension/CompiledExtension.hpp
+@@ -29,26 +29,28 @@ namespace vtextension
+ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
+ {
+     struct PrivateTag
+     {
+     };
+ 
+   public:
+     /// Loads and checks a module.
+     /// @param engine The engine the module is loaded on and its instances run on; the module keeps it
+     ///        alive.
++    /// @param identity Which host the module runs in, for a runtime that runs modules out of process.
+     /// @param bytes The module's bytes; the runtime's module keeps them.
+-    /// @return The loaded module; `InvalidComponent` if it is not a valid core module,
++    /// @return The loaded module; `HostUnavailable` if the host it is to run in cannot be reached,
++    ///         `InvalidComponent` if it is not a valid core module,
+     ///         `ManifestInvalid` if its manifest does not parse, `WorldMismatch` if it imports
+     ///         something the host does not provide or lacks an export the world requires.
+     [[nodiscard]] static std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> load(
+-        Engine& engine, std::vector<std::byte> bytes);
++        Engine& engine, wasm::ModuleIdentity identity, std::vector<std::byte> bytes);
+ 
+     /// Use load(); public only so that std::make_shared can reach it.
+     CompiledExtension(PrivateTag,
+                       std::shared_ptr<Engine> engine,
+                       std::optional<Manifest> manifest,
+                       std::shared_ptr<wasm::IWasmModule> module);
+ 
+     ~CompiledExtension() = default;
+ 
+     CompiledExtension(CompiledExtension const&) = delete;
+diff --git a/src/vtextension/ControlImports_test.cpp b/src/vtextension/ControlImports_test.cpp
+index 65c794e9f..719c9e1ea 100644
+--- a/src/vtextension/ControlImports_test.cpp
++++ b/src/vtextension/ControlImports_test.cpp
+@@ -410,22 +410,22 @@ TEST_CASE("a control import the guest calls wrongly traps", "[vtextension][contr
+               == ExtensionError::Trapped);
+     }
+     CHECK(services.controlCalls.empty());
+ }
+ 
+ TEST_CASE("a module importing the control interface instantiates", "[vtextension][control]")
+ {
+     auto const backend = wasm::makeDefaultBackend();
+     auto const engine = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+-    auto const compiled =
+-        CompiledExtension::load(**engine, toModule(vtextension::testing::ControlImportingModule));
++    auto const compiled = CompiledExtension::load(
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule));
+     REQUIRE(compiled.has_value());
+     auto services = FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     auto const instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+     REQUIRE(instance.has_value());
+     CHECK((*instance)->render(surface(80, 1)).has_value());
+     CHECK(services.controlCalls.empty());
+ }
+ 
+ TEST_CASE("a guest calls a control verb through the runtime", "[vtextension][control]")
+@@ -475,20 +475,21 @@ TEST_CASE("an instance's deadline expiring during a control call faults it, writ
+         argv.front() = 16;
+         return {};
+     };
+ 
+     auto limits = ExtensionLimits {};
+     limits.callDeadline = 20ms;
+     auto const engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+     auto const compiled = CompiledExtension::load(
+         **engine,
++        wasm::ModuleIdentity {},
+         vtextension::testing::withManifest(toModule(vtextension::testing::MinimalModule),
+                                            "name = reader\nversion = 1\ncontrol read\n"));
+     REQUIRE(compiled.has_value());
+     auto services = FakeHostServices {};
+     services.controlAnswer =
+         R"({"version":"1","protocolVersion":4,"platform":"linux","hostname":"h","uptimeSeconds":1})";
+     // The host takes until the watchdog has interrupted the guest (bounded, so that a watchdog that never
+     // fires fails the checks below rather than hanging the test).
+     services.beforeControlAnswer = [&] {
+         auto const giveUp = std::chrono::steady_clock::now() + std::chrono::seconds { 5 };
+diff --git a/src/vtextension/Engine_test.cpp b/src/vtextension/Engine_test.cpp
+index 0fc14d30a..7925e88bd 100644
+--- a/src/vtextension/Engine_test.cpp
++++ b/src/vtextension/Engine_test.cpp
+@@ -222,21 +222,21 @@ TEST_CASE("Engine.armWhileWatching")
+ }
+ 
+ TEST_CASE("Engine.deadline.endToEnd")
+ {
+     // End to end on the default backend: the deadline stops a guest spinning in an endless loop, and a call
+     // that finished in time leaves its instance usable once its deadline is disarmed.
+     auto const backend = vtextension::wasm::makeDefaultBackend();
+     auto limits = ExtensionLimits {};
+     limits.callDeadline = std::chrono::milliseconds { 50 };
+     auto const engine = createEngine(*backend, limits);
+-    auto module = engine->runtime().load(hostOnlyModule());
++    auto module = engine->runtime().load(vtextension::wasm::ModuleIdentity {}, hostOnlyModule());
+     REQUIRE(module.has_value());
+ 
+     auto const callUnderDeadline = [&](vtextension::wasm::IWasmInstance& instance, std::string_view name) {
+         auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+         auto const token = WatchToken { .instance = &instance, .state = &state };
+         auto const function = instance.function(name);
+         REQUIRE(function.has_value());
+         engine->armDeadline(token, limits.callDeadline);
+         auto const called = instance.call(*function, {});
+         engine->disarm(token);
+diff --git a/src/vtextension/ExtensionError.hpp b/src/vtextension/ExtensionError.hpp
+index eaa86b5b5..d5632c506 100644
+--- a/src/vtextension/ExtensionError.hpp
++++ b/src/vtextension/ExtensionError.hpp
+@@ -24,20 +24,21 @@ enum class ExtensionError : uint8_t
+     ManifestMissing,    ///< The module embeds no extension manifest.
+     ManifestInvalid,    ///< The embedded manifest could not be parsed.
+     PermissionPending,  ///< A permission the call needs has not been answered yet.
+     PermissionDenied,   ///< A permission the call needs was refused.
+     CommandNotDeclared, ///< The guest ran a command its manifest does not declare.
+     OutputTooLarge,     ///< A render produced more bytes than the limit allows.
+     ArgumentRejected,   ///< A command argument could be taken for an option, or holds a NUL.
+     CommandFailed,      ///< A command could not be started, or was stopped before it finished.
+     ModuleUnavailable,  ///< The host found no module to load: not installed, or not readable.
+     ModuleTooLarge,     ///< The module file is larger than ExtensionLimits::maxModuleBytes.
++    HostUnavailable,    ///< The process hosting the extension could not be reached, or died.
+ };
+ 
+ /// One row of the error-description table.
+ struct ExtensionErrorText
+ {
+     ExtensionError error;  ///< The error described.
+     std::string_view text; ///< What a diagnostic says for it.
+ };
+ 
+ /// What a diagnostic says for each error, indexed by the enumerator's value.
+@@ -57,23 +58,25 @@ inline constexpr auto ExtensionErrorTexts = std::array {
+     ExtensionErrorText { .error = ExtensionError::PermissionPending, .text = "extension permission pending" },
+     ExtensionErrorText { .error = ExtensionError::PermissionDenied, .text = "extension permission denied" },
+     ExtensionErrorText { .error = ExtensionError::CommandNotDeclared,
+                          .text = "command not declared in the extension manifest" },
+     ExtensionErrorText { .error = ExtensionError::OutputTooLarge, .text = "extension output too large" },
+     ExtensionErrorText { .error = ExtensionError::ArgumentRejected,
+                          .text = "command argument rejected: it could be taken for an option" },
+     ExtensionErrorText { .error = ExtensionError::CommandFailed, .text = "command could not be run" },
+     ExtensionErrorText { .error = ExtensionError::ModuleUnavailable, .text = "extension module not found" },
+     ExtensionErrorText { .error = ExtensionError::ModuleTooLarge, .text = "extension module too large" },
++    ExtensionErrorText { .error = ExtensionError::HostUnavailable,
++                         .text = "its host process is unavailable" },
+ };
+ 
+-static_assert(ExtensionErrorTexts.size() == std::to_underlying(ExtensionError::ModuleTooLarge) + 1u,
++static_assert(ExtensionErrorTexts.size() == std::to_underlying(ExtensionError::HostUnavailable) + 1u,
+               "every ExtensionError has a row");
+ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ExtensionErrorTexts.size()),
+                                   [](std::size_t index) {
+                                       return std::to_underlying(ExtensionErrorTexts.at(index).error) == index;
+                                   }),
+               "ExtensionErrorTexts is indexed by the enumerator's value");
+ 
+ /// Describes an extension error for diagnostics.
+ /// @param error The error to describe.
+ /// @return A short, human-readable description.
+diff --git a/src/vtextension/ExtensionError_test.cpp b/src/vtextension/ExtensionError_test.cpp
+new file mode 100644
+index 000000000..e0d7a9f3f
+--- /dev/null
++++ b/src/vtextension/ExtensionError_test.cpp
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The text every extension error is shown with.
++#include <catch2/catch_message.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <cstddef>
++#include <ranges>
++#include <string_view>
++#include <utility>
++
++#include <vtextension/ExtensionError.hpp>
++
++using namespace std::string_view_literals;
++using vtextension::ExtensionError;
++using vtextension::ExtensionErrorTexts;
++
++TEST_CASE("ExtensionError.everyErrorHasText", "[vtextension]")
++{
++    auto const last = std::to_underlying(ExtensionError::HostUnavailable);
++    REQUIRE(ExtensionErrorTexts.size() == std::size_t { last } + 1u);
++    for (auto const& row: ExtensionErrorTexts)
++    {
++        INFO("error " << static_cast<int>(std::to_underlying(row.error)));
++        CHECK_FALSE(row.text.empty());
++        CHECK(vtextension::errorText(row.error) == row.text);
++    }
++    // Shown to the user, so it names the process, not the engine that ran in it.
++    CHECK(vtextension::errorText(ExtensionError::HostUnavailable) == "its host process is unavailable"sv);
++}
+diff --git a/src/vtextension/ExtensionHost.cpp b/src/vtextension/ExtensionHost.cpp
+index c1206d8eb..d156f4e6e 100644
+--- a/src/vtextension/ExtensionHost.cpp
++++ b/src/vtextension/ExtensionHost.cpp
+@@ -88,21 +88,22 @@ PreparedExtensions prepareExtensions(ExtensionHostConfig config,
+     {
+         auto compiled = [&]() -> std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> {
+             if (spec.module.empty())
+                 return std::unexpected(spec.moduleError);
+             if (!engine)
+                 return std::unexpected(engine.error());
+             if (!threadGuard)
+                 threadGuard.emplace((*engine)->backend().enterThread());
+             if (!*threadGuard)
+                 return std::unexpected(threadGuard->error());
+-            return CompiledExtension::load(**engine, std::move(spec.module));
++            return CompiledExtension::load(
++                **engine, wasm::ModuleIdentity { spec.hostId }, std::move(spec.module));
+         }();
+         spec.module.clear();
+         prepared.extensions.push_back(
+             PreparedExtension { .spec = std::move(spec), .compiled = std::move(compiled) });
+     }
+     return prepared;
+ }
+ 
+ std::unique_ptr<RetiredExtension> retirementOf(PreparedExtensions prepared)
+ {
+diff --git a/src/vtextension/Instance.cpp b/src/vtextension/Instance.cpp
+index 4c159ca5a..e0aa41d1d 100644
+--- a/src/vtextension/Instance.cpp
++++ b/src/vtextension/Instance.cpp
+@@ -362,22 +362,28 @@ ExtensionError Instance::guestFailure(wasm::CallFailure failure) const noexcept
+ {
+     if (_hostCallError)
+         return *_hostCallError;
+     if (isDeadlineExpired())
+         return ExtensionError::DeadlineExceeded;
+     // Refused growth is seen only as the reason this very call failed. Growth refused in a call that
+     // returned (a guest allocator that copes with `memory.grow` failing) is not reported by the runtime
+     // interface, so a later failure in the same guarded body is `Trapped`, where WAMR driven directly
+     // once said `OutOfMemory` -- a documented deviation, in the label only. Refusal inside a host call's
+     // allocation does reach here as `OutOfMemory`: the host call records it as its error, which ranks first.
+-    if (failure == wasm::CallFailure::MemoryGrowthRefused)
+-        return ExtensionError::OutOfMemory;
++    switch (failure)
++    {
++        case wasm::CallFailure::MemoryGrowthRefused: return ExtensionError::OutOfMemory;
++        case wasm::CallFailure::HostCrashed: return ExtensionError::HostUnavailable;
++        case wasm::CallFailure::Trap:
++        case wasm::CallFailure::Interrupted:
++        case wasm::CallFailure::HostFailure: return ExtensionError::Trapped;
++    }
+     return ExtensionError::Trapped;
+ }
+ 
+ std::unexpected<ExtensionError> Instance::failHostCall(ExtensionError error) noexcept
+ {
+     if (!_hostCallError)
+         _hostCallError = error;
+     return std::unexpected(error);
+ }
+ 
+diff --git a/src/vtextension/Instance_test.cpp b/src/vtextension/Instance_test.cpp
+index b2d48e7b6..10226b5a7 100644
+--- a/src/vtextension/Instance_test.cpp
++++ b/src/vtextension/Instance_test.cpp
+@@ -41,33 +41,33 @@ using vtextension::testing::toModule;
+ 
+ namespace
+ {
+ 
+ /// Loads @p module on a fresh engine of @p backend and returns how that went.
+ [[nodiscard]] std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> loadModule(
+     wasm::IWasmBackend& backend, std::vector<std::byte> module)
+ {
+     auto const engine = Engine::create(backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+-    return CompiledExtension::load(**engine, std::move(module));
++    return CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
+ }
+ 
+ /// Loads @p module on a fresh engine under @p limits and, if that succeeds, creates an instance of it, which
+ /// is discarded.
+ /// @return The error loading or creating it failed with; nothing if both succeeded.
+ [[nodiscard]] std::optional<ExtensionError> outcomeOf(std::vector<std::byte> module,
+                                                       ExtensionLimits limits = {})
+ {
+     auto const backend = wasm::makeDefaultBackend();
+     auto const engine = Engine::create(*backend, limits);
+     REQUIRE(engine.has_value());
+-    auto const compiled = CompiledExtension::load(**engine, std::move(module));
++    auto const compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
+     if (!compiled)
+         return compiled.error();
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     return errorOf(Instance::create(**engine, **compiled, services, clock, limits));
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("CompiledExtension.load", "[vtextension]")
+@@ -117,37 +117,83 @@ TEST_CASE("CompiledExtension.worldMismatch", "[vtextension]")
+         CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::StartFunctionModule)))
+               == ExtensionError::WorldMismatch);
+     }
+     SECTION("an export with the wrong signature")
+     {
+         CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WrongExportSignatureModule)))
+               == ExtensionError::WorldMismatch);
+     }
+ }
+ 
++TEST_CASE("CompiledExtension.passesHostUnavailableThrough", "[vtextension]")
++{
++    // A runtime whose host is gone says so; every other load failure stays an invalid module.
++    auto backend = vtextension::testing::FakeWasmBackend {};
++    backend.loadFailure = ExtensionError::HostUnavailable;
++    CHECK(errorOf(loadModule(backend, toModule(vtextension::testing::MinimalModule)))
++          == ExtensionError::HostUnavailable);
++    backend.loadFailure = ExtensionError::RuntimeUnavailable;
++    CHECK(errorOf(loadModule(backend, toModule(vtextension::testing::MinimalModule)))
++          == ExtensionError::InvalidComponent);
++}
++
++TEST_CASE("CompiledExtension.passesIdentityToTheRuntime", "[vtextension]")
++{
++    auto backend = vtextension::testing::FakeWasmBackend {};
++    auto const engine = Engine::create(backend, ExtensionLimits {});
++    REQUIRE(engine.has_value());
++    auto const compiled = CompiledExtension::load(
++        **engine, wasm::ModuleIdentity { "x" }, toModule(vtextension::testing::MinimalModule));
++    REQUIRE(compiled.has_value());
++    CHECK(backend.loads() == 1);
++    CHECK(backend.lastIdentity() == wasm::ModuleIdentity { "x" });
++}
++
++TEST_CASE("Instance.hostCrashedIsHostUnavailable", "[vtextension]")
++{
++    // The host running the instance died mid-call: neither a trap nor an overrun, but a host to report.
++    auto backend = vtextension::testing::FakeWasmBackend {};
++    backend.guest.exports["render"] =
++        [](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
++        return std::unexpected(wasm::CallFailure::HostCrashed);
++    };
++    auto const limits = ExtensionLimits {};
++    auto const engine = Engine::create(backend, limits);
++    REQUIRE(engine.has_value());
++    auto const compiled = CompiledExtension::load(
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
++    REQUIRE(compiled.has_value());
++    auto services = vtextension::testing::FakeHostServices {};
++    auto clock = core::platform::ManualClock {};
++    auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
++    REQUIRE(instance.has_value());
++    CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::HostUnavailable);
++}
++
+ TEST_CASE("Instance.minimal", "[vtextension]")
+ {
+     auto guest = RunningGuest(toModule(vtextension::testing::MinimalModule));
+     CHECK(guest.loadAndRender({}).empty());
+     CHECK(guest.instance().update(TimerFired {}).value() == RenderRequest::None);
+     CHECK_FALSE(guest.instance().fault().has_value());
+ }
+ 
+ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
+ {
+     // The minimal module asks for one 64 KiB page up front; a cap below that refuses it.
+     auto limits = ExtensionLimits {};
+     limits.memoryBytes = std::size_t { 32 } * 1024;
+     auto const backend = wasm::makeDefaultBackend();
+     auto const engine = Engine::create(*backend, limits);
+     REQUIRE(engine.has_value());
+-    auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
++    auto const compiled = CompiledExtension::load(
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     CHECK(errorOf(Instance::create(**engine, **compiled, services, clock, limits))
+           == ExtensionError::OutOfMemory);
+ }
+ 
+ TEST_CASE("Instance.malicious", "[vtextension]")
+ {
+     // A guest that forges addresses and lengths gets an error, never a host access outside its memory.
+@@ -248,21 +294,22 @@ class HastyClock final: public core::platform::IClock
+ 
+ } // namespace
+ 
+ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
+ {
+     // When the call's deadline is spent by the time the guest asks for a command, the command does
+     // not run, and the call fails as overrun.
+     auto const backend = wasm::makeDefaultBackend();
+     auto const engine = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+-    auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MaliciousModule));
++    auto const compiled = CompiledExtension::load(
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MaliciousModule));
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     services.commandAnswer = "";
+     auto clock = HastyClock {};
+     auto instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+     REQUIRE(instance.has_value());
+ 
+     CHECK(errorOf((*instance)->render(surface(80, 10))) == ExtensionError::DeadlineExceeded);
+     CHECK(services.commands.empty());
+ }
+@@ -306,21 +353,22 @@ TEST_CASE("Instance.expiredBetweenCalls", "[vtextension]")
+             return;
+         auto const giveUp = std::chrono::steady_clock::now() + std::chrono::seconds { 5 };
+         while (backend.lastInstance->interrupts.load() == 0 && std::chrono::steady_clock::now() < giveUp)
+             std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+     };
+ 
+     auto limits = ExtensionLimits {};
+     limits.callDeadline = std::chrono::milliseconds { 20 };
+     auto const engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+-    auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
++    auto const compiled = CompiledExtension::load(
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+     REQUIRE(instance.has_value());
+ 
+     CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::DeadlineExceeded);
+     CHECK(postRenders == 0);
+     REQUIRE(backend.lastInstance != nullptr);
+     CHECK(backend.lastInstance->interrupts.load() == 1);
+@@ -365,22 +413,22 @@ TEST_CASE("Instance.growthRefusedInHostCallAllocation", "[vtextension]")
+             constexpr auto StateFunction = std::size_t { 2 }; // `state`, in the world's host table
+             auto const resultAddress = std::array { uint32_t { 64 } };
+             if (!backend.lastInstance->callHost(StateFunction, resultAddress))
+                 return std::unexpected(wasm::CallFailure::Trap); // the guest traps on its own afterwards
+             return {};
+         };
+ 
+         auto const limits = ExtensionLimits {};
+         auto const engine = Engine::create(backend, limits);
+         REQUIRE(engine.has_value());
+-        auto const compiled =
+-            CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
++        auto const compiled = CompiledExtension::load(
++            **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+         REQUIRE(compiled.has_value());
+         auto services = vtextension::testing::FakeHostServices {};
+         services.snapshot.title = "a title the host must allocate for";
+         auto clock = core::platform::ManualClock {};
+         auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+         REQUIRE(instance.has_value());
+ 
+         CHECK(errorOf((*instance)->render(surface(80, 1))) == testCase.error);
+         CHECK(reallocs == 1);
+         CHECK((*instance)->fault() == testCase.error);
+diff --git a/src/vtextension/testing/FakeWasmBackend.hpp b/src/vtextension/testing/FakeWasmBackend.hpp
+index 8bb8b05a1..ec7a15d43 100644
+--- a/src/vtextension/testing/FakeWasmBackend.hpp
++++ b/src/vtextension/testing/FakeWasmBackend.hpp
+@@ -203,26 +203,24 @@ class FakeWasmRuntime final: public wasm::IWasmRuntime, public std::enable_share
+     /// @param backend What created it.
+     /// @param hostFunctions What its modules import.
+     FakeWasmRuntime(FakeWasmBackend& backend, std::span<wasm::HostFunction const> hostFunctions);
+     FakeWasmRuntime(FakeWasmRuntime const&) = delete;
+     FakeWasmRuntime(FakeWasmRuntime&&) = delete;
+     FakeWasmRuntime& operator=(FakeWasmRuntime const&) = delete;
+     FakeWasmRuntime& operator=(FakeWasmRuntime&&) = delete;
+     /// Tells the backend that one runtime fewer is alive.
+     ~FakeWasmRuntime() override;
+ 
+-    /// Ignores @p bytes: every module is a world guest.
++    /// Tells the backend of @p identity and ignores @p bytes: every module is a world guest.
++    /// @return The module; the backend's FakeWasmBackend::loadFailure if it names one.
+     [[nodiscard]] std::expected<std::shared_ptr<wasm::IWasmModule>, ExtensionError> load(
+-        std::vector<std::byte> /*bytes*/) override
+-    {
+-        return std::make_shared<FakeWasmModule>(shared_from_this(), _backend, _hostFunctions);
+-    }
++        wasm::ModuleIdentity identity, std::vector<std::byte> /*bytes*/) override;
+ 
+   private:
+     FakeWasmBackend& _backend;
+     std::vector<wasm::HostFunction> _hostFunctions;
+ };
+ 
+ /// A fake backend with no per-thread state. It keeps the contract's bring-up rules all the same: the
+ /// generation counts up each time a runtime is created with none alive, a guard is refused while no
+ /// runtime is alive, and every thread is prepared while one is. Refused memory growth would be reported
+ /// (it never happens).
+@@ -252,23 +250,40 @@ class FakeWasmBackend final: public wasm::IWasmBackend
+     [[nodiscard]] uint64_t runtimeGeneration() const noexcept override
+     {
+         return _generation.load(std::memory_order_acquire);
+     }
+ 
+     [[nodiscard]] wasm::BackendCapabilities capabilities() const noexcept override
+     {
+         return wasm::BackendCapabilities { .memoryGrowth = wasm::MemoryGrowthReporting::Reported };
+     }
+ 
++    /// @return How many modules were loaded, failed loads included.
++    [[nodiscard]] std::size_t loads() const noexcept
++    {
++        auto const lock = std::scoped_lock { _mutex };
++        return _loads;
++    }
++
++    /// @return The identity the last module was loaded with; empty before the first.
++    [[nodiscard]] wasm::ModuleIdentity lastIdentity() const
++    {
++        auto const lock = std::scoped_lock { _mutex };
++        return _lastIdentity;
++    }
++
+     /// How every instance created from now on behaves.
+     FakeGuest guest;
+ 
++    /// What every load from now on fails with; nothing for loads that succeed.
++    std::optional<ExtensionError> loadFailure;
++
+     /// The instance created last; null before the first. Valid only while that instance lives.
+     FakeWasmInstance* lastInstance = nullptr;
+ 
+   private:
+     friend class FakeWasmRuntime;
+ 
+     /// A guard that prepares nothing, as nothing needs preparing; it remembers its generation.
+     class Guard final: public wasm::IThreadGuard
+     {
+       public:
+@@ -282,44 +297,63 @@ class FakeWasmBackend final: public wasm::IWasmBackend
+     };
+ 
+     /// Counts a runtime created; the first one alive is a bring-up of the engine.
+     void runtimeCreated()
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         if (_runtimesAlive++ == 0)
+             _generation.fetch_add(1, std::memory_order_release);
+     }
+ 
++    /// Counts a module loaded with @p identity.
++    void moduleLoaded(wasm::ModuleIdentity identity)
++    {
++        auto const lock = std::scoped_lock { _mutex };
++        ++_loads;
++        _lastIdentity = std::move(identity);
++    }
++
+     /// Counts a runtime destroyed, on whichever thread drops the last reference to it.
+     void runtimeDestroyed()
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         --_runtimesAlive;
+     }
+ 
+     mutable std::mutex _mutex;             ///< Guards the counters below; the generation is read without it.
+     std::size_t _runtimesAlive = 0;        ///< How many runtimes are alive.
++    std::size_t _loads = 0;                ///< How many modules were loaded.
++    wasm::ModuleIdentity _lastIdentity;    ///< The identity the last module was loaded with.
+     std::atomic<uint64_t> _generation = 0; ///< How many times the engine was brought up.
+ };
+ 
+ inline FakeWasmRuntime::FakeWasmRuntime(FakeWasmBackend& backend,
+                                         std::span<wasm::HostFunction const> hostFunctions):
+     _backend { backend }, _hostFunctions { hostFunctions.begin(), hostFunctions.end() }
+ {
+     _backend.runtimeCreated();
+ }
+ 
+ inline FakeWasmRuntime::~FakeWasmRuntime()
+ {
+     _backend.runtimeDestroyed();
+ }
+ 
++inline std::expected<std::shared_ptr<wasm::IWasmModule>, ExtensionError> FakeWasmRuntime::load(
++    wasm::ModuleIdentity identity, std::vector<std::byte> /*bytes*/)
++{
++    _backend.moduleLoaded(std::move(identity));
++    if (_backend.loadFailure)
++        return std::unexpected(*_backend.loadFailure);
++    return std::make_shared<FakeWasmModule>(shared_from_this(), _backend, _hostFunctions);
++}
++
+ inline FakeWasmModule::FakeWasmModule(std::shared_ptr<wasm::IWasmRuntime> runtime,
+                                       FakeWasmBackend& backend,
+                                       std::span<wasm::HostFunction const> hostFunctions):
+     _runtime { std::move(runtime) }, _backend { backend }
+ {
+     auto const i32s = [](std::size_t count) {
+         return std::vector<wasm::ValueType>(count, wasm::ValueType::I32);
+     };
+     for (auto const& function: hostFunctions)
+         _imports.push_back(wasm::ImportDescription {
+diff --git a/src/vtextension/testing/Harness.hpp b/src/vtextension/testing/Harness.hpp
+index 42bdb41cd..636272347 100644
+--- a/src/vtextension/testing/Harness.hpp
++++ b/src/vtextension/testing/Harness.hpp
+@@ -139,21 +139,21 @@ class FakeHostServices final: public IHostServices
+ class RunningGuest
+ {
+   public:
+     /// Loads @p module and instantiates it under @p limits.
+     explicit RunningGuest(std::vector<std::byte> module, ExtensionLimits limits = {}):
+         _backend { wasm::makeDefaultBackend() }, _limits { limits }
+     {
+         auto engine = Engine::create(*_backend, limits);
+         REQUIRE(engine.has_value());
+         _engine = std::move(*engine);
+-        auto compiled = CompiledExtension::load(*_engine, std::move(module));
++        auto compiled = CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module));
+         REQUIRE(compiled.has_value());
+         _compiled = std::move(*compiled);
+         restart();
+     }
+ 
+     /// Replaces the instance with a fresh one of the same module.
+     void restart()
+     {
+         _instance.reset();
+         auto instance = Instance::create(*_engine, *_compiled, services, clock, _limits);
+diff --git a/src/vtextension/testing/RunnerHarness.hpp b/src/vtextension/testing/RunnerHarness.hpp
+index bf69a5f18..aa603895a 100644
+--- a/src/vtextension/testing/RunnerHarness.hpp
++++ b/src/vtextension/testing/RunnerHarness.hpp
+@@ -48,21 +48,21 @@ struct LoadedModule
+ /// @param backend What the engine is created from; must outlive the engine and the module.
+ /// @param bytes The module.
+ /// @param limits What the engine allows.
+ /// @return The engine and the module loaded on it.
+ [[nodiscard]] inline LoadedModule loadModule(wasm::IWasmBackend& backend,
+                                              std::vector<std::byte> bytes,
+                                              ExtensionLimits const& limits = {})
+ {
+     auto engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+-    auto compiled = CompiledExtension::load(**engine, std::move(bytes));
++    auto compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(bytes));
+     REQUIRE(compiled.has_value());
+     return LoadedModule { .engine = std::move(*engine), .compiled = std::move(*compiled) };
+ }
+ 
+ /// Reads every instant as UTC, so that no test depends on the zone of the machine it runs on.
+ [[nodiscard]] inline std::chrono::local_seconds utcLocalTime(
+     std::chrono::system_clock::time_point when) noexcept
+ {
+     return std::chrono::local_seconds { std::chrono::floor<std::chrono::seconds>(when).time_since_epoch() };
+ }
+diff --git a/src/vtextension/wasm/WasmRuntime.hpp b/src/vtextension/wasm/WasmRuntime.hpp
+index 1442f9218..a2dd2b015 100644
+--- a/src/vtextension/wasm/WasmRuntime.hpp
++++ b/src/vtextension/wasm/WasmRuntime.hpp
+@@ -69,20 +69,31 @@ enum class MemoryGrowthReporting : uint8_t
+ };
+ 
+ /// Why an export call failed.
+ enum class CallFailure : uint8_t
+ {
+     Trap,                ///< The guest trapped, for any reason not named below.
+     Interrupted,         ///< IWasmInstance::interrupt() stopped the call, or had before it began.
+     MemoryGrowthRefused, ///< The guest trapped after its memory refused to grow past the cap; only
+                          ///< from a backend declaring MemoryGrowthReporting::Reported.
+     HostFailure,         ///< A host function the guest called failed (IHostContext::callHost).
++    HostCrashed,         ///< The host running the instance died; every later call fails so.
++};
++
++/// Which host a module runs in. Modules with equal keys share one; an empty key gets a host of its own.
++/// In-process backends ignore it.
++struct ModuleIdentity
++{
++    std::string key; ///< What names the host; empty for a host of the module's own.
++
++    /// @return Whether both name the same host.
++    bool operator==(ModuleIdentity const&) const = default;
+ };
+ 
+ /// A function's core signature.
+ struct FunctionSignature
+ {
+     std::vector<ValueType> parameters; ///< The parameter types, in order.
+     std::vector<ValueType> results;    ///< The result types, in order.
+ 
+     /// @return Whether every parameter and every result is an i32: the only exports an instance offers
+     ///         (IWasmInstance::function).
+@@ -291,25 +302,26 @@ class IWasmRuntime
+   public:
+     IWasmRuntime() = default;
+     IWasmRuntime(IWasmRuntime const&) = delete;
+     IWasmRuntime(IWasmRuntime&&) = delete;
+     IWasmRuntime& operator=(IWasmRuntime const&) = delete;
+     IWasmRuntime& operator=(IWasmRuntime&&) = delete;
+     /// Releases the runtime; with the last one alive, the engine is torn down.
+     virtual ~IWasmRuntime() = default;
+ 
+     /// Loads a module. Runs none of its code.
++    /// @param identity Which host the module runs in; a backend running every module in-process ignores it.
+     /// @param bytes The module's bytes; the module keeps them.
+     /// @return The module, which keeps the runtime alive; `InvalidComponent` if the bytes are not a
+-    ///         valid core module.
++    ///         valid core module, `HostUnavailable` if the host it is to run in cannot be reached.
+     [[nodiscard]] virtual std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
+-        std::vector<std::byte> bytes) = 0;
++        ModuleIdentity identity, std::vector<std::byte> bytes) = 0;
+ };
+ 
+ /// A thread's preparation to call into instances, held for as long as the guard lives.
+ class IThreadGuard
+ {
+   public:
+     IThreadGuard() = default;
+     IThreadGuard(IThreadGuard const&) = delete;
+     IThreadGuard(IThreadGuard&&) = delete;
+     IThreadGuard& operator=(IThreadGuard const&) = delete;
+diff --git a/src/vtextension/wasm/remote/proto/Codec.cpp b/src/vtextension/wasm/remote/proto/Codec.cpp
+index 0d5189478..103809a13 100644
+--- a/src/vtextension/wasm/remote/proto/Codec.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec.cpp
+@@ -74,21 +74,22 @@ namespace
+         }
+         return false;
+     }
+     constexpr bool isEnumerator(CallFailure value) noexcept
+     {
+         switch (value)
+         {
+             case CallFailure::Trap:
+             case CallFailure::Interrupted:
+             case CallFailure::MemoryGrowthRefused:
+-            case CallFailure::HostFailure: return true;
++            case CallFailure::HostFailure:
++            case CallFailure::HostCrashed: return true;
+         }
+         return false;
+     }
+     constexpr bool isEnumerator(ExtensionError value) noexcept
+     {
+         return std::to_underlying(value) < ExtensionErrorTexts.size();
+     }
+     constexpr bool isEnumerator(MemoryMode value) noexcept
+     {
+         switch (value)
+diff --git a/src/vtextension/wasm/remote/proto/Codec_test.cpp b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+index 10126728e..5d206150c 100644
+--- a/src/vtextension/wasm/remote/proto/Codec_test.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec_test.cpp
+@@ -81,20 +81,22 @@ namespace
+                                              .signature = {},
+                                              .initialPages = 17 } },
+         },
+         Instantiate { .moduleId = 9, .instanceId = 11 },
+         Instantiated { .instanceId = 11, .error = std::nullopt, .callableExports = { 0, 3, 70000 } },
+         Release { .target = ReleaseTarget::Runtime, .id = 7 },
+         Call { .instanceId = 11, .exportOrdinal = 2, .argv = { 1, 0xFFFFFFFF, 300 } },
+         CallHost { .functionIndex = 4, .arguments = { 1, 2, 3 } },
+         HostResult { .error = ExtensionError::PermissionDenied },
+         CallResult { .failure = CallFailure::HostFailure, .argv = { 42 } },
++        CallResult { .failure = CallFailure::HostCrashed, .argv = {} },
++        HostResult { .error = ExtensionError::HostUnavailable },
+         MemoryRead { .instanceId = 11, .address = 0x10000, .size = 256 },
+         MemoryData { .status = MemoryStatus::Ok, .bytes = raw({ 1, 2, 3 }) },
+         MemoryWrite { .instanceId = 11, .address = 0xFFFFFFF0, .bytes = raw({ 9, 8 }) },
+     };
+ }
+ 
+ /// @return @p pdu's frame, which the test expects to encode.
+ [[nodiscard]] std::vector<uint8_t> encoded(Pdu const& pdu)
+ {
+     auto frame = encodeFrame(pdu);
+@@ -142,23 +144,26 @@ TEST_CASE("PduCodec.tableHasOneRowPerKind", "[vtextension]")
+     CHECK(PduTable.size() == 15);
+     for (auto const index: std::views::iota(std::size_t { 0 }, PduTable.size()))
+     {
+         INFO("row " << index);
+         CHECK(PduTable[index].kind == static_cast<PduKind>(index + 1));
+     }
+ }
+ 
+ TEST_CASE("PduCodec.roundTrip", "[vtextension]")
+ {
+-    for (auto const& sample: samples())
++    auto const all = samples();
++    for (auto const index: std::views::iota(std::size_t { 0 }, all.size()))
+     {
+-        DYNAMIC_SECTION("kind " << static_cast<int>(kindOf(sample)))
++        // Indexed, as a kind may be sampled more than once and a section runs once per name.
++        auto const& sample = all[index];
++        DYNAMIC_SECTION("sample " << index << ", kind " << static_cast<int>(kindOf(sample)))
+         {
+             auto const& row = rowOf(sample);
+             auto const frame = encoded(sample);
+             auto const decoded = decodeFrame(frame, row.direction, row.channel, PduLimits {});
+             REQUIRE(decoded.has_value());
+             CHECK(decoded->pdu == sample);
+             CHECK(decoded->consumed == frame.size());
+         }
+     }
+ }
+@@ -251,21 +256,21 @@ TEST_CASE("PduCodec.lyingBodyIsMalformed", "[vtextension]")
+               == DecodeError::TrailingBytes);
+     }
+ 
+     SECTION("an enumeration byte out of range is BadEnum")
+     {
+         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { 1, 2, 2 }), helloRow)
+               == DecodeError::BadEnum);
+         CHECK(errorOf(frameOf(std::to_underlying(PduKind::Hello), std::vector<uint8_t> { 1, 0, 3 }), helloRow)
+               == DecodeError::BadEnum);
+         // A status names the error + 1; one past the last error is out of range.
+-        auto const lastError = std::to_underlying(ExtensionError::ModuleTooLarge);
++        auto const lastError = std::to_underlying(ExtensionError::HostUnavailable);
+         auto const& createdRow = PduTable.at(std::to_underlying(PduKind::RuntimeCreated) - 1);
+         CHECK(errorOf(frameOf(std::to_underlying(PduKind::RuntimeCreated),
+                               std::vector<uint8_t> { 7, static_cast<uint8_t>(lastError + 1) }),
+                       createdRow)
+               == std::nullopt);
+         CHECK(errorOf(frameOf(std::to_underlying(PduKind::RuntimeCreated),
+                               std::vector<uint8_t> { 7, static_cast<uint8_t>(lastError + 2) }),
+                       createdRow)
+               == DecodeError::BadEnum);
+     }
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index 5e79f2204..bc33a3c22 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -628,21 +628,21 @@ template <typename Body>
+     auto word = uint32_t { 0 };
+     for (auto const [index, byte]: core::views::enumerate(*view))
+         word |= std::to_integer<uint32_t>(byte) << (static_cast<uint32_t>(index) * 8);
+     return word;
+ }
+ 
+ /// @return @p bytes loaded on @p runtime, which must accept them.
+ template <std::size_t N>
+ [[nodiscard]] std::shared_ptr<IWasmModule> load(IWasmRuntime& runtime, std::array<uint8_t, N> const& bytes)
+ {
+-    auto module = runtime.load(vtextension::testing::toModule(bytes));
++    auto module = runtime.load(ModuleIdentity {}, vtextension::testing::toModule(bytes));
+     REQUIRE(module.has_value());
+     return std::move(*module);
+ }
+ 
+ /// @return The import of @p module named @p moduleName : @p name, which must be there.
+ [[nodiscard]] inline ImportDescription const& importOf(IWasmModule const& module,
+                                                        std::string_view moduleName,
+                                                        std::string_view name)
+ {
+     auto const imports = module.imports();
+@@ -673,21 +673,21 @@ template <std::size_t N>
+         return std::unexpected(ExtensionError::RuntimeUnavailable);
+     return {};
+ }
+ 
+ /// Bytes that are no module are refused.
+ template <typename T>
+ void loadRejectsNonModule()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+-    auto const loaded = runtime->load({ std::byte { 1 }, std::byte { 2 } });
++    auto const loaded = runtime->load(ModuleIdentity {}, { std::byte { 1 }, std::byte { 2 } });
+     REQUIRE_FALSE(loaded.has_value());
+     CHECK(loaded.error() == ExtensionError::InvalidComponent);
+ }
+ 
+ /// Loads each of FeatureModules whose feature is @p state in EngineFeatures, each in a section of its own
+ /// named after the feature, and checks that it is accepted if the feature is On, refused if Off.
+ template <typename T>
+ void checkFeatureModules(FeatureState state)
+ {
+     auto const backend = T::make();
+@@ -695,21 +695,21 @@ void checkFeatureModules(FeatureState state)
+     auto const guard = enterThread(*backend);
+     for (auto const& [feature, bytes]: FeatureModules)
+     {
+         auto const& row = featureRow(feature);
+         if (row.state != state)
+             continue;
+         DYNAMIC_SECTION(row.name)
+         {
+             INFO("feature: " << row.name);
+             auto const module = std::as_bytes(bytes);
+-            auto const loaded = runtime->load({ module.begin(), module.end() });
++            auto const loaded = runtime->load(ModuleIdentity {}, { module.begin(), module.end() });
+             if (state == FeatureState::On)
+                 CHECK(loaded.has_value());
+             else
+             {
+                 REQUIRE_FALSE(loaded.has_value());
+                 CHECK(loaded.error() == ExtensionError::InvalidComponent);
+             }
+         }
+     }
+ }
+@@ -922,21 +922,21 @@ void twoBackendsAgree()
+ /// A module loaded on one prepared thread is used on another.
+ template <typename T>
+ void moduleCrossesThreads()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+     auto const loaded = onFreshThread([&]() -> std::expected<std::shared_ptr<IWasmModule>, ExtensionError> {
+         auto const guard = backend->enterThread();
+         if (!guard)
+             return std::unexpected(guard.error());
+-        return runtime->load(vtextension::testing::toModule(DescribedModule));
++        return runtime->load(ModuleIdentity {}, vtextension::testing::toModule(DescribedModule));
+     });
+     REQUIRE(loaded.has_value());
+     auto const& module = *loaded;
+     CHECK(module->imports().size() == 2);
+     CHECK(exportOf(*module, "add").kind == ExternKind::Function);
+ }
+ 
+ /// An instance's function export is called with its parameters and hands back its results.
+ template <typename T>
+ void callsExport()
+@@ -1288,33 +1288,34 @@ void tableInitialSizeIsCapped()
+     REQUIRE_FALSE(instance.has_value());
+     CHECK(instance.error() == ExtensionError::OutOfMemory);
+ }
+ 
+ /// A module defining more tables than MaxTables is not loaded.
+ template <typename T>
+ void tableCountIsCapped()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+-    auto const module = runtime->load(vtextension::testing::toModule(TwoTablesModule));
++    auto const module = runtime->load(ModuleIdentity {}, vtextension::testing::toModule(TwoTablesModule));
+     REQUIRE_FALSE(module.has_value());
+     CHECK(module.error() == ExtensionError::InvalidComponent);
+ }
+ 
+ /// A table section with bytes after its last table is not loaded, though the tables before them are
+ /// well-formed.
+ template <typename T>
+ void tableSectionWithTrailingBytesIsRefused()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+-    auto const module = runtime->load(vtextension::testing::toModule(TrailingBytesTableModule));
++    auto const module =
++        runtime->load(ModuleIdentity {}, vtextension::testing::toModule(TrailingBytesTableModule));
+     REQUIRE_FALSE(module.has_value());
+     CHECK(module.error() == ExtensionError::InvalidComponent);
+ }
+ 
+ /// A table cap above MaxTableElements creates no runtime.
+ template <typename T>
+ void tableCapAboveMaximumIsRefused()
+ {
+     auto const backend = T::make();
+     auto limits = Limits;
+@@ -1410,22 +1411,23 @@ void interruptIsFinal()
+     }
+     CHECK(context.calls().empty());
+ }
+ 
+ /// A module loaded on one prepared thread is instantiated on a second, and called on a third.
+ template <typename T>
+ void instanceCrossesThreads()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+-    auto const loaded = onPreparedThread(
+-        *backend, [&] { return runtime->load(vtextension::testing::toModule(DescribedModule)); });
++    auto const loaded = onPreparedThread(*backend, [&] {
++        return runtime->load(ModuleIdentity {}, vtextension::testing::toModule(DescribedModule));
++    });
+     REQUIRE(loaded.has_value());
+     REQUIRE(loaded->has_value());
+     auto const& module = **loaded;
+ 
+     auto context = RecordingHostContext {};
+     auto created = onPreparedThread(*backend, [&] { return module->instantiate(context); });
+     REQUIRE(created.has_value());
+     REQUIRE(created->has_value());
+     auto const instance = std::move(**created);
+ 
+diff --git a/src/vtextension/wasm/testing/RenderMeasurement.hpp b/src/vtextension/wasm/testing/RenderMeasurement.hpp
+index a9566185c..e759667c7 100644
+--- a/src/vtextension/wasm/testing/RenderMeasurement.hpp
++++ b/src/vtextension/wasm/testing/RenderMeasurement.hpp
+@@ -72,21 +72,21 @@ struct RenderMeasurement
+     REQUIRE(engine.has_value());
+     // Calls in on this thread, which a backend may not have prepared by creating the engine alone.
+     auto const guard = backend.enterThread();
+     REQUIRE(guard.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     services.snapshot.focus = FocusState::Focused;
+     auto guestClock = core::ManualClock {};
+ 
+     auto measurement = RenderMeasurement {};
+     auto const loadStart = clock.now();
+-    auto compiled = CompiledExtension::load(**engine, std::move(module));
++    auto compiled = CompiledExtension::load(**engine, ModuleIdentity {}, std::move(module));
+     measurement.load = clock.now() - loadStart;
+     REQUIRE(compiled.has_value());
+ 
+     auto const startStart = clock.now();
+     auto instance = Instance::create(**engine, **compiled, services, guestClock, limits);
+     REQUIRE(instance.has_value());
+     REQUIRE((*instance)->load({}).has_value());
+     measurement.start = clock.now() - startStart;
+ 
+     REQUIRE((*instance)->render(sizes.front()).has_value());
+diff --git a/src/vtextension/wasm/wamr/WamrBackend.cpp b/src/vtextension/wasm/wamr/WamrBackend.cpp
+index 90dd6832e..15dc3a2e8 100644
+--- a/src/vtextension/wasm/wamr/WamrBackend.cpp
++++ b/src/vtextension/wasm/wamr/WamrBackend.cpp
+@@ -213,21 +213,22 @@ WamrRuntime::WamrRuntime(PrivateTag /*unused*/,
+ {
+ }
+ 
+ WamrRuntime::~WamrRuntime()
+ {
+     _hostRegistrations.reset();
+     detail::closeNullDevice(_nullDevice);
+     releaseRuntime();
+ }
+ 
+-std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WamrRuntime::load(std::vector<std::byte> bytes)
++std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WamrRuntime::load(ModuleIdentity /*identity*/,
++                                                                              std::vector<std::byte> bytes)
+ {
+     return loadModule(shared_from_this(), std::move(bytes));
+ }
+ 
+ namespace
+ {
+     /// A thread's WAMR environment, held for as long as the guard lives.
+     class WamrThreadGuard final: public IThreadGuard
+     {
+       public:
+diff --git a/src/vtextension/wasm/wamr/WamrRuntime.hpp b/src/vtextension/wasm/wamr/WamrRuntime.hpp
+index b744f6156..202f50e65 100644
+--- a/src/vtextension/wasm/wamr/WamrRuntime.hpp
++++ b/src/vtextension/wasm/wamr/WamrRuntime.hpp
+@@ -47,22 +47,23 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
+                 std::unique_ptr<HostRegistrations> hostRegistrations) noexcept;
+ 
+     /// Unregisters the host functions, closes the null device, then releases the hold on the runtime.
+     ~WamrRuntime() override;
+ 
+     WamrRuntime(WamrRuntime const&) = delete;
+     WamrRuntime(WamrRuntime&&) = delete;
+     WamrRuntime& operator=(WamrRuntime const&) = delete;
+     WamrRuntime& operator=(WamrRuntime&&) = delete;
+ 
++    /// Loads @p bytes in this process; the identity is ignored, as every module runs here.
+     [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
+-        std::vector<std::byte> bytes) override;
++        ModuleIdentity identity, std::vector<std::byte> bytes) override;
+ 
+     /// @return The limits every instance of the runtime is held to.
+     [[nodiscard]] RuntimeLimits const& limits() const noexcept { return _limits; }
+ 
+     /// @return The raw handle of the null device the guests' WASI standard streams are bound to.
+     [[nodiscard]] int64_t nullDevice() const noexcept { return _nullDevice; }
+ 
+   private:
+     RuntimeLimits _limits;
+     int64_t _nullDevice;                                   ///< Owned; closed on destruction.
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
+index 30dac8ff5..c98a8b10e 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend.cpp
+@@ -443,21 +443,21 @@ WasmtimeRuntime::WasmtimeRuntime(std::shared_ptr<KindState> kind,
+ 
+ WasmtimeRuntime::~WasmtimeRuntime()
+ {
+     // The engine goes before the runtime stops counting alive, so that no bring-up overlaps it.
+     _linker.reset();
+     _engine.reset();
+     _kind->releaseRuntime();
+ }
+ 
+ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> WasmtimeRuntime::load(
+-    std::vector<std::byte> bytes)
++    ModuleIdentity /*identity*/, std::vector<std::byte> bytes)
+ {
+     return loadModule(shared_from_this(), _engine.get(), bytes);
+ }
+ 
+ std::shared_ptr<KindState> makeKindState()
+ {
+     return std::make_shared<KindState>();
+ }
+ 
+ std::unique_ptr<IWasmBackend> makeWasmtimeBackend(std::shared_ptr<KindState> kind, WasmtimeConfig config)
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+index 73ec7571f..1e921181a 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+@@ -36,20 +36,21 @@
+ #include <vtextension/wasm/testing/FeatureModules.hpp>
+ #include <vtextension/wasm/testing/RenderMeasurement.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeBackend.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::wasm::FeatureState;
+ using vtextension::wasm::IWasmBackend;
+ using vtextension::wasm::MemoryGrowthReporting;
++using vtextension::wasm::ModuleIdentity;
+ using vtextension::wasm::RuntimeLimits;
+ using vtextension::wasm::wasmtime::KindState;
+ using vtextension::wasm::wasmtime::makeKindState;
+ using vtextension::wasm::wasmtime::makeWasmtimeBackend;
+ using vtextension::wasm::wasmtime::TrapMode;
+ using vtextension::wasm::wasmtime::WasmtimeConfig;
+ 
+ namespace
+ {
+ 
+@@ -225,21 +226,21 @@ TEST_CASE("WasmtimeBackend.hostFunctionArities", "[wasmtime]")
+     auto const backend = WasmtimeTraits::make();
+ 
+     for (auto const arity: { uint32_t { 0 }, uint32_t { 1 }, MaxHostParameters })
+     {
+         INFO("arity " << arity);
+         auto const hostFunctions =
+             std::array { HostFunction { .module = "arity", .name = "f", .parameterCount = arity } };
+         auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
+         REQUIRE(runtime.has_value());
+         auto const guard = contract::enterThread(*backend);
+-        auto const module = (*runtime)->load(arityModule(arity));
++        auto const module = (*runtime)->load(ModuleIdentity {}, arityModule(arity));
+         REQUIRE(module.has_value());
+         auto context = contract::RecordingHostContext {};
+         auto const instance = contract::instantiate(**module, context);
+ 
+         CHECK(instance->call(contract::functionOf(*instance, "call"), {}).has_value());
+         auto const expected = std::ranges::to<std::vector>(std::views::iota(uint32_t { 1 }, arity + 1));
+         CHECK(context.calls()
+               == std::vector { contract::HostCall {
+                   .functionIndex = 0, .arguments = expected, .thread = std::this_thread::get_id() } });
+     }
+@@ -281,22 +282,24 @@ TEST_CASE("WasmtimeBackend.callsWideExports", "[wasmtime]")
+     auto parameters = std::string {};
+     auto body = std::string { "(i32.const 0)" };
+     for (auto const index: std::views::iota(uint32_t { 0 }, Width))
+     {
+         parameters += " i32";
+         body = std::format("(i32.add {} (i32.mul (local.get {}) (i32.const {})))", body, index, index + 1);
+     }
+     auto const backend = WasmtimeTraits::make();
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+-    auto const module = runtime->load(assemble(
+-        std::format(R"((module (func (export "sum") (param{}) (result i32) {})))", parameters, body)));
++    auto const module =
++        runtime->load(ModuleIdentity {},
++                      assemble(std::format(
++                          R"((module (func (export "sum") (param{}) (result i32) {})))", parameters, body)));
+     REQUIRE(module.has_value());
+     auto context = contract::RecordingHostContext {};
+     auto const instance = contract::instantiate(**module, context);
+ 
+     // Passed 1, 2, ... 20: 1² + 2² + ... + 20², which no other order of them gives.
+     auto argv = std::ranges::to<std::vector>(std::views::iota(uint32_t { 1 }, Width + 1));
+     REQUIRE(instance->call(contract::functionOf(*instance, "sum"), argv).has_value());
+     CHECK(argv[0] == 2870);
+ }
+ 
+@@ -312,21 +315,21 @@ TEST_CASE("WasmtimeBackend.refusesWhatWasmtimeEnablesByDefault", "[wasmtime]")
+     auto const runtime = vtextension::wasm::testing::contract::createRuntime(*backend);
+     auto enabledByDefault = std::size_t { 0 };
+     for (auto const& [feature, bytes]: vtextension::wasm::testing::FeatureModules)
+     {
+         auto const& row = vtextension::wasm::featureRow(feature);
+         if (row.state != FeatureState::Off || !defaultEngineAccepts(bytes))
+             continue;
+         ++enabledByDefault;
+         INFO("feature: " << row.name);
+         auto const module = std::as_bytes(bytes);
+-        auto const loaded = runtime->load({ module.begin(), module.end() });
++        auto const loaded = runtime->load(ModuleIdentity {}, { module.begin(), module.end() });
+         REQUIRE_FALSE(loaded.has_value());
+         CHECK(loaded.error() == ExtensionError::InvalidComponent);
+     }
+     // Wasmtime 48 enables GC, exceptions, 64-bit memories, typed function references, threads, tail
+     // calls, multiple memories, SIMD and relaxed SIMD by default; were none of them, this case checked
+     // nothing.
+     CHECK(enabledByDefault >= 9);
+ #ifndef _WIN32
+     // Neither the backend's engines nor the default ones compared against took the process's SIGSEGV.
+     struct sigaction after {};
+@@ -394,21 +397,21 @@ TEST_CASE("WasmtimeBackend.wasiReadsTheConfiguredEnvironment", "[wasmtime]")
+ 
+ TEST_CASE("Wasmtime.idleInstanceNeverWakes", "[wasmtime]")
+ {
+     // Nothing but an interrupt moves the epoch: a guest running a million loop iterations never reaches
+     // its deadline, and nothing wakes to poll it.
+     namespace contract = vtextension::wasm::testing::contract;
+     auto const& kind = *WasmtimeTraits::kind();
+     auto const backend = WasmtimeTraits::make();
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+-    auto const module = runtime->load(assemble(CountingModule));
++    auto const module = runtime->load(ModuleIdentity {}, assemble(CountingModule));
+     REQUIRE(module.has_value());
+     auto context = contract::RecordingHostContext {};
+     auto const instance = contract::instantiate(**module, context);
+ 
+     // Long enough for a ticker, were one moving the epoch, to fire many times over.
+     using namespace std::chrono_literals;
+     constexpr auto RunFor = 100ms;
+     auto const count = contract::functionOf(*instance, "count");
+     auto const before = kind.epochCallbacks();
+     auto const started = std::chrono::steady_clock::now();
+@@ -430,21 +433,21 @@ TEST_CASE("Wasmtime.nestedInterruptStopsTheOuterCall", "[wasmtime]")
+     // An interrupt landing during a host function call stops the guest that made it, even when the host
+     // function calls back in, finds that call interrupted, absorbs the failure and returns into a guest
+     // that would spin forever. A regression would hang: the call runs on a thread of its own, and is
+     // released by a second interrupt if it does not end in time.
+     using namespace std::chrono_literals;
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::CallFailure;
+     auto const backend = WasmtimeTraits::make();
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+-    auto const module = runtime->load(assemble(R"((module
++    auto const module = runtime->load(ModuleIdentity {}, assemble(R"((module
+   (import "contract:test/host@0" "ping" (func $ping (param i32)))
+   (func (export "add") (param i32 i32) (result i32) (i32.add (local.get 0) (local.get 1)))
+   (func (export "ping-then-spin") (call $ping (i32.const 0)) (loop (br 0))))
+ )"));
+     REQUIRE(module.has_value());
+     auto context = SelfInterruptingHostContext {};
+     auto const instance = contract::instantiate(**module, context);
+     context.attach(*instance);
+     auto const pingThenSpin = contract::functionOf(*instance, "ping-then-spin");
+ 
+@@ -465,21 +468,21 @@ TEST_CASE("Wasmtime.nestedInterruptStopsTheOuterCall", "[wasmtime]")
+ TEST_CASE("Wasmtime.interruptLeavesSiblingsRunning", "[wasmtime]")
+ {
+     // An interrupt moves the epoch every instance of the runtime shares. One running when it moves wakes
+     // once, finds its own instance not interrupted, and runs on; the interrupted one stays stopped.
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::CallFailure;
+     auto const& kind = *WasmtimeTraits::kind();
+     auto const backend = WasmtimeTraits::make();
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+-    auto const module = runtime->load(assemble(CountingModule));
++    auto const module = runtime->load(ModuleIdentity {}, assemble(CountingModule));
+     REQUIRE(module.has_value());
+     auto targetContext = contract::RecordingHostContext {};
+     auto const target = contract::instantiate(**module, targetContext);
+     auto siblingContext = InterruptingHostContext { *target };
+     auto const sibling = contract::instantiate(**module, siblingContext);
+ 
+     auto const before = kind.epochCallbacks();
+     auto result = std::array<uint32_t, 1> {};
+     REQUIRE(sibling->call(contract::functionOf(*sibling, "ping-then-count"), result).has_value());
+     CHECK(result[0] == CountedTo);
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+index e700182cf..ea1672a15 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+@@ -129,22 +129,23 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
+                     detail::EngineHandle engine,
+                     std::vector<HostBinding> hostBindings,
+                     detail::LinkerHandle linker) noexcept;
+ 
+     WasmtimeRuntime(WasmtimeRuntime const&) = delete;
+     WasmtimeRuntime(WasmtimeRuntime&&) = delete;
+     WasmtimeRuntime& operator=(WasmtimeRuntime const&) = delete;
+     WasmtimeRuntime& operator=(WasmtimeRuntime&&) = delete;
+     ~WasmtimeRuntime() override;
+ 
++    /// Loads @p bytes in this process; the identity is ignored, as every module runs here.
+     [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
+-        std::vector<std::byte> bytes) override;
++        ModuleIdentity identity, std::vector<std::byte> bytes) override;
+ 
+     /// @return The engine modules are compiled and stores are created on.
+     [[nodiscard]] wasm_engine_t* engine() const noexcept { return _engine.get(); }
+ 
+     /// @return The linker providing the host functions and WASI to every instance.
+     [[nodiscard]] wasmtime_linker const* linker() const noexcept { return _linker.get(); }
+ 
+     /// @return The host functions the runtime provides.
+     [[nodiscard]] std::span<HostBinding const> hostBindings() const noexcept { return _hostBindings; }
+ 

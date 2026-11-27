@@ -1,0 +1,1193 @@
+# Review package: a978e239b..HEAD
+
+## Commits
+3e3cd46bd test(vtextension): fail a run whose helper ended uncleanly, and keep helper output out of captures
+cec4fc1ba fix(vtextension): bound reads and host calls of an interrupted instance
+21587f174 fix(vtextension): never arm another instance's frame, nor lower a newer arming
+
+## Files changed
+ src/vtextension/Instance_test.cpp                  |   5 +-
+ src/vtextension/test_main.cpp                      |  10 +-
+ src/vtextension/testing/RunGate.hpp                |  22 ++++
+ src/vtextension/wasm/remote/LaneWatch.cpp          |  14 ++-
+ src/vtextension/wasm/remote/LaneWatch.hpp          |  17 ++-
+ src/vtextension/wasm/remote/LaneWatch_test.cpp     |  68 ++++++++++++
+ src/vtextension/wasm/remote/RemoteBackend.cpp      |  18 +++-
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp | 118 +++++++++++++++++++++
+ .../wasm/remote/process/PosixLaunch.cpp            |   9 +-
+ .../wasm/remote/process/PosixLaunch.hpp            |   2 +
+ .../wasm/remote/process/ProcessHostConnector.cpp   |   3 +-
+ .../wasm/remote/process/ProcessHostConnector.hpp   |   3 +
+ .../wasm/remote/process/ProcessLauncher.hpp        |  16 ++-
+ .../wasm/remote/process/Process_freebsd.cpp        |   4 +-
+ .../wasm/remote/process/Process_linux.cpp          |   3 +
+ .../wasm/remote/process/Process_macos.cpp          |   6 +-
+ .../wasm/remote/process/Process_win32.cpp          |   4 +-
+ .../remote/process/testing/HelperComposition.cpp   |  57 ++++++++--
+ .../remote/process/testing/HelperComposition.hpp   |   4 +
+ .../wasm/remote/testing/ProcessDefaultBackend.cpp  |  52 ++++++++-
+ 20 files changed, 403 insertions(+), 32 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/Instance_test.cpp b/src/vtextension/Instance_test.cpp
+index 902fa9be1..6b3cb7162 100644
+--- a/src/vtextension/Instance_test.cpp
++++ b/src/vtextension/Instance_test.cpp
+@@ -758,24 +758,21 @@ TEST_CASE("Instance.hostile.frameFlood", "[vtextension][guest]")
+ {
+     // Every request reaches the host, which is where they are rate-capped.
+     auto guest = hostile("frame-flood");
+     CHECK(guest->instance().render(surface(80, 1)).value() == "flooded");
+     CHECK(guest->services.frameRequests.size() == 1000);
+ }
+ 
+     #ifndef _WIN32
+ using vtextension::testing::StandardStreamsCapture;
+ 
+-// [in-process]: an extension host process inherits this process's standard error, which it writes its own
+-// diagnostics to (in a sanitizer build, that it applies no caps): the capture would see the host's line, not
+-// the guest's.
+-TEST_CASE("Instance.hostile.print", "[vtextension][guest][in-process]")
++TEST_CASE("Instance.hostile.print", "[vtextension][guest]")
+ {
+     // The guest's standard output and error lead nowhere: nothing it prints reaches the host's.
+     auto capture = StandardStreamsCapture {};
+     auto rendered = std::expected<std::string, ExtensionError> {};
+     {
+         auto guest = hostile("print");
+         rendered = guest->instance().render(surface(80, 1));
+     }
+     auto const captured = capture.finish();
+ 
+diff --git a/src/vtextension/test_main.cpp b/src/vtextension/test_main.cpp
+index 8ffa7b4f0..4f5a1e5f2 100644
+--- a/src/vtextension/test_main.cpp
++++ b/src/vtextension/test_main.cpp
+@@ -1,14 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <core/testing/SuppressWindowsDialogs.hpp>
+ 
+ #define CATCH_CONFIG_RUNNER
+ #include <catch2/catch_session.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <print>
++
++#include <vtextension/testing/RunGate.hpp>
++
+ int main(int argc, char const* argv[])
+ {
+     core::testing::suppressWindowsDialogs();
+ 
+     int const result = Catch::Session().run(argc, argv);
+-    return result;
++    // What a listener found once a case had ended fails the run, naming the case.
++    auto const& failures = vtextension::testing::runGateFailures();
++    for (auto const& failure: failures)
++        std::println(stderr, "run gate: {}", failure);
++    return result != 0 || failures.empty() ? result : 1;
+ }
+diff --git a/src/vtextension/testing/RunGate.hpp b/src/vtextension/testing/RunGate.hpp
+new file mode 100644
+index 000000000..0a3aa5e51
+--- /dev/null
++++ b/src/vtextension/testing/RunGate.hpp
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// Test-only: what fails a test binary's run as a whole, for a check a Catch2 listener makes once a case
++/// ended -- when the case can no longer fail by an assertion of its own. The binary's main() reports each
++/// and fails the run.
++
++#include <string>
++#include <vector>
++
++namespace vtextension::testing
++{
++
++/// @return What failed the run so far, one line each; written and read on the thread the cases run on.
++[[nodiscard]] inline std::vector<std::string>& runGateFailures()
++{
++    static auto failures = std::vector<std::string> {};
++    return failures;
++}
++
++} // namespace vtextension::testing
+diff --git a/src/vtextension/wasm/remote/LaneWatch.cpp b/src/vtextension/wasm/remote/LaneWatch.cpp
+index b326c5baf..6bfd7287b 100644
+--- a/src/vtextension/wasm/remote/LaneWatch.cpp
++++ b/src/vtextension/wasm/remote/LaneWatch.cpp
+@@ -50,25 +50,33 @@ void LaneWatch::endHostCall() noexcept
+ {
+     if (auto const depth = _depth.load(); depth > 0 && depth <= LaneFrameCapacity)
+         _frames[depth - 1].state.store(FrameState::Running);
+ }
+ 
+ bool LaneWatch::interrupt(uint32_t instanceId) noexcept
+ {
+     auto const depth = std::min(_depth.load(), LaneFrameCapacity);
+     for (auto& frame: std::span { _frames }.first(depth))
+     {
++        // The serial first: enter() stores it last, so the instance read after it is that frame's, or a later
++        // one's. Should the frame have been replaced in between, this arms a serial no frame has any more --
++        // an arming the supervisor never sees -- and never the frame of another instance.
++        auto const serial = frame.serial.load();
++        if (_probe.betweenReads)
++            _probe.betweenReads(_probe.context);
+         if (frame.instanceId.load() != instanceId)
+             continue;
+-        // Should the frame have been left and another entered in its place meanwhile, this arms a serial no
+-        // frame has any more: an arming that the supervisor never sees.
+-        frame.armedSerial.store(frame.serial.load());
++        // Raised, never lowered: an interrupter that read an older frame leaves a later frame's arming be.
++        auto armed = frame.armedSerial.load();
++        while (armed < serial && !frame.armedSerial.compare_exchange_weak(armed, serial))
++        {
++        }
+         return true;
+     }
+     return false;
+ }
+ 
+ LaneObservation LaneWatch::observe() const noexcept
+ {
+     auto const depth = _depth.load();
+     if (depth == 0)
+         return LaneObservation {};
+diff --git a/src/vtextension/wasm/remote/LaneWatch.hpp b/src/vtextension/wasm/remote/LaneWatch.hpp
+index 369fe4c3e..bf10b026f 100644
+--- a/src/vtextension/wasm/remote/LaneWatch.hpp
++++ b/src/vtextension/wasm/remote/LaneWatch.hpp
+@@ -43,29 +43,41 @@ enum class LanePlace : uint8_t
+ /// One look at a lane.
+ struct LaneObservation
+ {
+     /// Names the arming in force: it changes whenever another frame is armed, or the armed one ends. 0 while
+     /// disarmed.
+     uint64_t epoch = 0;
+     LaneArming arming = LaneArming::Disarmed; ///< Whether a frame on it is armed.
+     LanePlace place = LanePlace::Idle;        ///< Who it waits on.
+ };
+ 
++/// Test hook: what interrupt() calls between its two reads of a frame -- its serial, then its instance --
++/// so that a test can replace the frame in between, as a lane thread racing it may.
++struct LaneWatchProbe
++{
++    void (*betweenReads)(void* context) noexcept = nullptr; ///< Called, if set, with `context`.
++    void* context = nullptr;                                ///< What it is called with.
++};
++
+ /// One lane's frames as its thread runs them, for the backstop. Atomics only: the lane's thread records,
+ /// any thread interrupts, the supervisor observes, and none of them waits on another.
+ ///
+-/// Every frame is given a serial unique on the lane; an interrupt arms a frame by storing its serial beside
+-/// it, so that an arming outlives neither the frame nor a frame entered later in its place.
++/// Every frame is given a serial unique on the lane, increasing as frames enter; an interrupt arms a frame by
++/// raising the serial stored beside it to the frame's own, so that an arming outlives neither the frame nor a
++/// frame entered later in its place, and an interrupter that read an older frame never lowers it.
+ class LaneWatch
+ {
+   public:
+     LaneWatch() noexcept = default;
++
++    /// @param probe The test hook interrupt() calls between its reads.
++    explicit LaneWatch(LaneWatchProbe probe) noexcept: _probe { probe } {}
+     LaneWatch(LaneWatch const&) = delete;
+     LaneWatch(LaneWatch&&) = delete;
+     LaneWatch& operator=(LaneWatch const&) = delete;
+     LaneWatch& operator=(LaneWatch&&) = delete;
+     ~LaneWatch() = default;
+ 
+     /// The lane's thread: a call into, or a memory read of, instance @p instanceId begins.
+     /// @param instanceId The instance's id.
+     void enter(uint32_t instanceId) noexcept;
+ 
+@@ -101,20 +113,21 @@ class LaneWatch
+     {
+         std::atomic<uint64_t> serial { 0 };      ///< Its serial; 0 until a frame was entered here.
+         std::atomic<uint64_t> armedSerial { 0 }; ///< The serial an interrupt armed; armed iff it is `serial`.
+         std::atomic<uint32_t> instanceId { 0 };  ///< The instance it runs.
+         std::atomic<FrameState> state { FrameState::Running };
+     };
+ 
+     std::array<Frame, LaneFrameCapacity> _frames {};
+     std::atomic<std::size_t> _depth { 0 };   ///< How many frames run, recorded or not.
+     std::atomic<uint64_t> _nextSerial { 1 }; ///< The next frame's serial; the lane's thread's.
++    LaneWatchProbe _probe {};                ///< Test hook; inert by default.
+ };
+ 
+ /// The lanes of one host, MaxLaneChannels of them.
+ class LaneWatchSet
+ {
+   public:
+     /// @param index The lane's index, below MaxLaneChannels.
+     /// @return The lane.
+     [[nodiscard]] LaneWatch& lane(std::size_t index) noexcept;
+ 
+diff --git a/src/vtextension/wasm/remote/LaneWatch_test.cpp b/src/vtextension/wasm/remote/LaneWatch_test.cpp
+index 74d44cbcc..b4ac631a8 100644
+--- a/src/vtextension/wasm/remote/LaneWatch_test.cpp
++++ b/src/vtextension/wasm/remote/LaneWatch_test.cpp
+@@ -1,29 +1,33 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // What the supervisor's backstop sees of each lane: which frames run there, which of them an interrupt armed,
+ // and whether the innermost one waits on the parent.
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
++#include <functional>
+ #include <ranges>
+ #include <thread>
++#include <tuple>
++#include <utility>
+ 
+ #include <vtextension/wasm/remote/LaneWatch.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ using vtextension::wasm::remote::LaneArming;
+ using vtextension::wasm::remote::LaneObservation;
+ using vtextension::wasm::remote::LanePlace;
+ using vtextension::wasm::remote::LaneWatch;
++using vtextension::wasm::remote::LaneWatchProbe;
+ using vtextension::wasm::remote::LaneWatchSet;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ 
+ TEST_CASE("LaneWatch.interruptArmsOnlyAFrameOnTheLane", "[vtextension]")
+ {
+     auto watch = LaneWatch {};
+     CHECK(watch.observe().place == LanePlace::Idle);
+     CHECK_FALSE(watch.interrupt(7)); // nothing runs
+@@ -73,20 +77,84 @@ TEST_CASE("LaneWatch.frameEnteredAfterItsInstanceLeftIsNotArmed", "[vtextension]
+ {
+     // An interrupt arms the frame it found, not a later one of the same instance.
+     auto watch = LaneWatch {};
+     watch.enter(7);
+     CHECK(watch.interrupt(7));
+     watch.leave();
+     watch.enter(7);
+     CHECK(watch.observe().arming == LaneArming::Disarmed);
+ }
+ 
++namespace
++{
++/// A lane thread racing an interrupt: what it does to the lane between the interrupt's two reads of a frame,
++/// once.
++struct Race
++{
++    std::function<void(LaneWatch&)> change;
++    LaneWatch* watch = nullptr;
++    bool isRun = false;
++
++    /// @return The probe that runs the change.
++    [[nodiscard]] LaneWatchProbe probe() noexcept
++    {
++        return LaneWatchProbe { .betweenReads =
++                                    [](void* context) noexcept {
++                                        auto& race = *static_cast<Race*>(context);
++                                        if (std::exchange(race.isRun, true))
++                                            return;
++                                        race.change(*race.watch);
++                                    },
++                                .context = this };
++    }
++};
++} // namespace
++
++TEST_CASE("LaneWatch.interruptNeverArmsAnotherInstancesFrame", "[vtextension]")
++{
++    // Instance 7's frame is left, and 9's entered in its place, while the watchdog reads the frame: the
++    // healthy call of 9 is not armed, whatever the watchdog read of 7.
++    auto race = Race { .change =
++                           [](LaneWatch& lane) {
++                               lane.leave();
++                               lane.enter(9);
++                           },
++                       .watch = nullptr,
++                       .isRun = false };
++    auto watch = LaneWatch { race.probe() };
++    race.watch = &watch;
++    watch.enter(7);
++    std::ignore = watch.interrupt(7);
++    CHECK(race.isRun);
++    CHECK(watch.observe().arming == LaneArming::Disarmed);
++}
++
++TEST_CASE("LaneWatch.staleInterruptKeepsANewerArming", "[vtextension]")
++{
++    // One watchdog reads 7's frame; meanwhile 7 calls again in its place, and another interrupt arms that
++    // call. The first, done reading, must not put the arming back to the frame that is gone.
++    auto race = Race { .change =
++                           [](LaneWatch& lane) {
++                               lane.leave();
++                               lane.enter(7);
++                               CHECK(lane.interrupt(7));
++                           },
++                       .watch = nullptr,
++                       .isRun = false };
++    auto watch = LaneWatch { race.probe() };
++    race.watch = &watch;
++    watch.enter(7);
++    CHECK(watch.interrupt(7));
++    CHECK(race.isRun);
++    CHECK(watch.observe().arming == LaneArming::Armed);
++}
++
+ TEST_CASE("LaneWatch.hostCallParksTheInnermostFrame", "[vtextension]")
+ {
+     auto watch = LaneWatch {};
+     watch.enter(7);
+     watch.beginHostCall();
+     CHECK(watch.observe().place == LanePlace::ServingHost);
+ 
+     // The parent calls back in: the helper runs again.
+     watch.enter(9);
+     CHECK(watch.observe().place == LanePlace::InHelper);
+diff --git a/src/vtextension/wasm/remote/RemoteBackend.cpp b/src/vtextension/wasm/remote/RemoteBackend.cpp
+index c860dc0bc..0232b6d7f 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend.cpp
+@@ -579,37 +579,49 @@ namespace
+                 return crashed();
+             if (auto const* const hostCall = std::get_if<proto::CallHost>(&*reply))
+             {
+                 if (auto const served = serveHostCall(*lane, watch, *hostCall); !served)
+                     return served;
+                 continue;
+             }
+             auto* const result = std::get_if<proto::CallResult>(&*reply);
+             if (!result)
+                 return crashed();
++            // A call that failed once its instance was interrupted failed for the interrupt, whatever the
++            // host makes of a host call refused for it.
+             if (result->failure)
+-                return std::unexpected(reportedFailure(*result->failure));
++                return std::unexpected(_interrupt.load() == InterruptState::Interrupted
++                                           ? CallFailure::Interrupted
++                                           : reportedFailure(*result->failure));
+             if (result->argv.size() != signature.results.size())
+                 return crashed();
+             std::ranges::copy(result->argv, argv.begin());
+             return {};
+         }
+     }
+ 
+     std::expected<void, CallFailure> RemoteInstance::serveHostCall(PduStream& lane,
+                                                                    LaneWatch& watch,
+                                                                    proto::CallHost const& request)
+     {
+         auto const functions = _module->runtime().functions();
+         if (request.functionIndex >= functions.size()
+             || request.arguments.size() != functions[request.functionIndex].parameterCount)
+             return crashed();
++        // An interrupted instance's host calls are refused, not served: a host that runs on past an interrupt
++        // cannot keep its grace paused on the parent's time.
++        if (_interrupt.load() == InterruptState::Interrupted)
++        {
++            if (!lane.send(proto::HostResult { .error = ExtensionError::DeadlineExceeded }))
++                return crashed();
++            return {};
++        }
+         // The parent's own time: only the host function. Answering it is the host's again, as a host that
+         // stops reading must not hold the lane past the grace.
+         auto const result = [&] {
+             auto const parked = HostCallFrame { watch };
+             return _context.callHost(request.functionIndex, request.arguments);
+         }();
+         // What the host function wrote reaches the guest before it runs on.
+         if (auto const flushed = flushTo(lane); !flushed)
+             return flushed;
+         auto const error = result ? std::nullopt : std::optional { result.error() };
+@@ -630,21 +642,25 @@ namespace
+ 
+     std::expected<std::vector<std::byte>, MemoryFailure> RemoteInstance::fetch(uint32_t address,
+                                                                                uint32_t size)
+     {
+         // A thread that cannot call cannot read either: as a call from it traps, its read is refused.
+         auto const laneIndex = laneOfCurrentThread();
+         if (!laneIndex)
+             return std::unexpected(MemoryFailure::OutOfBounds);
+         auto* const lane = &_incarnation->lane(*laneIndex);
+         // A read is a frame of its own: a host that stalls in its answer is the backstop's, once interrupted.
++        // An instance interrupted before the read began -- a deadline that ran out while a call's results
++        // were lifted -- has its read armed here, as interrupt() found no frame of it then.
+         auto const frame = LaneFrame { _incarnation->laneWatch(*laneIndex), _instanceId };
++        if (_interrupt.load() == InterruptState::Interrupted)
++            _incarnation->interrupt(_instanceId, _interruptSlot);
+         if (!lane->send(proto::MemoryRead { .instanceId = _instanceId, .address = address, .size = size }))
+         {
+             _incarnation->markDead();
+             return std::unexpected(MemoryFailure::HostCrashed);
+         }
+         auto reply = lane->receive();
+         auto* const data = reply ? std::get_if<proto::MemoryData>(&*reply) : nullptr;
+         if (!data || (data->status == proto::MemoryStatus::Ok && data->bytes.size() != size))
+         {
+             _incarnation->markDead();
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index 5ed596a54..f73548c55 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -35,20 +35,21 @@
+ #include <vtextension/wasm/BackendConfig.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/HostServer.hpp>
+ #include <vtextension/wasm/host/InProcessHost.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/RemoteBackend.hpp>
+ #include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ #include <vtextension/wasm/testing/RenderMeasurement.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::BackendConfig;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::ExportDescription;
+ using vtextension::wasm::ExternKind;
+@@ -64,27 +65,30 @@ using vtextension::wasm::LockdownRequirement;
+ using vtextension::wasm::MemoryFailure;
+ using vtextension::wasm::ModuleIdentity;
+ using vtextension::wasm::ValueType;
+ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
+ using vtextension::wasm::remote::HostAttachment;
+ using vtextension::wasm::remote::HostConnection;
+ using vtextension::wasm::remote::HostStep;
+ using vtextension::wasm::remote::IHostConnector;
+ using vtextension::wasm::remote::IHostHandle;
++using vtextension::wasm::remote::LaneArming;
++using vtextension::wasm::remote::LaneWatch;
+ using vtextension::wasm::remote::makeRemoteBackend;
+ using vtextension::wasm::remote::makeRemoteKindState;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ using vtextension::wasm::remote::RemoteKindState;
+ using vtextension::wasm::remote::StepWatch;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::makeChannelPair;
++using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::testing::makeHostedEngine;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace contract = vtextension::wasm::testing::contract;
+ 
+ namespace
+ {
+ 
+ /// The kind every remote backend of this binary shares, as a process's do.
+ [[nodiscard]] std::shared_ptr<RemoteKindState> const& sharedKind()
+@@ -1191,20 +1195,134 @@ TEST_CASE("RemoteBackend.releasedSlotIsLowered", "[vtextension][remote][threadin
+         std::fputs("RemoteBackend.releasedSlotIsLowered: the interrupted call did not return\n", stderr);
+         std::abort();
+     }
+     CHECK(spun.get() == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
+ 
+     auto argv = std::array<uint32_t, 2> { 2, 3 };
+     CHECK(heir.call(contract::functionOf(heir, "add"), argv).has_value());
+     CHECK(argv[0] == 5);
+ }
+ 
++namespace
++{
++/// @return @p future's value, once ready within five seconds; else the run ends, rather than wait forever on
++///         a thread a regression keeps from returning.
++template <typename T>
++[[nodiscard]] T within(std::future<T>& future, char const* what)
++{
++    if (future.wait_for(std::chrono::seconds { 5 }) != std::future_status::ready)
++    {
++        FAIL_CHECK(what);
++        std::fputs(what, stderr);
++        std::fputs("\n", stderr);
++        std::abort();
++    }
++    return future.get();
++}
++} // namespace
++
++TEST_CASE("RemoteBackend.readAfterAnInterruptIsArmed", "[vtextension][remote][threading]")
++{
++    // A deadline ran out between a call and the reads of its results: the read that follows waits on a host
++    // that never answers it, and must be the backstop's to end.
++    using namespace std::chrono_literals;
++    auto scripted = ScriptedInstance { HelperScript {} }; // reads none of its lanes
++    scripted.instance->interrupt();
++    auto read = std::async(std::launch::async, [&]() -> std::optional<MemoryFailure> {
++        auto const guard = scripted.rig.backend->enterThread();
++        if (!guard)
++            return MemoryFailure::OutOfBounds;
++        auto const viewed = scripted.instance->memory(0, 4);
++        return viewed ? std::nullopt : std::optional { viewed.error() };
++    });
++
++    auto const attachment = scripted.rig.connector->attachment();
++    REQUIRE(attachment.lanes != nullptr);
++    auto const isArmed = [&] {
++        return std::ranges::any_of(attachment.lanes->lanes(), [](LaneWatch const& lane) {
++            return lane.observe().arming == LaneArming::Armed;
++        });
++    };
++    auto const deadline = std::chrono::steady_clock::now() + 5s;
++    while (!isArmed() && std::chrono::steady_clock::now() < deadline)
++        std::this_thread::sleep_for(1ms);
++    auto const wasArmed = isArmed();
++    // What the backstop's kill does to the parent once the grace ran out.
++    attachment.onDeath();
++    CHECK(wasArmed);
++    CHECK(within(read, "the stalled read did not end with its host") == MemoryFailure::HostCrashed);
++}
++
++TEST_CASE("RemoteBackend.interruptedInstancesHostCallIsRefused", "[vtextension][remote][threading]")
++{
++    // A host that runs on past an interrupt and calls the parent gets a refusal, not a served host call whose
++    // time would pause its grace.
++    using namespace std::chrono_literals;
++    auto arrived = std::make_shared<std::promise<void>>();
++    auto go = std::make_shared<std::promise<void>>();
++    auto answered = std::make_shared<std::promise<std::optional<ExtensionError>>>();
++    auto const connector = std::make_shared<ScriptedConnector>([arrived,
++                                                                proceed = go->get_future().share(),
++                                                                answered](HelperEnds& ends,
++                                                                          std::size_t /*connection*/) {
++        auto const script = HelperScript {};
++        auto const create = ends.send(HonestHello) ? ends.receive<proto::CreateRuntime>() : std::nullopt;
++        if (!create
++            || !ends.send(proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt }))
++            return;
++        auto const load = ends.receive<proto::Load>();
++        if (!load || !ends.sendFrame(script.loaded(load->moduleId)))
++            return;
++        auto const instantiate = ends.receive<proto::Instantiate>();
++        if (!instantiate || !ends.sendFrame(script.instantiated(instantiate->instanceId)))
++            return;
++        auto lane = PduStream { std::move(ends.lanes.front()),
++                                proto::ChannelKind::Lane,
++                                proto::Direction::ToHelper,
++                                proto::PduLimits {} };
++        if (!lane.receive())
++            return;
++        arrived->set_value();
++        // The guest runs on, interrupted, and calls `ping(7)`.
++        if (proceed.wait_for(5s) != std::future_status::ready
++            || !lane.send(proto::CallHost { .functionIndex = 0, .arguments = { 7 } }))
++            return;
++        auto const answer = lane.receive();
++        auto const* const result = answer ? std::get_if<proto::HostResult>(&*answer) : nullptr;
++        answered->set_value(result ? result->error : std::nullopt);
++        std::ignore = lane.send(proto::CallResult { .failure = CallFailure::HostFailure, .argv = {} });
++        ends.drain();
++    });
++    auto rig = ScriptedRig { .connector = connector };
++    auto const guard = contract::enterThread(*rig.backend);
++    auto const module = contract::load(*rig.runtime, PeekModule);
++    auto context = contract::RecordingHostContext {};
++    auto const instance = contract::instantiate(*module, context);
++
++    auto called = std::async(std::launch::async, [&] {
++        auto const callGuard = rig.backend->enterThread();
++        auto argv = std::array<uint32_t, 1> { 0 };
++        return callGuard ? instance->call(contract::functionOf(*instance, "ping-then-load"), argv)
++                         : std::expected<void, CallFailure> { std::unexpected(CallFailure::Trap) };
++    });
++    auto arrival = arrived->get_future();
++    within(arrival, "the call never reached the host");
++    instance->interrupt();
++    go->set_value();
++    auto answer = answered->get_future();
++    CHECK(within(answer, "the host call was not answered")
++          == std::optional { ExtensionError::DeadlineExceeded });
++    CHECK(within(called, "the call did not return")
++          == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
++    CHECK(context.calls().empty());
++}
++
+ TEST_CASE("RemoteBackend.preparedGenerationFollowsTheOutermostGuard", "[vtextension][remote]")
+ {
+     auto const backend = makeBackend(makeConnector());
+     auto const runtime = contract::createRuntime(*backend);
+     auto const generations = contract::onFreshThread([&] {
+         auto const before = vtextension::wasm::remote::preparedGeneration();
+         auto const outer = contract::enterThread(*backend);
+         auto const during = vtextension::wasm::remote::preparedGeneration();
+         {
+             auto const inner = contract::enterThread(*backend);
+diff --git a/src/vtextension/wasm/remote/process/PosixLaunch.cpp b/src/vtextension/wasm/remote/process/PosixLaunch.cpp
+index ef77d66ff..904805895 100644
+--- a/src/vtextension/wasm/remote/process/PosixLaunch.cpp
++++ b/src/vtextension/wasm/remote/process/PosixLaunch.cpp
+@@ -69,36 +69,43 @@ std::vector<char*> PreparedLaunch::envp()
+ {
+     return pointersInto(environment);
+ }
+ 
+ std::expected<PreparedLaunch, LaunchError> prepareLaunch(LaunchSpec const& spec)
+ {
+     auto prepared = PreparedLaunch { .executable = spec.executable.string(),
+                                      .arguments = {},
+                                      .environment = {},
+                                      .parked = {},
+-                                     .nullDevice = {} };
++                                     .nullDevice = {},
++                                     .standardError = {} };
+     // posix_spawn() reports a failed exec too, but pdfork()'s child can only exit: the check up front gives
+     // every platform the same NotFound.
+     if (::access(prepared.executable.c_str(), X_OK) == -1)
+         return std::unexpected(LaunchError::NotFound);
+ 
+     // Parked at or above the first descriptor the child does not inherit, so that the child's dup2() onto 3,
+     // 4, … overwrites none of the descriptors still to be moved.
+     auto const childEnd = FirstChildDescriptor + static_cast<int>(spec.inherited.size());
+     for (auto const descriptor: spec.inherited)
+     {
+         auto const parked = ::fcntl(descriptor, F_DUPFD_CLOEXEC, childEnd);
+         if (parked == -1)
+             return std::unexpected(launchErrorOf(errno));
+         prepared.parked.emplace_back(parked);
+     }
++    if (spec.standardError)
++    {
++        prepared.standardError = UniqueFd { ::fcntl(*spec.standardError, F_DUPFD_CLOEXEC, childEnd) };
++        if (prepared.standardError.get() == -1)
++            return std::unexpected(launchErrorOf(errno));
++    }
+     prepared.nullDevice = UniqueFd { ::open("/dev/null", O_RDWR | O_CLOEXEC) };
+     if (prepared.nullDevice.get() == -1)
+         return std::unexpected(launchErrorOf(errno));
+ 
+     auto childHandles = std::vector<transport::NativeHandle> {};
+     for (auto const index: std::views::iota(FirstChildDescriptor, childEnd))
+         childHandles.push_back(index);
+     prepared.arguments.push_back(prepared.executable);
+     if (spec.arguments)
+         std::ranges::move(spec.arguments(childHandles), std::back_inserter(prepared.arguments));
+diff --git a/src/vtextension/wasm/remote/process/PosixLaunch.hpp b/src/vtextension/wasm/remote/process/PosixLaunch.hpp
+index 1a516ddda..285511d04 100644
+--- a/src/vtextension/wasm/remote/process/PosixLaunch.hpp
++++ b/src/vtextension/wasm/remote/process/PosixLaunch.hpp
+@@ -91,20 +91,22 @@ using SpawnAttributes = SpawnObject<posix_spawnattr_t, &::posix_spawnattr_init,
+ 
+ /// A launch prepared for the system call that spawns it.
+ struct PreparedLaunch
+ {
+     std::string executable;               ///< The program's path.
+     std::vector<std::string> arguments;   ///< argv, the program's path first.
+     std::vector<std::string> environment; ///< envp, each `NAME=value`.
+     std::vector<UniqueFd> parked; ///< The inherited descriptors' close-on-exec copies, all at or above
+                                   ///< childEnd(): dup2() onto 3, 4, … cannot overwrite one of them.
+     UniqueFd nullDevice;          ///< /dev/null, read-write and close-on-exec: stdin and stdout.
++    /// The stderr the spec names, parked as the inherited ones are; -1 to keep this process's own.
++    UniqueFd standardError;
+ 
+     /// @return The first descriptor beyond those the child inherits: what it closes from.
+     [[nodiscard]] int childEnd() const noexcept
+     {
+         return FirstChildDescriptor + static_cast<int>(parked.size());
+     }
+ 
+     /// @return argv for exec: pointers into arguments, null-terminated. Valid while this is unchanged.
+     [[nodiscard]] std::vector<char*> argv();
+ 
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp b/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
+index c3a775ca5..0a3df0664 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
+@@ -87,21 +87,22 @@ std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::conn
+         if (!lane)
+             return std::unexpected(ExtensionError::HostUnavailable);
+         lanes.push_back(*std::move(lane));
+     }
+ 
+     // The child sees them in this order (HelperArguments): control, the lanes, the page, the wake signal.
+     auto spec = LaunchSpec { .executable = _config.helper,
+                              .inherited = {},
+                              .arguments = {},
+                              .environment = _config.environment,
+-                             .caps = _config.caps };
++                             .caps = _config.caps,
++                             .standardError = _config.standardError };
+     spec.inherited.push_back(control->helper.nativeHandle());
+     for (auto const& lane: lanes)
+         spec.inherited.push_back(lane.helper.nativeHandle());
+     spec.inherited.push_back(page->nativeHandle());
+     spec.inherited.push_back(wake->helper.nativeHandle());
+     spec.arguments = [extra = _config.extraArguments,
+                       dataBytes = _config.caps.dataBytes](std::span<NativeHandle const> handles) {
+         auto arguments = transport::HelperArguments { .control = handles[0],
+                                                       .lanes = {},
+                                                       .controlPage = handles[1 + MaxLaneChannels],
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp b/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
+index 898950381..eb9f45ebf 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
+@@ -1,40 +1,43 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// The connector that starts each extension host as a process of its own, through the supervisor: the
+ /// production IHostConnector.
+ 
+ #include <expected>
+ #include <filesystem>
+ #include <memory>
++#include <optional>
+ #include <string>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ /// How each host process is started.
+ struct ProcessHostConfig
+ {
+     std::filesystem::path helper; ///< The extension host executable; an absolute path.
+     /// Its whole environment: by default what any host needs (defaultHelperEnvironment()).
+     std::vector<std::pair<std::string, std::string>> environment = defaultHelperEnvironment();
+     std::vector<std::string> extraArguments; ///< Appended after the handle arguments; for test helpers.
+     ResourceCaps caps {};                    ///< The caps it runs under.
++    /// Where its stderr goes: nothing for this process's own (LaunchSpec::standardError).
++    std::optional<transport::NativeHandle> standardError {};
+ };
+ 
+ /// Starts each host as a process the supervisor launches and owns, connected over inherited channels, an
+ /// interrupt page and a wake signal.
+ class ProcessHostConnector final: public remote::IHostConnector
+ {
+   public:
+     /// @param supervisor What launches and supervises the processes.
+     /// @param config How each one is started.
+     ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor, ProcessHostConfig config);
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+index d028fa354..40ae55195 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+@@ -77,27 +77,33 @@ struct ResourceCaps
+ using Waitable = void*;
+ #else
+ /// What a process's exit is waited on by: a pidfd (Linux), a process descriptor (FreeBSD), the pid (macOS,
+ /// for EVFILT_PROC).
+ using Waitable = int;
+ #endif
+ 
+ /// What to start.
+ struct LaunchSpec
+ {
+-    std::filesystem::path executable;               ///< The program; an absolute path.
+-    std::vector<transport::NativeHandle> inherited; ///< What the child inherits; it sees them in this order.
++    std::filesystem::path executable {}; ///< The program; an absolute path.
++    std::vector<transport::NativeHandle>
++        inherited {}; ///< What the child inherits; it sees them in this order.
+     /// The command line after the program's name, given the values the inherited handles have in the child:
+     /// on POSIX 3, 4, …; on Windows the duplicates' values.
+-    std::function<std::vector<std::string>(std::span<transport::NativeHandle const> childHandles)> arguments;
+-    std::vector<std::pair<std::string, std::string>> environment; ///< The child's whole environment.
+-    ResourceCaps caps {};                                         ///< Its caps.
++    std::function<std::vector<std::string>(std::span<transport::NativeHandle const> childHandles)>
++        arguments {};
++    std::vector<std::pair<std::string, std::string>> environment {}; ///< The child's whole environment.
++    ResourceCaps caps {};                                            ///< Its caps.
++    /// Where the child's stderr goes: nothing for this process's own, as Contour starts its helpers. A test
++    /// names a copy of its own stderr taken before anything captured it, so that what a helper reports stays
++    /// visible however the test redirects its own.
++    std::optional<transport::NativeHandle> standardError {};
+ };
+ 
+ /// One started process. Non-copyable, non-movable; used by one thread at a time (the supervisor's).
+ class IProcessHandle
+ {
+   public:
+     IProcessHandle() = default;
+     IProcessHandle(IProcessHandle const&) = delete;
+     IProcessHandle(IProcessHandle&&) = delete;
+     IProcessHandle& operator=(IProcessHandle const&) = delete;
+diff --git a/src/vtextension/wasm/remote/process/Process_freebsd.cpp b/src/vtextension/wasm/remote/process/Process_freebsd.cpp
+index 49ae509f9..b9f4bad32 100644
+--- a/src/vtextension/wasm/remote/process/Process_freebsd.cpp
++++ b/src/vtextension/wasm/remote/process/Process_freebsd.cpp
+@@ -100,21 +100,23 @@ namespace
+         struct sigaction byDefault {};
+         byDefault.sa_handler = SIG_DFL;
+         for (auto const signal: std::views::iota(1, NSIG))
+             if (signal != SIGKILL && signal != SIGSTOP)
+                 ::sigaction(signal, &byDefault, nullptr);
+         auto empty = sigset_t {};
+         sigemptyset(&empty);
+         ::sigprocmask(SIG_SETMASK, &empty, nullptr);
+ 
+         if (!inheritAs(prepared.nullDevice.get(), STDIN_FILENO)
+-            || !inheritAs(prepared.nullDevice.get(), STDOUT_FILENO))
++            || !inheritAs(prepared.nullDevice.get(), STDOUT_FILENO)
++            || (prepared.standardError.get() != -1
++                && !inheritAs(prepared.standardError.get(), STDERR_FILENO)))
+             ::_exit(ExecFailed);
+         auto child = posix::FirstChildDescriptor;
+         for (auto const& parked: prepared.parked)
+             if (!inheritAs(parked.get(), child++))
+                 ::_exit(ExecFailed);
+         ::closefrom(prepared.childEnd());
+         if (::chdir("/") == -1)
+             ::_exit(ExecFailed);
+         ::execve(prepared.executable.c_str(), argv, envp);
+         ::_exit(ExecFailed);
+diff --git a/src/vtextension/wasm/remote/process/Process_linux.cpp b/src/vtextension/wasm/remote/process/Process_linux.cpp
+index ec85bd56b..eda9ff620 100644
+--- a/src/vtextension/wasm/remote/process/Process_linux.cpp
++++ b/src/vtextension/wasm/remote/process/Process_linux.cpp
+@@ -97,20 +97,23 @@ namespace
+         {
+             auto prepared = posix::prepareLaunch(spec);
+             if (!prepared)
+                 return std::unexpected(prepared.error());
+ 
+             auto actions = posix::FileActions {};
+             actions.check(
+                 ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDIN_FILENO));
+             actions.check(
+                 ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDOUT_FILENO));
++            if (prepared->standardError.get() != -1)
++                actions.check(::posix_spawn_file_actions_adddup2(
++                    actions.get(), prepared->standardError.get(), STDERR_FILENO));
+             auto child = posix::FirstChildDescriptor;
+             for (auto const& parked: prepared->parked)
+                 actions.check(::posix_spawn_file_actions_adddup2(actions.get(), parked.get(), child++));
+             actions.check(::posix_spawn_file_actions_addclosefrom_np(actions.get(), prepared->childEnd()));
+             actions.check(::posix_spawn_file_actions_addchdir_np(actions.get(), "/"));
+ 
+             auto attributes = posix::SpawnAttributes {};
+             auto defaults = sigset_t {};
+             auto mask = sigset_t {};
+             ::sigfillset(&defaults);
+diff --git a/src/vtextension/wasm/remote/process/Process_macos.cpp b/src/vtextension/wasm/remote/process/Process_macos.cpp
+index 1bbcca1a8..3f547337c 100644
+--- a/src/vtextension/wasm/remote/process/Process_macos.cpp
++++ b/src/vtextension/wasm/remote/process/Process_macos.cpp
+@@ -218,21 +218,25 @@ namespace
+         {
+             auto prepared = posix::prepareLaunch(spec);
+             if (!prepared)
+                 return std::unexpected(prepared.error());
+ 
+             auto actions = posix::FileActions {};
+             actions.check(
+                 ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDIN_FILENO));
+             actions.check(
+                 ::posix_spawn_file_actions_adddup2(actions.get(), prepared->nullDevice.get(), STDOUT_FILENO));
+-            actions.check(::posix_spawn_file_actions_addinherit_np(actions.get(), STDERR_FILENO));
++            if (prepared->standardError.get() != -1)
++                actions.check(::posix_spawn_file_actions_adddup2(
++                    actions.get(), prepared->standardError.get(), STDERR_FILENO));
++            else
++                actions.check(::posix_spawn_file_actions_addinherit_np(actions.get(), STDERR_FILENO));
+             auto child = posix::FirstChildDescriptor;
+             for (auto const& parked: prepared->parked)
+                 actions.check(::posix_spawn_file_actions_adddup2(actions.get(), parked.get(), child++));
+             actions.check(::posix_spawn_file_actions_addchdir_np(actions.get(), "/"));
+ 
+             auto attributes = posix::SpawnAttributes {};
+             auto defaults = sigset_t {};
+             auto mask = sigset_t {};
+             sigfillset(&defaults);
+             sigemptyset(&mask);
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.cpp b/src/vtextension/wasm/remote/process/Process_win32.cpp
+index c4cc2fa42..c0b621cba 100644
+--- a/src/vtextension/wasm/remote/process/Process_win32.cpp
++++ b/src/vtextension/wasm/remote/process/Process_win32.cpp
+@@ -387,23 +387,23 @@ namespace
+                                                           FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                           nullptr,
+                                                           OPEN_EXISTING,
+                                                           0,
+                                                           nullptr) };
+             if (nullDevice.get() == INVALID_HANDLE_VALUE)
+             {
+                 std::ignore = nullDevice.release();
+                 return std::unexpected(launchErrorOf(::GetLastError()));
+             }
+-            // This process's stderr, if it has one; the null device if not.
++            // The stderr the spec names, else this process's own, if it has one; the null device if not.
+             auto errorOutput = OwnedHandle {};
+-            if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE);
++            if (auto* const own = spec.standardError.value_or(::GetStdHandle(STD_ERROR_HANDLE));
+                 own != nullptr && own != INVALID_HANDLE_VALUE)
+                 errorOutput = copyOf(own);
+             auto* const childError = errorOutput ? errorOutput.get() : nullDevice.get();
+ 
+             auto handleList = childHandles;
+             handleList.push_back(nullDevice.get());
+             if (errorOutput)
+                 handleList.push_back(errorOutput.get());
+ 
+             auto job = makeJob(spec.caps.dataBytes);
+diff --git a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+index 5145301f4..a7feb6b07 100644
+--- a/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
++++ b/src/vtextension/wasm/remote/process/testing/HelperComposition.cpp
+@@ -3,37 +3,69 @@
+ 
+ #include <core/Clock.hpp>
+ #include <core/Environment.hpp>
+ 
+ #include <array>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <memory>
++#include <optional>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#else
++    #include <fcntl.h>
++    #include <unistd.h>
++#endif
++
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+ namespace
+ {
+     /// The sanitizer variables a helper is handed when this process has them (D39).
+     constexpr auto SanitizerVariables =
+         std::array<std::string_view, 4> { "ASAN_OPTIONS", "LSAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS" };
+ 
+-    /// How long past the teardown grace awaitEveryHelperReaped() waits: a killed helper's reap included.
++    /// How long past the teardown grace awaitLiveHelpersAtMost() waits: a killed helper's reap included.
+     constexpr auto ReapSlack = std::chrono::seconds { 3 };
++
++    /// @return A copy of this process's stderr, never closed; nothing if it has none.
++    [[nodiscard]] std::optional<transport::NativeHandle> copyOfStandardError() noexcept
++    {
++#ifdef _WIN32
++        auto* const own = ::GetStdHandle(STD_ERROR_HANDLE);
++        auto copy = HANDLE { nullptr };
++        if (own == nullptr || own == INVALID_HANDLE_VALUE
++            || !::DuplicateHandle(
++                ::GetCurrentProcess(), own, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
++            return std::nullopt;
++        return copy;
++#else
++        auto const copy = ::fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 3);
++        return copy == -1 ? std::nullopt : std::optional<transport::NativeHandle> { copy };
++#endif
++    }
++
++    /// This process's stderr as it was when the binary started -- before any case captured it -- which every
++    /// helper writes to (D39), so that what a helper reports reaches the test's log and no case's capture.
++    auto const originalStandardError = copyOfStandardError();
+ } // namespace
+ 
+ std::vector<std::pair<std::string, std::string>> helperEnvironment()
+ {
+     auto environment = defaultHelperEnvironment();
+     auto const live = core::LiveEnvironment {};
+     for (auto const name: SanitizerVariables)
+         if (auto value = live.get(name))
+             environment.emplace_back(std::string { name }, *std::move(value));
+     return environment;
+@@ -52,49 +84,56 @@ HelperComposition::HelperComposition():
+             std::abort();
+         }
+         return std::move(*started);
+     }() },
+     _kind { makeRemoteKindState() }
+ {
+ }
+ 
+ std::shared_ptr<ProcessHostConnector> HelperComposition::connector(HelperBackendConfig const& config) const
+ {
+-    return std::make_shared<ProcessHostConnector>(_supervisor->mailbox(),
+-                                                  ProcessHostConfig { .helper = config.helper,
+-                                                                      .environment = helperEnvironment(),
+-                                                                      .extraArguments = config.extraArguments,
+-                                                                      .caps = {} });
++    return std::make_shared<ProcessHostConnector>(
++        _supervisor->mailbox(),
++        ProcessHostConfig { .helper = config.helper,
++                            .environment = helperEnvironment(),
++                            .extraArguments = config.extraArguments,
++                            .caps = {},
++                            .standardError = originalStandardError });
+ }
+ 
+ std::unique_ptr<IWasmBackend> HelperComposition::backend(HelperBackendConfig const& config) const
+ {
+     return makeRemoteBackend(_kind,
+                              BackendConfig { .helper = config.helper,
+                                              .timeouts = config.timeouts,
+                                              .connector = connector(config),
+                                              .lockdown = config.lockdown });
+ }
+ 
+ std::size_t HelperComposition::killsFor(KillReason reason) const
+ {
+     // A kill's onDeath runs before its batch's counters are published: sync() first.
+     _supervisor->sync();
+     return _supervisor->counters().kills.at(std::to_underlying(reason));
+ }
+ 
+ bool HelperComposition::awaitEveryHelperReaped() const
++{
++    return awaitLiveHelpersAtMost(0);
++}
++
++bool HelperComposition::awaitLiveHelpersAtMost(std::size_t count) const
+ {
+     using namespace std::chrono_literals;
+     auto const deadline = std::chrono::steady_clock::now() + HelperTeardownGrace + ReapSlack;
+-    while (_supervisor->liveProcesses() != 0 && std::chrono::steady_clock::now() < deadline)
+-        std::this_thread::sleep_for(10ms);
+-    return _supervisor->liveProcesses() == 0;
++    while (_supervisor->liveProcesses() > count && std::chrono::steady_clock::now() < deadline)
++        std::this_thread::sleep_for(1ms);
++    return _supervisor->liveProcesses() <= count;
+ }
+ 
+ HelperComposition& binaryComposition()
+ {
+     static auto composition = HelperComposition {};
+     return composition;
+ }
+ 
+ } // namespace vtextension::wasm::remote::process::testing
+diff --git a/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp b/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp
+index 6e4cd81d1..2c535aab9 100644
+--- a/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp
++++ b/src/vtextension/wasm/remote/process/testing/HelperComposition.hpp
+@@ -65,20 +65,24 @@ class HelperComposition
+ 
+     /// @return How many kills the supervisor sent for @p reason so far, as of everything it was told and
+     ///         everything that fell due by now.
+     [[nodiscard]] std::size_t killsFor(KillReason reason) const;
+ 
+     /// Waits until every helper was reaped -- those let go exit on their own -- or the teardown grace and
+     /// some passed.
+     /// @return Whether none is left.
+     [[nodiscard]] bool awaitEveryHelperReaped() const;
+ 
++    /// Waits until at most @p count helpers live, or the teardown grace and some passed.
++    /// @return Whether at most @p count are left.
++    [[nodiscard]] bool awaitLiveHelpersAtMost(std::size_t count) const;
++
+   private:
+     std::shared_ptr<RecordingLauncher> _recording;
+     std::unique_ptr<ExtensionHostSupervisor> _supervisor;
+     std::shared_ptr<RemoteKindState> _kind;
+ };
+ 
+ /// @return The composition the whole test binary shares, as a hosting process has one supervisor.
+ [[nodiscard]] HelperComposition& binaryComposition();
+ 
+ } // namespace vtextension::wasm::remote::process::testing
+diff --git a/src/vtextension/wasm/remote/testing/ProcessDefaultBackend.cpp b/src/vtextension/wasm/remote/testing/ProcessDefaultBackend.cpp
+index 59f88e45b..4a54c819a 100644
+--- a/src/vtextension/wasm/remote/testing/ProcessDefaultBackend.cpp
++++ b/src/vtextension/wasm/remote/testing/ProcessDefaultBackend.cpp
+@@ -1,20 +1,27 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The default backend of the extension host process's test binary: the remote backend, over real helper
+ // processes the binary's one supervisor starts. Compiled into vtextension_helper_test only, so that the
+ // contract and the suites written against the default backend run their real guests through a process
+-// boundary, unchanged.
++// boundary, unchanged -- and, through a listener, fail when a helper of theirs ended uncleanly (D57).
++#include <catch2/catch_test_case_info.hpp>
++#include <catch2/reporters/catch_reporter_event_listener.hpp>
++#include <catch2/reporters/catch_reporter_registrars.hpp>
++
++#include <cstddef>
+ #include <cstdint>
++#include <format>
+ #include <memory>
+ #include <utility>
+ 
++#include <vtextension/testing/RunGate.hpp>
+ #include <vtextension/wasm/BackendConfig.hpp>
+ #include <vtextension/wasm/DefaultBackend.hpp>
+ #include <vtextension/wasm/remote/RemoteBackend.hpp>
+ #include <vtextension/wasm/remote/process/testing/HelperComposition.hpp>
+ #include <vtextension/wasm/testing/PreparedGeneration.hpp>
+ 
+ namespace vtextension::wasm
+ {
+ 
+ std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
+@@ -38,10 +45,53 @@ std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
+ 
+ namespace vtextension::wasm::testing
+ {
+ 
+ uint64_t preparedGeneration() noexcept
+ {
+     return remote::preparedGeneration();
+ }
+ 
+ } // namespace vtextension::wasm::testing
++
++namespace
++{
++
++/// D57 for every case of the binary: once a case ended, waits until the helpers it let go were reaped, and
++/// fails the run should any helper of the binary's composition have ended uncleanly meanwhile -- how a
++/// helper's sanitizer report fails the case that caused it. A case's helpers exit once its backends are
++/// gone, which is by the time it ended.
++class UncleanHelperExits final: public Catch::EventListenerBase
++{
++  public:
++    using Catch::EventListenerBase::EventListenerBase;
++
++    void testCaseStarting(Catch::TestCaseInfo const& /*info*/) override
++    {
++        auto const& supervisor =
++            vtextension::wasm::remote::process::testing::binaryComposition().supervisor();
++        _liveBefore = supervisor.liveProcesses();
++        _uncleanBefore = supervisor.counters().uncleanExits;
++    }
++
++    void testCaseEnded(Catch::TestCaseStats const& stats) override
++    {
++        auto const& composition = vtextension::wasm::remote::process::testing::binaryComposition();
++        if (!composition.awaitLiveHelpersAtMost(_liveBefore))
++            vtextension::testing::runGateFailures().push_back(
++                std::format("{}: an extension host it started outlived it", stats.testInfo->name));
++        auto const unclean = composition.supervisor().counters().uncleanExits - _uncleanBefore;
++        if (unclean != 0)
++            vtextension::testing::runGateFailures().push_back(
++                std::format("{}: {} extension host(s) ended uncleanly -- see their report above",
++                            stats.testInfo->name,
++                            unclean));
++    }
++
++  private:
++    std::size_t _liveBefore = 0;
++    std::size_t _uncleanBefore = 0;
++};
++
++} // namespace
++
++CATCH_REGISTER_LISTENER(UncleanHelperExits)

@@ -1,0 +1,2575 @@
+# Review package: 0e71d554d..HEAD
+
+## Commits
+3d57fdbef feat(vtextension): reserved shared objects whose pages Contour commits
+46f447648 fix(vtextension): accept a shared object rounded up to any page a parent may use
+1803ef305 fix(vtextension): name every failure in full, and prove a refused launch
+
+## Files changed
+ src/vtextension/wasm/host/HostBootstrap.cpp        |  20 +-
+ src/vtextension/wasm/host/HostBootstrap.hpp        |  26 ++-
+ src/vtextension/wasm/host/HostBootstrap_posix.cpp  |   7 +
+ src/vtextension/wasm/host/HostBootstrap_win32.cpp  |  10 +
+ src/vtextension/wasm/host/HostProcess.cpp          |   2 +-
+ src/vtextension/wasm/host/HostProcess.hpp          |   2 +-
+ src/vtextension/wasm/host/HostProcess_test.cpp     |  34 +++-
+ src/vtextension/wasm/remote/CMakeLists.txt         |  10 +-
+ src/vtextension/wasm/remote/HostRefusals.cpp       |  45 ++++-
+ src/vtextension/wasm/remote/HostRefusals.hpp       |  41 ++++-
+ src/vtextension/wasm/remote/HostRefusals_test.cpp  |  11 +-
+ .../wasm/remote/process/ProcessLauncher_test.cpp   |  28 +--
+ .../wasm/remote/process/testing/LaunchedHelper.cpp |  28 ++-
+ .../wasm/remote/process/testing/LaunchedHelper.hpp |  17 ++
+ src/vtextension/wasm/remote/transport/Channel.hpp  |   4 +
+ .../wasm/remote/transport/Channel_posix.cpp        |   5 +
+ .../wasm/remote/transport/Channel_win32.cpp        |   5 +
+ .../wasm/remote/transport/ControlPage.hpp          |  59 +++---
+ .../wasm/remote/transport/ControlPage_posix.cpp    | 202 ++++-----------------
+ .../wasm/remote/transport/ControlPage_test.cpp     |  42 +++--
+ .../wasm/remote/transport/ControlPage_win32.cpp    | 138 ++++----------
+ .../wasm/remote/transport/OwnedHandle.hpp          |  69 +++++++
+ .../wasm/remote/transport/SharedObject.cpp         |  50 +++++
+ .../wasm/remote/transport/SharedObject.hpp         | 140 ++++++++++++++
+ .../wasm/remote/transport/SharedObject_posix.cpp   | 189 +++++++++++++++++++
+ .../wasm/remote/transport/SharedObject_test.cpp    | 191 +++++++++++++++++++
+ .../wasm/remote/transport/SharedObject_win32.cpp   | 129 +++++++++++++
+ 27 files changed, 1114 insertions(+), 390 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/host/HostBootstrap.cpp b/src/vtextension/wasm/host/HostBootstrap.cpp
+index 2f926deab..a3f262c57 100644
+--- a/src/vtextension/wasm/host/HostBootstrap.cpp
++++ b/src/vtextension/wasm/host/HostBootstrap.cpp
+@@ -1,39 +1,37 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // What every system's hardening shares: the steps are its own (HostBootstrap_posix.cpp,
+ // HostBootstrap_win32.cpp), taking them is not.
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ 
+-#include <algorithm>
+ #include <expected>
++#include <format>
+ #include <optional>
+ #include <span>
+-#include <string_view>
++#include <string>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+-std::expected<void, HardeningStep> hardenProcess(std::span<HardeningRow const> steps) noexcept
++std::expected<void, HardeningFailure> hardenProcess(std::span<HardeningRow const> steps) noexcept
+ {
+-    auto failed = std::optional<HardeningStep> {};
++    auto failed = std::optional<HardeningFailure> {};
+     for (auto const& row: steps)
+-        if (!row.apply() && !failed)
+-            failed = row.step;
++        if (auto const applied = row.apply(); !applied && !failed)
++            failed = HardeningFailure { .step = row.step, .text = row.text, .code = applied.error() };
+     if (failed)
+         return std::unexpected(*failed);
+     return {};
+ }
+ 
+-std::expected<void, HardeningStep> hardenProcess() noexcept
++std::expected<void, HardeningFailure> hardenProcess() noexcept
+ {
+     return hardenProcess(hardeningSteps());
+ }
+ 
+-std::string_view hardeningStepText(HardeningStep step) noexcept
++std::string hardeningFailureText(HardeningFailure const& failure)
+ {
+-    auto const steps = hardeningSteps();
+-    auto const row = std::ranges::find(steps, step, &HardeningRow::step);
+-    return row != steps.end() ? row->text : std::string_view {};
++    return std::format("{} ({})", failure.text, systemErrorText(failure.code));
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostBootstrap.hpp b/src/vtextension/wasm/host/HostBootstrap.hpp
+index 728b5836d..27bc470f6 100644
+--- a/src/vtextension/wasm/host/HostBootstrap.hpp
++++ b/src/vtextension/wasm/host/HostBootstrap.hpp
+@@ -8,20 +8,21 @@
+ ///
+ /// Each is the helper's own doing rather than the launcher's: on Linux the parent-death signal is bound to
+ /// the thread that started the process, which only the child can name after the fact; what is set per thread
+ /// (no_new_privs, Landlock) reaches every thread only when set before the first is created, which the
+ /// hardening step is the place for; and RLIMIT_NPROC counts threads, so a cap applied before exec would keep
+ /// the helper from starting its own.
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <span>
++#include <string>
+ #include <string_view>
+ 
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// Why the host cannot bind itself to its parent.
+ enum class BootstrapError : uint8_t
+@@ -58,33 +59,46 @@ struct HardeningRow
+ };
+ 
+ /// @return The steps this system's hardening takes, in order: no core dump, which would stall a crash while
+ /// it
+ ///         is written and put an extension's memory on disk; on Linux not dumpable, on FreeBSD not traceable,
+ ///         so that another process of the same user can neither attach to it nor read its memory; on Windows
+ ///         no fault report with its dialog, where the job Contour started it in ends it on an unhandled
+ ///         exception.
+ [[nodiscard]] std::span<HardeningRow const> hardeningSteps() noexcept;
+ 
++/// A step of the hardening that failed, and how.
++struct HardeningFailure
++{
++    HardeningStep step;    ///< The step.
++    std::string_view text; ///< What failed, as the step's row says.
++    int code;              ///< The system's error code (errno on POSIX, an HRESULT on Windows).
++};
++
+ /// Takes every step of @p steps, even past one that failed, so that a host is as hard as the system lets it
+ /// be.
+ /// @param steps The steps, in order.
+-/// @return Nothing if every step was taken; the first that failed otherwise.
+-[[nodiscard]] std::expected<void, HardeningStep> hardenProcess(std::span<HardeningRow const> steps) noexcept;
++/// @return Nothing if every step was taken; the first that failed otherwise, as its row says.
++[[nodiscard]] std::expected<void, HardeningFailure> hardenProcess(
++    std::span<HardeningRow const> steps) noexcept;
+ 
+ /// Hardens this process by this system's steps (hardeningSteps()), before it starts any thread of its own.
+ /// @return Nothing if every step was taken; the first that failed otherwise.
+-[[nodiscard]] std::expected<void, HardeningStep> hardenProcess() noexcept;
++[[nodiscard]] std::expected<void, HardeningFailure> hardenProcess() noexcept;
++
++/// @param code An error code a hardening step returned: errno on POSIX, an HRESULT on Windows.
++/// @return What the system says of it, user-readable.
++[[nodiscard]] std::string systemErrorText(int code);
+ 
+-/// @param step A step of the hardening.
+-/// @return What failed when it fails, as this system's row says; empty if this system takes no such step.
+-[[nodiscard]] std::string_view hardeningStepText(HardeningStep step) noexcept;
++/// @param failure A step that failed.
++/// @return What failed and why, user-readable: its row's text, then the system's word on the error.
++[[nodiscard]] std::string hardeningFailureText(HardeningFailure const& failure);
+ 
+ /// Whether the host caps its own resources.
+ enum class CapPolicy : uint8_t
+ {
+     Skip,  ///< It caps nothing: a sanitizer's shadow memory and its stop-the-world threads exceed any cap.
+     Apply, ///< It caps them.
+ };
+ 
+ /// How this build caps the host: not at all in a sanitizer build.
+ inline constexpr CapPolicy BuildCapPolicy =
+diff --git a/src/vtextension/wasm/host/HostBootstrap_posix.cpp b/src/vtextension/wasm/host/HostBootstrap_posix.cpp
+index 64b28e4ce..2e83b0cf9 100644
+--- a/src/vtextension/wasm/host/HostBootstrap_posix.cpp
++++ b/src/vtextension/wasm/host/HostBootstrap_posix.cpp
+@@ -5,20 +5,22 @@
+ // ptrace(PT_DENY_ATTACH), so there it only checks its parent and refuses core dumps.
+ #include <sys/resource.h>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <csignal>
+ #include <cstdint>
+ #include <expected>
+ #include <span>
++#include <string>
++#include <system_error>
+ 
+ #include <unistd.h>
+ 
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ 
+ #ifdef __linux__
+     #include <sys/prctl.h>
+ #elifdef __FreeBSD__
+     #include <sys/procctl.h>
+ #endif
+@@ -129,20 +131,25 @@ std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexce
+             return std::unexpected(BootstrapError::ParentGone);
+         return {};
+     });
+ }
+ 
+ std::span<HardeningRow const> hardeningSteps() noexcept
+ {
+     return HardeningSteps;
+ }
+ 
++std::string systemErrorText(int code)
++{
++    return std::system_category().message(code);
++}
++
+ remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept
+ {
+     if (policy == CapPolicy::Skip)
+         return remote::proto::LockdownState::Unsandboxed;
+     auto const applied = std::ranges::all_of(Caps, [dataBytes](ResourceCap const& cap) {
+         if (cap.value == CappedValue::DataBytes && dataBytes == 0)
+             return true;
+         auto inherited = rlimit {};
+         if (::getrlimit(cap.resource, &inherited) != 0)
+             return false;
+diff --git a/src/vtextension/wasm/host/HostBootstrap_win32.cpp b/src/vtextension/wasm/host/HostBootstrap_win32.cpp
+index 2613f53fe..6f7b1ec0c 100644
+--- a/src/vtextension/wasm/host/HostBootstrap_win32.cpp
++++ b/src/vtextension/wasm/host/HostBootstrap_win32.cpp
+@@ -1,19 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // What the extension host does to itself on Windows: it asks for no fault report. The kill-on-close job
+ // Contour starts it in ends it with its parent, caps its memory and its processes, and ends it on an
+ // unhandled exception rather than show a dialog.
+ #include <array>
+ #include <cstdint>
+ #include <expected>
++#include <format>
+ #include <span>
++#include <string>
++#include <system_error>
+ 
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ #include <werapi.h>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+@@ -37,17 +40,24 @@ namespace
+ std::expected<void, BootstrapError> bindToParent([[maybe_unused]] int64_t parentProcessId) noexcept
+ {
+     return {};
+ }
+ 
+ std::span<HardeningRow const> hardeningSteps() noexcept
+ {
+     return HardeningSteps;
+ }
+ 
++std::string systemErrorText(int code)
++{
++    // The system's message names an HRESULT it knows; the value itself names every one.
++    return std::format(
++        "{}, HRESULT 0x{:08X}", std::system_category().message(code), static_cast<uint32_t>(code));
++}
++
+ remote::proto::LockdownState capResources([[maybe_unused]] uint64_t dataBytes,
+                                           [[maybe_unused]] CapPolicy policy) noexcept
+ {
+     return remote::proto::LockdownState::Unsandboxed;
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostProcess.cpp b/src/vtextension/wasm/host/HostProcess.cpp
+index 93e37b86e..0023c290b 100644
+--- a/src/vtextension/wasm/host/HostProcess.cpp
++++ b/src/vtextension/wasm/host/HostProcess.cpp
+@@ -183,21 +183,21 @@ int runExtensionHost(std::span<std::string_view const> arguments,
+ {
+     auto const parsed = transport::parseHelperArguments(arguments);
+     if (!parsed)
+         return endWith(HostProcessExit::BadArguments);
+     // First, so that the host never outlives Contour, whatever happens next.
+     if (!confinement.bindToParent(parsed->parentProcessId))
+         return endWith(HostProcessExit::ParentGone);
+     // While the main thread is the only one: what is set per thread then reaches every thread started later.
+     auto const hardened = confinement.beforeThreads();
+     if (!hardened)
+-        tell(std::format("hardening failed: {}", hardeningStepText(hardened.error())));
++        tell(std::format("hardening failed: {}", hardeningFailureText(hardened.error())));
+     auto endpoints = adoptEndpoints(*parsed);
+     if (!endpoints)
+         return endWith(endpoints.error());
+     // Declared before the host, so that every object the host made of it goes first.
+     auto const engine = engines();
+     if (!engine)
+         return endWith(HostProcessExit::EngineUnavailable);
+     auto config = HostServerConfig {};
+     config.confine = [&confinement, hardened, dataBytes = parsed->dataBytes] {
+         auto const confined = confinement.confine(dataBytes);
+diff --git a/src/vtextension/wasm/host/HostProcess.hpp b/src/vtextension/wasm/host/HostProcess.hpp
+index fafe05134..38311cb83 100644
+--- a/src/vtextension/wasm/host/HostProcess.hpp
++++ b/src/vtextension/wasm/host/HostProcess.hpp
+@@ -102,21 +102,21 @@ class HostProcess
+ struct HostConfinement
+ {
+     /// Binds the process to the parent it is given, as bindToParent() does.
+     std::function<std::expected<void, BootstrapError>(int64_t parentProcessId)> bindToParent;
+     /// Hardens the process while its main thread is its only one, as hardenProcess() does: right after it
+     /// bound itself to its parent, before it adopts its endpoints, makes its engine or starts any thread.
+     /// What is set per thread and must reach every thread is set here.
+     /// @return Nothing if it hardened itself wholly; the first step that failed otherwise, which the host
+     /// tells
+     ///         of on stderr and which makes Hello state `Failed` whatever confine returns.
+-    std::function<std::expected<void, HardeningStep>()> beforeThreads;
++    std::function<std::expected<void, HardeningFailure>()> beforeThreads;
+     /// Caps its resources once its threads run, to the data bytes it is given, as capResources() does.
+     /// @return What Hello states, unless beforeThreads failed.
+     std::function<remote::proto::LockdownState(uint64_t dataBytes)> confine;
+ };
+ 
+ /// @return bindToParent(), hardenProcess(), and capResources() under BuildCapPolicy, which under `Skip` says
+ ///         so once on stderr.
+ [[nodiscard]] HostConfinement systemConfinement();
+ 
+ /// The executable's body: parse, bind to the parent, harden, adopt, make the engine, serve. Every exit but
+diff --git a/src/vtextension/wasm/host/HostProcess_test.cpp b/src/vtextension/wasm/host/HostProcess_test.cpp
+index 7188b2410..5393ea019 100644
+--- a/src/vtextension/wasm/host/HostProcess_test.cpp
++++ b/src/vtextension/wasm/host/HostProcess_test.cpp
+@@ -50,32 +50,34 @@
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::testing::toModule;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::host::BootstrapError;
+ using vtextension::wasm::host::CapPolicy;
+ using vtextension::wasm::host::capResources;
+ using vtextension::wasm::host::EngineFactory;
+ using vtextension::wasm::host::exitCodeOf;
++using vtextension::wasm::host::HardeningFailure;
++using vtextension::wasm::host::hardeningFailureText;
+ using vtextension::wasm::host::HardeningRow;
+ using vtextension::wasm::host::HardeningStep;
+ using vtextension::wasm::host::hardeningSteps;
+-using vtextension::wasm::host::hardeningStepText;
+ using vtextension::wasm::host::hardenProcess;
+ using vtextension::wasm::host::HostConfinement;
+ using vtextension::wasm::host::HostProcessExit;
+ using vtextension::wasm::host::hostProcessExitOf;
+ using vtextension::wasm::host::hostProcessExits;
+ using vtextension::wasm::host::IHostedEngine;
+ using vtextension::wasm::host::runExtensionHost;
+ using vtextension::wasm::host::ServerExit;
++using vtextension::wasm::host::systemErrorText;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ControlPage;
+ using vtextension::wasm::remote::transport::formatHelperArguments;
+ using vtextension::wasm::remote::transport::HelperArguments;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+ using vtextension::wasm::remote::transport::makeWakePair;
+ using vtextension::wasm::remote::transport::NativeHandle;
+ using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::remote::transport::StreamError;
+@@ -127,21 +129,21 @@ struct Confined
+     std::atomic<uint64_t> cappedTo { 0 };
+     std::atomic<int> confines { 0 };
+     std::atomic<int> hardenings { 0 };
+     std::atomic<int> steps { 0 };
+     std::atomic<int> hardenedAt { -1 };
+     std::atomic<int> engineMadeAt { -1 };
+     std::atomic<int> confinedAt { -1 };
+     std::atomic<std::size_t> threadsWhenHardened { 0 };
+     std::atomic<std::size_t> threadsWhenConfined { 0 };
+     /// What beforeThreads returns.
+-    std::expected<void, HardeningStep> hardening {};
++    std::expected<void, HardeningFailure> hardening {};
+ };
+ 
+ /// @return A confinement that touches nothing of this process: it binds to TheParent alone, and hardens and
+ ///         caps by recording that, and when, it did.
+ [[nodiscard]] HostConfinement testConfinement(std::shared_ptr<Confined> const& confined)
+ {
+     return HostConfinement {
+         .bindToParent = [confined](int64_t parent) -> std::expected<void, BootstrapError> {
+             confined->boundTo.store(parent);
+             if (parent != TheParent)
+@@ -424,21 +426,21 @@ TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
+     }
+     REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
+     CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+     CHECK(exitCodeOf(HostProcessExit::Served) == 0);
+ }
+ 
+ namespace
+ {
+ 
+ /// Runs a host whose hardening ends as @p hardening, and checks what Hello states and when it hardened.
+-void checkHardening(std::expected<void, HardeningStep> hardening, proto::LockdownState expected)
++void checkHardening(std::expected<void, HardeningFailure> hardening, proto::LockdownState expected)
+ {
+     auto parent = makeParentEnds();
+     auto confined = std::make_shared<Confined>();
+     confined->hardening = hardening;
+     auto const arguments = formatHelperArguments(parent.arguments);
+     auto task = std::packaged_task<int()> { [&] {
+         return runHost(arguments, recordingEngines(confined), testConfinement(confined));
+     } };
+     auto exitCode = task.get_future();
+     auto host = std::jthread { std::move(task) };
+@@ -476,23 +478,23 @@ std::atomic<int> thirdStepRuns { 0 };
+ } // namespace
+ 
+ TEST_CASE("HostProcess.hardensBeforeAnyThreadStarts", "[vtextension][host]")
+ {
+     checkHardening({}, proto::LockdownState::Unsandboxed);
+ }
+ 
+ TEST_CASE("HostProcess.failedHardeningSaysWhichStep", "[vtextension][host]")
+ {
+     // A hardening that failed is what Hello states, whatever the caps did; the host tells which step failed.
+-    auto const step = hardeningSteps().front().step;
+-    checkHardening(std::unexpected(step), proto::LockdownState::Failed);
+-    CHECK_FALSE(hardeningStepText(step).empty());
++    auto const& row = hardeningSteps().front();
++    checkHardening(std::unexpected(HardeningFailure { .step = row.step, .text = row.text, .code = 1 }),
++                   proto::LockdownState::Failed);
+ }
+ 
+ TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]")
+ {
+     firstStepRuns.store(0);
+     secondStepRuns.store(0);
+     thirdStepRuns.store(0);
+     auto const rows = std::array {
+         HardeningRow { .step = HardeningStep::CoreDumps,
+                        .text = "first",
+@@ -508,35 +510,47 @@ TEST_CASE("HostBootstrap.hardeningNamesTheFirstFailedStep", "[vtextension][host]
+                        } },
+         HardeningRow { .step = HardeningStep::Tracing,
+                        .text = "third",
+                        .apply = []() noexcept -> std::expected<void, int> {
+                            thirdStepRuns.fetch_add(1);
+                            return std::unexpected(2);
+                        } },
+     };
+     auto const hardened = hardenProcess(rows);
+     REQUIRE_FALSE(hardened.has_value());
+-    CHECK(hardened.error() == rows[1].step);
++    // Named by the row that ran, whether or not this system takes such a step, with the error it returned.
++    CHECK(hardened.error().step == rows[1].step);
++    CHECK(hardened.error().text == rows[1].text);
++    CHECK(hardened.error().code == 1);
+     // Every step ran, past the one that failed.
+     CHECK(firstStepRuns.load() == 1);
+     CHECK(secondStepRuns.load() == 1);
+     CHECK(thirdStepRuns.load() == 1);
+ }
+ 
+ TEST_CASE("HostBootstrap.everyStepSaysWhatFailed", "[vtextension][host]")
+ {
+     CHECK_FALSE(hardeningSteps().empty());
+     for (auto const& row: hardeningSteps())
+-    {
+         CHECK_FALSE(row.text.empty());
+-        CHECK(hardeningStepText(row.step) == row.text);
+-    }
++}
++
++TEST_CASE("HostBootstrap.failureSaysWhatTheSystemSaid", "[vtextension][host]")
++{
++    // The error code is read, not printed as a bare number: the line carries the system's word on it.
++    auto const failure = HardeningFailure { .step = HardeningStep::CoreDumps, .text = "first", .code = 1 };
++    auto const text = hardeningFailureText(failure);
++    INFO(text);
++    CHECK(text.starts_with("first ("));
++    CHECK(text.ends_with(")"));
++    CHECK(text.contains(systemErrorText(1)));
++    CHECK_FALSE(systemErrorText(1).empty());
+ }
+ 
+ TEST_CASE("HostProcess.badArgumentsExit", "[vtextension][host]")
+ {
+     auto engines = std::make_shared<std::atomic<int>>(0);
+     auto confined = std::make_shared<Confined>();
+     CHECK(runHost({ "--bogus=1" }, countingEngines(engines), testConfinement(confined)) == 70);
+     CHECK(engines->load() == 0);
+     CHECK(confined->boundTo.load() == 0);
+ }
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 52d1dd335..ffda7ab32 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -1,27 +1,29 @@
+ # vtextension_remote_wire: the protocol Contour speaks with its extension host process, and the channels it
+ # travels on. The codec (proto/) is pure bytes-in/PDUs-out and the transport (transport/) is the operating
+ # system's byte channels; neither links a WebAssembly engine or vtextension itself, so that both the parent and
+ # the helper process link them, and both are always built. On Windows the channel's owner-only pipe DACL
+ # needs advapi32.
+ 
+-# What both processes need of the operating system, one source per platform: the channel, the interrupt page and
+-# the wake signal.
++# What both processes need of the operating system, one source per platform: the channel, the shared memory
++# objects (the interrupt page and guest memory) and the wake signal.
+ set(_transport_sources
+     transport/Channel_posix.cpp
+     transport/ControlPage_posix.cpp
++    transport/SharedObject_posix.cpp
+     transport/WakeSignal_posix.cpp
+ )
+ if(WIN32)
+     set(_transport_sources
+         transport/Channel_win32.cpp
+         transport/ControlPage_win32.cpp
++        transport/SharedObject_win32.cpp
+         transport/WakeSignal_win32.cpp
+     )
+ endif()
+ 
+ # The codec's sources, compiled into the library and, with the fuzzer's flags, into the fuzz target below: one
+ # list, so that the fuzzer never decodes with a codec the library does not ship.
+ set(_codec_sources
+     proto/Codec.cpp
+     proto/Codec.hpp
+     proto/Pdu.hpp
+@@ -29,22 +31,25 @@ set(_codec_sources
+     proto/Wire.hpp
+ )
+ 
+ add_library(vtextension_remote_wire STATIC
+     ${_codec_sources}
+     ../BuildInstrumentation.hpp
+     transport/Channel.hpp
+     transport/ControlPage.hpp
+     transport/HelperArguments.cpp
+     transport/HelperArguments.hpp
++    transport/OwnedHandle.hpp
+     transport/PduStream.cpp
+     transport/PduStream.hpp
++    transport/SharedObject.cpp
++    transport/SharedObject.hpp
+     transport/WakeSignal.hpp
+     ${_transport_sources}
+ )
+ # The codec names the runtime vocabulary (WasmRuntime.hpp, ExtensionError.hpp), which is header-only and
+ # std-only: the include path is all it takes.
+ target_include_directories(vtextension_remote_wire PUBLIC
+     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+ )
+ 
+@@ -120,20 +125,21 @@ if(_process_source)
+             process/HostTimers_test.cpp
+             process/ProcessHostConnector_test.cpp
+             process/ProcessLauncher_test.cpp
+             process/testing/FakeProcessLauncher.cpp
+             process/testing/FakeProcessLauncher.hpp
+             process/testing/LaunchedHelper.cpp
+             process/testing/LaunchedHelper.hpp
+             process/testing/RecordingLauncher.hpp
+             transport/ControlPage_test.cpp
+             transport/HelperArguments_test.cpp
++            transport/SharedObject_test.cpp
+             transport/WakeSignal_test.cpp
+         )
+         target_link_libraries(vtextension_process_test PRIVATE
+             vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2 contour_test_trace)
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+         add_test(NAME vtextension_process_test COMMAND vtextension_process_test)
+         if(NOT WIN32)
+             # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+diff --git a/src/vtextension/wasm/remote/HostRefusals.cpp b/src/vtextension/wasm/remote/HostRefusals.cpp
+index c27ac4038..2c236ea24 100644
+--- a/src/vtextension/wasm/remote/HostRefusals.cpp
++++ b/src/vtextension/wasm/remote/HostRefusals.cpp
+@@ -1,19 +1,20 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+ 
+ #include <core/log/LogStore.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
+ #include <format>
++#include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ namespace
+@@ -42,33 +43,59 @@ namespace
+                                   "do not run." },
+         HandshakeRefusalRow { .refusal = HostRefusal::Unsandboxed,
+                               .text =
+                                   "The extension host runs without a sandbox on this system, which Contour "
+                                   "requires, and was refused. Extensions do not run." },
+         HandshakeRefusalRow {
+             .refusal = HostRefusal::MemoryMode,
+             .text = "The extension host shares memory where Contour copies it, and was refused: "
+                     "it is not the one installed with this Contour. Extensions do not run." },
+     };
+-    static_assert(std::to_underlying(HostRefusal::MemoryMode) < 32,
+-                  "a bit per reason in HostRefusalLog's word");
++    static_assert(std::to_underlying(LastHostRefusal) < 32, "a bit per reason in HostRefusalLog's word");
++
++    /// The line for a host that could not be started for a reason the launcher's table does not name.
++    constexpr auto UnnamedLaunchLine =
++        std::string_view { "The extension host cannot be started. Extensions do not run." };
++
++    /// @return Whether every reason the handshake refuses for has its row.
++    [[nodiscard]] consteval bool everyHandshakeRefusalHasARow() noexcept
++    {
++        for (auto const value: std::views::iota(0, std::to_underlying(LastHostRefusal) + 1))
++        {
++            auto const refusal = static_cast<HostRefusal>(value);
++            if (refusalSource(refusal) == RefusalSource::Handshake
++                && std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal)
++                       == HandshakeRefusals.end())
++                return false;
++        }
++        return true;
++    }
++    static_assert(everyHandshakeRefusalHasARow());
+ } // namespace
+ 
+ std::string refusalLine(HostRefusal refusal)
+ {
+-    for (auto const& row: process::launchErrors())
+-        if (row.refusal == refusal)
+-            return std::format(LaunchLine, row.text);
+-    auto const handshake = std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal);
+-    if (handshake == HandshakeRefusals.end())
+-        return {};
+-    return std::string { handshake->text };
++    switch (refusalSource(refusal))
++    {
++        case RefusalSource::Launch:
++            for (auto const& row: process::launchErrors())
++                if (row.refusal == refusal)
++                    return std::format(LaunchLine, row.text);
++            return std::string { UnnamedLaunchLine };
++        case RefusalSource::Handshake:
++            // Every such reason has its row: checked at compile time.
++            return std::string {
++                std::ranges::find(HandshakeRefusals, refusal, &HandshakeRefusalRow::refusal)->text
++            };
++        case RefusalSource::None: break;
++    }
++    return std::string { UnnamedLaunchLine };
+ }
+ 
+ HostRefusalLog::HostRefusalLog(Writer writer): _writer { std::move(writer) }
+ {
+ }
+ 
+ void HostRefusalLog::refused(HostRefusal refusal)
+ {
+     auto const bit = uint32_t { 1 } << std::to_underlying(refusal);
+     if ((_logged.fetch_or(bit) & bit) != 0)
+diff --git a/src/vtextension/wasm/remote/HostRefusals.hpp b/src/vtextension/wasm/remote/HostRefusals.hpp
+index 9b6104bc5..057e18fe7 100644
+--- a/src/vtextension/wasm/remote/HostRefusals.hpp
++++ b/src/vtextension/wasm/remote/HostRefusals.hpp
+@@ -4,40 +4,77 @@
+ /// @file
+ /// Why Contour runs no extension host, said once: a host it could not start, or one it refused at the
+ /// handshake. Each reason is logged the first time it comes up, never again for that backend -- a reason
+ /// stays as long as the installation does, and every later attempt would only repeat it.
+ 
+ #include <atomic>
+ #include <cstdint>
+ #include <functional>
+ #include <string>
+ #include <string_view>
++#include <utility>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ /// Why no extension host serves.
+ enum class HostRefusal : uint8_t
+ {
+     HelperNotFound,  ///< The host executable is missing, or cannot be executed.
+     OutOfResources,  ///< The system is out of memory, processes or handles.
+     Unsupported,     ///< The system lacks what starting a host takes.
+     LaunchRefused,   ///< The system refused to start it for another reason.
+     ProtocolVersion, ///< It speaks another protocol version than Contour.
+     LockdownFailed,  ///< It failed to confine itself.
+     Unsandboxed,     ///< It runs without a sandbox, which Contour requires.
+     MemoryMode,      ///< It shares memory, where Contour copies it.
+ };
+ 
++/// The last reason: what every table and loop over the reasons ends at. refusalSource()'s switch, which has
++/// no default, keeps it the last: a reason added after it fails to compile until this names it.
++inline constexpr auto LastHostRefusal = HostRefusal::MemoryMode;
++
++/// Where a reason's line comes from.
++enum class RefusalSource : uint8_t
++{
++    None,      ///< Nowhere: the value names no reason.
++    Launch,    ///< The launcher's table (launchErrors()): a host that could not be started.
++    Handshake, ///< The handshake: a host that started and was refused.
++};
++
++/// @param refusal A reason, or any value of its type.
++/// @return Where its line comes from; `None` if @p refusal names no reason.
++[[nodiscard]] constexpr RefusalSource refusalSource(HostRefusal refusal) noexcept
++{
++    switch (refusal)
++    {
++        case HostRefusal::HelperNotFound:
++        case HostRefusal::OutOfResources:
++        case HostRefusal::Unsupported:
++        case HostRefusal::LaunchRefused: return RefusalSource::Launch;
++        case HostRefusal::ProtocolVersion:
++        case HostRefusal::LockdownFailed:
++        case HostRefusal::Unsandboxed:
++        case HostRefusal::MemoryMode: return RefusalSource::Handshake;
++    }
++    return RefusalSource::None;
++}
++
++static_assert(refusalSource(LastHostRefusal) != RefusalSource::None);
++static_assert(refusalSource(static_cast<HostRefusal>(std::to_underlying(LastHostRefusal) + 1))
++                  == RefusalSource::None,
++              "LastHostRefusal must name the last reason");
++
+ /// @param refusal Why no extension host serves.
+-/// @return The line logged for it, user-readable, naming no engine. A host that could not be started says
+-///         what the launcher says of its failure (launchErrors()), in one sentence for every such reason.
++/// @return The line logged for it, user-readable, naming no engine, never empty. A host that could not be
++///         started says what the launcher says of its failure (launchErrors()), in one sentence for every
++///         such reason.
+ [[nodiscard]] std::string refusalLine(HostRefusal refusal);
+ 
+ /// Logs each reason the first time it comes up. Thread-safe; the reasons seen are kept wait-free.
+ class HostRefusalLog
+ {
+   public:
+     /// Writes one logged line.
+     using Writer = std::function<void(std::string_view line)>;
+ 
+     /// @param writer Where the lines go: errorLogWriter() for Contour's error log, a recorder in a test.
+diff --git a/src/vtextension/wasm/remote/HostRefusals_test.cpp b/src/vtextension/wasm/remote/HostRefusals_test.cpp
+index 4bb88ba51..d0becea08 100644
+--- a/src/vtextension/wasm/remote/HostRefusals_test.cpp
++++ b/src/vtextension/wasm/remote/HostRefusals_test.cpp
+@@ -1,33 +1,37 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // Why no extension host serves, said once per reason.
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <algorithm>
+ #include <cctype>
+ #include <cstddef>
+ #include <format>
+ #include <memory>
+ #include <mutex>
+ #include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ using vtextension::wasm::remote::HostRefusal;
+ using vtextension::wasm::remote::HostRefusalLog;
++using vtextension::wasm::remote::LastHostRefusal;
+ using vtextension::wasm::remote::refusalLine;
++using vtextension::wasm::remote::RefusalSource;
++using vtextension::wasm::remote::refusalSource;
+ using vtextension::wasm::remote::process::LaunchError;
+ using vtextension::wasm::remote::process::launchErrors;
+ using vtextension::wasm::remote::process::launchErrorText;
+ 
+ namespace
+ {
+ 
+ /// The lines a log wrote, from any thread.
+ struct Lines
+ {
+@@ -50,25 +54,30 @@ struct Lines
+     auto result = std::string { text };
+     for (auto& character: result)
+         character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+     return result;
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("HostRefusals.everyRefusalHasALine", "[vtextension]")
+ {
+-    for (auto const value: std::views::iota(0, std::to_underlying(HostRefusal::MemoryMode) + 1))
++    for (auto const value: std::views::iota(0, std::to_underlying(LastHostRefusal) + 1))
+     {
+         auto const line = refusalLine(static_cast<HostRefusal>(value));
+         INFO(line);
+         CHECK_FALSE(line.empty());
++        // A launch reason says what the launcher's own row says.
++        if (refusalSource(static_cast<HostRefusal>(value)) == RefusalSource::Launch)
++            CHECK(std::ranges::any_of(launchErrors(), [value](auto const& row) {
++                return row.refusal == static_cast<HostRefusal>(value);
++            }));
+         // Users read these: they name the role, never the engine.
+         for (auto const engine: { "wasm", "wamr", "wasmtime", "webassembly" })
+             CHECK_FALSE(lowered(line).contains(engine));
+     }
+ }
+ 
+ TEST_CASE("HostRefusals.launchLinesSayWhatTheLauncherSays", "[vtextension]")
+ {
+     for (auto const& row: launchErrors())
+     {
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 38f2e39cf..944c1e0e2 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -46,20 +46,21 @@
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <csignal>
+ 
+     #include <fcntl.h>
++    #include <poll.h>
+     #include <unistd.h>
+ #endif
+ 
+ using namespace vtextension::wasm::remote;
+ using process::ExitKind;
+ using process::ExitStatus;
+ using process::IProcessHandle;
+ using process::IProcessLauncher;
+ using process::LaunchError;
+ using process::LaunchSpec;
+@@ -383,34 +384,39 @@ TEST_CASE("ProcessLauncher.missingExecutableIsNotFound", "[vtextension]")
+                                    .arguments = [](auto) { return std::vector<std::string> {}; },
+                                    .environment = {},
+                                    .caps = {} };
+     CHECK(launcher->launch(spec) == std::unexpected(LaunchError::NotFound));
+ }
+ 
+ #ifdef __linux__
+ TEST_CASE("ProcessLauncher.unsupportedPidfdWaitsRefuseEveryLaunch", "[vtextension]")
+ {
+     auto const launcher = process::makeLinuxProcessLauncher(process::PidfdWaits::Unsupported);
+-    auto control = transport::makeChannelPair();
+-    REQUIRE(control.has_value());
+-    auto const spec = LaunchSpec { .executable = VTEXTENSION_PROBE_PATH,
+-                                   .inherited = { control->helper.nativeHandle() },
+-                                   .arguments = [](auto) { return std::vector<std::string> { "--report" }; },
+-                                   .environment = {},
+-                                   .caps = {} };
+-    CHECK(launcher->launch(spec) == std::unexpected(LaunchError::Unsupported));
+-    // Refused before anything started: once Contour lets go of the helper's end, no child holds it.
++    // Everything the probe needs to write its report, so that a child started anyway would write one.
++    auto prepared = process::testing::prepareHelperLaunch(process::testing::HelperLaunch {
++        .executable = VTEXTENSION_PROBE_PATH, .leading = { "--report" }, .dataBytes = ProbeDataBytes });
++    // Kept alive to the end, so that a child started anyway is neither killed nor reaped before it reported.
++    auto launched = launcher->launch(prepared.spec);
++    CHECK(launched == std::unexpected(LaunchError::Unsupported));
++    // Refused before anything started: once Contour lets go of the helper's ends, no child holds them, and
++    // the control channel ends at once -- rather than carry a report, or stay open past the patience.
++    auto control = std::move(prepared.control.parent);
+     {
+-        auto const dropped = std::move(control->helper);
++        auto const dropped = std::move(prepared);
+     }
++    auto readable = pollfd { .fd = control.nativeHandle(), .events = POLLIN, .revents = 0 };
++    auto const patience = std::chrono::duration_cast<std::chrono::milliseconds>(ChildPatience);
++    REQUIRE(::poll(&readable, 1, static_cast<int>(patience.count())) == 1);
+     auto buffer = std::array<uint8_t, 16> {};
+-    CHECK(control->parent.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
++    CHECK(control.receiveSome(buffer) == std::unexpected(ChannelError::Closed));
++    if (launched)
++        CHECK(endAndReap(*launcher, **launched));
+ }
+ 
+ TEST_CASE("ProcessLauncher.thisKernelWaitsOnPidfds", "[vtextension]")
+ {
+     // Every kernel this is tested on is 5.4 or later.
+     CHECK(process::probePidfdWaits() == process::PidfdWaits::Supported);
+ }
+ #endif
+ 
+ #ifdef _WIN32
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+index 3941017c0..cece32604 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+@@ -92,22 +92,21 @@ LaunchedHelper::~LaunchedHelper()
+     if (process)
+         std::ignore = endAndReap(*launcher, *process);
+ }
+ 
+ void LaunchedHelper::closeControl() noexcept
+ {
+     control.shutdown();
+     auto const closed = std::move(control);
+ }
+ 
+-std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcessLauncher> launcher,
+-                                                        HelperLaunch launch)
++PreparedHelperLaunch prepareHelperLaunch(HelperLaunch launch)
+ {
+     auto control = transport::makeChannelPair();
+     REQUIRE(control.has_value());
+     auto lanes = std::vector<transport::ChannelPair> {};
+     for ([[maybe_unused]] auto const i: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
+     {
+         auto lane = transport::makeChannelPair();
+         REQUIRE(lane.has_value());
+         lanes.push_back(*std::move(lane));
+     }
+@@ -141,25 +140,40 @@ std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcess
+                                                       .wake = handles[2 + MaxLaneChannels],
+                                                       .parentProcessId = parentProcessId,
+                                                       .dataBytes = dataBytes };
+         std::ranges::copy(handles.subspan(1, MaxLaneChannels), arguments.lanes.begin());
+         auto result = leading;
+         std::ranges::copy(transport::formatHelperArguments(arguments), std::back_inserter(result));
+         if (trailing)
+             std::ranges::copy(trailing(handles), std::back_inserter(result));
+         return result;
+     };
++    return PreparedHelperLaunch { .spec = std::move(spec),
++                                  .control = *std::move(control),
++                                  .lanes = std::move(lanes),
++                                  .page = *std::move(page),
++                                  .wake = *std::move(wake),
++                                  .childHandles = std::move(childHandles) };
++}
+ 
+-    auto process = launcher->launch(spec);
++std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcessLauncher> launcher,
++                                                        HelperLaunch launch)
++{
++    auto prepared = prepareHelperLaunch(std::move(launch));
++    auto process = launcher->launch(prepared.spec);
+     if (!process)
+         return std::unexpected(process.error());
+     // The helper's ends are the child's alone now: the parent's copies close here, as a connector's do when
+     // its spec goes out of scope.
+     auto parentLanes = std::vector<Channel> {};
+-    for (auto& lane: lanes)
++    for (auto& lane: prepared.lanes)
+         parentLanes.push_back(std::move(lane.parent));
+-    return LaunchedHelper { std::move(launcher),    *std::move(process), std::move(control->parent),
+-                            std::move(parentLanes), *std::move(page),    std::move(wake->parent),
+-                            std::move(childHandles) };
++    return LaunchedHelper { std::move(launcher),
++                            *std::move(process),
++                            std::move(prepared.control.parent),
++                            std::move(parentLanes),
++                            std::move(prepared.page),
++                            std::move(prepared.wake.parent),
++                            std::move(prepared.childHandles) };
+ }
+ 
+ } // namespace vtextension::wasm::remote::process::testing
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+index 77bc1c7f4..7120d76ca 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+@@ -82,16 +82,33 @@ class LaunchedHelper
+     std::vector<transport::Channel> lanes;
+     transport::ControlPage page;
+     transport::WakeSender wake;
+     std::shared_ptr<std::vector<transport::NativeHandle>>
+         childHandles; ///< What its arguments were made from.
+ 
+     /// Ends the child the way Contour lets a helper end: its control channel reaches end of stream.
+     void closeControl() noexcept;
+ };
+ 
++/// Everything a launch of a helper is made of, before it starts: the spec, and both ends of what the spec
++/// hands the child. The helper's ends are Contour's to close once the launch is done.
++struct PreparedHelperLaunch
++{
++    LaunchSpec spec;                           ///< What the launcher is given.
++    transport::ChannelPair control;            ///< The control channel.
++    std::vector<transport::ChannelPair> lanes; ///< The lane channels.
++    transport::ControlPage page;               ///< The interrupt page.
++    transport::WakePair wake;                  ///< The wake signal.
++    std::shared_ptr<std::vector<transport::NativeHandle>>
++        childHandles; ///< What its arguments were made from.
++};
++
++/// Makes fresh channels, page and wake for @p launch, and the spec that hands them over.
++/// @return The spec and the ends.
++[[nodiscard]] PreparedHelperLaunch prepareHelperLaunch(HelperLaunch launch);
++
+ /// Starts @p launch with fresh channels, page and wake.
+ /// @return The child; why it could not be started otherwise.
+ [[nodiscard]] std::expected<LaunchedHelper, LaunchError> launchHelper(
+     std::shared_ptr<IProcessLauncher> launcher, HelperLaunch launch);
+ 
+ } // namespace vtextension::wasm::remote::process::testing
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index a46a2b020..38afff47a 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -25,20 +25,24 @@ enum class ChannelError : uint8_t
+ };
+ 
+ #ifdef _WIN32
+ /// The operating system's name for one end: a pipe HANDLE.
+ using NativeHandle = void*;
+ #else
+ /// The operating system's name for one end: a socket descriptor.
+ using NativeHandle = int;
+ #endif
+ 
++/// Closes a handle this process owns: close() on POSIX, CloseHandle() on Windows.
++/// @param handle The handle; never used again.
++void closeNativeHandle(NativeHandle handle) noexcept;
++
+ /// One end of a connected byte channel. Move-only; the end is closed when its owner is destroyed. A
+ /// moved-from channel may only be shut down, assigned to or destroyed.
+ class Channel
+ {
+   public:
+     /// The platform's state of one end; defined by Channel_posix.cpp or Channel_win32.cpp.
+     struct Native;
+ 
+     /// Takes ownership of an open end.
+     /// @param native The end. Never null.
+diff --git a/src/vtextension/wasm/remote/transport/Channel_posix.cpp b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+index 223898223..813dc37de 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+@@ -181,11 +181,16 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
+     auto parent = std::make_unique<Channel::Native>(descriptors[0]);
+     auto helper = std::make_unique<Channel::Native>(descriptors[1]);
+     return configureEnd(parent->descriptor, PairCloseOnExec)
+         .and_then([&] { return configureEnd(helper->descriptor, PairCloseOnExec); })
+         .transform([&] {
+             return ChannelPair { .parent = Channel { std::move(parent) },
+                                  .helper = Channel { std::move(helper) } };
+         });
+ }
+ 
++void closeNativeHandle(NativeHandle handle) noexcept
++{
++    ::close(handle);
++}
++
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/Channel_win32.cpp b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+index 63b928d64..14eb0ea99 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+@@ -397,11 +397,16 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
+             if (!::GetOverlappedResult(server.get(), &overlapped, &connected, TRUE))
+                 return std::unexpected(ChannelError::Io);
+         }
+         else if (error != ERROR_PIPE_CONNECTED)
+             return std::unexpected(ChannelError::Io);
+     }
+     return ChannelPair { .parent = Channel { std::make_unique<Channel::Native>(server.release()) },
+                          .helper = Channel { std::make_unique<Channel::Native>(client.release()) } };
+ }
+ 
++void closeNativeHandle(NativeHandle handle) noexcept
++{
++    ::CloseHandle(handle);
++}
++
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage.hpp b/src/vtextension/wasm/remote/transport/ControlPage.hpp
+index 0f28cf6e4..3c6bd6e1b 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage.hpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage.hpp
+@@ -6,116 +6,105 @@
+ /// interrupt slot. Contour raises an instance's slot to interrupt its running call; the helper, woken by the
+ /// wake signal (WakeSignal.hpp), scans the page for raised slots.
+ ///
+ /// Contour only ever stores to the page, never reads it back, so a helper that scribbles over it can mislead
+ /// only itself.
+ 
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
++#include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ /// The interrupt page's size: one page on every platform this runs on.
+ inline constexpr std::size_t ControlPageBytes = 4096;
+ 
+ /// How many interrupt slots the page holds: a 32-bit flag each.
+ inline constexpr uint32_t InterruptSlotCount = ControlPageBytes / sizeof(std::atomic<uint32_t>);
+ 
+-/// Whether a shared memory object of @p objectBytes, as fstat() reports it, is the interrupt page: at least
+-/// ControlPageBytes, and at most that rounded up to the system's page. XNU rounds a POSIX shared memory
+-/// object's size up to the page at ftruncate(), and fstat() reports the rounded size -- 16 KiB on Apple
+-/// silicon -- while a memfd and a Windows section keep the size they were given. Whatever lies beyond
+-/// ControlPageBytes is never mapped.
+-/// @param objectBytes The object's size.
+-/// @param pageBytes The system's page size, a power of two.
+-/// @return Whether it is the page's size.
+-[[nodiscard]] constexpr bool isControlPageSize(uint64_t objectBytes, uint64_t pageBytes) noexcept
+-{
+-    auto const rounded = (uint64_t { ControlPageBytes } + pageBytes - 1) / pageBytes * pageBytes;
+-    return objectBytes >= ControlPageBytes && objectBytes <= rounded;
+-}
+-
+-/// Why a shared memory object could not be made or mapped.
+-enum class SharedObjectError : uint8_t
+-{
+-    Unsupported, ///< The system has no shared memory object of the kind needed.
+-    Io,          ///< The system refused.
+-    WrongSize,   ///< The object adopted is not the size expected.
+-};
+-
+ /// One page both processes map: a flag per interrupt slot. Move-only; unmapped and closed when destroyed. A
+ /// moved-from page may only be assigned to or destroyed.
+ class ControlPage
+ {
+   public:
+     /// Creates the page, all slots clear: Contour's side. Not inherited by a child unless handed over.
+     /// @return The page; `Unsupported` or `Io` if the system refused.
+     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> create();
+ 
+     /// Maps a page this process inherited, read-only: the helper's side, which only reads the flags. Takes
+     /// ownership of @p handle, made close-on-exec (not inheritable) again.
+     /// @param handle The page's handle.
+-    /// @return The page; `WrongSize` if the object is not of the page's size (isControlPageSize()), `Io` if
+-    /// it cannot be
+-    ///         mapped. On failure @p handle stays the caller's.
++    /// @return The page; `WrongSize` if the object is not of the page's size (fitsSharedObject()), `Io` if
++    ///         it cannot be mapped. On failure @p handle stays the caller's.
+     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> adopt(NativeHandle handle);
+ 
+     /// Maps this page a second time, read-only, on a handle of its own, as adopt() maps an inherited one:
+     /// the helper's side of a host that serves in this process.
+     /// @return The second mapping; `Io` if the handle could not be duplicated or the page mapped.
+     [[nodiscard]] std::expected<ControlPage, SharedObjectError> openHelperView() const;
+ 
+-    ControlPage(ControlPage&& other) noexcept;
+-    ControlPage& operator=(ControlPage&& other) noexcept;
++    ControlPage(ControlPage&& other) noexcept = default;
++    ControlPage& operator=(ControlPage&& other) noexcept = default;
+     ControlPage(ControlPage const&) = delete;
+     ControlPage& operator=(ControlPage const&) = delete;
+-    ~ControlPage();
++    ~ControlPage() = default;
+ 
+     /// Raises @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
+     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
+     void raise(uint32_t slot) noexcept;
+ 
+     /// Clears @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
+     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
+     void clear(uint32_t slot) noexcept;
+ 
+     /// @param slot The slot.
+     /// @return Whether @p slot is raised; never for one at or beyond InterruptSlotCount.
+     [[nodiscard]] bool isRaised(uint32_t slot) const noexcept;
+ 
+     /// @return The page's handle, still owned by the page: for handing it to a child process. On Windows it
+     ///         grants read access only, so that a well-behaved child cannot map the page writable; a hostile
+     ///         one can widen its own handle (an unnamed section's access is not checked), which grants it
+     ///         nothing, since this process never reads the page back.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+-    ControlPage(NativeHandle handle, uint32_t* flags) noexcept;
++    /// @param handle The page's handle, the one handed over.
++    /// @param mapping Its mapping, ControlPageBytes.
++    ControlPage(OwnedHandle handle, SharedMapping mapping) noexcept;
+ 
+     /// @return @p slot's flag.
+     [[nodiscard]] std::atomic_ref<uint32_t> flag(uint32_t slot) const noexcept;
+ 
+-    /// Unmaps and closes what this page holds, if anything.
+-    void release() noexcept;
+-
+-    NativeHandle _handle;
+-    uint32_t* _flags; ///< The mapping, InterruptSlotCount flags; null once moved from.
++    OwnedHandle _handle;
++    SharedMapping _mapping; ///< InterruptSlotCount flags; empty once moved from.
+ };
+ 
++inline ControlPage::ControlPage(OwnedHandle handle, SharedMapping mapping) noexcept:
++    _handle { std::move(handle) }, _mapping { std::move(mapping) }
++{
++}
++
++inline NativeHandle ControlPage::nativeHandle() const noexcept
++{
++    return _handle.get();
++}
++
+ inline std::atomic_ref<uint32_t> ControlPage::flag(uint32_t slot) const noexcept
+ {
+-    return std::atomic_ref<uint32_t> { _flags[slot] };
++    return std::atomic_ref<uint32_t> { reinterpret_cast<uint32_t*>(_mapping.bytes().data())[slot] };
+ }
+ 
+ inline void ControlPage::raise(uint32_t slot) noexcept
+ {
+     // Release: what the raiser wrote before it raised is seen by whoever sees the flag raised.
+     if (slot < InterruptSlotCount)
+         flag(slot).store(1, std::memory_order_release);
+ }
+ 
+ inline void ControlPage::clear(uint32_t slot) noexcept
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp b/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp
+index 372fef786..e2c5510a1 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp
+@@ -1,204 +1,64 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+-// The interrupt page on POSIX. Linux and FreeBSD: an anonymous memfd, sealed against shrinking and growing,
+-// so that neither process can make the other's mapping fault past the object's end. macOS has no memfd: a
+-// POSIX shared memory object under a name unique to this process, created exclusively and unlinked at once,
+-// so that it is reachable only through the descriptor.
++// The interrupt page on POSIX: a shared memory object made for the page (SharedObject.hpp), mapped writable
++// by Contour and sealed once it is.
+ //
+-// The helper maps the page read-only. On Linux (5.1 and later) the memfd is also sealed against every write
+-// mapping made after Contour's own (F_SEAL_FUTURE_WRITE), so that a helper cannot map it writable even if it
+-// tried, nor mprotect() its mapping writable. Where the seal is missing -- an older kernel, FreeBSD, macOS --
+-// the read-only mapping is the helper's own choice; a helper that writes to the page anyway still misleads
+-// only itself, as Contour never reads it back.
+-#include <sys/mman.h>
+-#include <sys/stat.h>
+-#include <sys/types.h>
+-
++// The helper maps the page read-only. On Linux (5.1 and later) the object is also sealed against every write
++// mapping made after Contour's own, so that a helper cannot map it writable even if it tried, nor mprotect()
++// its mapping writable. Where the seal is missing -- an older kernel, FreeBSD, macOS -- the read-only mapping
++// is the helper's own choice; a helper that writes to the page anyway still misleads only itself, as Contour
++// never reads it back.
+ #include <atomic>
+-#include <cerrno>
+-#include <cstddef>
+ #include <cstdint>
+ #include <expected>
++#include <tuple>
+ #include <utility>
+ 
+ #include <fcntl.h>
+-#include <unistd.h>
+ 
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+-
+-#ifdef __APPLE__
+-    #include <format>
+-    #include <string>
+-#endif
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ static_assert(std::atomic_ref<uint32_t>::is_always_lock_free,
+               "the page is shared between processes: only a lock-free flag is address-free");
+ 
+-namespace
+-{
+-    /// @return Why a call that set @p error failed.
+-    [[nodiscard]] SharedObjectError sharedObjectErrorOf(int error) noexcept
+-    {
+-        return error == ENOSYS || error == EINVAL ? SharedObjectError::Unsupported : SharedObjectError::Io;
+-    }
+-
+-    /// @return A new shared memory object of ControlPageBytes, close-on-exec; or why it could not be made.
+-    [[nodiscard]] std::expected<int, SharedObjectError> createObject() noexcept
+-    {
+-#ifdef __APPLE__
+-        static auto serial = std::atomic<uint64_t> { 0 };
+-        auto const name = std::format("/contour-eh-{}-{}", ::getpid(), serial.fetch_add(1));
+-        auto const descriptor = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+-        if (descriptor == -1)
+-            return std::unexpected(sharedObjectErrorOf(errno));
+-        ::shm_unlink(name.c_str());
+-        if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1
+-            || ::ftruncate(descriptor, static_cast<off_t>(ControlPageBytes)) == -1)
+-        {
+-            auto const error = errno;
+-            ::close(descriptor);
+-            return std::unexpected(sharedObjectErrorOf(error));
+-        }
+-        return descriptor;
+-#else
+-        auto const descriptor =
+-            ::memfd_create("contour-extension-host-control", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+-        if (descriptor == -1)
+-            return std::unexpected(sharedObjectErrorOf(errno));
+-        if (::ftruncate(descriptor, static_cast<off_t>(ControlPageBytes)) == -1
+-            || ::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) == -1)
+-        {
+-            auto const error = errno;
+-            ::close(descriptor);
+-            return std::unexpected(sharedObjectErrorOf(error));
+-        }
+-        return descriptor;
+-#endif
+-    }
+-
+-    /// Who maps the page, and so what it may do to it.
+-    enum class PageAccess : uint8_t
+-    {
+-        ReadOnly,  ///< The helper: it reads the flags.
+-        ReadWrite, ///< Contour: it raises and clears them.
+-    };
+-
+-    /// @return @p descriptor's page mapped shared with @p access; or why it could not be.
+-    [[nodiscard]] std::expected<uint32_t*, SharedObjectError> mapPage(int descriptor,
+-                                                                      PageAccess access) noexcept
+-    {
+-        auto const protection = access == PageAccess::ReadWrite ? PROT_READ | PROT_WRITE : PROT_READ;
+-        auto* const mapping = ::mmap(nullptr, ControlPageBytes, protection, MAP_SHARED, descriptor, 0);
+-        if (mapping == MAP_FAILED)
+-            return std::unexpected(SharedObjectError::Io);
+-        return static_cast<uint32_t*>(mapping);
+-    }
+-
+-    /// Seals @p descriptor, once Contour mapped it: against any later write mapping where the system can, and
+-    /// against further seals. Nothing to do where the object is no memfd (macOS).
+-    /// @return Nothing; or why it could not be sealed.
+-    [[nodiscard]] std::expected<void, SharedObjectError> sealMapped([[maybe_unused]] int descriptor) noexcept
+-    {
+-#ifndef __APPLE__
+-    #ifdef F_SEAL_FUTURE_WRITE
+-        // EINVAL: a kernel older than the seal; the helper's read-only mapping is then the only guard.
+-        if (::fcntl(descriptor, F_ADD_SEALS, F_SEAL_FUTURE_WRITE) == -1 && errno != EINVAL)
+-            return std::unexpected(sharedObjectErrorOf(errno));
+-    #endif
+-        if (::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SEAL) == -1)
+-            return std::unexpected(sharedObjectErrorOf(errno));
+-#endif
+-        return {};
+-    }
+-} // namespace
+-
+-ControlPage::ControlPage(NativeHandle handle, uint32_t* flags) noexcept: _handle { handle }, _flags { flags }
+-{
+-}
+-
+ std::expected<ControlPage, SharedObjectError> ControlPage::create()
+ {
+-    auto const descriptor = createObject();
+-    if (!descriptor)
+-        return std::unexpected(descriptor.error());
+-    auto const flags = mapPage(*descriptor, PageAccess::ReadWrite);
+-    if (!flags)
+-    {
+-        ::close(*descriptor);
+-        return std::unexpected(flags.error());
+-    }
+-    auto page = ControlPage { *descriptor, *flags };
+-    return sealMapped(*descriptor).transform([&] { return std::move(page); });
++    return createSharedObject(ControlPageBytes, SharedObjectUse::InterruptPage)
++        .and_then([](OwnedHandle object) {
++            return SharedMapping::map(object.get(), ControlPageBytes, MapAccess::ReadWrite)
++                .and_then([&](SharedMapping mapping) {
++                    return sealSharedObject(object.get(), SharedObjectUse::InterruptPage).transform([&] {
++                        return ControlPage { std::move(object), std::move(mapping) };
++                    });
++                });
++        });
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle handle)
+ {
+-    struct stat status {};
+-    if (::fstat(handle, &status) == -1)
+-        return std::unexpected(SharedObjectError::Io);
+-    // Not exactly ControlPageBytes: XNU reports a shared memory object rounded up to the page. Only the
+-    // first ControlPageBytes are mapped, so that a size the kernel rounded up maps nothing more. Shared
+-    // memory sized by the guest's needs must not trust fstat() either: on macOS it is a page multiple, not
+-    // the size asked for.
+-    auto const pageBytes = ::sysconf(_SC_PAGESIZE);
+-    if (status.st_size < 0 || pageBytes <= 0
+-        || !isControlPageSize(static_cast<uint64_t>(status.st_size), static_cast<uint64_t>(pageBytes)))
+-        return std::unexpected(SharedObjectError::WrongSize);
+-    if (::fcntl(handle, F_SETFD, FD_CLOEXEC) == -1)
+-        return std::unexpected(SharedObjectError::Io);
+-    return mapPage(handle, PageAccess::ReadOnly).transform([&](uint32_t* flags) {
+-        return ControlPage { handle, flags };
+-    });
++    // Not exactly ControlPageBytes: XNU reports a shared memory object rounded up to its page, which the
++    // mapping checks for; only the first ControlPageBytes are mapped.
++    return SharedMapping::map(handle, ControlPageBytes, MapAccess::ReadOnly)
++        .and_then([handle](SharedMapping mapping) -> std::expected<ControlPage, SharedObjectError> {
++            if (::fcntl(handle, F_SETFD, FD_CLOEXEC) == -1)
++                return std::unexpected(SharedObjectError::Io);
++            return ControlPage { OwnedHandle { handle }, std::move(mapping) };
++        });
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::openHelperView() const
+ {
+-    auto const copy = ::fcntl(_handle, F_DUPFD_CLOEXEC, 0);
+-    if (copy == -1)
++    auto copy = OwnedHandle { ::fcntl(_handle.get(), F_DUPFD_CLOEXEC, 0) };
++    if (!copy)
+         return std::unexpected(SharedObjectError::Io);
+-    auto view = adopt(copy);
+-    if (!view)
+-        ::close(copy);
++    auto view = adopt(copy.get());
++    if (view)
++        std::ignore = copy.release();
+     return view;
+ }
+ 
+-ControlPage::ControlPage(ControlPage&& other) noexcept:
+-    _handle { std::exchange(other._handle, -1) }, _flags { std::exchange(other._flags, nullptr) }
+-{
+-}
+-
+-ControlPage& ControlPage::operator=(ControlPage&& other) noexcept
+-{
+-    if (this != &other)
+-    {
+-        release();
+-        _handle = std::exchange(other._handle, -1);
+-        _flags = std::exchange(other._flags, nullptr);
+-    }
+-    return *this;
+-}
+-
+-ControlPage::~ControlPage()
+-{
+-    release();
+-}
+-
+-void ControlPage::release() noexcept
+-{
+-    if (_flags != nullptr)
+-        ::munmap(_flags, ControlPageBytes);
+-    if (_handle != -1)
+-        ::close(_handle);
+-    _flags = nullptr;
+-    _handle = -1;
+-}
+-
+-NativeHandle ControlPage::nativeHandle() const noexcept
+-{
+-    return _handle;
+-}
+-
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_test.cpp b/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
+index a35be9b36..09147bc09 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
+@@ -23,21 +23,20 @@
+     #include <cerrno>
+     #include <csignal>
+     #include <format>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::ControlPage;
+ using vtextension::wasm::remote::transport::ControlPageBytes;
+-using vtextension::wasm::remote::transport::isControlPageSize;
+ using vtextension::wasm::remote::transport::SharedObjectError;
+ using vtextension::wasm::remote::transport::testing::duplicate;
+ 
+ TEST_CASE("ControlPage.raiseIsSeenThroughASecondMapping", "[vtextension]")
+ {
+     auto parent = ControlPage::create();
+     REQUIRE(parent.has_value());
+     auto const copy = duplicate(parent->nativeHandle());
+     REQUIRE(copy.has_value());
+     auto helper = ControlPage::adopt(*copy);
+@@ -65,44 +64,30 @@ TEST_CASE("ControlPage.helperViewSeesTheRaise", "[vtextension]")
+     REQUIRE(parent.has_value());
+     auto helper = parent->openHelperView();
+     REQUIRE(helper.has_value());
+     CHECK(helper->nativeHandle() != parent->nativeHandle());
+     parent->raise(9);
+     CHECK(helper->isRaised(9));
+     parent->clear(9);
+     CHECK_FALSE(helper->isRaised(9));
+ }
+ 
+-TEST_CASE("ControlPage.sizeMayBeRoundedUpToThePage", "[vtextension]")
+-{
+-    // 4 KiB pages: the object is exactly the page.
+-    CHECK(isControlPageSize(ControlPageBytes, 4096));
+-    CHECK_FALSE(isControlPageSize(ControlPageBytes - 1, 4096));
+-    CHECK_FALSE(isControlPageSize(ControlPageBytes + 1, 4096));
+-    // 16 KiB pages (Apple silicon): XNU reports the object rounded up to the page.
+-    CHECK(isControlPageSize(ControlPageBytes, 16384));
+-    CHECK(isControlPageSize(16384, 16384));
+-    CHECK_FALSE(isControlPageSize(16385, 16384));
+-    CHECK_FALSE(isControlPageSize(32768, 16384));
+-    CHECK_FALSE(isControlPageSize(ControlPageBytes - 1, 16384));
+-}
+-
+ #ifndef _WIN32
+ TEST_CASE("ControlPage.adoptRefusesAWrongSize", "[vtextension]")
+ {
+-    // Larger than any page the page's size rounds up to, 16 KiB on Apple silicon included; and, where the
+-    // object keeps the size it is given (not XNU's shared memory, which rounds it up to the page), smaller.
+-    auto const pageBytes = static_cast<off_t>(::sysconf(_SC_PAGESIZE));
++    // Larger than the largest page the page's size rounds up to (MaxPageBytes); and, where the object keeps
++    // the size it is given (not XNU's shared memory, which rounds it up to the page), smaller.
++    constexpr auto Larger = static_cast<off_t>(2 * vtextension::wasm::remote::transport::MaxPageBytes);
+     #ifdef __APPLE__
+-    auto const sizes = std::array { 4 * pageBytes };
++    auto const sizes = std::array { Larger };
+     #else
+-    auto const sizes = std::array { 4 * pageBytes, off_t { ControlPageBytes / 2 } };
++    auto const sizes = std::array { Larger, off_t { ControlPageBytes / 2 } };
+     #endif
+     for (auto const size: sizes)
+     {
+         INFO(size);
+     #ifdef __APPLE__
+         // XNU sizes a shared memory object once: a fresh one per size.
+         auto const name = std::format("/contour-eh-test-{}", ::getpid());
+         auto const descriptor = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+         REQUIRE(descriptor != -1);
+         ::shm_unlink(name.c_str());
+@@ -111,20 +96,37 @@ TEST_CASE("ControlPage.adoptRefusesAWrongSize", "[vtextension]")
+         REQUIRE(descriptor != -1);
+     #endif
+         REQUIRE(::ftruncate(descriptor, size) == 0);
+         CHECK(ControlPage::adopt(descriptor) == std::unexpected(SharedObjectError::WrongSize));
+         // A refused handle stays its owner's.
+         CHECK(::close(descriptor) == 0);
+     }
+ }
+ #endif
+ 
++#ifndef _WIN32
++TEST_CASE("ControlPage.adoptAcceptsThePageRoundedUpToTheLargestPage", "[vtextension]")
++{
++    // An arm64 parent's page, rounded up to its 16 KiB page, adopted by a helper whose own page may be 4 KiB
++    // (x86_64 under Rosetta): only the first ControlPageBytes are mapped.
++    auto const object = vtextension::wasm::remote::transport::createSharedObject(
++        vtextension::wasm::remote::transport::MaxPageBytes,
++        vtextension::wasm::remote::transport::SharedObjectUse::InterruptPage);
++    REQUIRE(object.has_value());
++    auto const copy = duplicate(object->get());
++    REQUIRE(copy.has_value());
++    auto const page = ControlPage::adopt(*copy);
++    REQUIRE(page.has_value());
++    CHECK_FALSE(page->isRaised(0));
++}
++#endif
++
+ #if defined(__linux__) || defined(__FreeBSD__)
+ TEST_CASE("ControlPage.isSealed", "[vtextension]")
+ {
+     auto const page = ControlPage::create();
+     REQUIRE(page.has_value());
+     // Neither process can make the other's mapping run past the object's end, nor shrink it under it.
+     for (auto const size: { 8192, 0 })
+     {
+         auto const resized = ::ftruncate(page->nativeHandle(), size);
+         auto const error = errno;
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp b/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
+index f61898547..d03ad9242 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
+@@ -1,142 +1,74 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+-// The interrupt page on Windows: an unnamed, pagefile-backed section of one page, not inheritable until it is
+-// handed over. A section cannot be resized once created, so it needs no seal. Contour maps it writable and
+-// then keeps only a handle that grants FILE_MAP_READ, the one it hands over: a well-behaved helper cannot map
+-// the page writable through it. A hostile one can: an unnamed section carries no security descriptor that is
+-// checked, so DuplicateHandle can widen the access of the helper's own handle. That grants nothing, because
+-// Contour only stores to the page and never reads it back; an AppContainer around the helper narrows it
+-// further.
++// The interrupt page on Windows: a section made for the page (SharedObject.hpp), not inheritable until it is
++// handed over. Contour maps it writable and then keeps only a handle that grants FILE_MAP_READ, the one it
++// hands over: a well-behaved helper cannot map the page writable through it. A hostile one can: an unnamed
++// section carries no security descriptor that is checked, so DuplicateHandle can widen the access of the
++// helper's own handle. That grants nothing, because Contour only stores to the page and never reads it back;
++// an AppContainer around the helper narrows it further.
+ #include <atomic>
+-#include <cstddef>
+ #include <cstdint>
+ #include <expected>
++#include <tuple>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ static_assert(std::atomic_ref<uint32_t>::is_always_lock_free,
+               "the page is shared between processes: only a lock-free flag is address-free");
+ 
+ namespace
+ {
+-    /// @return @p section's whole view mapped with @p access (FILE_MAP_…), and its size; or why it could not
+-    /// be.
+-    [[nodiscard]] std::expected<std::pair<uint32_t*, std::size_t>, SharedObjectError> mapSection(
+-        HANDLE section, DWORD access) noexcept
++    /// @return A handle on @p handle's section that grants reading only; or `Io` if it cannot be made.
++    [[nodiscard]] std::expected<OwnedHandle, SharedObjectError> readOnlyHandle(NativeHandle handle) noexcept
+     {
+-        auto* const view = ::MapViewOfFile(section, access, 0, 0, 0);
+-        if (view == nullptr)
++        auto copy = HANDLE { nullptr };
++        if (!::DuplicateHandle(
++                ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, FILE_MAP_READ, FALSE, 0))
+             return std::unexpected(SharedObjectError::Io);
+-        auto region = MEMORY_BASIC_INFORMATION {};
+-        if (::VirtualQuery(view, &region, sizeof(region)) == 0)
+-        {
+-            ::UnmapViewOfFile(view);
+-            return std::unexpected(SharedObjectError::Io);
+-        }
+-        return std::pair { static_cast<uint32_t*>(view), static_cast<std::size_t>(region.RegionSize) };
++        return OwnedHandle { copy };
+     }
+ } // namespace
+ 
+-ControlPage::ControlPage(NativeHandle handle, uint32_t* flags) noexcept: _handle { handle }, _flags { flags }
+-{
+-}
+-
+ std::expected<ControlPage, SharedObjectError> ControlPage::create()
+ {
+-    auto* const section =
+-        ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, ControlPageBytes, nullptr);
+-    if (section == nullptr)
+-        return std::unexpected(SharedObjectError::Io);
+-    auto const mapped = mapSection(section, FILE_MAP_READ | FILE_MAP_WRITE);
+-    if (!mapped)
+-    {
+-        ::CloseHandle(section);
+-        return std::unexpected(mapped.error());
+-    }
+     // The view keeps the section alive; the full-access handle goes, and a read-only one stays.
+-    auto readOnly = HANDLE { nullptr };
+-    auto const duplicated = ::DuplicateHandle(
+-        ::GetCurrentProcess(), section, ::GetCurrentProcess(), &readOnly, FILE_MAP_READ, FALSE, 0);
+-    ::CloseHandle(section);
+-    if (!duplicated)
+-    {
+-        ::UnmapViewOfFile(mapped->first);
+-        return std::unexpected(SharedObjectError::Io);
+-    }
+-    return ControlPage { readOnly, mapped->first };
++    return createSharedObject(ControlPageBytes, SharedObjectUse::InterruptPage)
++        .and_then([](OwnedHandle const& object) {
++            return SharedMapping::map(object.get(), ControlPageBytes, MapAccess::ReadWrite)
++                .and_then([&](SharedMapping mapping) {
++                    return readOnlyHandle(object.get()).transform([&](OwnedHandle readOnly) {
++                        return ControlPage { std::move(readOnly), std::move(mapping) };
++                    });
++                });
++        });
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle handle)
+ {
+-    auto const mapped = mapSection(handle, FILE_MAP_READ);
+-    if (!mapped)
+-        return std::unexpected(mapped.error());
+-    if (mapped->second != ControlPageBytes)
+-    {
+-        ::UnmapViewOfFile(mapped->first);
+-        return std::unexpected(SharedObjectError::WrongSize);
+-    }
+-    if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0))
+-    {
+-        ::UnmapViewOfFile(mapped->first);
+-        return std::unexpected(SharedObjectError::Io);
+-    }
+-    return ControlPage { handle, mapped->first };
++    return SharedMapping::map(handle, ControlPageBytes, MapAccess::ReadOnly)
++        .and_then([handle](SharedMapping mapping) -> std::expected<ControlPage, SharedObjectError> {
++            if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0))
++                return std::unexpected(SharedObjectError::Io);
++            return ControlPage { OwnedHandle { handle }, std::move(mapping) };
++        });
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::openHelperView() const
+ {
+-    auto copy = HANDLE { nullptr };
+-    if (!::DuplicateHandle(
+-            ::GetCurrentProcess(), _handle, ::GetCurrentProcess(), &copy, FILE_MAP_READ, FALSE, 0))
+-        return std::unexpected(SharedObjectError::Io);
+-    auto view = adopt(copy);
+-    if (!view)
+-        ::CloseHandle(copy);
+-    return view;
+-}
+-
+-ControlPage::ControlPage(ControlPage&& other) noexcept:
+-    _handle { std::exchange(other._handle, nullptr) }, _flags { std::exchange(other._flags, nullptr) }
+-{
+-}
+-
+-ControlPage& ControlPage::operator=(ControlPage&& other) noexcept
+-{
+-    if (this != &other)
+-    {
+-        release();
+-        _handle = std::exchange(other._handle, nullptr);
+-        _flags = std::exchange(other._flags, nullptr);
+-    }
+-    return *this;
+-}
+-
+-ControlPage::~ControlPage()
+-{
+-    release();
+-}
+-
+-void ControlPage::release() noexcept
+-{
+-    if (_flags != nullptr)
+-        ::UnmapViewOfFile(_flags);
+-    if (_handle != nullptr)
+-        ::CloseHandle(_handle);
+-    _flags = nullptr;
+-    _handle = nullptr;
+-}
+-
+-NativeHandle ControlPage::nativeHandle() const noexcept
+-{
+-    return _handle;
++    return readOnlyHandle(_handle.get()).and_then([](OwnedHandle copy) {
++        auto view = adopt(copy.get());
++        if (view)
++            std::ignore = copy.release();
++        return view;
++    });
+ }
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/OwnedHandle.hpp b/src/vtextension/wasm/remote/transport/OwnedHandle.hpp
+new file mode 100644
+index 000000000..e1ab0464f
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/OwnedHandle.hpp
+@@ -0,0 +1,69 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// A handle this process owns, closed when its owner is destroyed: a descriptor on POSIX, a HANDLE on
++/// Windows. What a shared memory object is made as, and what crosses to the extension host process.
++
++#include <utility>
++
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++
++namespace vtextension::wasm::remote::transport
++{
++
++#ifdef _WIN32
++/// The value no handle has: null, which no section or pipe handle is.
++inline constexpr auto NoNativeHandle = nullptr;
++#else
++/// The value no descriptor has.
++inline constexpr NativeHandle NoNativeHandle = -1;
++#endif
++
++/// Owns one handle, and closes it when destroyed. Move-only; a moved-from one owns nothing.
++class OwnedHandle
++{
++  public:
++    /// Owns nothing.
++    OwnedHandle() noexcept = default;
++
++    /// Takes ownership of @p handle.
++    /// @param handle The handle; NoNativeHandle for none.
++    explicit OwnedHandle(NativeHandle handle) noexcept: _handle { handle } {}
++
++    OwnedHandle(OwnedHandle&& other) noexcept: _handle { other.release() } {}
++
++    OwnedHandle& operator=(OwnedHandle&& other) noexcept
++    {
++        if (this != &other)
++            reset(other.release());
++        return *this;
++    }
++
++    OwnedHandle(OwnedHandle const&) = delete;
++    OwnedHandle& operator=(OwnedHandle const&) = delete;
++
++    ~OwnedHandle() { reset(NoNativeHandle); }
++
++    /// @return The handle, still owned; NoNativeHandle if none.
++    [[nodiscard]] NativeHandle get() const noexcept { return _handle; }
++
++    /// Gives the handle up, unclosed.
++    /// @return The handle, now the caller's; NoNativeHandle if none.
++    [[nodiscard]] NativeHandle release() noexcept { return std::exchange(_handle, NoNativeHandle); }
++
++    /// @return Whether it owns a handle.
++    [[nodiscard]] explicit operator bool() const noexcept { return _handle != NoNativeHandle; }
++
++  private:
++    /// Closes the handle owned, if any, and owns @p handle instead.
++    void reset(NativeHandle handle) noexcept
++    {
++        if (auto const previous = std::exchange(_handle, handle); previous != NoNativeHandle)
++            closeNativeHandle(previous);
++    }
++
++    NativeHandle _handle = NoNativeHandle;
++};
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject.cpp b/src/vtextension/wasm/remote/transport/SharedObject.cpp
+new file mode 100644
+index 000000000..66fbe5405
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/SharedObject.cpp
+@@ -0,0 +1,50 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// What every system's mapping of a shared memory object shares: mapping and committing are each system's own
++// (SharedObject_posix.cpp, SharedObject_win32.cpp), owning the mapping is not.
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
++
++#include <cstdint>
++#include <expected>
++#include <span>
++#include <utility>
++
++namespace vtextension::wasm::remote::transport
++{
++
++SharedMapping::SharedMapping(std::span<std::byte> bytes, MapAccess access) noexcept:
++    _bytes { bytes }, _access { access }
++{
++}
++
++SharedMapping::SharedMapping(SharedMapping&& other) noexcept:
++    _bytes { std::exchange(other._bytes, {}) }, _access { other._access }
++{
++}
++
++SharedMapping& SharedMapping::operator=(SharedMapping&& other) noexcept
++{
++    if (this != &other)
++    {
++        release();
++        _bytes = std::exchange(other._bytes, {});
++        _access = other._access;
++    }
++    return *this;
++}
++
++SharedMapping::~SharedMapping()
++{
++    release();
++}
++
++std::expected<void, SharedObjectError> SharedMapping::commit(uint64_t from, uint64_t to) noexcept
++{
++    if (from > to || to > _bytes.size())
++        return std::unexpected(SharedObjectError::OutOfRange);
++    if (from == to)
++        return {};
++    return commitRange(from, to);
++}
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject.hpp b/src/vtextension/wasm/remote/transport/SharedObject.hpp
+new file mode 100644
+index 000000000..4dcf3922f
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/SharedObject.hpp
+@@ -0,0 +1,140 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// Shared memory objects Contour and its extension host process both map, made in one place: the interrupt
++/// page (ControlPage.hpp) and an instance's guest memory. Linux and FreeBSD make a memfd, sealed against
++/// resizing; macOS a POSIX shared memory object under a name unique to this process, unlinked at once, sized
++/// once; Windows an unnamed pagefile-backed section, whose guest memory is reserved and committed page by
++/// page.
++///
++/// A mapping trusts no size the object reports beyond what fitsSharedObject() accepts: XNU rounds an object
++/// up to its page, which may be larger than the page of the process that reads it (an x86_64 helper under
++/// Rosetta sees 4 KiB pages, its arm64 parent rounded to 16 KiB).
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <span>
++
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
++
++namespace vtextension::wasm::remote::transport
++{
++
++/// The largest page a system this runs on rounds a shared memory object up to: 16 KiB, on Apple silicon.
++inline constexpr uint64_t MaxPageBytes = uint64_t { 16 } * 1024;
++
++/// Whether an object of @p objectBytes, as the system reports it, is one made of @p expectedBytes: at least
++/// that, and at most that rounded up to MaxPageBytes, whatever the reader's own page. Whatever lies beyond
++/// @p expectedBytes is never mapped.
++/// @param objectBytes The size the system reports.
++/// @param expectedBytes The size it was made of.
++/// @return Whether it is that object's size.
++[[nodiscard]] constexpr bool fitsSharedObject(uint64_t objectBytes, uint64_t expectedBytes) noexcept
++{
++    auto const remainder = expectedBytes % MaxPageBytes;
++    auto const slack = remainder == 0 ? 0 : MaxPageBytes - remainder;
++    return objectBytes >= expectedBytes && objectBytes - expectedBytes <= slack;
++}
++
++/// What a shared memory object is for, which decides how it is made and sealed.
++enum class SharedObjectUse : uint8_t
++{
++    GuestMemory,   ///< An instance's memory: the helper writes it. Reserved on Windows, committed on demand.
++    InterruptPage, ///< The interrupt page: only Contour writes it. Sealed against later write mappings.
++};
++
++/// How a mapping may touch the object.
++enum class MapAccess : uint8_t
++{
++    ReadOnly,  ///< It reads.
++    ReadWrite, ///< It reads and writes.
++};
++
++/// Why a shared memory object could not be made, sealed or mapped.
++enum class SharedObjectError : uint8_t
++{
++    Unsupported, ///< The system has no shared memory object of the kind needed.
++    Io,          ///< The system refused.
++    WrongSize,   ///< The object is not the size expected, or no object can have that size.
++    OutOfRange,  ///< A range runs past the mapping's end.
++};
++
++/// Makes a shared memory object of @p bytes, not inherited by a child unless handed over. Linux and FreeBSD
++/// seal it against shrinking and growing at once; sealSharedObject() seals it for good once Contour mapped
++/// it. On Windows, guest memory is a reserved section whose pages commit() commits.
++/// @param bytes Its size: more than 0.
++/// @param use What it is for.
++/// @return Its handle; `WrongSize` for a size no object has, `Unsupported` or `Io` if the system refused.
++[[nodiscard]] std::expected<OwnedHandle, SharedObjectError> createSharedObject(uint64_t bytes,
++                                                                               SharedObjectUse use);
++
++/// Seals @p handle's object for good, once Contour mapped it: on Linux and FreeBSD against further seals,
++/// and for the interrupt page, on Linux 5.1 and later, against any write mapping made after Contour's own.
++/// Guest memory is never sealed against writes: the helper writes it. Nothing to do on macOS and Windows.
++/// @param handle An object createSharedObject() made for @p use.
++/// @param use What it is for.
++/// @return Nothing once sealed; `Io` if the system refused.
++[[nodiscard]] std::expected<void, SharedObjectError> sealSharedObject(NativeHandle handle,
++                                                                      SharedObjectUse use) noexcept;
++
++#ifndef _WIN32
++/// Checks the size of the object @p handle names, as fstat() reports it.
++/// @param handle A shared memory object.
++/// @param expectedBytes The size it was made of.
++/// @return Nothing if fitsSharedObject() accepts it; `WrongSize` if not, `Io` if it cannot be asked.
++[[nodiscard]] std::expected<void, SharedObjectError> checkSharedObjectSize(NativeHandle handle,
++                                                                           uint64_t expectedBytes) noexcept;
++#endif
++
++/// The first bytes of a shared memory object, mapped shared. Move-only; unmapped when destroyed. It does not
++/// own the object's handle: the mapping keeps the object alive on its own.
++class SharedMapping
++{
++  public:
++    /// Maps the first @p bytes of @p handle's object, once its size is checked: by fstat() on POSIX
++    /// (checkSharedObjectSize()), by the view's extent on Windows.
++    /// @param handle The object; still the caller's.
++    /// @param bytes How many bytes to map: the size the object was made of.
++    /// @param access How the mapping may touch them.
++    /// @return The mapping; `WrongSize` if the object is not of @p bytes, `Io` if it cannot be mapped.
++    [[nodiscard]] static std::expected<SharedMapping, SharedObjectError> map(NativeHandle handle,
++                                                                             uint64_t bytes,
++                                                                             MapAccess access);
++
++    SharedMapping(SharedMapping&& other) noexcept;
++    SharedMapping& operator=(SharedMapping&& other) noexcept;
++    SharedMapping(SharedMapping const&) = delete;
++    SharedMapping& operator=(SharedMapping const&) = delete;
++    ~SharedMapping();
++
++    /// @return The mapped bytes; empty once moved from.
++    [[nodiscard]] std::span<std::byte> bytes() const noexcept { return _bytes; }
++
++    /// Commits [@p from, @p to) of the mapping, so that it can be touched: on Windows, the reserved pages of
++    /// guest memory, committed through this view (VirtualAlloc, MEM_COMMIT); nothing elsewhere, where every
++    /// page of the object is backed on first touch. Committing a committed page again does nothing.
++    /// @param from The first byte.
++    /// @param to One past the last byte; at most bytes().size().
++    /// @return Nothing once committed; `OutOfRange` if the range runs past the mapping, `Io` if the system
++    ///         refused.
++    [[nodiscard]] std::expected<void, SharedObjectError> commit(uint64_t from, uint64_t to) noexcept;
++
++  private:
++    /// @param bytes The mapping, its own.
++    /// @param access How it was mapped.
++    SharedMapping(std::span<std::byte> bytes, MapAccess access) noexcept;
++
++    /// Commits [@p from, @p to), a range within the mapping, as this system does.
++    [[nodiscard]] std::expected<void, SharedObjectError> commitRange(uint64_t from, uint64_t to) noexcept;
++
++    /// Unmaps what it holds, if anything.
++    void release() noexcept;
++
++    std::span<std::byte> _bytes; ///< The mapping; empty once moved from.
++    MapAccess _access;           ///< How it was mapped.
++};
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject_posix.cpp b/src/vtextension/wasm/remote/transport/SharedObject_posix.cpp
+new file mode 100644
+index 000000000..43bc2f651
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/SharedObject_posix.cpp
+@@ -0,0 +1,189 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Shared memory objects on POSIX. Linux and FreeBSD (13 and later): an anonymous memfd, sealed against
++// shrinking and growing as it is made, so that neither process can make the other's mapping fault past the
++// object's end, and against further seals once Contour mapped it. macOS has no memfd: a POSIX shared memory
++// object under a name unique to this process, created exclusively and unlinked at once, so that it is
++// reachable only through the descriptor. XNU sizes such an object once, and rounds it up to its page.
++//
++// The interrupt page is also sealed, on Linux 5.1 and later, against every write mapping made after
++// Contour's own (F_SEAL_FUTURE_WRITE): the helper only reads it. Guest memory never is: the helper writes it.
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++
++#include <algorithm>
++#include <array>
++#include <cerrno>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <limits>
++#include <ranges>
++#include <span>
++#include <utility>
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
++
++#ifdef __APPLE__
++    #include <atomic>
++    #include <format>
++    #include <string>
++#endif
++
++namespace vtextension::wasm::remote::transport
++{
++
++namespace
++{
++    /// Whether an object is sealed against write mappings made after Contour's own.
++    enum class LaterWrites : uint8_t
++    {
++        Allowed, ///< The helper maps it writable.
++        Sealed,  ///< Nobody maps it writable after Contour (F_SEAL_FUTURE_WRITE, where there is one).
++    };
++
++    /// How an object for one use is made and sealed.
++    struct UseRow
++    {
++        SharedObjectUse use;     ///< The use.
++        char const* memfdName;   ///< The memfd's name, as /proc shows it (Linux, FreeBSD).
++        LaterWrites laterWrites; ///< Whether it is sealed against later write mappings.
++    };
++
++    /// Every use, at its enumerator's index.
++    constexpr auto Uses = std::array {
++        UseRow { .use = SharedObjectUse::GuestMemory,
++                 .memfdName = "contour-extension-host-memory",
++                 .laterWrites = LaterWrites::Allowed },
++        UseRow { .use = SharedObjectUse::InterruptPage,
++                 .memfdName = "contour-extension-host-control",
++                 .laterWrites = LaterWrites::Sealed },
++    };
++    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, Uses.size()),
++                                      [](std::size_t index) {
++                                          return std::to_underlying(Uses[index].use) == index;
++                                      }));
++
++    /// @return How an object for @p use is made and sealed.
++    [[nodiscard]] UseRow const& rowOf(SharedObjectUse use) noexcept
++    {
++        return Uses[std::to_underlying(use)];
++    }
++
++    /// @return Why a call that set @p error failed.
++    [[nodiscard]] SharedObjectError sharedObjectErrorOf(int error) noexcept
++    {
++        return error == ENOSYS || error == EINVAL ? SharedObjectError::Unsupported : SharedObjectError::Io;
++    }
++
++    /// @return Nothing if @p result is not -1; why the call failed otherwise.
++    [[nodiscard]] std::expected<void, SharedObjectError> succeeded(int result) noexcept
++    {
++        if (result == -1)
++            return std::unexpected(sharedObjectErrorOf(errno));
++        return {};
++    }
++
++    /// @return A new object, close-on-exec and not yet sized; or why it could not be made.
++    [[nodiscard]] std::expected<OwnedHandle, SharedObjectError> openObject(
++        [[maybe_unused]] UseRow const& row) noexcept
++    {
++#ifdef __APPLE__
++        static auto serial = std::atomic<uint64_t> { 0 };
++        auto const name = std::format("/contour-eh-{}-{}", ::getpid(), serial.fetch_add(1));
++        auto object = OwnedHandle { ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600) };
++        if (!object)
++            return std::unexpected(sharedObjectErrorOf(errno));
++        ::shm_unlink(name.c_str());
++        return succeeded(::fcntl(object.get(), F_SETFD, FD_CLOEXEC)).transform([&] {
++            return std::move(object);
++        });
++#else
++        auto object = OwnedHandle { ::memfd_create(row.memfdName, MFD_CLOEXEC | MFD_ALLOW_SEALING) };
++        if (!object)
++            return std::unexpected(sharedObjectErrorOf(errno));
++        return object;
++#endif
++    }
++} // namespace
++
++std::expected<OwnedHandle, SharedObjectError> createSharedObject(uint64_t bytes, SharedObjectUse use)
++{
++    if (bytes == 0 || bytes > static_cast<uint64_t>(std::numeric_limits<off_t>::max()))
++        return std::unexpected(SharedObjectError::WrongSize);
++    // Sized once -- all XNU allows -- and, where there are seals, sealed at that size at once.
++    return openObject(rowOf(use)).and_then([bytes](OwnedHandle object) {
++        return succeeded(::ftruncate(object.get(), static_cast<off_t>(bytes)))
++#ifndef __APPLE__
++            .and_then(
++                [&] { return succeeded(::fcntl(object.get(), F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW)); })
++#endif
++            .transform([&] { return std::move(object); });
++    });
++}
++
++std::expected<void, SharedObjectError> sealSharedObject([[maybe_unused]] NativeHandle handle,
++                                                        [[maybe_unused]] SharedObjectUse use) noexcept
++{
++#ifndef __APPLE__
++    #ifdef F_SEAL_FUTURE_WRITE
++    // EINVAL: a kernel older than the seal; the helper's read-only mapping is then the only guard.
++    if (rowOf(use).laterWrites == LaterWrites::Sealed
++        && ::fcntl(handle, F_ADD_SEALS, F_SEAL_FUTURE_WRITE) == -1 && errno != EINVAL)
++        return std::unexpected(sharedObjectErrorOf(errno));
++    #endif
++    return succeeded(::fcntl(handle, F_ADD_SEALS, F_SEAL_SEAL));
++#else
++    return {};
++#endif
++}
++
++std::expected<void, SharedObjectError> checkSharedObjectSize(NativeHandle handle,
++                                                             uint64_t expectedBytes) noexcept
++{
++    struct stat status {};
++    if (::fstat(handle, &status) == -1)
++        return std::unexpected(SharedObjectError::Io);
++    if (status.st_size < 0 || !fitsSharedObject(static_cast<uint64_t>(status.st_size), expectedBytes))
++        return std::unexpected(SharedObjectError::WrongSize);
++    return {};
++}
++
++std::expected<SharedMapping, SharedObjectError> SharedMapping::map(NativeHandle handle,
++                                                                   uint64_t bytes,
++                                                                   MapAccess access)
++{
++    if (bytes == 0 || bytes > std::numeric_limits<std::size_t>::max())
++        return std::unexpected(SharedObjectError::WrongSize);
++    return checkSharedObjectSize(handle, bytes)
++        .and_then([&]() -> std::expected<SharedMapping, SharedObjectError> {
++            auto const protection = access == MapAccess::ReadWrite ? PROT_READ | PROT_WRITE : PROT_READ;
++            auto* const mapping =
++                ::mmap(nullptr, static_cast<std::size_t>(bytes), protection, MAP_SHARED, handle, 0);
++            if (mapping == MAP_FAILED)
++                return std::unexpected(SharedObjectError::Io);
++            return SharedMapping {
++                std::span { static_cast<std::byte*>(mapping), static_cast<std::size_t>(bytes) }, access
++            };
++        });
++}
++
++std::expected<void, SharedObjectError> SharedMapping::commitRange([[maybe_unused]] uint64_t from,
++                                                                  [[maybe_unused]] uint64_t to) noexcept
++{
++    // Every page of the object is backed on first touch.
++    return {};
++}
++
++void SharedMapping::release() noexcept
++{
++    if (!_bytes.empty())
++        ::munmap(_bytes.data(), _bytes.size());
++    _bytes = {};
++}
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject_test.cpp b/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
+new file mode 100644
+index 000000000..eb4a3b35a
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
+@@ -0,0 +1,191 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The shared memory objects Contour and its extension host process both map: a size rounded up to any page a
++// parent may use is accepted and no more, what one mapping writes the other sees, and nobody can resize an
++// object, inherit it unasked, or find more of a reserved one committed than was asked for.
++#include <catch2/catch_test_macros.hpp>
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <initializer_list>
++#include <utility>
++
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
++
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#else
++    #include <sys/mman.h>
++    #include <sys/types.h>
++
++    #include <cerrno>
++
++    #include <fcntl.h>
++    #include <unistd.h>
++#endif
++
++using vtextension::wasm::remote::transport::createSharedObject;
++using vtextension::wasm::remote::transport::fitsSharedObject;
++using vtextension::wasm::remote::transport::MapAccess;
++using vtextension::wasm::remote::transport::sealSharedObject;
++using vtextension::wasm::remote::transport::SharedMapping;
++using vtextension::wasm::remote::transport::SharedObjectError;
++using vtextension::wasm::remote::transport::SharedObjectUse;
++#ifndef _WIN32
++using vtextension::wasm::remote::transport::checkSharedObjectSize;
++#endif
++
++namespace
++{
++
++constexpr auto KiB = uint64_t { 1024 };
++constexpr auto MiB = 1024 * KiB;
++
++/// The size the tests' guest memory is made of: a guest's page.
++constexpr auto GuestBytes = 64 * KiB;
++
++} // namespace
++
++TEST_CASE("SharedObject.sizeMayBeRoundedUpToTheLargestPage", "[vtextension]")
++{
++    // An arm64 parent's 4 KiB object, rounded to its 16 KiB page, read by an x86_64 helper under Rosetta,
++    // whose own page is 4 KiB.
++    STATIC_CHECK(fitsSharedObject(16 * KiB, 4 * KiB));
++    STATIC_CHECK(fitsSharedObject(4 * KiB, 4 * KiB));
++    STATIC_CHECK(fitsSharedObject(32 * MiB, 32 * MiB));
++    STATIC_CHECK_FALSE(fitsSharedObject((16 * KiB) + 1, 4 * KiB));
++    STATIC_CHECK_FALSE(fitsSharedObject((4 * KiB) - 1, 4 * KiB));
++    STATIC_CHECK_FALSE(fitsSharedObject((32 * MiB) + (16 * KiB), 32 * MiB));
++    // No size near the top wraps around.
++    STATIC_CHECK_FALSE(fitsSharedObject(0, UINT64_MAX));
++    STATIC_CHECK(fitsSharedObject(UINT64_MAX, UINT64_MAX));
++}
++
++TEST_CASE("SharedObject.writesAreSeenThroughASecondMapping", "[vtextension]")
++{
++    auto const object = createSharedObject(GuestBytes, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    auto first = SharedMapping::map(object->get(), GuestBytes, MapAccess::ReadWrite);
++    REQUIRE(first.has_value());
++    auto second = SharedMapping::map(object->get(), GuestBytes, MapAccess::ReadWrite);
++    REQUIRE(second.has_value());
++    REQUIRE(sealSharedObject(object->get(), SharedObjectUse::GuestMemory).has_value());
++    CHECK(first->bytes().size() == GuestBytes);
++    REQUIRE(first->commit(0, GuestBytes).has_value());
++    REQUIRE(second->commit(0, GuestBytes).has_value());
++
++    first->bytes().front() = std::byte { 0x5A };
++    second->bytes().back() = std::byte { 0xA5 };
++    CHECK(second->bytes().front() == std::byte { 0x5A });
++    CHECK(first->bytes().back() == std::byte { 0xA5 });
++
++    // A moved mapping is the same mapping.
++    auto moved = std::move(*second);
++    CHECK(moved.bytes().front() == std::byte { 0x5A });
++
++    // Nothing past the mapping commits.
++    CHECK(first->commit(0, GuestBytes + 1) == std::unexpected(SharedObjectError::OutOfRange));
++    CHECK(first->commit(2, 1) == std::unexpected(SharedObjectError::OutOfRange));
++}
++
++TEST_CASE("SharedObject.noObjectIsEmpty", "[vtextension]")
++{
++    for (auto const use: { SharedObjectUse::GuestMemory, SharedObjectUse::InterruptPage })
++        CHECK(createSharedObject(0, use) == std::unexpected(SharedObjectError::WrongSize));
++}
++
++#if defined(__linux__) || defined(__FreeBSD__)
++TEST_CASE("SharedObject.isSealedAgainstResizing", "[vtextension]")
++{
++    auto const object = createSharedObject(GuestBytes, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    // Against resizing from the start: nobody can make another's mapping fault past the end, nor shrink it.
++    CHECK(::fcntl(object->get(), F_GET_SEALS) == (F_SEAL_SHRINK | F_SEAL_GROW));
++    auto const mapping = SharedMapping::map(object->get(), GuestBytes, MapAccess::ReadWrite);
++    REQUIRE(mapping.has_value());
++    REQUIRE(sealSharedObject(object->get(), SharedObjectUse::GuestMemory).has_value());
++    for (auto const size: { 2 * GuestBytes, uint64_t { 0 } })
++    {
++        auto const resized = ::ftruncate(object->get(), static_cast<off_t>(size));
++        auto const error = errno;
++        CHECK(resized == -1);
++        CHECK(error == EPERM);
++    }
++    // Guest memory stays writable for the helper: sealed against resizing and further seals, never against
++    // writes.
++    CHECK(::fcntl(object->get(), F_GET_SEALS) == (F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL));
++    auto* const helperView =
++        ::mmap(nullptr, GuestBytes, PROT_READ | PROT_WRITE, MAP_SHARED, object->get(), 0);
++    CHECK(helperView != MAP_FAILED);
++    if (helperView != MAP_FAILED)
++        ::munmap(helperView, GuestBytes);
++}
++#endif
++
++TEST_CASE("SharedObject.isNotInherited", "[vtextension]")
++{
++    for (auto const use: { SharedObjectUse::GuestMemory, SharedObjectUse::InterruptPage })
++    {
++        auto const object = createSharedObject(GuestBytes, use);
++        REQUIRE(object.has_value());
++#ifdef _WIN32
++        auto flags = DWORD { 0 };
++        REQUIRE(::GetHandleInformation(object->get(), &flags));
++        CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
++#else
++        auto const flags = ::fcntl(object->get(), F_GETFD);
++        REQUIRE(flags != -1);
++        CHECK((flags & FD_CLOEXEC) != 0);
++#endif
++    }
++}
++
++TEST_CASE("SharedObject.checkRefusesAWrongSize", "[vtextension]")
++{
++    // Made of 32 KiB and expected as 4: more than any page rounds 4 KiB up to. Made of 4 KiB and expected as
++    // 32: less.
++    auto const large = createSharedObject(32 * KiB, SharedObjectUse::GuestMemory);
++    REQUIRE(large.has_value());
++    auto const small = createSharedObject(4 * KiB, SharedObjectUse::GuestMemory);
++    REQUIRE(small.has_value());
++    CHECK(SharedMapping::map(large->get(), 4 * KiB, MapAccess::ReadOnly)
++          == std::unexpected(SharedObjectError::WrongSize));
++    CHECK(SharedMapping::map(small->get(), 32 * KiB, MapAccess::ReadOnly)
++          == std::unexpected(SharedObjectError::WrongSize));
++    CHECK(SharedMapping::map(small->get(), 4 * KiB, MapAccess::ReadOnly).has_value());
++#ifndef _WIN32
++    CHECK(checkSharedObjectSize(large->get(), 4 * KiB) == std::unexpected(SharedObjectError::WrongSize));
++    CHECK(checkSharedObjectSize(small->get(), 32 * KiB) == std::unexpected(SharedObjectError::WrongSize));
++    CHECK(checkSharedObjectSize(small->get(), 4 * KiB).has_value());
++    // What names no object cannot be asked.
++    CHECK(checkSharedObjectSize(-1, 4 * KiB) == std::unexpected(SharedObjectError::Io));
++#endif
++}
++
++#ifdef _WIN32
++TEST_CASE("SharedObject.reservedSectionCommitsOnlyWhatIsAsked", "[vtextension]")
++{
++    // Guest memory is reserved: only the pages committed through a view are backed, and charged.
++    auto const object = createSharedObject(MiB, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    auto mapping = SharedMapping::map(object->get(), MiB, MapAccess::ReadWrite);
++    REQUIRE(mapping.has_value());
++    auto* const base = mapping->bytes().data();
++
++    auto region = MEMORY_BASIC_INFORMATION {};
++    REQUIRE(::VirtualQuery(base, &region, sizeof(region)) != 0);
++    CHECK(region.State == MEM_RESERVE);
++
++    REQUIRE(mapping->commit(0, GuestBytes).has_value());
++    REQUIRE(::VirtualQuery(base, &region, sizeof(region)) != 0);
++    CHECK(region.State == MEM_COMMIT);
++    CHECK(region.RegionSize == GuestBytes);
++    REQUIRE(::VirtualQuery(base + GuestBytes, &region, sizeof(region)) != 0);
++    CHECK(region.State == MEM_RESERVE);
++
++    mapping->bytes()[GuestBytes - 1] = std::byte { 1 };
++    CHECK(mapping->bytes()[GuestBytes - 1] == std::byte { 1 });
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject_win32.cpp b/src/vtextension/wasm/remote/transport/SharedObject_win32.cpp
+new file mode 100644
+index 000000000..25860837e
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/SharedObject_win32.cpp
+@@ -0,0 +1,129 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Shared memory objects on Windows: an unnamed, pagefile-backed section, not inheritable until it is handed
++// over. A section cannot be resized once created, so it needs no seal. Guest memory is a reserved section
++// (SEC_RESERVE): none of it is charged until commit() commits its pages through a view, so that an object
++// sized for the instance's largest memory costs only what the instance grew to. The interrupt page is
++// committed whole.
++//
++// A view's size is the section's, rounded up to the page; a mapping checks it against the size the object
++// was made of, as POSIX checks fstat()'s.
++#include <algorithm>
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <limits>
++#include <ranges>
++#include <span>
++#include <utility>
++
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
++
++#define WIN32_LEAN_AND_MEAN
++#include <Windows.h>
++
++namespace vtextension::wasm::remote::transport
++{
++
++namespace
++{
++    /// How an object for one use is made.
++    struct UseRow
++    {
++        SharedObjectUse use; ///< The use.
++        DWORD sectionKind;   ///< What backs its pages: committed at once (SEC_COMMIT), or reserved.
++    };
++
++    /// Every use, at its enumerator's index.
++    constexpr auto Uses = std::array {
++        UseRow { .use = SharedObjectUse::GuestMemory, .sectionKind = SEC_RESERVE },
++        UseRow { .use = SharedObjectUse::InterruptPage, .sectionKind = SEC_COMMIT },
++    };
++    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, Uses.size()),
++                                      [](std::size_t index) {
++                                          return std::to_underlying(Uses[index].use) == index;
++                                      }));
++
++    /// @return How many bytes the view at @p base spans: every region that the one allocation it began
++    ///         holds, committed or reserved alike; 0 if it cannot be asked.
++    [[nodiscard]] uint64_t viewBytes(void* base) noexcept
++    {
++        auto total = uint64_t { 0 };
++        auto region = MEMORY_BASIC_INFORMATION {};
++        auto* cursor = static_cast<std::byte*>(base);
++        while (::VirtualQuery(cursor, &region, sizeof(region)) != 0 && region.AllocationBase == base)
++        {
++            total += region.RegionSize;
++            cursor += region.RegionSize;
++        }
++        return total;
++    }
++} // namespace
++
++std::expected<OwnedHandle, SharedObjectError> createSharedObject(uint64_t bytes, SharedObjectUse use)
++{
++    if (bytes == 0 || bytes > std::numeric_limits<std::size_t>::max())
++        return std::unexpected(SharedObjectError::WrongSize);
++    auto object =
++        OwnedHandle { ::CreateFileMappingW(INVALID_HANDLE_VALUE,
++                                           nullptr,
++                                           PAGE_READWRITE | Uses[std::to_underlying(use)].sectionKind,
++                                           static_cast<DWORD>(bytes >> 32),
++                                           static_cast<DWORD>(bytes & 0xFFFF'FFFF),
++                                           nullptr) };
++    if (!object)
++        return std::unexpected(SharedObjectError::Io);
++    return object;
++}
++
++std::expected<void, SharedObjectError> sealSharedObject([[maybe_unused]] NativeHandle handle,
++                                                        [[maybe_unused]] SharedObjectUse use) noexcept
++{
++    // A section's size is fixed at creation; there is nothing to seal.
++    return {};
++}
++
++std::expected<SharedMapping, SharedObjectError> SharedMapping::map(NativeHandle handle,
++                                                                   uint64_t bytes,
++                                                                   MapAccess access)
++{
++    if (bytes == 0 || bytes > std::numeric_limits<std::size_t>::max())
++        return std::unexpected(SharedObjectError::WrongSize);
++    // The whole section, so that its size shows; only the first bytes are handed out.
++    auto const viewAccess = access == MapAccess::ReadWrite ? FILE_MAP_READ | FILE_MAP_WRITE : FILE_MAP_READ;
++    auto* const view = ::MapViewOfFile(handle, viewAccess, 0, 0, 0);
++    if (view == nullptr)
++        return std::unexpected(SharedObjectError::Io);
++    auto const extent = viewBytes(view);
++    if (extent == 0)
++    {
++        ::UnmapViewOfFile(view);
++        return std::unexpected(SharedObjectError::Io);
++    }
++    if (!fitsSharedObject(extent, bytes))
++    {
++        ::UnmapViewOfFile(view);
++        return std::unexpected(SharedObjectError::WrongSize);
++    }
++    return SharedMapping { std::span { static_cast<std::byte*>(view), static_cast<std::size_t>(bytes) },
++                           access };
++}
++
++std::expected<void, SharedObjectError> SharedMapping::commitRange(uint64_t from, uint64_t to) noexcept
++{
++    auto const protection = _access == MapAccess::ReadWrite ? PAGE_READWRITE : PAGE_READONLY;
++    if (::VirtualAlloc(_bytes.data() + from, static_cast<SIZE_T>(to - from), MEM_COMMIT, protection)
++        == nullptr)
++        return std::unexpected(SharedObjectError::Io);
++    return {};
++}
++
++void SharedMapping::release() noexcept
++{
++    if (!_bytes.empty())
++        ::UnmapViewOfFile(_bytes.data());
++    _bytes = {};
++}
++
++} // namespace vtextension::wasm::remote::transport

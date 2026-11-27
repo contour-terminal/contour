@@ -1,0 +1,919 @@
+# Review package: c326cc652..HEAD
+
+## Commits
+009b13c5e test(vtbackend): say which runtimes the multibyte trimming check bites on
+b52650093 fix(vtextension): try a fresh shared memory name on macOS when one is taken
+2126634ae fix(vtextension): make Contour's channel ends refuse descriptors a host sends
+
+## Files changed
+ src/contour-extension-host/testing/HostileHost.cpp | 12 +++--
+ src/vtbackend/grid/Line_test.cpp                   |  7 +--
+ src/vtextension/wasm/remote/CMakeLists.txt         |  1 +
+ src/vtextension/wasm/remote/Hostility_test.cpp     |  5 +-
+ .../wasm/remote/process/ProcessHostConnector.cpp   | 21 ++++++++
+ src/vtextension/wasm/remote/transport/Channel.hpp  | 27 ++++++++--
+ .../wasm/remote/transport/Channel_posix.cpp        | 42 +++++++++++++--
+ .../wasm/remote/transport/Channel_test.cpp         | 55 +++++++++++++++++--
+ .../wasm/remote/transport/Channel_win32.cpp        |  4 +-
+ .../wasm/remote/transport/SharedObjectName.hpp     | 56 ++++++++++++++++++++
+ .../wasm/remote/transport/SharedObject_posix.cpp   | 33 ++++++++----
+ .../wasm/remote/transport/SharedObject_test.cpp    | 61 +++++++++++++++++++++-
+ 12 files changed, 290 insertions(+), 34 deletions(-)
+
+## Diff
+diff --git a/src/contour-extension-host/testing/HostileHost.cpp b/src/contour-extension-host/testing/HostileHost.cpp
+index cf026c11c..6eba73403 100644
+--- a/src/contour-extension-host/testing/HostileHost.cpp
++++ b/src/contour-extension-host/testing/HostileHost.cpp
+@@ -425,41 +425,45 @@ class Relay
+                                       std::size_t size,
+                                       std::function<void(proto::Grow&)> const& rewrite)
+     {
+         if (!complete(way, pending, size))
+             return Verdict::Stop;
+         auto const frame = rewrittenGrow(std::span { pending }.first(size), way.channel.kind, rewrite);
+         return frame && way.sendTo(way.target(), *frame) ? Verdict::Discard : Verdict::Stop;
+     }
+ 
+     /// Forwards the frame, @p size bytes, @p pending starts with, to Contour with a descriptor of /dev/null
+-    /// attached; as it is on Windows, where nothing travels beside a frame.
++    /// attached; as it is where Contour's end refuses descriptors, and on Windows, where nothing travels
++    /// beside a frame.
+     /// @return What becomes of the frame.
+     [[nodiscard]] Verdict forwardWithDescriptor(Way const& way,
+                                                 std::vector<uint8_t>& pending,
+                                                 std::size_t size)
+     {
+ #ifdef _WIN32
+         std::ignore = way;
+         std::ignore = pending;
+         std::ignore = size;
+         return Verdict::Forward;
+ #else
+         if (!complete(way, pending, size))
+             return Verdict::Stop;
+         auto const devNull = transport::OwnedHandle { ::open("/dev/null", O_RDONLY | O_CLOEXEC) };
+         if (!devNull)
+             return Verdict::Forward;
+         auto const lock = std::scoped_lock { way.channel.contourSends };
+-        return way.target().sendWithHandle(std::span { pending }.first(size), devNull.get())
+-                   ? Verdict::Discard
+-                   : Verdict::Stop;
++        auto const sent = way.target().sendWithHandle(std::span { pending }.first(size), devNull.get());
++        if (sent)
++            return Verdict::Discard;
++        // Contour's end refuses descriptors (UpwardDescriptors::Refused): nothing was sent, so the frame
++        // goes on as it came, and the host serves on.
++        return sent.error() == transport::ChannelError::Refused ? Verdict::Forward : Verdict::Stop;
+ #endif
+     }
+ 
+     /// @return The MemoryRead whose frame, @p size bytes, @p pending starts with; nothing if it does not
+     ///         arrive.
+     [[nodiscard]] std::optional<proto::MemoryRead> memoryRead(Way const& way,
+                                                               std::vector<uint8_t>& pending,
+                                                               std::size_t size)
+     {
+         if (!complete(way, pending, size))
+diff --git a/src/vtbackend/grid/Line_test.cpp b/src/vtbackend/grid/Line_test.cpp
+index d73837d31..0e3085267 100644
+--- a/src/vtbackend/grid/Line_test.cpp
++++ b/src/vtbackend/grid/Line_test.cpp
+@@ -129,24 +129,25 @@ TEST_CASE("Line.toUtf8", "[Line]")
+ 
+     auto const trimmed = line.toUtf8Trimmed();
+     CHECK(trimmed == "Hi");
+ }
+ 
+ TEST_CASE("Line.toUtf8TrimmedKeepsMultibyteText", "[Line]")
+ {
+     // U+26A0 is E2 9A A0 in UTF-8, and U+00A0 is C2 A0: bytes past 0x7F that std::isspace may not be given as
+     // a char (a debug C runtime asserts) and that a Latin-1 locale calls a space. Only ASCII whitespace goes.
+     auto line = Line(ColumnCount(6), LineFlag::None, GraphicsAttributes {});
+-    line.useCellAt(ColumnOffset(1)).write(GraphicsAttributes {}, U' ', 1);
++    line.useCellAt(ColumnOffset(1)).write(GraphicsAttributes {}, U'\u00A0', 1);
+     line.useCellAt(ColumnOffset(2)).write(GraphicsAttributes {}, U'x', 1);
+-    line.useCellAt(ColumnOffset(3)).write(GraphicsAttributes {}, U'⚠', 1);
+-    CHECK(line.toUtf8Trimmed() == " x⚠");
++    line.useCellAt(ColumnOffset(3)).write(GraphicsAttributes {}, U'\u26A0', 1);
++    // This check bites only under the MSVC debug runtime or a non-C locale; the STATIC_CHECKs pin the helper.
++    CHECK(line.toUtf8Trimmed() == "\u00A0x\u26A0");
+ 
+     STATIC_CHECK(isAsciiWhitespace('\t'));
+     STATIC_CHECK_FALSE(isAsciiWhitespace(static_cast<char>(0xA0)));
+ }
+ 
+ TEST_CASE("Line.toUtf8ColumnAligned", "[Line]")
+ {
+     auto constexpr DisplayWidth = ColumnCount(5);
+ 
+     auto line = Line(DisplayWidth, LineFlag::None, GraphicsAttributes {});
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index caa0e55a3..59a90e76c 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -43,20 +43,21 @@ add_library(vtextension_remote_wire STATIC
+     transport/GuestMemoryMapping.cpp
+     transport/GuestMemoryMapping.hpp
+     transport/HandleGrant.hpp
+     transport/HelperArguments.cpp
+     transport/HelperArguments.hpp
+     transport/OwnedHandle.hpp
+     transport/PduStream.cpp
+     transport/PduStream.hpp
+     transport/SharedObject.cpp
+     transport/SharedObject.hpp
++    transport/SharedObjectName.hpp
+     transport/WakeSignal.hpp
+     ${_transport_sources}
+ )
+ # The codec names the runtime vocabulary (WasmRuntime.hpp, ExtensionError.hpp), which is header-only and
+ # std-only: the include path is all it takes.
+ target_include_directories(vtextension_remote_wire PUBLIC
+     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+ )
+ 
+diff --git a/src/vtextension/wasm/remote/Hostility_test.cpp b/src/vtextension/wasm/remote/Hostility_test.cpp
+index de9dde00f..f30d86d39 100644
+--- a/src/vtextension/wasm/remote/Hostility_test.cpp
++++ b/src/vtextension/wasm/remote/Hostility_test.cpp
+@@ -834,22 +834,23 @@ namespace
+ constexpr auto ScribbledRendersBound = std::chrono::seconds { 10 };
+ 
+ /// How many renders run through a host that scribbles on memory.
+ constexpr auto ScribbledRenders = 200;
+ 
+ } // namespace
+ 
+ #ifndef _WIN32
+ TEST_CASE("Hostility.descriptorUpIsNeverInstalled", "[vtextension][process][hostility]")
+ {
+-    // The host attaches a descriptor to its CallResult: Contour reads its lanes with plain receives, so the
+-    // system drops it, and the call is answered as if nothing came with it.
++    // The host attaches a descriptor to its CallResult. Where Contour's ends refuse descriptors (Linux 6.16+)
++    // its send fails and it passes the frame on bare; elsewhere Contour's plain receives leave the system to
++    // drop it. Either way the call is answered as if nothing came with it, and the host serves on.
+     auto const deadline = CaseDeadline { "Hostility.descriptorUpIsNeverInstalled" };
+     auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+     {
+         auto const backend = composition.backend(hostileHelper("descriptor-up"));
+         auto const runtime = contract::createRuntime(*backend);
+         auto loaded = loadInstanceModule(*runtime);
+         REQUIRE(loaded.has_value());
+         auto const module = *std::move(loaded);
+         auto context = contract::RecordingHostContext {};
+         auto const instance = contract::instantiate(*module, context);
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp b/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
+index ef9868143..8915827df 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
+@@ -1,40 +1,60 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+ 
++#include <core/log/LogStore.hpp>
++
+ #include <algorithm>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <iterator>
+ #include <memory>
++#include <mutex>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ using transport::NativeHandle;
+ 
+ namespace
+ {
++    /// Debug notes about how extension host processes are connected; off unless asked for.
++    auto const connectionLog = core::log::Category("vtextension.host.connection",
++                                                   "Logs how extension host processes are connected.");
++
++    /// Notes once, at debug level, that this system discards rather than refuses descriptors a host sends
++    /// up: nothing is installed either way, but a discarded one is closed on a thread of Contour's.
++    void noteUpwardDescriptors(transport::UpwardDescriptors upward)
++    {
++        if (upward == transport::UpwardDescriptors::Refused)
++            return;
++        static auto noted = std::once_flag {};
++        std::call_once(noted, [] {
++            connectionLog()("This system cannot make Contour's ends refuse descriptors an extension host "
++                            "sends; it discards them instead.");
++        });
++    }
++
+     /// A host process, as its parent holds it: the supervisor's grip on it, and the parent's ends of its
+     /// interrupt page and wake signal.
+     class ProcessHostHandle final: public remote::IHostHandle
+     {
+       public:
+         ProcessHostHandle(SupervisedHelper helper,
+                           transport::ControlPage page,
+                           transport::WakeSender wake) noexcept:
+             _page { std::move(page) }, _wake { std::move(wake) }, _helper { std::move(helper) }
+         {
+@@ -89,20 +109,21 @@ std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::conn
+     if (!control || !page || !wake)
+         return std::unexpected(ExtensionError::HostUnavailable);
+     auto lanes = std::vector<transport::ChannelPair> {};
+     for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
+     {
+         auto lane = transport::makeChannelPair();
+         if (!lane)
+             return std::unexpected(ExtensionError::HostUnavailable);
+         lanes.push_back(*std::move(lane));
+     }
++    noteUpwardDescriptors(control->upward);
+ 
+     // The child sees them in this order (HelperArguments): control, the lanes, the page, the wake signal.
+     auto spec = LaunchSpec { .executable = _config.helper,
+                              .inherited = {},
+                              .arguments = {},
+                              .environment = _config.environment,
+                              .caps = _config.caps,
+                              .standardError = _config.standardError };
+     spec.inherited.push_back(control->helper.nativeHandle());
+     for (auto const& lane: lanes)
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index e4263ff74..e48207e96 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -17,21 +17,22 @@
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ /// Why a channel operation failed.
+ enum class ChannelError : uint8_t
+ {
+     Closed, ///< The peer closed its end, or this end was shut down.
+     Io,     ///< The operating system reported any other failure.
+     /// The peer attached what no message carries: more descriptors than a receive takes in, or ancillary
+-    /// data other than descriptors (receiveSomeWithHandles()).
++    /// data other than descriptors (receiveSomeWithHandles()); or, sending, the peer's end refuses
++    /// descriptors (sendWithHandle()).
+     Refused,
+ };
+ 
+ #ifdef _WIN32
+ /// The operating system's name for one end: a pipe HANDLE.
+ using NativeHandle = void*;
+ #else
+ /// The operating system's name for one end: a socket descriptor.
+ using NativeHandle = int;
+ #endif
+@@ -84,21 +85,23 @@ class Channel
+     /// @param buffer Where the bytes go. Not empty.
+     /// @return How many bytes arrived, at least one; `Closed` at the peer's end of stream, or once this end
+     ///         was shut down.
+     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSome(std::span<uint8_t> buffer);
+ 
+ #ifndef _WIN32
+     /// Sends all of @p bytes, as send() does, with a duplicate of @p handle attached to their first byte
+     /// (SCM_RIGHTS): the peer receives it with that byte, as receiveSomeWithHandles() does.
+     /// @param bytes The bytes to send; not empty.
+     /// @param handle The descriptor; still the caller's.
+-    /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
++    /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down;
++    ///         `Refused`, with nothing sent, if the peer's end refuses descriptors
++    ///         (UpwardDescriptors::Refused).
+     [[nodiscard]] std::expected<void, ChannelError> sendWithHandle(std::span<uint8_t const> bytes,
+                                                                    NativeHandle handle);
+ 
+     /// Receives at least one byte, as receiveSome() does, and installs the descriptors attached to them,
+     /// close-on-exec. At most two are taken in at once, so that a reader tells a peer that attached one
+     /// more than a message may carry from one that did not; past that, the system truncates them, and the
+     /// receive fails.
+     /// @param buffer Where the bytes go. Not empty.
+     /// @param handles Where the descriptors that arrived are appended, now the caller's.
+     /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Refused` if the system
+@@ -121,23 +124,39 @@ class Channel
+     /// @return The end's descriptor or handle, still owned by the channel: for handing it to a child
+     ///         process, and for inspecting it. On Windows, INVALID_HANDLE_VALUE once shutdown() closed it.
+     ///         Not to be called, nor its value used, while another thread may call shutdown(): on Windows the
+     ///         handle may be closed, and its value reused, at any moment after shutdown() begins.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     std::unique_ptr<Native> _native;
+ };
+ 
++/// What becomes of a descriptor the extension host process attaches to what it sends Contour.
++///
++/// Contour reads its ends with plain receives, so nothing a helper attaches is ever installed. But where the
++/// system merely discards such a descriptor, it closes it in the receiving thread, and a last close can block
++/// without bound (a socket lingering on a full send buffer): a compromised helper could hang a thread of
++/// Contour's. Where the system lets an end refuse descriptors outright (Linux 6.16 and later,
++/// `SO_PASSRIGHTS`), the helper's send fails instead, and no descriptor ever reaches Contour's process.
++enum class UpwardDescriptors : uint8_t
++{
++    Discarded, ///< The system takes them in and closes them, in the receiving thread (older kernels, BSDs).
++    Refused,   ///< The system refuses to send them: nothing reaches Contour (Linux 6.16+, and Windows, where
++               ///< no handle travels beside the bytes).
++};
++
+ /// Two connected ends: what one sends, the other receives.
+ struct ChannelPair
+ {
+     Channel parent; ///< Contour's end.
+-    Channel helper; ///< The extension host process's end.
++    Channel helper; ///< The extension host process's end; it takes descriptors (Contour's grants).
++    UpwardDescriptors upward {}; ///< What becomes of a descriptor sent from the helper's end to Contour's.
+ };
+ 
+ /// Creates a connected pair. Neither end is inherited by a child process unless it is handed over on
+-/// purpose.
++/// purpose. Contour's end refuses descriptors where the system can (UpwardDescriptors); the helper's end
++/// never does, so that it still receives the grants Contour sends.
+ /// @return The pair; `Io` if the operating system refused.
+ [[nodiscard]] std::expected<ChannelPair, ChannelError> makeChannelPair();
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/Channel_posix.cpp b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+index ee464dfca..883831f19 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+@@ -1,18 +1,19 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The channel on POSIX: a connected pair of Unix-domain stream sockets, close-on-exec, whose writes never
+ // raise SIGPIPE. Shutting an end down is ::shutdown(), which wakes a reader blocked on it; the descriptor is
+ // closed only when the channel is destroyed, so that no thread can find its number reused.
+ //
+ // A descriptor travels as SCM_RIGHTS on a message's first byte. Only receiveSomeWithHandles() installs what
+-// arrives; a plain recv() leaves the system to discard it.
++// arrives; a plain recv() leaves the system to discard it. Contour's end of a pair refuses descriptors where
++// Linux lets it (SO_PASSRIGHTS), so that none is even discarded there (UpwardDescriptors).
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <sys/uio.h>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <cstddef>
+ #include <cstdint>
+@@ -71,20 +72,50 @@ namespace
+         if (closeOnExec == CloseOnExec::Unknown && ::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1)
+             return std::unexpected(ChannelError::Io);
+ #ifdef SO_NOSIGPIPE
+         auto const enable = 1;
+         if (::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enable, sizeof(enable)) == -1)
+             return std::unexpected(ChannelError::Io);
+ #endif
+         return {};
+     }
+ 
++#ifdef __linux__
++    #ifdef SO_PASSRIGHTS
++    constexpr auto PassRightsOption = SO_PASSRIGHTS;
++    #else
++    /// `SO_PASSRIGHTS` (Linux 6.16, asm-generic/socket.h), for C libraries whose headers predate it.
++    constexpr auto PassRightsOption = 83;
++    #endif
++#endif
++
++    /// Makes Contour's end @p descriptor refuse descriptors its peer sends, where the system can: a
++    /// descriptor the system took in only to discard it would be closed in the receiving thread, and a last
++    /// close can block without bound (UpwardDescriptors).
++    /// @return What becomes of descriptors sent to it; `Io` if the system failed otherwise than by lacking
++    /// it.
++    [[nodiscard]] std::expected<UpwardDescriptors, ChannelError> refuseDescriptors(
++        [[maybe_unused]] int descriptor) noexcept
++    {
++#ifdef __linux__
++        auto const disable = 0;
++        if (::setsockopt(descriptor, SOL_SOCKET, PassRightsOption, &disable, sizeof(disable)) == 0)
++            return UpwardDescriptors::Refused;
++        // A kernel older than 6.16 does not know the option.
++        if (errno == ENOPROTOOPT || errno == EINVAL)
++            return UpwardDescriptors::Discarded;
++        return std::unexpected(ChannelError::Io);
++#else
++        return UpwardDescriptors::Discarded;
++#endif
++    }
++
+     /// The types of msghdr::msg_controllen and cmsghdr::cmsg_len: size_t on Linux, socklen_t on macOS.
+     using ControlLength = decltype(::msghdr {}.msg_controllen);
+     using ControlMessageLength = decltype(::cmsghdr {}.cmsg_len);
+ 
+     /// The most descriptors one receive takes in: one more than a message may carry, so that a peer that
+     /// attached two is told from one that attached one.
+     constexpr auto MaxReceivedHandles = std::size_t { 2 };
+ 
+     /// The control buffer one attached descriptor is sent in.
+     using SendControlBuffer = std::array<std::byte, CMSG_SPACE(sizeof(int))>;
+@@ -202,20 +233,23 @@ std::expected<void, ChannelError> Channel::sendWithHandle(std::span<uint8_t cons
+     header->cmsg_type = SCM_RIGHTS;
+     header->cmsg_len = static_cast<ControlMessageLength>(CMSG_LEN(sizeof(int)));
+     std::memcpy(CMSG_DATA(header), &handle, sizeof(int));
+     while (true)
+     {
+         auto const sent = ::sendmsg(_native->descriptor, &message, SendFlags);
+         if (sent == -1)
+         {
+             if (errno == EINTR)
+                 continue;
++            // The peer's end refuses descriptors (SO_PASSRIGHTS off): nothing was sent.
++            if (errno == EPERM)
++                return std::unexpected(ChannelError::Refused);
+             return std::unexpected(channelErrorOf(errno));
+         }
+         // The descriptor went with the first byte; the rest are plain bytes.
+         return send(bytes.subspan(static_cast<std::size_t>(sent)));
+     }
+ }
+ 
+ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::span<uint8_t> buffer,
+                                                                          std::vector<OwnedHandle>& handles)
+ {
+@@ -292,22 +326,24 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
+ #else
+     constexpr auto SocketType = SOCK_STREAM;
+     constexpr auto PairCloseOnExec = CloseOnExec::Unknown;
+ #endif
+     if (::socketpair(AF_UNIX, SocketType, 0, descriptors.data()) == -1)
+         return std::unexpected(ChannelError::Io);
+     auto parent = std::make_unique<Channel::Native>(descriptors[0]);
+     auto helper = std::make_unique<Channel::Native>(descriptors[1]);
+     return configureEnd(parent->descriptor, PairCloseOnExec)
+         .and_then([&] { return configureEnd(helper->descriptor, PairCloseOnExec); })
+-        .transform([&] {
++        .and_then([&] { return refuseDescriptors(parent->descriptor); })
++        .transform([&](UpwardDescriptors upward) {
+             return ChannelPair { .parent = Channel { std::move(parent) },
+-                                 .helper = Channel { std::move(helper) } };
++                                 .helper = Channel { std::move(helper) },
++                                 .upward = upward };
+         });
+ }
+ 
+ void closeNativeHandle(NativeHandle handle) noexcept
+ {
+     ::close(handle);
+ }
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/Channel_test.cpp b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+index 6010b56ac..fe3b242f2 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_test.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+@@ -21,34 +21,38 @@
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
++    #include <sys/socket.h>
++
+     #include <csignal>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ 
+     #include <vtextension/wasm/remote/proto/Codec.hpp>
+     #include <vtextension/wasm/remote/proto/Pdu.hpp>
+     #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+     #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
++using vtextension::wasm::remote::transport::ChannelPair;
+ using vtextension::wasm::remote::transport::makeChannelPair;
++using vtextension::wasm::remote::transport::UpwardDescriptors;
+ using vtextension::wasm::remote::transport::testing::closeHandle;
+ using vtextension::wasm::remote::transport::testing::duplicate;
+ 
+ namespace
+ {
+ 
+ /// @return Exactly @p count bytes received off @p channel; nothing if it failed first.
+ [[nodiscard]] std::optional<std::vector<uint8_t>> receiveExactly(Channel& channel, std::size_t count)
+ {
+     auto received = std::vector<uint8_t>(count);
+@@ -283,20 +287,36 @@ struct Pipe
+ };
+ 
+ /// @return A fresh pipe.
+ [[nodiscard]] Pipe makePipe()
+ {
+     auto ends = std::array<int, 2> { -1, -1 };
+     REQUIRE(::pipe(ends.data()) == 0);
+     return Pipe { .reader = OwnedHandle { ends[0] }, .writer = OwnedHandle { ends[1] } };
+ }
+ 
++/// @return A connected pair whose ends both take descriptors in, as a system without `SO_PASSRIGHTS` makes
++///         them: for the path where the system discards what a helper sends up, which makeChannelPair()'s
++///         pairs never reach on a kernel that refuses it.
++[[nodiscard]] ChannelPair discardingPair()
++{
++    auto ends = std::array<int, 2> { -1, -1 };
++    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, ends.data()) == 0);
++    auto parent = Channel::adopt(ends[0]);
++    auto helper = Channel::adopt(ends[1]);
++    REQUIRE(parent.has_value());
++    REQUIRE(helper.has_value());
++    return ChannelPair { .parent = *std::move(parent),
++                         .helper = *std::move(helper),
++                         .upward = UpwardDescriptors::Discarded };
++}
++
+ } // namespace
+ 
+ TEST_CASE("Channel.handleTravelsWithItsBytes", "[vtextension]")
+ {
+     auto pair = makeChannelPair();
+     REQUIRE(pair.has_value());
+     auto const pipe = makePipe();
+     auto const bytes = std::array<uint8_t, 3> { 1, 2, 3 };
+     REQUIRE(pair->parent.sendWithHandle(bytes, pipe.writer.get()).has_value());
+ 
+@@ -313,38 +333,65 @@ TEST_CASE("Channel.handleTravelsWithItsBytes", "[vtextension]")
+     REQUIRE(flags != -1);
+     CHECK((flags & FD_CLOEXEC) != 0);
+ 
+     // Plain bytes after it carry nothing.
+     REQUIRE(pair->parent.send(bytes).has_value());
+     auto none = std::vector<OwnedHandle> {};
+     CHECK(pair->helper.receiveSomeWithHandles(received, none) == std::size_t { 3 });
+     CHECK(none.empty());
+ }
+ 
+-TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
++    #ifdef __linux__
++TEST_CASE("Channel.parentEndRefusesDescriptors", "[vtextension]")
+ {
+-    // A helper attaches a descriptor to every frame it sends; Contour's reader takes in none of them.
++    // Contour's end refuses what a helper attaches: the helper's sendmsg fails (EPERM, reported as Refused)
++    // with nothing sent, so no descriptor enters Contour's process -- not even to be discarded, a close that
++    // could block a thread of Contour's. The helper's end still takes Contour's grants.
+     auto pair = makeChannelPair();
+     REQUIRE(pair.has_value());
++    if (pair->upward != UpwardDescriptors::Refused)
++        SKIP("this kernel predates SO_PASSRIGHTS (Linux 6.16)");
++    auto const pipe = makePipe();
++    auto const bytes = std::array<uint8_t, 3> { 1, 2, 3 };
++    CHECK(pair->helper.sendWithHandle(bytes, pipe.writer.get()) == std::unexpected(ChannelError::Refused));
++
++    // Only what is sent after it arrives, and with nothing attached.
++    REQUIRE(pair->helper.send(bytes).has_value());
++    auto received = std::array<uint8_t, 8> {};
++    auto handles = std::vector<OwnedHandle> {};
++    CHECK(pair->parent.receiveSomeWithHandles(received, handles) == std::size_t { 3 });
++    CHECK(handles.empty());
++
++    REQUIRE(pair->parent.sendWithHandle(bytes, pipe.writer.get()).has_value());
++    CHECK(pair->helper.receiveSomeWithHandles(received, handles) == std::size_t { 3 });
++    CHECK(handles.size() == 1);
++}
++    #endif
++
++TEST_CASE("Channel.parentInstallsNoDescriptorFromTheHelper", "[vtextension]")
++{
++    // A helper attaches a descriptor to every frame it sends, to an end that does not refuse them (as on a
++    // system without SO_PASSRIGHTS); Contour's reader takes in none of them.
++    auto pair = discardingPair();
+     auto parent = vtextension::wasm::remote::transport::PduStream {
+-        std::move(pair->parent), proto::ChannelKind::Control, proto::Direction::ToParent, proto::PduLimits {}
++        std::move(pair.parent), proto::ChannelKind::Control, proto::Direction::ToParent, proto::PduLimits {}
+     };
+     auto const frame = proto::encodeFrame(proto::RuntimeCreated { .runtimeId = 7, .error = std::nullopt });
+     REQUIRE(frame.has_value());
+     constexpr auto Frames = 100;
+ 
+     auto const before = openDescriptorCount();
+     for ([[maybe_unused]] auto const index: std::views::iota(0, Frames))
+     {
+         // Sent and received one at a time, so that the socket's buffer never fills.
+         {
+             auto const pipe = makePipe();
+-            REQUIRE(pair->helper.sendWithHandle(*frame, pipe.writer.get()).has_value());
++            REQUIRE(pair.helper.sendWithHandle(*frame, pipe.writer.get()).has_value());
+         }
+         auto const received = parent.receive();
+         REQUIRE(received.has_value());
+         CHECK(std::holds_alternative<proto::RuntimeCreated>(*received));
+     }
+     CHECK(openDescriptorCount() == before);
+     CHECK_FALSE(parent.takeAttachedHandle());
+ }
+ #endif
+diff --git a/src/vtextension/wasm/remote/transport/Channel_win32.cpp b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+index 14eb0ea99..99c60ecb2 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+@@ -393,20 +393,22 @@ std::expected<ChannelPair, ChannelError> makeChannelPair()
+         auto const error = ::GetLastError();
+         auto connected = DWORD { 0 };
+         if (error == ERROR_IO_PENDING)
+         {
+             if (!::GetOverlappedResult(server.get(), &overlapped, &connected, TRUE))
+                 return std::unexpected(ChannelError::Io);
+         }
+         else if (error != ERROR_PIPE_CONNECTED)
+             return std::unexpected(ChannelError::Io);
+     }
++    // No handle travels beside a pipe's bytes: the helper has nothing to send up.
+     return ChannelPair { .parent = Channel { std::make_unique<Channel::Native>(server.release()) },
+-                         .helper = Channel { std::make_unique<Channel::Native>(client.release()) } };
++                         .helper = Channel { std::make_unique<Channel::Native>(client.release()) },
++                         .upward = UpwardDescriptors::Refused };
+ }
+ 
+ void closeNativeHandle(NativeHandle handle) noexcept
+ {
+     ::CloseHandle(handle);
+ }
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/SharedObjectName.hpp b/src/vtextension/wasm/remote/transport/SharedObjectName.hpp
+new file mode 100644
+index 000000000..4a3626f09
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/SharedObjectName.hpp
+@@ -0,0 +1,56 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// The names a named shared memory object is made under, where the system has no anonymous one (macOS's
++/// shm_open). The name lives only until the object is open -- it is unlinked at once -- but another process
++/// of the same user can guess or squat it meanwhile, so each name is random and a taken one is tried again.
++/// Std-only, so that the decision is tested where shm_open is not used.
++
++#include <cerrno>
++#include <cstdint>
++#include <expected>
++#include <format>
++#include <ranges>
++#include <string>
++
++namespace vtextension::wasm::remote::transport
++{
++
++/// How many names an object is tried under before its creation fails: a taken name is someone else's, and
++/// eight random ones all taken is someone squatting the namespace, not chance.
++inline constexpr auto SharedObjectNameAttempts = 8;
++
++/// How many bits of a suffix a name keeps: 12 hex digits, so that `/contour-eh-<pid>-<suffix>` stays within
++/// macOS's 31 characters (PSHMNAMLEN) for any process id up to 99999.
++inline constexpr auto SharedObjectNameSuffixBits = 48;
++
++/// @param processId The process making the object.
++/// @param suffix What tells the name apart; only its low SharedObjectNameSuffixBits bits are used.
++/// @return The name: `/contour-eh-<processId>-<suffix as 12 hex digits>`.
++[[nodiscard]] inline std::string sharedObjectName(int64_t processId, uint64_t suffix)
++{
++    constexpr auto SuffixMask = (uint64_t { 1 } << SharedObjectNameSuffixBits) - 1;
++    return std::format("/contour-eh-{}-{:012x}", processId, suffix & SuffixMask);
++}
++
++/// Creates an object under a fresh name: tries up to SharedObjectNameAttempts names, each with a new suffix,
++/// for as long as the name tried is taken.
++/// @param processId The process making the object.
++/// @param nextSuffix Gives each attempt's suffix: a random value, never a constant.
++/// @param create Tries one name: the object, or the `errno` it failed with; `EEXIST` if the name is taken.
++/// @return What the first attempt not refused for a taken name gave; `EEXIST` if every name was taken.
++template <typename NextSuffix, typename Create>
++[[nodiscard]] auto createUnderFreshName(int64_t processId, NextSuffix const& nextSuffix, Create const& create)
++    -> decltype(create(std::string {}))
++{
++    for ([[maybe_unused]] auto const attempt: std::views::iota(0, SharedObjectNameAttempts))
++    {
++        auto created = create(sharedObjectName(processId, nextSuffix()));
++        if (created || created.error() != EEXIST)
++            return created;
++    }
++    return decltype(create(std::string {})) { std::unexpect, EEXIST };
++}
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject_posix.cpp b/src/vtextension/wasm/remote/transport/SharedObject_posix.cpp
+index 43bc2f651..e0b676b0b 100644
+--- a/src/vtextension/wasm/remote/transport/SharedObject_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/SharedObject_posix.cpp
+@@ -22,23 +22,24 @@
+ #include <ranges>
+ #include <span>
+ #include <utility>
+ 
+ #include <fcntl.h>
+ #include <unistd.h>
+ 
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ #ifdef __APPLE__
+-    #include <atomic>
+-    #include <format>
++    #include <random>
+     #include <string>
++
++    #include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
+ #endif
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ namespace
+ {
+     /// Whether an object is sealed against write mappings made after Contour's own.
+     enum class LaterWrites : uint8_t
+     {
+@@ -86,29 +87,39 @@ namespace
+         if (result == -1)
+             return std::unexpected(sharedObjectErrorOf(errno));
+         return {};
+     }
+ 
+     /// @return A new object, close-on-exec and not yet sized; or why it could not be made.
+     [[nodiscard]] std::expected<OwnedHandle, SharedObjectError> openObject(
+         [[maybe_unused]] UseRow const& row) noexcept
+     {
+ #ifdef __APPLE__
+-        static auto serial = std::atomic<uint64_t> { 0 };
+-        auto const name = std::format("/contour-eh-{}-{}", ::getpid(), serial.fetch_add(1));
+-        auto object = OwnedHandle { ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600) };
+-        if (!object)
+-            return std::unexpected(sharedObjectErrorOf(errno));
+-        ::shm_unlink(name.c_str());
+-        return succeeded(::fcntl(object.get(), F_SETFD, FD_CLOEXEC)).transform([&] {
+-            return std::move(object);
+-        });
++        // A random name, tried again while it is taken (SharedObjectName.hpp), and unlinked once open.
++        auto random = std::random_device {};
++        auto const nextSuffix = [&] {
++            return (uint64_t { random() } << 32) | random();
++        };
++        auto const createNamed = [](std::string const& name) -> std::expected<OwnedHandle, int> {
++            auto object = OwnedHandle { ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600) };
++            if (!object)
++                return std::unexpected(errno);
++            ::shm_unlink(name.c_str());
++            return object;
++        };
++        return createUnderFreshName(::getpid(), nextSuffix, createNamed)
++            .transform_error(sharedObjectErrorOf)
++            .and_then([](OwnedHandle object) -> std::expected<OwnedHandle, SharedObjectError> {
++                return succeeded(::fcntl(object.get(), F_SETFD, FD_CLOEXEC)).transform([&] {
++                    return std::move(object);
++                });
++            });
+ #else
+         auto object = OwnedHandle { ::memfd_create(row.memfdName, MFD_CLOEXEC | MFD_ALLOW_SEALING) };
+         if (!object)
+             return std::unexpected(sharedObjectErrorOf(errno));
+         return object;
+ #endif
+     }
+ } // namespace
+ 
+ std::expected<OwnedHandle, SharedObjectError> createSharedObject(uint64_t bytes, SharedObjectUse use)
+diff --git a/src/vtextension/wasm/remote/transport/SharedObject_test.cpp b/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
+index 4e286cedc..eaa848665 100644
+--- a/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
++++ b/src/vtextension/wasm/remote/transport/SharedObject_test.cpp
+@@ -1,60 +1,117 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The shared memory objects Contour and its extension host process both map: a size rounded up to any page a
+ // parent may use is accepted and no more, what one mapping writes the other sees, and nobody can resize an
+ // object, inherit it unasked, or find more of a reserved one committed than was asked for.
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <cerrno>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <initializer_list>
++#include <string>
+ #include <utility>
++#include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
++#include <vtextension/wasm/remote/transport/SharedObjectName.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <sys/mman.h>
+     #include <sys/types.h>
+ 
+-    #include <cerrno>
+-
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::createSharedObject;
++using vtextension::wasm::remote::transport::createUnderFreshName;
+ using vtextension::wasm::remote::transport::fitsSharedObject;
+ using vtextension::wasm::remote::transport::MapAccess;
+ using vtextension::wasm::remote::transport::sealSharedObject;
+ using vtextension::wasm::remote::transport::SharedMapping;
+ using vtextension::wasm::remote::transport::SharedObjectError;
++using vtextension::wasm::remote::transport::sharedObjectName;
++using vtextension::wasm::remote::transport::SharedObjectNameAttempts;
+ using vtextension::wasm::remote::transport::SharedObjectUse;
+ #ifndef _WIN32
+ using vtextension::wasm::remote::transport::checkSharedObjectSize;
+ #endif
+ 
+ namespace
+ {
+ 
+ constexpr auto KiB = uint64_t { 1024 };
+ constexpr auto MiB = 1024 * KiB;
+ 
+ /// The size the tests' guest memory is made of: a guest's page.
+ constexpr auto GuestBytes = 64 * KiB;
+ 
+ } // namespace
+ 
++TEST_CASE("SharedObject.nameFitsMacOS", "[vtextension]")
++{
++    // macOS refuses shm_open names longer than 31 characters (PSHMNAMLEN); its process ids stay below 100000.
++    CHECK(sharedObjectName(99999, ~uint64_t { 0 }) == "/contour-eh-99999-ffffffffffff");
++    CHECK(sharedObjectName(99999, ~uint64_t { 0 }).size() <= 31);
++    CHECK(sharedObjectName(42, 0xABC) == "/contour-eh-42-000000000abc");
++}
++
++TEST_CASE("SharedObject.takenNamesAreTriedAgain", "[vtextension]")
++{
++    // A name someone else holds is tried again under a fresh suffix, a bounded number of times; any other
++    // failure ends the attempt at once.
++    auto suffix = uint64_t { 0 };
++    auto const nextSuffix = [&] {
++        return ++suffix;
++    };
++    auto tried = std::vector<std::string> {};
++    auto const takenUntil = [&](std::size_t freeAt) {
++        return [&tried, freeAt](std::string const& name) -> std::expected<int, int> {
++            tried.push_back(name);
++            if (tried.size() < freeAt)
++                return std::unexpected(EEXIST);
++            return static_cast<int>(tried.size());
++        };
++    };
++
++    SECTION("a free name at the third try")
++    {
++        CHECK(createUnderFreshName(7, nextSuffix, takenUntil(3)) == std::expected<int, int> { 3 });
++        CHECK(tried
++              == std::vector<std::string> {
++                  "/contour-eh-7-000000000001", "/contour-eh-7-000000000002", "/contour-eh-7-000000000003" });
++    }
++    SECTION("every name taken")
++    {
++        CHECK(createUnderFreshName(7, nextSuffix, takenUntil(100))
++              == std::expected<int, int> { std::unexpect, EEXIST });
++        auto const attempts = static_cast<std::size_t>(SharedObjectNameAttempts);
++        CHECK(tried.size() == attempts);
++    }
++    SECTION("another failure is not retried")
++    {
++        auto const denied = [&](std::string const& name) -> std::expected<int, int> {
++            tried.push_back(name);
++            return std::unexpected(EACCES);
++        };
++        CHECK(createUnderFreshName(7, nextSuffix, denied)
++              == std::expected<int, int> { std::unexpect, EACCES });
++        CHECK(tried.size() == 1);
++    }
++}
++
+ TEST_CASE("SharedObject.sizeMayBeRoundedUpToTheLargestPage", "[vtextension]")
+ {
+     // An arm64 parent's 4 KiB object, rounded to its 16 KiB page, read by an x86_64 helper under Rosetta,
+     // whose own page is 4 KiB.
+     STATIC_CHECK(fitsSharedObject(16 * KiB, 4 * KiB));
+     STATIC_CHECK(fitsSharedObject(4 * KiB, 4 * KiB));
+     STATIC_CHECK(fitsSharedObject(32 * MiB, 32 * MiB));
+     STATIC_CHECK_FALSE(fitsSharedObject((16 * KiB) + 1, 4 * KiB));
+     STATIC_CHECK_FALSE(fitsSharedObject((4 * KiB) - 1, 4 * KiB));
+     STATIC_CHECK_FALSE(fitsSharedObject((32 * MiB) + (16 * KiB), 32 * MiB));

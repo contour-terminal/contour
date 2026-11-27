@@ -1,0 +1,3154 @@
+# Review package: 1551a7793..HEAD
+
+## Commits
+588d234cc build: install contour-extension-host beside contour
+952e7ba41 feat(vtextension): the contour-extension-host executable
+abe316439 fix(vtextension): state what a helper can do with its page, and how a wait fails
+
+## Files changed
+ src/CMakeLists.txt                                 |  20 ++
+ src/contour-extension-host/CMakeLists.txt          |  26 ++
+ src/contour-extension-host/main.cpp                |  14 +
+ src/contour/CMakeLists.txt                         |  14 +-
+ src/vtextension/wasm/host/CMakeLists.txt           |  23 +-
+ src/vtextension/wasm/host/HelperEngine.hpp         |  19 ++
+ src/vtextension/wasm/host/HostBootstrap.hpp        |  58 ++++
+ src/vtextension/wasm/host/HostBootstrap_posix.cpp  | 100 ++++++
+ src/vtextension/wasm/host/HostBootstrap_win32.cpp  |  24 ++
+ src/vtextension/wasm/host/HostProcess.cpp          | 184 +++++++++++
+ src/vtextension/wasm/host/HostProcess.hpp          | 128 ++++++++
+ src/vtextension/wasm/host/HostProcess_test.cpp     | 346 +++++++++++++++++++++
+ src/vtextension/wasm/host/HostServer.cpp           |  34 +-
+ src/vtextension/wasm/host/HostServer.hpp           |  14 +-
+ src/vtextension/wasm/host/HostServer_test.cpp      |  53 +++-
+ src/vtextension/wasm/host/IHostedEngine.hpp        |   6 +
+ src/vtextension/wasm/host/InProcessHost.hpp        |   4 -
+ src/vtextension/wasm/remote/CMakeLists.txt         |  38 ++-
+ src/vtextension/wasm/remote/Helper_test.cpp        | 102 ++++++
+ .../wasm/remote/process/HelperLocation.cpp         |  41 +++
+ .../wasm/remote/process/HelperLocation.hpp         |  40 +++
+ .../wasm/remote/process/HelperLocation_test.cpp    |  87 ++++++
+ .../wasm/remote/process/ProcessLauncher.hpp        |   7 +-
+ .../wasm/remote/process/ProcessLauncher_test.cpp   | 279 +++++++----------
+ .../wasm/remote/process/testing/LaunchProbe.cpp    |  42 ++-
+ .../wasm/remote/process/testing/LaunchedHelper.cpp | 153 +++++++++
+ .../wasm/remote/process/testing/LaunchedHelper.hpp |  91 ++++++
+ .../wasm/remote/transport/Channel_test.cpp         |  31 +-
+ .../wasm/remote/transport/ControlPage.hpp          |   4 +-
+ .../wasm/remote/transport/ControlPage_test.cpp     |  25 +-
+ .../wasm/remote/transport/ControlPage_win32.cpp    |   7 +-
+ .../wasm/remote/transport/testing/HandleCopies.hpp |  49 +++
+ src/vtextension/wasm/wasmtime/CMakeLists.txt       |  11 +
+ src/vtextension/wasm/wasmtime/HelperEngine.cpp     |  28 ++
+ 34 files changed, 1828 insertions(+), 274 deletions(-)
+
+## Diff
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 4f42f32f4..a15a49bdb 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -5,27 +5,47 @@ endif()
+ include(PedanticCompiler)
+ 
+ # Coverage instruments the first-party code under src/ only, never the fetched third-party code. Instrumented,
+ # a library's translation units built for a CPU extension -- libunicode compiles its scanner for AVX-512 -- reset
+ # their counters with that extension's instructions, and the runtime resets every unit's counters in each fork
+ # child (__gcov_fork): on a CPU without the extension every child died of SIGILL before it could exec.
+ if(CONTOUR_CODE_COVERAGE_ENABLED)
+     add_compile_options(-g --coverage)
+ endif()
+ 
++# Whether this build produces a macOS application bundle, as opposed to a plain executable.
++#
++# A .app exists to be double-clicked, and everything that assembles one -- the
++# @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
++# notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
++# command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
++# which is the whole point of not building the frontend. So it installs like any other Unix CLI
++# tool. Every bundle-only block (contour/, contour-extension-host/) is gated on this rather than on APPLE.
++set(CONTOUR_MACOS_APP_BUNDLE OFF)
++if(APPLE AND CONTOUR_FRONTEND_GUI)
++    set(CONTOUR_MACOS_APP_BUNDLE ON)
++endif()
++
+ # Before every module: their suites link its test support.
+ add_subdirectory(testing)
+ add_subdirectory(crispy)
+ add_subdirectory(text_shaper)
+ add_subdirectory(vtpty)
+ add_subdirectory(vtcontrol)
+ add_subdirectory(vtparser)
+ add_subdirectory(vtbackend)
+ if(CONTOUR_EXTENSIONS)
++    # Where contour-extension-host is installed on Unix, a private executable of Contour's, and the way there
++    # from the directory contour is installed in: how contour finds it (vtextension_remote_process).
++    include(GNUInstallDirs)
++    set(CONTOUR_EXTENSION_HOST_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}/contour")
++    file(RELATIVE_PATH CONTOUR_EXTENSION_HOST_RELATIVE_DIR
++        "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBEXECDIR}/contour")
+     add_subdirectory(vtextension)
++    add_subdirectory(contour-extension-host)
+ endif()
+ add_subdirectory(vtconformance)
+ add_subdirectory(vtworkspace)
+ add_subdirectory(vthost)
+ add_subdirectory(vtrasterizer)
+ 
+ add_subdirectory(contour)
+diff --git a/src/contour-extension-host/CMakeLists.txt b/src/contour-extension-host/CMakeLists.txt
+new file mode 100644
+index 000000000..d4c4f1729
+--- /dev/null
++++ b/src/contour-extension-host/CMakeLists.txt
+@@ -0,0 +1,26 @@
++# contour-extension-host: the process Contour runs extensions in, apart from itself. Its body is
++# vtextension_host's runExtensionHost(); main.cpp only hands it the command line and the engine.
++if(TARGET vtextension_wasmtime)
++    add_executable(contour-extension-host main.cpp)
++    target_link_libraries(contour-extension-host PRIVATE vtextension_host vtextension_wasmtime_helper_engine contour::wasmtime)
++    # A console program, so that it opens no window; Contour starts it without a console (CREATE_NO_WINDOW).
++    set_target_properties(contour-extension-host PROPERTIES WIN32_EXECUTABLE OFF)
++
++    # Installed where contour finds it (vtextension_remote_process's locateExtensionHost()): beside contour.exe
++    # on Windows; inside the app bundle on macOS, where the bundle's install carries it; elsewhere among the
++    # private executables, CONTOUR_EXTENSION_HOST_INSTALL_DIR (../CMakeLists.txt), as no user runs it.
++    if(WIN32)
++        install(TARGETS contour-extension-host RUNTIME DESTINATION bin)
++    elseif(CONTOUR_MACOS_APP_BUNDLE)
++        add_custom_command(TARGET contour-extension-host POST_BUILD
++            COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers"
++            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>"
++                "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers/"
++            VERBATIM
++        )
++    else()
++        install(TARGETS contour-extension-host RUNTIME DESTINATION "${CONTOUR_EXTENSION_HOST_INSTALL_DIR}")
++    endif()
++else()
++    message(STATUS "contour-extension-host is not built: it needs Wasmtime until its WAMR engine lands")
++endif()
+diff --git a/src/contour-extension-host/main.cpp b/src/contour-extension-host/main.cpp
+new file mode 100644
+index 000000000..a9d3bf8ad
+--- /dev/null
++++ b/src/contour-extension-host/main.cpp
+@@ -0,0 +1,14 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// contour-extension-host: started by Contour, never by hand, to run its extensions in a process of their own.
++#include <string_view>
++#include <vector>
++
++#include <vtextension/wasm/host/HelperEngine.hpp>
++#include <vtextension/wasm/host/HostProcess.hpp>
++
++int main(int argc, char const* argv[])
++{
++    auto const arguments = std::vector<std::string_view>(argv + 1, argv + argc);
++    return vtextension::wasm::host::runExtensionHost(arguments, &vtextension::wasm::host::makeHelperEngine);
++}
+diff --git a/src/contour/CMakeLists.txt b/src/contour/CMakeLists.txt
+index 4ff3ee7e9..c7d51dedd 100644
+--- a/src/contour/CMakeLists.txt
++++ b/src/contour/CMakeLists.txt
+@@ -4,32 +4,22 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
+     set(FREEBSD TRUE)
+ elseif(${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
+     set(OPENBSD TRUE)
+ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+     set(LINUX TRUE)
+ endif()
+ 
+ option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
+ option(CONTOUR_WAYLAND "Enables Wayland specific code paths." ON)
+ 
+-# Whether this build produces a macOS application bundle, as opposed to a plain executable.
+-#
+-# A .app exists to be double-clicked, and everything that assembles one -- the
+-# @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
+-# notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
+-# command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
+-# which is the whole point of not building the frontend. So it installs like any other Unix CLI
+-# tool. Every bundle-only block below is gated on this rather than on APPLE.
+-set(CONTOUR_MACOS_APP_BUNDLE OFF)
+-if(APPLE AND CONTOUR_FRONTEND_GUI)
+-    set(CONTOUR_MACOS_APP_BUNDLE ON)
+-endif()
++# CONTOUR_MACOS_APP_BUNDLE, whether this build produces a macOS application bundle, is decided in
++# ../CMakeLists.txt: contour-extension-host is placed into the bundle too.
+ 
+ option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
+ 
+ # {{{ Setup QT_COMPONENTS
+ # QT_COMPONENTS is the list of Qt libraries Contour requires for building.
+ # NB: Widgets is required for SystemTrayIcon's fallback implementation
+ # NB: GuiPrivate provides rhi/qrhi.h (RHI resource model) used by the display lib and the screenshot
+ #     readback test. It must be requested here explicitly: relying on a sibling subdirectory's
+ #     find_package to have populated the Qt6::GuiPrivate target is order-dependent and fails on some
+ #     Qt packagings (e.g. Homebrew Qt on macOS), where contour_gui_test then cannot link it.
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index 302a40e82..1864f35d1 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -1,17 +1,34 @@
+ # vtextension_host: the extension host's side of the protocol. HostServer serves one engine's runtimes, modules
+ # and instances over a control channel and its lanes; InProcessHostConnector runs one in this process, for the
+-# tests and for measuring the protocol without a process boundary. It links no engine: whoever composes a host
+-# hands it one (IHostedEngine), and its tests live in vtextension_remote_test (../remote/CMakeLists.txt), which
+-# links Wasmtime's.
++# tests and for measuring the protocol without a process boundary; HostProcess is the extension host
++# executable's body, and HostBootstrap what that process does to itself before it serves. It links no engine:
++# whoever composes a host hands it one (IHostedEngine), and its tests live in vtextension_remote_test
++# (../remote/CMakeLists.txt), which links Wasmtime's.
++
++set(_bootstrap_source HostBootstrap_posix.cpp)
++if(WIN32)
++    set(_bootstrap_source HostBootstrap_win32.cpp)
++endif()
+ 
+ add_library(vtextension_host STATIC
+     ExecutorThread.cpp
+     ExecutorThread.hpp
++    HelperEngine.hpp
++    HostBootstrap.hpp
++    ${_bootstrap_source}
++    HostProcess.cpp
++    HostProcess.hpp
+     HostServer.cpp
+     HostServer.hpp
+     IHostedEngine.hpp
+     InProcessHost.cpp
+     InProcessHost.hpp
+     ../remote/HostConnector.hpp
+ )
+ target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire PRIVATE core::base)
++
++# A sanitizer's shadow memory and its threads exceed any cap the host could apply to itself (HostBootstrap.hpp):
++# public, so that every user of BuildCapPolicy sees the same value.
++if(CONTOUR_SANITIZE)
++    target_compile_definitions(vtextension_host PUBLIC CONTOUR_SANITIZED_BUILD)
++endif()
+diff --git a/src/vtextension/wasm/host/HelperEngine.hpp b/src/vtextension/wasm/host/HelperEngine.hpp
+new file mode 100644
+index 000000000..e0e607340
+--- /dev/null
++++ b/src/vtextension/wasm/host/HelperEngine.hpp
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// The engine the extension host executable runs modules on. Declared here, neutrally, and defined by the
++/// directory of the engine the executable links, so that the host names no engine.
++
++#include <memory>
++
++#include <vtextension/wasm/host/IHostedEngine.hpp>
++
++namespace vtextension::wasm::host
++{
++
++/// @return A new engine for the extension host process; null if none can be created. Every engine it returns
++///         shares the process's one kind state.
++[[nodiscard]] std::unique_ptr<IHostedEngine> makeHelperEngine();
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostBootstrap.hpp b/src/vtextension/wasm/host/HostBootstrap.hpp
+new file mode 100644
+index 000000000..28f4c4aac
+--- /dev/null
++++ b/src/vtextension/wasm/host/HostBootstrap.hpp
+@@ -0,0 +1,58 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// What the extension host process does to itself before it serves: it binds its life to its parent's, first
++/// thing, and caps its own resources once its threads run.
++///
++/// Both are the helper's own doing rather than the launcher's: on Linux the parent-death signal is bound to
++/// the thread that started the process, which only the child can name after the fact, and RLIMIT_NPROC
++/// counts threads, so a cap applied before exec would keep the helper from starting its own.
++
++#include <cstdint>
++#include <expected>
++
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++
++namespace vtextension::wasm::host
++{
++
++/// Why the host cannot bind itself to its parent.
++enum class BootstrapError : uint8_t
++{
++    ParentGone, ///< Its parent is not the process it was told of: that one ended, and it was reparented.
++    Refused,    ///< The system refused the binding.
++};
++
++/// Ends this process when its parent ends: Linux PR_SET_PDEATHSIG, FreeBSD PROC_PDEATHSIG_CTL, each with
++/// SIGKILL, then a check that the parent is still @p parentProcessId, in case it ended before the binding.
++/// macOS has no such binding and only checks; Windows does nothing, as the kill-on-close job Contour started
++/// it in binds it already.
++/// @param parentProcessId The process that started this one.
++/// @return Nothing once bound; why not otherwise.
++[[nodiscard]] std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexcept;
++
++/// Whether the host caps its own resources.
++enum class CapPolicy : uint8_t
++{
++    Skip,  ///< It caps nothing: a sanitizer's shadow memory and its stop-the-world threads exceed any cap.
++    Apply, ///< It caps them.
++};
++
++/// How this build caps the host: not at all in a sanitizer build (CONTOUR_SANITIZED_BUILD).
++#ifdef CONTOUR_SANITIZED_BUILD
++inline constexpr CapPolicy BuildCapPolicy = CapPolicy::Skip;
++#else
++inline constexpr CapPolicy BuildCapPolicy = CapPolicy::Apply;
++#endif
++
++/// Caps this process's resources, as far as @p policy says: on Linux no further process or thread
++/// (RLIMIT_NPROC 0) and @p dataBytes of data memory (RLIMIT_DATA); on FreeBSD no further process or thread;
++/// on macOS and Windows nothing (Windows caps memory in the job Contour started it in). Soft and hard limits
++/// alike, so that they cannot be raised again.
++/// @param dataBytes The cap on its data memory; 0 for none.
++/// @param policy Whether to cap at all.
++/// @return `Unsandboxed`; `Failed` if the system refused a cap.
++[[nodiscard]] remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept;
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostBootstrap_posix.cpp b/src/vtextension/wasm/host/HostBootstrap_posix.cpp
+new file mode 100644
+index 000000000..20b671f6d
+--- /dev/null
++++ b/src/vtextension/wasm/host/HostBootstrap_posix.cpp
+@@ -0,0 +1,100 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// What the extension host does to itself on Linux, FreeBSD and macOS. macOS has no parent-death binding and
++// no cap that bounds mmap (RLIMIT_AS and RLIMIT_DATA do not), so there it only checks its parent.
++#include <sys/resource.h>
++
++#include <algorithm>
++#include <array>
++#include <csignal>
++#include <cstdint>
++#include <expected>
++#include <span>
++
++#include <unistd.h>
++
++#include <vtextension/wasm/host/HostBootstrap.hpp>
++
++#ifdef __linux__
++    #include <sys/prctl.h>
++#elifdef __FreeBSD__
++    #include <sys/procctl.h>
++#endif
++
++namespace vtextension::wasm::host
++{
++
++namespace
++{
++    /// What a resource is capped to.
++    enum class CappedValue : uint8_t
++    {
++        Zero,      ///< None at all.
++        DataBytes, ///< The data bytes asked for; not capped when they are 0.
++    };
++
++    /// One resource cap.
++    struct ResourceCap
++    {
++        int resource;      ///< The limit (RLIMIT_…).
++        CappedValue value; ///< What it is capped to.
++    };
++
++    /// The caps this system applies.
++#ifdef __linux__
++    // RLIMIT_DATA counts private writable mappings, not the PROT_NONE reservations an engine makes for its
++    // memories, so it bounds what the host commits.
++    constexpr auto Caps =
++        std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::Zero },
++                     ResourceCap { .resource = RLIMIT_DATA, .value = CappedValue::DataBytes } };
++#elifdef __FreeBSD__
++    constexpr auto Caps = std::array { ResourceCap { .resource = RLIMIT_NPROC, .value = CappedValue::Zero } };
++#else
++    constexpr auto Caps = std::array<ResourceCap, 0> {};
++#endif
++
++    /// Asks the system to kill this process when its parent ends.
++    /// @return Nothing once it took the request, or where there is no such request to make; `Refused` if it
++    ///         did not take it.
++    [[nodiscard]] std::expected<void, BootstrapError> requestParentDeathSignal() noexcept
++    {
++#ifdef __linux__
++        auto const requested = ::prctl(PR_SET_PDEATHSIG, SIGKILL) == 0;
++#elifdef __FreeBSD__
++        auto signal = SIGKILL;
++        auto const requested = ::procctl(P_PID, 0, PROC_PDEATHSIG_CTL, &signal) == 0;
++#else
++        auto const requested = true;
++#endif
++        if (!requested)
++            return std::unexpected(BootstrapError::Refused);
++        return {};
++    }
++} // namespace
++
++std::expected<void, BootstrapError> bindToParent(int64_t parentProcessId) noexcept
++{
++    // Checked after the binding: a parent that ended before it reparented this process already, and the
++    // signal will never come.
++    return requestParentDeathSignal().and_then([parentProcessId]() -> std::expected<void, BootstrapError> {
++        if (static_cast<int64_t>(::getppid()) != parentProcessId)
++            return std::unexpected(BootstrapError::ParentGone);
++        return {};
++    });
++}
++
++remote::proto::LockdownState capResources(uint64_t dataBytes, CapPolicy policy) noexcept
++{
++    if (policy == CapPolicy::Skip)
++        return remote::proto::LockdownState::Unsandboxed;
++    auto const applied = std::ranges::all_of(Caps, [dataBytes](ResourceCap const& cap) {
++        if (cap.value == CappedValue::DataBytes && dataBytes == 0)
++            return true;
++        auto const value = cap.value == CappedValue::Zero ? rlim_t { 0 } : static_cast<rlim_t>(dataBytes);
++        auto const limit = rlimit { .rlim_cur = value, .rlim_max = value };
++        return ::setrlimit(cap.resource, &limit) == 0;
++    });
++    return applied ? remote::proto::LockdownState::Unsandboxed : remote::proto::LockdownState::Failed;
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostBootstrap_win32.cpp b/src/vtextension/wasm/host/HostBootstrap_win32.cpp
+new file mode 100644
+index 000000000..3b1943cac
+--- /dev/null
++++ b/src/vtextension/wasm/host/HostBootstrap_win32.cpp
+@@ -0,0 +1,24 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// What the extension host does to itself on Windows: nothing. The kill-on-close job Contour starts it in ends
++// it with its parent, and caps its memory and its processes.
++#include <cstdint>
++#include <expected>
++
++#include <vtextension/wasm/host/HostBootstrap.hpp>
++
++namespace vtextension::wasm::host
++{
++
++std::expected<void, BootstrapError> bindToParent([[maybe_unused]] int64_t parentProcessId) noexcept
++{
++    return {};
++}
++
++remote::proto::LockdownState capResources([[maybe_unused]] uint64_t dataBytes,
++                                          [[maybe_unused]] CapPolicy policy) noexcept
++{
++    return remote::proto::LockdownState::Unsandboxed;
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostProcess.cpp b/src/vtextension/wasm/host/HostProcess.cpp
+new file mode 100644
+index 000000000..d642775be
+--- /dev/null
++++ b/src/vtextension/wasm/host/HostProcess.cpp
+@@ -0,0 +1,184 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/host/HostProcess.hpp>
++
++#include <algorithm>
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <cstdio>
++#include <expected>
++#include <print>
++#include <ranges>
++#include <utility>
++#include <vector>
++
++namespace vtextension::wasm::host
++{
++
++namespace transport = remote::transport;
++
++namespace
++{
++    /// Every way the host process ends. Its codes stay clear of 1 (a generic failure), 23 (LeakSanitizer)
++    /// and 66 (AddressSanitizer, ThreadSanitizer), so that a sanitizer's report cannot pass for one of them.
++    constexpr auto ExitTable = std::array {
++        HostProcessExitRow {
++            .exit = HostProcessExit::Served, .code = 0, .text = "Contour ended the connection" },
++        HostProcessExitRow { .exit = HostProcessExit::BadArguments,
++                             .code = 70,
++                             .text = "its command line is not what it takes: Contour starts it, not a user" },
++        HostProcessExitRow { .exit = HostProcessExit::HandlesUnusable,
++                             .code = 71,
++                             .text = "the channels it was started with cannot be used" },
++        HostProcessExitRow { .exit = HostProcessExit::ParentGone,
++                             .code = 72,
++                             .text = "the Contour process that started it is gone" },
++        HostProcessExitRow { .exit = HostProcessExit::EngineUnavailable,
++                             .code = 73,
++                             .text = "no extension runtime can be created" },
++        HostProcessExitRow { .exit = HostProcessExit::ProtocolViolation,
++                             .code = 74,
++                             .text = "Contour sent what the protocol does not allow" },
++        HostProcessExitRow { .exit = HostProcessExit::ExecutorUnavailable,
++                             .code = 75,
++                             .text = "a thread to run extensions on cannot be started" },
++    };
++
++    /// @return @p exit's row.
++    [[nodiscard]] HostProcessExitRow const& rowOf(HostProcessExit exit) noexcept
++    {
++        // Every enumerator has its row, at its own index.
++        return ExitTable[static_cast<std::size_t>(exit)];
++    }
++
++    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ExitTable.size()),
++                                      [](std::size_t index) {
++                                          return static_cast<std::size_t>(ExitTable[index].exit) == index;
++                                      }),
++                  "ExitTable lists every HostProcessExit at its own index");
++
++    /// Writes why the host ends to stderr, unless it served.
++    /// @return @p exit's code.
++    [[nodiscard]] int endWith(HostProcessExit exit)
++    {
++        auto const& row = rowOf(exit);
++        if (exit != HostProcessExit::Served)
++            std::println(stderr, "contour-extension-host: {}", row.text);
++        return row.code;
++    }
++} // namespace
++
++std::span<HostProcessExitRow const> hostProcessExits() noexcept
++{
++    return ExitTable;
++}
++
++int exitCodeOf(HostProcessExit exit) noexcept
++{
++    return rowOf(exit).code;
++}
++
++HostProcessExit hostProcessExitOf(ServerExit exit) noexcept
++{
++    switch (exit)
++    {
++        case ServerExit::PeerClosed:
++        case ServerExit::Stopped: return HostProcessExit::Served;
++        case ServerExit::ProtocolViolation: return HostProcessExit::ProtocolViolation;
++        case ServerExit::ExecutorUnavailable: return HostProcessExit::ExecutorUnavailable;
++    }
++    return HostProcessExit::ProtocolViolation;
++}
++
++std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(transport::HelperArguments const& arguments)
++{
++    auto const unusable = [](auto) {
++        return HostProcessExit::HandlesUnusable;
++    };
++    auto control = transport::Channel::adopt(arguments.control);
++    if (!control)
++        return std::unexpected(HostProcessExit::HandlesUnusable);
++    auto lanes = std::vector<transport::Channel> {};
++    lanes.reserve(arguments.lanes.size());
++    for (auto const handle: arguments.lanes)
++    {
++        auto lane = transport::Channel::adopt(handle);
++        if (!lane)
++            return std::unexpected(HostProcessExit::HandlesUnusable);
++        lanes.push_back(*std::move(lane));
++    }
++    return transport::ControlPage::adopt(arguments.controlPage)
++        .transform_error(unusable)
++        .and_then([&](transport::ControlPage page) {
++            return transport::WakeReceiver::adopt(arguments.wake)
++                .transform_error(unusable)
++                .transform([&](transport::WakeReceiver wake) {
++                    return HostEndpoints { .control = *std::move(control),
++                                           .lanes = std::move(lanes),
++                                           .controlPage = std::move(page),
++                                           .wake = std::move(wake) };
++                });
++        });
++}
++
++HostProcess::HostProcess(IHostedEngine& engine, HostEndpoints endpoints, HostServerConfig config):
++    _controlPage { std::move(endpoints.controlPage) },
++    _wake { std::move(endpoints.wake) },
++    _server { engine, std::move(endpoints.lanes), std::move(endpoints.control), std::move(config) }
++{
++}
++
++ServerExit HostProcess::run()
++{
++    return _server.run();
++}
++
++void HostProcess::stop() noexcept
++{
++    _server.stop();
++}
++
++HostConfinement systemConfinement()
++{
++    return HostConfinement {
++        .bindToParent = &bindToParent,
++        .confine =
++            [](uint64_t dataBytes) {
++                if constexpr (BuildCapPolicy == CapPolicy::Skip)
++                    std::println(stderr, "contour-extension-host: resource caps are off in this build");
++                return capResources(dataBytes, BuildCapPolicy);
++            },
++    };
++}
++
++int runExtensionHost(std::span<std::string_view const> arguments,
++                     EngineFactory const& engines,
++                     HostConfinement const& confinement)
++{
++    auto const parsed = transport::parseHelperArguments(arguments);
++    if (!parsed)
++        return endWith(HostProcessExit::BadArguments);
++    // First, so that the host never outlives Contour, whatever happens next.
++    if (!confinement.bindToParent(parsed->parentProcessId))
++        return endWith(HostProcessExit::ParentGone);
++    auto endpoints = adoptEndpoints(*parsed);
++    if (!endpoints)
++        return endWith(endpoints.error());
++    // Declared before the host, so that every object the host made of it goes first.
++    auto const engine = engines();
++    if (!engine)
++        return endWith(HostProcessExit::EngineUnavailable);
++    auto config = HostServerConfig {};
++    config.confine = [&confinement, dataBytes = parsed->dataBytes] {
++        return confinement.confine(dataBytes);
++    };
++    auto host = HostProcess { *engine, *std::move(endpoints), std::move(config) };
++    return endWith(hostProcessExitOf(host.run()));
++}
++
++int runExtensionHost(std::span<std::string_view const> arguments, EngineFactory const& engines)
++{
++    return runExtensionHost(arguments, engines, systemConfinement());
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostProcess.hpp b/src/vtextension/wasm/host/HostProcess.hpp
+new file mode 100644
+index 000000000..355d30388
+--- /dev/null
++++ b/src/vtextension/wasm/host/HostProcess.hpp
+@@ -0,0 +1,128 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// The extension host process: the endpoints it inherited from Contour, the server it runs over them, and the
++/// way it ends, as one exit code per reason.
++
++#include <cstdint>
++#include <expected>
++#include <functional>
++#include <memory>
++#include <span>
++#include <string_view>
++#include <vector>
++
++#include <vtextension/wasm/host/HostBootstrap.hpp>
++#include <vtextension/wasm/host/HostServer.hpp>
++#include <vtextension/wasm/host/IHostedEngine.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/HelperArguments.hpp>
++#include <vtextension/wasm/remote/transport/WakeSignal.hpp>
++
++namespace vtextension::wasm::host
++{
++
++/// How the extension host process ended.
++enum class HostProcessExit : uint8_t
++{
++    Served,              ///< It served until Contour closed the connection, or it was stopped.
++    BadArguments,        ///< Its command line is not what it takes.
++    HandlesUnusable,     ///< A handle it was told of cannot be adopted.
++    ParentGone,          ///< It could not bind itself to its parent, or that one ended already.
++    EngineUnavailable,   ///< No engine could be created.
++    ProtocolViolation,   ///< Contour sent what the protocol does not allow.
++    ExecutorUnavailable, ///< A lane's thread could not be started.
++};
++
++/// One way the host process ends.
++struct HostProcessExitRow
++{
++    HostProcessExit exit;  ///< The reason.
++    int code;              ///< Its exit code: 0, or 70 and up -- never 1, 23 or 66, which sanitizers use.
++    std::string_view text; ///< What it writes to stderr on the way out; user-readable, naming no engine.
++};
++
++/// @return Every way the host process ends, one row each.
++[[nodiscard]] std::span<HostProcessExitRow const> hostProcessExits() noexcept;
++
++/// @param exit How the host ended.
++/// @return Its exit code.
++[[nodiscard]] int exitCodeOf(HostProcessExit exit) noexcept;
++
++/// @param exit Why the server stopped serving.
++/// @return How the host process ends because of it: `Served` once Contour closed it or it was stopped.
++[[nodiscard]] HostProcessExit hostProcessExitOf(ServerExit exit) noexcept;
++
++/// The helper's ends of everything Contour handed it.
++struct HostEndpoints
++{
++    remote::transport::Channel control;            ///< The control channel.
++    std::vector<remote::transport::Channel> lanes; ///< MaxLaneChannels lanes.
++    remote::transport::ControlPage controlPage;    ///< The interrupt page, read-only.
++    remote::transport::WakeReceiver wake;          ///< The wake signal's receiving end.
++};
++
++/// Takes ownership of every handle @p arguments name.
++/// @param arguments The parsed command line.
++/// @return The endpoints; `HandlesUnusable` if any handle cannot be adopted.
++[[nodiscard]] std::expected<HostEndpoints, HostProcessExit> adoptEndpoints(
++    remote::transport::HelperArguments const& arguments);
++
++/// A host's whole serving side over its endpoints: the server.
++class HostProcess
++{
++  public:
++    /// @param engine What runtimes are created on; must outlive the host.
++    /// @param endpoints What it serves over.
++    /// @param config How its server runs.
++    HostProcess(IHostedEngine& engine, HostEndpoints endpoints, HostServerConfig config);
++
++    /// Serves until Contour closes the connection, it violates the protocol, or stop() is called; then
++    /// releases every engine object. Called once.
++    /// @return Why it stopped serving.
++    [[nodiscard]] ServerExit run();
++
++    /// Thread-safe, idempotent: ends run().
++    void stop() noexcept;
++
++  private:
++    remote::transport::ControlPage
++        _controlPage; ///< Where Contour raises an instance's interrupt; held while it serves.
++    remote::transport::WakeReceiver _wake; ///< What tells it to look at the page; held while it serves.
++    HostServer _server;
++};
++
++/// What the host process does to itself, as the operating system does it (systemConfinement()) or, in a test
++/// that runs the host in its own process, as a double does it.
++struct HostConfinement
++{
++    /// Binds the process to the parent it is given, as bindToParent() does.
++    std::function<std::expected<void, BootstrapError>(int64_t parentProcessId)> bindToParent;
++    /// Caps its resources once its threads run, to the data bytes it is given, as capResources() does.
++    /// @return What Hello states.
++    std::function<remote::proto::LockdownState(uint64_t dataBytes)> confine;
++};
++
++/// @return bindToParent() and capResources() under BuildCapPolicy, which under `Skip` says so once on stderr.
++[[nodiscard]] HostConfinement systemConfinement();
++
++/// The executable's body: parse, bind to the parent, adopt, make the engine, serve. Every exit but `Served`
++/// writes one line, `contour-extension-host: <text>`, to stderr.
++/// @param arguments The command line after the program's name.
++/// @param engines Makes the engine; called only once everything before it succeeded.
++/// @param confinement How it binds to its parent and caps itself.
++/// @return The exit code.
++[[nodiscard]] int runExtensionHost(std::span<std::string_view const> arguments,
++                                   EngineFactory const& engines,
++                                   HostConfinement const& confinement);
++
++/// runExtensionHost() with systemConfinement(): what the executable runs.
++/// @param arguments The command line after the program's name.
++/// @param engines Makes the engine.
++/// @return The exit code.
++[[nodiscard]] int runExtensionHost(std::span<std::string_view const> arguments, EngineFactory const& engines);
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/HostProcess_test.cpp b/src/vtextension/wasm/host/HostProcess_test.cpp
+new file mode 100644
+index 000000000..a57dab008
+--- /dev/null
++++ b/src/vtextension/wasm/host/HostProcess_test.cpp
+@@ -0,0 +1,346 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <catch2/catch_test_macros.hpp>
++
++#include <atomic>
++#include <chrono>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <future>
++#include <memory>
++#include <set>
++#include <span>
++#include <string>
++#include <string_view>
++#include <thread>
++#include <utility>
++#include <vector>
++
++#include <vtextension/wasm/host/HostBootstrap.hpp>
++#include <vtextension/wasm/host/HostProcess.hpp>
++#include <vtextension/wasm/host/HostServer.hpp>
++#include <vtextension/wasm/host/IHostedEngine.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/HelperArguments.hpp>
++#include <vtextension/wasm/remote/transport/PduStream.hpp>
++#include <vtextension/wasm/remote/transport/WakeSignal.hpp>
++#include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
++#include <vtextension/wasm/testing/HostedEngine.hpp>
++
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#else
++    #include <sys/resource.h>
++    #include <sys/wait.h>
++
++    #include <unistd.h>
++#endif
++
++using vtextension::wasm::host::BootstrapError;
++using vtextension::wasm::host::CapPolicy;
++using vtextension::wasm::host::capResources;
++using vtextension::wasm::host::EngineFactory;
++using vtextension::wasm::host::exitCodeOf;
++using vtextension::wasm::host::HostConfinement;
++using vtextension::wasm::host::HostProcessExit;
++using vtextension::wasm::host::hostProcessExitOf;
++using vtextension::wasm::host::hostProcessExits;
++using vtextension::wasm::host::IHostedEngine;
++using vtextension::wasm::host::runExtensionHost;
++using vtextension::wasm::host::ServerExit;
++using vtextension::wasm::remote::transport::Channel;
++using vtextension::wasm::remote::transport::ControlPage;
++using vtextension::wasm::remote::transport::formatHelperArguments;
++using vtextension::wasm::remote::transport::HelperArguments;
++using vtextension::wasm::remote::transport::makeChannelPair;
++using vtextension::wasm::remote::transport::makeWakePair;
++using vtextension::wasm::remote::transport::NativeHandle;
++using vtextension::wasm::remote::transport::PduStream;
++using vtextension::wasm::remote::transport::StreamError;
++using vtextension::wasm::remote::transport::WakeSender;
++using vtextension::wasm::remote::transport::testing::closeHandle;
++using vtextension::wasm::remote::transport::testing::duplicate;
++using vtextension::wasm::testing::makeHostedEngine;
++
++namespace proto = vtextension::wasm::remote::proto;
++
++namespace
++{
++
++/// How long a test waits for the host to end.
++constexpr auto HostPatience = std::chrono::seconds { 5 };
++
++/// The parent process id the tests' confinement accepts.
++constexpr auto TheParent = int64_t { 4242 };
++
++/// The data cap the tests hand the host.
++constexpr auto TheDataBytes = uint64_t { 64 } * 1024 * 1024;
++
++/// @return This process's id.
++[[nodiscard]] int64_t ownProcessId() noexcept
++{
++#ifdef _WIN32
++    return static_cast<int64_t>(::GetCurrentProcessId());
++#else
++    return static_cast<int64_t>(::getpid());
++#endif
++}
++
++/// What the tests' confinement saw.
++struct Confined
++{
++    std::atomic<int64_t> boundTo { 0 };
++    std::atomic<uint64_t> cappedTo { 0 };
++    std::atomic<int> confines { 0 };
++};
++
++/// @return A confinement that touches nothing of this process: it binds to TheParent alone, and caps by
++///         recording the cap.
++[[nodiscard]] HostConfinement testConfinement(std::shared_ptr<Confined> const& confined)
++{
++    return HostConfinement {
++        .bindToParent = [confined](int64_t parent) -> std::expected<void, BootstrapError> {
++            confined->boundTo.store(parent);
++            if (parent != TheParent)
++                return std::unexpected(BootstrapError::ParentGone);
++            return {};
++        },
++        .confine =
++            [confined](uint64_t dataBytes) {
++                confined->cappedTo.store(dataBytes);
++                confined->confines.fetch_add(1);
++                return capResources(dataBytes, CapPolicy::Skip);
++            },
++    };
++}
++
++/// Contour's ends of everything a host is handed, and the command line that hands the host its own.
++struct ParentEnds
++{
++    PduStream control;
++    std::vector<Channel> lanes;
++    ControlPage page;
++    WakeSender wake;
++    HelperArguments arguments;
++};
++
++/// @return Fresh channels, page and wake, the helper's ends as second handles in the arguments.
++[[nodiscard]] ParentEnds makeParentEnds()
++{
++    auto const handOver = [](NativeHandle handle) {
++        auto const copy = duplicate(handle);
++        REQUIRE(copy.has_value());
++        return *copy;
++    };
++    auto control = makeChannelPair();
++    REQUIRE(control.has_value());
++    auto page = ControlPage::create();
++    REQUIRE(page.has_value());
++    auto wake = makeWakePair();
++    REQUIRE(wake.has_value());
++    auto arguments = HelperArguments { .control = handOver(control->helper.nativeHandle()),
++                                       .lanes = {},
++                                       .controlPage = handOver(page->nativeHandle()),
++                                       .wake = handOver(wake->helper.nativeHandle()),
++                                       .parentProcessId = TheParent,
++                                       .dataBytes = TheDataBytes };
++    auto lanes = std::vector<Channel> {};
++    for (auto& lane: arguments.lanes)
++    {
++        auto pair = makeChannelPair();
++        REQUIRE(pair.has_value());
++        lane = handOver(pair->helper.nativeHandle());
++        lanes.push_back(std::move(pair->parent));
++    }
++    return ParentEnds { .control = PduStream { std::move(control->parent),
++                                               proto::ChannelKind::Control,
++                                               proto::Direction::ToParent,
++                                               proto::PduLimits {} },
++                        .lanes = std::move(lanes),
++                        .page = *std::move(page),
++                        .wake = std::move(wake->parent),
++                        .arguments = arguments };
++}
++
++/// Closes every handle @p arguments name: what a host that ended before adopting them leaves.
++void closeAll(HelperArguments const& arguments) noexcept
++{
++    closeHandle(arguments.control);
++    for (auto const lane: arguments.lanes)
++        closeHandle(lane);
++    closeHandle(arguments.controlPage);
++    closeHandle(arguments.wake);
++}
++
++/// Runs the host with @p arguments to its end.
++/// @return Its exit code.
++[[nodiscard]] int runHost(std::vector<std::string> const& arguments,
++                          EngineFactory const& engines,
++                          HostConfinement const& confinement)
++{
++    auto views = std::vector<std::string_view> {};
++    for (auto const& argument: arguments)
++        views.emplace_back(argument);
++    return runExtensionHost(views, engines, confinement);
++}
++
++/// An engine factory that counts its calls.
++[[nodiscard]] EngineFactory countingEngines(std::shared_ptr<std::atomic<int>> calls)
++{
++    return [calls = std::move(calls)]() -> std::unique_ptr<IHostedEngine> {
++        calls->fetch_add(1);
++        return makeHostedEngine();
++    };
++}
++
++} // namespace
++
++TEST_CASE("HostProcess.servesOverAdoptedEndpoints", "[vtextension][host]")
++{
++    auto parent = makeParentEnds();
++    auto confined = std::make_shared<Confined>();
++    auto const arguments = formatHelperArguments(parent.arguments);
++    auto task = std::packaged_task<int()> { [&] {
++        return runHost(arguments, [] { return makeHostedEngine(); }, testConfinement(confined));
++    } };
++    auto exitCode = task.get_future();
++    auto host = std::jthread { std::move(task) };
++
++    auto const hello = parent.control.receive();
++    REQUIRE(hello.has_value());
++    CHECK(*hello
++          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
++                                         .memoryMode = proto::MemoryMode::Copy,
++                                         .lockdown = proto::LockdownState::Unsandboxed } });
++    CHECK(confined->boundTo.load() == TheParent);
++    CHECK(confined->cappedTo.load() == TheDataBytes);
++    CHECK(confined->confines.load() == 1);
++
++    {
++        // Contour closes the connection: the host serves no more, and ends as having served.
++        auto const closed = std::move(parent.control);
++    }
++    REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
++    CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
++    CHECK(exitCodeOf(HostProcessExit::Served) == 0);
++}
++
++TEST_CASE("HostProcess.badArgumentsExit", "[vtextension][host]")
++{
++    auto engines = std::make_shared<std::atomic<int>>(0);
++    auto confined = std::make_shared<Confined>();
++    CHECK(runHost({ "--bogus=1" }, countingEngines(engines), testConfinement(confined)) == 70);
++    CHECK(engines->load() == 0);
++    CHECK(confined->boundTo.load() == 0);
++}
++
++TEST_CASE("HostProcess.unusableHandleExits", "[vtextension][host]")
++{
++    auto parent = makeParentEnds();
++    // The control end the host is told of names nothing.
++    auto arguments = parent.arguments;
++    closeHandle(arguments.control);
++    auto engines = std::make_shared<std::atomic<int>>(0);
++    auto confined = std::make_shared<Confined>();
++    CHECK(runHost(formatHelperArguments(arguments), countingEngines(engines), testConfinement(confined))
++          == 71);
++    CHECK(engines->load() == 0);
++    // Nothing was adopted once the control end failed: the rest are still the test's.
++    for (auto const lane: arguments.lanes)
++        closeHandle(lane);
++    closeHandle(arguments.controlPage);
++    closeHandle(arguments.wake);
++    // The parent's control end sees no host.
++    CHECK(parent.control.receive() == std::unexpected(StreamError::Closed));
++}
++
++TEST_CASE("HostProcess.wrongParentExits", "[vtextension][host]")
++{
++    auto parent = makeParentEnds();
++    auto arguments = parent.arguments;
++    arguments.parentProcessId = ownProcessId();
++    auto engines = std::make_shared<std::atomic<int>>(0);
++    auto confined = std::make_shared<Confined>();
++    CHECK(runHost(formatHelperArguments(arguments), countingEngines(engines), testConfinement(confined))
++          == 72);
++    CHECK(engines->load() == 0);
++    CHECK(confined->confines.load() == 0);
++    closeAll(arguments);
++}
++
++TEST_CASE("HostProcess.noEngineExits", "[vtextension][host]")
++{
++    auto parent = makeParentEnds();
++    auto confined = std::make_shared<Confined>();
++    CHECK(runHost(
++              formatHelperArguments(parent.arguments),
++              [] { return std::unique_ptr<IHostedEngine> {}; },
++              testConfinement(confined))
++          == 73);
++    CHECK(confined->confines.load() == 0);
++    // The adopted ends closed with the host.
++    CHECK(parent.control.receive() == std::unexpected(StreamError::Closed));
++}
++
++TEST_CASE("HostProcess.exitCodesAreDistinct", "[vtextension][host]")
++{
++    auto codes = std::set<int> {};
++    auto exits = std::set<HostProcessExit> {};
++    for (auto const& row: hostProcessExits())
++    {
++        INFO(row.text);
++        CHECK(codes.insert(row.code).second);
++        CHECK(exits.insert(row.exit).second);
++        CHECK_FALSE(std::set { 1, 23, 66 }.contains(row.code));
++        CHECK_FALSE(row.text.empty());
++        CHECK(exitCodeOf(row.exit) == row.code);
++    }
++    CHECK(exits.size() == static_cast<std::size_t>(HostProcessExit::ExecutorUnavailable) + 1);
++    CHECK(exitCodeOf(HostProcessExit::Served) == 0);
++}
++
++TEST_CASE("HostProcess.serverExitsMapToProcessExits", "[vtextension][host]")
++{
++    CHECK(hostProcessExitOf(ServerExit::PeerClosed) == HostProcessExit::Served);
++    CHECK(hostProcessExitOf(ServerExit::Stopped) == HostProcessExit::Served);
++    CHECK(hostProcessExitOf(ServerExit::ProtocolViolation) == HostProcessExit::ProtocolViolation);
++    CHECK(hostProcessExitOf(ServerExit::ExecutorUnavailable) == HostProcessExit::ExecutorUnavailable);
++}
++
++#if defined(__linux__) || defined(__FreeBSD__)
++TEST_CASE("HostBootstrap.capResourcesApplies", "[vtextension][host]")
++{
++    // In a child of its own, as the caps are this process's for good. A sanitizer build's helper applies
++    // none; the policy is named here, so that what it would apply is tested in every build.
++    constexpr auto DataBytes = uint64_t { 256 } * 1024 * 1024;
++    auto const child = ::fork();
++    REQUIRE(child != -1);
++    if (child == 0)
++    {
++        auto const lockdown = capResources(DataBytes, CapPolicy::Apply);
++        auto processes = rlimit {};
++        auto const nprocHolds =
++            ::getrlimit(RLIMIT_NPROC, &processes) == 0 && processes.rlim_cur == 0 && processes.rlim_max == 0;
++    #ifdef __linux__
++        auto data = rlimit {};
++        auto const dataHolds =
++            ::getrlimit(RLIMIT_DATA, &data) == 0 && data.rlim_cur == DataBytes && data.rlim_max == DataBytes;
++    #else
++        auto const dataHolds = true;
++    #endif
++        ::_exit(lockdown == proto::LockdownState::Unsandboxed && nprocHolds && dataHolds ? 0 : 1);
++    }
++    auto status = 0;
++    REQUIRE(::waitpid(child, &status, 0) == child);
++    CHECK(WIFEXITED(status));
++    CHECK(WEXITSTATUS(status) == 0);
++}
++#endif
++
++TEST_CASE("HostBootstrap.skipCapsNothing", "[vtextension][host]")
++{
++    CHECK(capResources(TheDataBytes, CapPolicy::Skip) == proto::LockdownState::Unsandboxed);
++}
+diff --git a/src/vtextension/wasm/host/HostServer.cpp b/src/vtextension/wasm/host/HostServer.cpp
+index 88ceb06d5..77f34cd14 100644
+--- a/src/vtextension/wasm/host/HostServer.cpp
++++ b/src/vtextension/wasm/host/HostServer.cpp
+@@ -294,41 +294,43 @@ HostServer::Impl::Impl(IHostedEngine& engine,
+                                 .guard = nullptr });
+ }
+ 
+ ServerExit HostServer::Impl::run()
+ {
+     // Destroyed in reverse, on every way out, an exception's included: the connection ends (unblocking every
+     // executor), the executors are joined, then every engine object goes, here on the control thread.
+     auto releaseAll = core::Finally { [this] { release(); } };
+     auto executors = std::vector<ExecutorThread> {};
+     auto endConnection = core::Finally { [this] { finish(ServerExit::ProtocolViolation); } };
+-    auto const hello = send(_control,
+-                            proto::Hello { .version = proto::ProtocolVersion,
+-                                           .memoryMode = _engine.memoryMode(),
+-                                           .lockdown = _config.lockdown });
+-    if (hello)
++    executors.reserve(_lanes.size());
++    for (auto& lane: _lanes)
+     {
+-        executors.reserve(_lanes.size());
+-        for (auto& lane: _lanes)
+-        {
+-            auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane] { runLane(lane); });
+-            if (!started)
+-                break;
+-            executors.push_back(std::move(*started));
+-        }
+-        if (executors.size() == _lanes.size())
++        auto started = _config.startExecutor(ExecutorStackBytes, [this, &lane] { runLane(lane); });
++        if (!started)
++            break;
++        executors.push_back(std::move(*started));
++    }
++    if (executors.size() == _lanes.size())
++    {
++        // Every thread the host needs runs now: it may cap itself, then say how far it did.
++        auto const lockdown = _config.confine ? _config.confine() : _config.lockdown;
++        auto const hello = send(_control,
++                                proto::Hello { .version = proto::ProtocolVersion,
++                                               .memoryMode = _engine.memoryMode(),
++                                               .lockdown = lockdown });
++        if (hello)
+             serveControl();
+         else
+-            finish(ServerExit::ExecutorUnavailable);
++            finish(hello.error());
+     }
+     else
+-        finish(hello.error());
++        finish(ServerExit::ExecutorUnavailable);
+ 
+     // Every channel is shut down by now, and every instance interrupted: each executor returns.
+     endConnection.run();
+     executors.clear();
+     releaseAll.run();
+     auto const lock = std::scoped_lock { _mutex };
+     return _exit.value_or(ServerExit::Stopped);
+ }
+ 
+ void HostServer::Impl::serveControl()
+diff --git a/src/vtextension/wasm/host/HostServer.hpp b/src/vtextension/wasm/host/HostServer.hpp
+index 14692178d..e12b9087f 100644
+--- a/src/vtextension/wasm/host/HostServer.hpp
++++ b/src/vtextension/wasm/host/HostServer.hpp
+@@ -36,22 +36,25 @@ inline constexpr std::size_t ExecutorStackBytes =
+     remote::proto::MaxCallDepth * (remote::proto::MaxRuntimeStackBytes + HostFrameBytes);
+ 
+ /// Starts the thread a lane's executor runs on, with the stack it asks for, as ExecutorThread::start does.
+ using ExecutorStarter =
+     std::function<std::expected<ExecutorThread, std::error_code>(std::size_t, std::function<void()>)>;
+ 
+ /// How a host server runs.
+ struct HostServerConfig
+ {
+     remote::proto::PduLimits limits {}; ///< The caps of the PDUs it receives, and sends.
+-    /// How far the host confined itself, as its Hello states.
++    /// How far the host confined itself, as its Hello states, when there is no confine.
+     remote::proto::LockdownState lockdown = remote::proto::LockdownState::Unsandboxed;
++    /// Confines the host: called once every lane's thread started, before Hello, whose lockdown is what it
++    /// returns. Null: nothing is confined, and Hello states `lockdown`.
++    std::function<remote::proto::LockdownState()> confine {};
+     /// How each lane's executor thread is started: the operating system's threads, but in a test that
+     /// makes one fail.
+     ExecutorStarter startExecutor = &ExecutorThread::start;
+ };
+ 
+ /// Why a host server stopped serving.
+ enum class ServerExit : uint8_t
+ {
+     ProtocolViolation,   ///< The parent sent what the protocol does not allow, on any channel.
+     PeerClosed,          ///< The parent closed a channel, or a channel failed.
+@@ -70,25 +73,26 @@ class HostServer
+     HostServer(IHostedEngine& engine,
+                std::vector<remote::transport::Channel> lanes,
+                remote::transport::Channel control,
+                HostServerConfig config);
+     ~HostServer();
+     HostServer(HostServer const&) = delete;
+     HostServer(HostServer&&) = delete;
+     HostServer& operator=(HostServer const&) = delete;
+     HostServer& operator=(HostServer&&) = delete;
+ 
+-    /// Sends Hello, starts one executor thread per lane (of ExecutorStackBytes), serves control on the
+-    /// calling thread until EOF, a violation or stop(); then stops, joins the executors, releases every
+-    /// instance, module, runtime. Called once.
++    /// Starts one executor thread per lane (of ExecutorStackBytes), confines the host (HostServerConfig::
++    /// confine), sends Hello, serves control on the calling thread until EOF, a violation or stop(); then
++    /// stops, joins the executors, releases every instance, module, runtime. Called once.
+     /// @return Why it stopped serving: the first of the reasons that came up, on any channel;
+-    ///         `ExecutorUnavailable` if a lane's thread could not be started, serving nothing then.
++    ///         `ExecutorUnavailable` if a lane's thread could not be started, neither confining nor sending
++    ///         anything then.
+     [[nodiscard]] ServerExit run();
+ 
+     /// Thread-safe, idempotent: interrupts every live instance, shuts every channel down. Callable before,
+     /// during and after run(); run() then returns `Stopped`, unless it had stopped for another reason first.
+     void stop() noexcept;
+ 
+     /// Interrupts one instance; a brief mutex over the instance map, no I/O. Unknown id: ignored.
+     /// @param instanceId The parent-chosen id of the instance.
+     void interrupt(uint32_t instanceId) noexcept;
+ 
+diff --git a/src/vtextension/wasm/host/HostServer_test.cpp b/src/vtextension/wasm/host/HostServer_test.cpp
+index 8b0b2dfec..6ec61c4e8 100644
+--- a/src/vtextension/wasm/host/HostServer_test.cpp
++++ b/src/vtextension/wasm/host/HostServer_test.cpp
+@@ -792,26 +792,77 @@ TEST_CASE("HostServer.executorThatCannotStartEndsTheServer", "[vtextension][host
+     auto starts = std::make_shared<std::atomic<int>>(0);
+     auto config = HostServerConfig {};
+     config.startExecutor =
+         [starts](std::size_t stackBytes,
+                  std::function<void()> body) -> std::expected<ExecutorThread, std::error_code> {
+         if (starts->fetch_add(1) == 1)
+             return std::unexpected(std::make_error_code(std::errc::resource_unavailable_try_again));
+         return ExecutorThread::start(stackBytes, std::move(body));
+     };
+     auto parent = ScriptedParent { std::move(config) };
+-    parent.skipHello();
+     CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);
++    // Nothing was sent: a host that cannot serve every lane never says Hello.
+     CHECK(parent.control->receive() == std::unexpected(StreamError::Closed));
+     CHECK(starts->load() == 2);
+ }
+ 
++TEST_CASE("HostServer.confineRunsAfterTheLanesStartAndBeforeHello", "[vtextension][host]")
++{
++    auto starts = std::make_shared<std::atomic<std::size_t>>(0);
++    auto startsAtConfine = std::make_shared<std::atomic<std::size_t>>(0);
++    auto config = HostServerConfig {};
++    config.startExecutor =
++        [starts](std::size_t stackBytes,
++                 std::function<void()> body) -> std::expected<ExecutorThread, std::error_code> {
++        starts->fetch_add(1);
++        return ExecutorThread::start(stackBytes, std::move(body));
++    };
++    config.confine = [starts, startsAtConfine] {
++        startsAtConfine->store(starts->load());
++        return proto::LockdownState::Failed;
++    };
++    auto parent = ScriptedParent { std::move(config) };
++    CHECK(parent.receiveControl()
++          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
++                                         .memoryMode = proto::MemoryMode::Copy,
++                                         .lockdown = proto::LockdownState::Failed } });
++    CHECK(startsAtConfine->load() == MaxLaneChannels);
++}
++
++TEST_CASE("HostServer.noConfineSendsTheConfiguredLockdown", "[vtextension][host]")
++{
++    auto config = HostServerConfig {};
++    config.lockdown = proto::LockdownState::LockedDown;
++    auto parent = ScriptedParent { std::move(config) };
++    CHECK(parent.receiveControl()
++          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
++                                         .memoryMode = proto::MemoryMode::Copy,
++                                         .lockdown = proto::LockdownState::LockedDown } });
++}
++
++TEST_CASE("HostServer.executorFailureSkipsConfine", "[vtextension][host]")
++{
++    auto confined = std::make_shared<std::atomic<int>>(0);
++    auto config = HostServerConfig {};
++    config.startExecutor =
++        [](std::size_t, std::function<void()> const&) -> std::expected<ExecutorThread, std::error_code> {
++        return std::unexpected(std::make_error_code(std::errc::resource_unavailable_try_again));
++    };
++    config.confine = [confined] {
++        confined->fetch_add(1);
++        return proto::LockdownState::Unsandboxed;
++    };
++    auto parent = ScriptedParent { std::move(config) };
++    CHECK(parent.exitWithinDeadline() == ServerExit::ExecutorUnavailable);
++    CHECK(confined->load() == 0);
++}
++
+ TEST_CASE("HostServer.malformedFrameEndsTheConnection", "[vtextension][host]")
+ {
+     auto parent = ScriptedParent { HostServerConfig {}, LaneZero::Raw };
+     parent.skipHello();
+ 
+     auto const garbage = std::to_array<uint8_t>({ 0x03, 0x00, 0xff, 0xff });
+     REQUIRE(parent.rawLaneZero->send(garbage).has_value());
+ 
+     CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+     CHECK(parent.control->receive() == std::unexpected(StreamError::Closed));
+diff --git a/src/vtextension/wasm/host/IHostedEngine.hpp b/src/vtextension/wasm/host/IHostedEngine.hpp
+index f28017992..cbeb7b7f1 100644
+--- a/src/vtextension/wasm/host/IHostedEngine.hpp
++++ b/src/vtextension/wasm/host/IHostedEngine.hpp
+@@ -1,23 +1,29 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// What the extension host process runs modules on: a WebAssembly backend, and how it shares an instance's
+ /// memory with Contour.
+ 
++#include <functional>
++#include <memory>
++
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// A backend a host process drives. The helper's own interface: the parent never sees one.
+ class IHostedEngine: public IWasmBackend
+ {
+   public:
+     /// @return How the engine's instances share their linear memory with the parent: what the host states in
+     ///         its Hello, and so how the parent reaches that memory.
+     [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
+ };
+ 
++/// Creates the engine one host runs on; null if none can be.
++using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
++
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/InProcessHost.hpp b/src/vtextension/wasm/host/InProcessHost.hpp
+index 53c337f49..092b54761 100644
+--- a/src/vtextension/wasm/host/InProcessHost.hpp
++++ b/src/vtextension/wasm/host/InProcessHost.hpp
+@@ -2,37 +2,33 @@
+ #pragma once
+ 
+ /// @file
+ /// A host serving in this process, on threads of its own, over real channels: what the tests connect to, and
+ /// what measures the protocol's cost without a process boundary.
+ 
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+-#include <functional>
+ #include <memory>
+ #include <thread>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/host/HostServer.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+-/// Creates the engine one host runs on; null if none can be.
+-using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
+-
+ /// The hosts one connector started that are still alive; shared with each of them.
+ class InProcessHostRegistry;
+ 
+ /// One host serving in this process: an engine, the server driving it, and the thread the server runs on, in
+ /// that order, so that the thread is joined before the server goes, and the server before its engine.
+ class InProcessHost final: public remote::IHostHandle
+ {
+   public:
+     /// Whether a host's server still serves.
+     enum class ServingState : uint8_t
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index c377fdcf3..073c659fb 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -58,38 +58,47 @@ set(_process_sources_Linux process/Process_linux.cpp)
+ set(_process_sources_FreeBSD process/Process_freebsd.cpp)
+ set(_process_sources_Darwin process/Process_macos.cpp)
+ set(_process_sources_Windows process/Process_win32.cpp)
+ set(_process_source "${_process_sources_${CMAKE_SYSTEM_NAME}}")
+ if(_process_source AND NOT WIN32)
+     # What the POSIX launchers share.
+     list(APPEND _process_source process/PosixLaunch.cpp process/PosixLaunch.hpp)
+ endif()
+ if(_process_source)
+     add_library(vtextension_remote_process STATIC
++        process/HelperLocation.cpp
++        process/HelperLocation.hpp
+         process/ProcessLauncher.hpp
+         ${_process_source}
+     )
+     target_link_libraries(vtextension_remote_process PUBLIC vtextension_remote_wire core::base core::platform)
++    # Where the extension host is installed, from the directory contour is (../../../CMakeLists.txt).
++    target_compile_definitions(vtextension_remote_process PUBLIC
++        CONTOUR_EXTENSION_HOST_RELATIVE_DIR="${CONTOUR_EXTENSION_HOST_RELATIVE_DIR}")
+ 
+     if(VTEXTENSION_TESTING)
+-        # The probe the launcher's tests start: it reports what it was started with -- working directory,
+-        # environment, open handles -- on its control channel, and exits once that channel ends. Never installed.
++        # The probe the launcher's tests start: it binds itself to its parent and caps itself as the host does,
++        # reports what it was started with -- working directory, environment, caps, open handles -- on its
++        # control channel, and exits once that channel ends. Never installed.
+         add_executable(extension_host_probe process/testing/LaunchProbe.cpp)
+-        target_link_libraries(extension_host_probe PRIVATE vtextension_remote_wire)
++        target_link_libraries(extension_host_probe PRIVATE vtextension_host vtextension_remote_wire)
+ 
+         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
+         # no engine, so that it cross-builds and runs under wine.
+         add_executable(vtextension_process_test
+             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
++            process/HelperLocation_test.cpp
+             process/ProcessLauncher_test.cpp
+             process/testing/FakeProcessLauncher.cpp
+             process/testing/FakeProcessLauncher.hpp
++            process/testing/LaunchedHelper.cpp
++            process/testing/LaunchedHelper.hpp
+             process/testing/RecordingLauncher.hpp
+             transport/ControlPage_test.cpp
+             transport/HelperArguments_test.cpp
+             transport/WakeSignal_test.cpp
+         )
+         target_link_libraries(vtextension_process_test PRIVATE
+             vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2 contour_test_trace)
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+@@ -141,20 +150,21 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+     # The host's server, and the backend that reaches it, driven over real channels on a real engine:
+     # Wasmtime's, the engine a host process runs, reached through its directory's neutral test probe
+     # (vtextension_wasmtime_hosted_engine).
+     #
+     # Beside them, the suites vtextension_test runs on the default backend, here composed by
+     # testing/RemoteDefaultBackend.cpp as the remote backend over hosts in this process: their real guests
+     # run through the protocol.
+     add_executable(vtextension_remote_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         ../host/ExecutorThread_test.cpp
++        ../host/HostProcess_test.cpp
+         ../host/HostServer_test.cpp
+         RegistryRemote_test.cpp
+         RemoteBackend_test.cpp
+         testing/RemoteDefaultBackend.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/ControlImports_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Engine_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionHost_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionWorkerPool_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Instance_test.cpp
+@@ -170,10 +180,32 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+         add_dependencies(vtextension_remote_test contour_bundled_extensions)
+         target_compile_definitions(vtextension_remote_test PRIVATE
+             VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
+     endif()
+     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
++
++if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND TARGET vtextension_remote_process)
++    # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
++    # here), started as Contour starts it. Links no engine: the engine runs in the helper.
++    add_executable(vtextension_helper_test
++        ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
++        Helper_test.cpp
++        process/testing/LaunchedHelper.cpp
++        process/testing/LaunchedHelper.hpp
++    )
++    target_link_libraries(vtextension_helper_test PRIVATE
++        vtextension vtextension_remote vtextension_remote_process vtextension_remote_wire
++        glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
++    add_dependencies(vtextension_helper_test contour-extension-host)
++    target_compile_definitions(vtextension_helper_test PRIVATE
++        VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>")
++    add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
++    if(NOT WIN32)
++        # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
++        target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)
++    endif()
++endif()
+diff --git a/src/vtextension/wasm/remote/Helper_test.cpp b/src/vtextension/wasm/remote/Helper_test.cpp
+new file mode 100644
+index 000000000..ae6b87c38
+--- /dev/null
++++ b/src/vtextension/wasm/remote/Helper_test.cpp
+@@ -0,0 +1,102 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The extension host executable itself, started as Contour starts it.
++#include <core/Environment.hpp>
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <array>
++#include <expected>
++#include <memory>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++#include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/PduStream.hpp>
++
++namespace proto = vtextension::wasm::remote::proto;
++namespace process = vtextension::wasm::remote::process;
++using process::ExitKind;
++using process::ExitStatus;
++using process::testing::awaitReap;
++using process::testing::HelperLaunch;
++using process::testing::launchHelper;
++using process::testing::ownProcessId;
++using vtextension::wasm::remote::transport::PduStream;
++
++namespace
++{
++
++/// The sanitizer variables a helper is handed when this process has them, so that it reports as the tests do.
++constexpr auto SanitizerVariables =
++    std::array<std::string_view, 4> { "ASAN_OPTIONS", "LSAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS" };
++
++/// @return The helper's environment: the launcher's default, and this process's sanitizer variables.
++[[nodiscard]] std::vector<std::pair<std::string, std::string>> helperEnvironment()
++{
++    auto environment = process::defaultHelperEnvironment();
++    auto const live = core::LiveEnvironment {};
++    for (auto const name: SanitizerVariables)
++        if (auto value = live.get(name))
++            environment.emplace_back(std::string { name }, *std::move(value));
++    return environment;
++}
++
++/// @return A launch of the extension host executable with @p leading arguments before its own.
++[[nodiscard]] HelperLaunch helperLaunch(std::vector<std::string> leading = {},
++                                        process::ProcessId parentProcessId = ownProcessId())
++{
++    return HelperLaunch { .executable = VTEXTENSION_HELPER_PATH,
++                          .leading = std::move(leading),
++                          .trailing = {},
++                          .parentProcessId = parentProcessId,
++                          .dataBytes = process::DefaultDataBytes,
++                          .environment = helperEnvironment() };
++}
++
++} // namespace
++
++TEST_CASE("Helper.saysHelloOverInheritedChannels", "[vtextension]")
++{
++    auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch());
++    REQUIRE(helper.has_value());
++    auto control = PduStream { std::move(helper->control),
++                               proto::ChannelKind::Control,
++                               proto::Direction::ToParent,
++                               proto::PduLimits {} };
++    auto const hello = control.receive();
++    REQUIRE(hello.has_value());
++    CHECK(*hello
++          == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
++                                         .memoryMode = proto::MemoryMode::Copy,
++                                         .lockdown = proto::LockdownState::Unsandboxed } });
++
++    // Contour closes the connection: the helper exits cleanly, its sanitizers' reports included.
++    {
++        auto const closed = std::move(control);
++    }
++    CHECK(awaitReap(*helper->launcher, *helper->process)
++          == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
++}
++
++TEST_CASE("Helper.exitsOnBadArguments", "[vtextension]")
++{
++    auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch({ "--bogus=1" }));
++    REQUIRE(helper.has_value());
++    CHECK(awaitReap(*helper->launcher, *helper->process)
++          == ExitStatus { .kind = ExitKind::Exited, .value = 70 });
++}
++
++#ifndef _WIN32
++TEST_CASE("Helper.exitsWhenItsParentIsAnother", "[vtextension]")
++{
++    auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch({}, 1));
++    REQUIRE(helper.has_value());
++    CHECK(awaitReap(*helper->launcher, *helper->process)
++          == ExitStatus { .kind = ExitKind::Exited, .value = 72 });
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/process/HelperLocation.cpp b/src/vtextension/wasm/remote/process/HelperLocation.cpp
+new file mode 100644
+index 000000000..d0d6b32a5
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/HelperLocation.cpp
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/remote/process/HelperLocation.hpp>
++
++#include <array>
++#include <expected>
++#include <filesystem>
++#include <functional>
++#include <string_view>
++
++namespace vtextension::wasm::remote::process
++{
++
++namespace
++{
++    /// Where the extension host may be, relative to the directory of the program that starts it, in the order
++    /// they are tried.
++#ifdef _WIN32
++    constexpr auto Candidates = std::array<std::string_view, 1> { "." };
++#elifdef __APPLE__
++    constexpr auto Candidates =
++        std::array<std::string_view, 3> { "../Helpers", CONTOUR_EXTENSION_HOST_RELATIVE_DIR, "." };
++#else
++    constexpr auto Candidates = std::array<std::string_view, 2> { CONTOUR_EXTENSION_HOST_RELATIVE_DIR, "." };
++#endif
++} // namespace
++
++std::expected<std::filesystem::path, HelperLocationError> locateExtensionHost(
++    std::filesystem::path const& selfExecutable,
++    std::function<bool(std::filesystem::path const&)> const& isExecutable)
++{
++    auto const directory = selfExecutable.parent_path();
++    for (auto const candidate: Candidates)
++    {
++        auto path = (directory / candidate / ExtensionHostName).lexically_normal();
++        if (isExecutable(path))
++            return path;
++    }
++    return std::unexpected(HelperLocationError::NotFound);
++}
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/HelperLocation.hpp b/src/vtextension/wasm/remote/process/HelperLocation.hpp
+new file mode 100644
+index 000000000..7bdb5c078
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/HelperLocation.hpp
+@@ -0,0 +1,40 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// Where the extension host executable is installed, relative to the program that starts it.
++
++#include <cstdint>
++#include <expected>
++#include <filesystem>
++#include <functional>
++#include <string_view>
++
++namespace vtextension::wasm::remote::process
++{
++
++/// Why the extension host executable was not found.
++enum class HelperLocationError : uint8_t
++{
++    NotFound, ///< No candidate is an executable.
++};
++
++/// The extension host executable's file name.
++#ifdef _WIN32
++inline constexpr std::string_view ExtensionHostName = "contour-extension-host.exe";
++#else
++inline constexpr std::string_view ExtensionHostName = "contour-extension-host";
++#endif
++
++/// Looks for the extension host executable where this platform installs it, beside @p selfExecutable: on
++/// Unix in the private executables' directory (libexec/contour, as the install made it relative to the
++/// binaries' directory), then the same directory; in a macOS bundle in Contents/Helpers first; on Windows
++/// in the same directory.
++/// @param selfExecutable The running program's absolute path.
++/// @param isExecutable Whether a path names an executable file.
++/// @return The first candidate that is one; `NotFound` if none is.
++[[nodiscard]] std::expected<std::filesystem::path, HelperLocationError> locateExtensionHost(
++    std::filesystem::path const& selfExecutable,
++    std::function<bool(std::filesystem::path const&)> const& isExecutable);
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/HelperLocation_test.cpp b/src/vtextension/wasm/remote/process/HelperLocation_test.cpp
+new file mode 100644
+index 000000000..caedffb6e
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/HelperLocation_test.cpp
+@@ -0,0 +1,87 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <catch2/catch_test_macros.hpp>
++
++#include <expected>
++#include <filesystem>
++#include <set>
++#include <string>
++#include <vector>
++
++#include <vtextension/wasm/remote/process/HelperLocation.hpp>
++
++using std::filesystem::path;
++using vtextension::wasm::remote::process::ExtensionHostName;
++using vtextension::wasm::remote::process::HelperLocationError;
++using vtextension::wasm::remote::process::locateExtensionHost;
++
++namespace
++{
++
++/// One lookup: where the program runs, which paths are executables, and what is found.
++struct LocationCase
++{
++    std::string name;
++    path self;
++    std::set<path> executables;
++    std::expected<path, HelperLocationError> found;
++};
++
++/// @return The cases of this platform's layout.
++[[nodiscard]] std::vector<LocationCase> locationCases()
++{
++    auto const none = std::unexpected(HelperLocationError::NotFound);
++#ifdef _WIN32
++    auto const installed = path { "C:\\Contour\\bin\\contour-extension-host.exe" };
++    return {
++        { .name = "beside",
++          .self = "C:\\Contour\\bin\\contour.exe",
++          .executables = { installed },
++          .found = installed },
++        { .name = "none", .self = "C:\\Contour\\bin\\contour.exe", .executables = {}, .found = none },
++    };
++#elifdef __APPLE__
++    auto const helpers = path { "/Applications/Contour.app/Contents/Helpers" } / ExtensionHostName;
++    auto const beside = path { "/Applications/Contour.app/Contents/MacOS" } / ExtensionHostName;
++    auto const self = path { "/Applications/Contour.app/Contents/MacOS/contour" };
++    return {
++        { .name = "bundle", .self = self, .executables = { helpers, beside }, .found = helpers },
++        { .name = "beside", .self = self, .executables = { beside }, .found = beside },
++        { .name = "none", .self = self, .executables = {}, .found = none },
++    };
++#else
++    auto const libexec =
++        (path { "/usr/bin" } / CONTOUR_EXTENSION_HOST_RELATIVE_DIR / ExtensionHostName).lexically_normal();
++    auto const beside = path { "/usr/bin" } / ExtensionHostName;
++    return {
++        { .name = "libexec",
++          .self = "/usr/bin/contour",
++          .executables = { libexec, beside },
++          .found = libexec },
++        { .name = "beside", .self = "/usr/bin/contour", .executables = { beside }, .found = beside },
++        { .name = "none", .self = "/usr/bin/contour", .executables = {}, .found = none },
++    };
++#endif
++}
++
++} // namespace
++
++TEST_CASE("HelperLocation.candidatesInOrder", "[vtextension]")
++{
++    for (auto const& row: locationCases())
++    {
++        INFO(row.name);
++        auto const isExecutable = [&row](path const& candidate) {
++            return row.executables.contains(candidate.lexically_normal());
++        };
++        CHECK(locateExtensionHost(row.self, isExecutable) == row.found);
++    }
++}
++
++#if !defined(_WIN32) && !defined(__APPLE__)
++TEST_CASE("HelperLocation.libexecIsNotBesideTheBinaries", "[vtextension]")
++{
++    // The relative directory the install computed leads out of bin/, into the private executables' directory.
++    CHECK(path { CONTOUR_EXTENSION_HOST_RELATIVE_DIR }.filename() == "contour");
++    CHECK(path { CONTOUR_EXTENSION_HOST_RELATIVE_DIR }.is_relative());
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+index ed8ae109f..54eb41d8c 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+@@ -137,23 +137,24 @@ class IExitWaitSet
+     /// @return Nothing; or why it cannot be watched.
+     [[nodiscard]] virtual std::expected<void, LaunchError> watch(uint64_t key,
+                                                                  IProcessHandle const& process) = 0;
+ 
+     /// Stops watching @p key; a key not watched is ignored.
+     virtual void unwatch(uint64_t key) noexcept = 0;
+ 
+     /// Blocks until a watched process exits, wake() is called, or @p deadline passes (by the clock the set
+     /// was made with).
+     /// @return The keys whose process may have exited -- each is reported for as long as it is watched and
+-    ///         has ended; empty on a wake or the deadline. `Io` if the system cannot wait at all -- a watched
+-    ///         process's handle closed while watched, which breaks watch()'s contract: a caller that waits
+-    ///         again at once would spin, so it must stop waiting on this set.
++    ///         has ended; empty on a wake or the deadline. An error (any LaunchError) if the system cannot
++    ///         wait at all -- for instance a watched process's handle closed while watched, which breaks
++    ///         watch()'s contract: a caller that waits again at once would spin, so it must stop waiting on
++    ///         this set.
+     [[nodiscard]] virtual std::expected<std::vector<uint64_t>, LaunchError> wait(
+         std::optional<core::SteadyTimePoint> deadline) = 0;
+ 
+     /// Ends a wait() blocked now, or else the next one. Wait-free, any thread.
+     virtual void wake() noexcept = 0;
+ };
+ 
+ /// Starts processes, and makes the sets their exits are waited on with: a handle and the set that waits on it
+ /// are one platform's.
+ class IProcessLauncher
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index bb00a5ba6..12e9d6267 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -26,277 +26,161 @@
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
++#include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/process/testing/RecordingLauncher.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <csignal>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using namespace vtextension::wasm::remote;
+ using process::ExitKind;
+ using process::ExitStatus;
+-using process::IProcessHandle;
+ using process::IProcessLauncher;
+ using process::LaunchError;
+ using process::LaunchSpec;
+ using transport::Channel;
+ using transport::ChannelError;
+ using transport::NativeHandle;
+ 
+ namespace
+ {
+ 
+-/// How long a case waits for a child to do what it was told.
+-constexpr auto ChildPatience = std::chrono::seconds { 5 };
+-
+-/// @return This process's id.
+-[[nodiscard]] process::ProcessId ownProcessId() noexcept
+-{
+-#ifdef _WIN32
+-    return static_cast<process::ProcessId>(::GetCurrentProcessId());
+-#else
+-    return static_cast<process::ProcessId>(::getpid());
+-#endif
+-}
++using process::testing::awaitReap;
++using process::testing::ChildPatience;
++using process::testing::endAndReap;
++using process::testing::ownProcessId;
++using Probe = process::testing::LaunchedHelper;
+ 
+ #ifdef _WIN32
+ /// @return The handle's value as the probe prints it.
+ [[nodiscard]] std::string handleText(NativeHandle handle)
+ {
+     return std::to_string(std::bit_cast<uintptr_t>(handle));
+ }
+ #endif
+ 
+-/// Reaps @p process, waiting up to ChildPatience for it to exit.
+-/// @return Its status; nothing if it still ran when the patience ran out.
+-[[nodiscard]] std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process)
+-{
+-    auto clock = core::SteadyClock {};
+-    auto const deadline = clock.now() + ChildPatience;
+-    auto set = launcher.makeWaitSet(clock);
+-    if (!set || !(*set)->watch(0, process))
+-        return std::nullopt;
+-    while (true)
+-    {
+-        if (auto const status = process.tryReap())
+-            return status;
+-        if (clock.now() >= deadline)
+-            return std::nullopt;
+-        if (!(*set)->wait(deadline))
+-            return std::nullopt;
+-    }
+-}
+-
+-/// Kills @p process if it still runs, and reaps it.
+-/// @return Whether it is reaped: whether it is gone for good.
+-[[nodiscard]] bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process)
+-{
+-    process.kill();
+-    return awaitReap(launcher, process).has_value();
+-}
++/// The data cap the probe is told of, and caps itself to.
++constexpr auto ProbeDataBytes = uint64_t { 64 } * 1024 * 1024;
+ 
+ /// What a launch of the probe needs beside the launcher's defaults.
+ struct ProbeOptions
+ {
+     std::vector<std::pair<std::string, std::string>> environment {};
+     std::vector<std::string> checkHandles {}; ///< Handle values the probe reports the validity of (Windows).
++    process::ProcessId parentProcessId = ownProcessId(); ///< What `--parent` names.
+ };
+ 
+-/// A running probe: the parent's ends of everything it was handed, and the process. Its destructor ends and
+-/// reaps a probe that a failed assertion left running.
+-class Probe
++/// @return The probe's report on @p control, one line each, once it wrote all of it; nothing if the channel
++///         failed first.
++[[nodiscard]] std::optional<std::vector<std::string>> readReport(Channel& control)
+ {
+-  public:
+-    Probe(std::shared_ptr<IProcessLauncher> launcher,
+-          std::unique_ptr<IProcessHandle> process,
+-          Channel control,
+-          std::vector<Channel> lanes,
+-          transport::ControlPage page,
+-          transport::WakeSender wake,
+-          std::shared_ptr<std::vector<NativeHandle>> childHandles) noexcept:
+-        launcher { std::move(launcher) },
+-        process { std::move(process) },
+-        control { std::move(control) },
+-        lanes { std::move(lanes) },
+-        page { std::move(page) },
+-        wake { std::move(wake) },
+-        childHandles { std::move(childHandles) }
++    auto text = std::string {};
++    auto buffer = std::array<uint8_t, 4096> {};
++    while (!text.ends_with("end\n"))
+     {
++        auto const received = control.receiveSome(buffer);
++        if (!received)
++            return std::nullopt;
++        text.append(reinterpret_cast<char const*>(buffer.data()), *received);
+     }
+-    Probe(Probe&&) noexcept = default;
+-    Probe& operator=(Probe&&) noexcept = delete;
+-    Probe(Probe const&) = delete;
+-    Probe& operator=(Probe const&) = delete;
+-    ~Probe()
+-    {
+-        if (process)
+-            std::ignore = endAndReap(*launcher, *process);
+-    }
+-
+-    std::shared_ptr<IProcessLauncher> launcher;
+-    std::unique_ptr<IProcessHandle> process;
+-    Channel control;
+-    std::vector<Channel> lanes;
+-    transport::ControlPage page;
+-    transport::WakeSender wake;
+-    std::shared_ptr<std::vector<NativeHandle>> childHandles; ///< What the arguments callback was given.
+-
+-    /// @return The probe's report, one line each, once it wrote all of it; nothing if the channel failed
+-    /// first.
+-    [[nodiscard]] std::optional<std::vector<std::string>> report()
+-    {
+-        auto text = std::string {};
+-        auto buffer = std::array<uint8_t, 4096> {};
+-        while (!text.ends_with("end\n"))
+-        {
+-            auto const received = control.receiveSome(buffer);
+-            if (!received)
+-                return std::nullopt;
+-            text.append(reinterpret_cast<char const*>(buffer.data()), *received);
+-        }
+-        auto lines = std::vector<std::string> {};
+-        for (auto const line: std::views::split(std::string_view { text }, '\n'))
+-            if (!line.empty())
+-                lines.emplace_back(std::string_view { line });
+-        return lines;
+-    }
+-
+-    /// Ends the probe the way a helper ends: its control channel reaches end of stream.
+-    void closeControl() noexcept
+-    {
+-        control.shutdown();
+-        auto const closed = std::move(control);
+-    }
+-};
++    auto lines = std::vector<std::string> {};
++    for (auto const line: std::views::split(std::string_view { text }, '\n'))
++        if (!line.empty())
++            lines.emplace_back(std::string_view { line });
++    return lines;
++}
+ 
+ /// @return The values of @p report's lines that start with @p key, sorted.
+ [[nodiscard]] std::vector<std::string> valuesOf(std::vector<std::string> const& report, std::string_view key)
+ {
+     auto values = std::vector<std::string> {};
+     for (auto const& line: report)
+         if (line.starts_with(key))
+             values.push_back(line.substr(key.size()));
+     std::ranges::sort(values);
+     return values;
+ }
+ 
+ /// Launches the probe with fresh channels, page and wake.
+ [[nodiscard]] std::expected<Probe, LaunchError> launchProbe(std::shared_ptr<IProcessLauncher> launcher,
+                                                             ProbeOptions options = {})
+ {
+-    auto control = transport::makeChannelPair();
+-    REQUIRE(control.has_value());
+-    auto lanes = std::vector<transport::ChannelPair> {};
+-    for ([[maybe_unused]] auto const i: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
+-    {
+-        auto lane = transport::makeChannelPair();
+-        REQUIRE(lane.has_value());
+-        lanes.push_back(*std::move(lane));
+-    }
+-    auto page = transport::ControlPage::create();
+-    REQUIRE(page.has_value());
+-    auto wake = transport::makeWakePair();
+-    REQUIRE(wake.has_value());
+-
+-    auto spec = LaunchSpec { .executable = VTEXTENSION_PROBE_PATH,
+-                             .inherited = {},
+-                             .arguments = {},
+-                             .environment = std::move(options.environment),
+-                             .caps = {} };
+-    spec.inherited.push_back(control->helper.nativeHandle());
+-    for (auto const& lane: lanes)
+-        spec.inherited.push_back(lane.helper.nativeHandle());
+-    spec.inherited.push_back(page->nativeHandle());
+-    spec.inherited.push_back(wake->helper.nativeHandle());
+-
+-    auto childHandles = std::make_shared<std::vector<NativeHandle>>();
+-    spec.arguments = [childHandles,
+-                      checkHandles = std::move(options.checkHandles)](std::span<NativeHandle const> handles) {
+-        childHandles->assign(handles.begin(), handles.end());
+-        auto arguments = transport::HelperArguments { .control = handles[0],
+-                                                      .lanes = {},
+-                                                      .controlPage = handles[1 + MaxLaneChannels],
+-                                                      .wake = handles[2 + MaxLaneChannels],
+-                                                      .parentProcessId = ownProcessId(),
+-                                                      .dataBytes = process::DefaultDataBytes };
+-        std::ranges::copy(handles.subspan(1, MaxLaneChannels), arguments.lanes.begin());
+-        auto result = std::vector<std::string> { "--report" };
+-        std::ranges::copy(transport::formatHelperArguments(arguments), std::back_inserter(result));
++    return process::testing::launchHelper(
++        std::move(launcher),
++        process::testing::HelperLaunch {
++            .executable = VTEXTENSION_PROBE_PATH,
++            .leading = { "--report" },
++            .trailing =
++                [checkHandles = std::move(options.checkHandles)](
++                    [[maybe_unused]] std::span<NativeHandle const> handles) {
++                    auto result = std::vector<std::string> {};
+ #ifdef _WIN32
+-        // Every handle the probe was given must be open in it.
+-        for (auto const handle: handles)
+-            result.push_back(std::format("--check-handle={}", handleText(handle)));
++                    // Every handle the probe was given must be open in it.
++                    for (auto const handle: handles)
++                        result.push_back(std::format("--check-handle={}", handleText(handle)));
+ #endif
+-        for (auto const& handle: checkHandles)
+-            result.push_back(std::format("--check-handle={}", handle));
+-        return result;
+-    };
+-
+-    auto process = launcher->launch(spec);
+-    if (!process)
+-        return std::unexpected(process.error());
+-    // The helper's ends are the child's alone now: the parent's copies close here, as a connector's do when
+-    // its spec goes out of scope.
+-    auto parentLanes = std::vector<Channel> {};
+-    for (auto& lane: lanes)
+-        parentLanes.push_back(std::move(lane.parent));
+-    return Probe { std::move(launcher),    *std::move(process), std::move(control->parent),
+-                   std::move(parentLanes), *std::move(page),    std::move(wake->parent),
+-                   std::move(childHandles) };
++                    for (auto const& handle: checkHandles)
++                        result.push_back(std::format("--check-handle={}", handle));
++                    return result;
++                },
++            .parentProcessId = options.parentProcessId,
++            .dataBytes = ProbeDataBytes,
++            .environment = std::move(options.environment) });
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("ProcessLauncher.childGetsACleanEnvironment", "[vtextension]")
+ {
+     auto const leak = core::testing::ScopedEnv { "VTEXTENSION_LEAK", "1" };
+     auto probe =
+         launchProbe(process::makeSystemProcessLauncher(), ProbeOptions { .environment = { { "A", "1" } } });
+     REQUIRE(probe.has_value());
+-    auto const report = probe->report();
++    auto const report = readReport(probe->control);
+     REQUIRE(report.has_value());
+     auto names = valuesOf(*report, "env=");
+ #ifdef _WIN32
+     // Wine adds its own variables to every process it starts, whatever block it was given; Windows adds none.
+     if (::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr)
+         std::erase_if(names, [](std::string const& name) {
+             return name.starts_with("WINE") || name == "SystemDrive" || name == "SystemRoot"
+                    || name == "PROCESSOR_ARCHITECTURE";
+         });
+ #endif
+     CHECK(names == std::vector<std::string> { "A" });
+     CHECK(endAndReap(*probe->launcher, *probe->process));
+ }
+ 
+ TEST_CASE("ProcessLauncher.childRunsAtTheRootOnTheNullDevice", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+-    auto const report = probe->report();
++    auto const report = readReport(probe->control);
+     REQUIRE(report.has_value());
+ #ifdef _WIN32
+     auto const root = std::filesystem::absolute(VTEXTENSION_PROBE_PATH).root_path().string();
+ #else
+     auto const root = std::string { "/" };
+ #endif
+     CHECK(valuesOf(*report, "cwd=") == std::vector<std::string> { root });
+     CHECK(valuesOf(*report, "stdin=") == std::vector<std::string> { "null" });
+     CHECK(valuesOf(*report, "stdout=") == std::vector<std::string> { "null" });
+     CHECK(endAndReap(*probe->launcher, *probe->process));
+@@ -314,42 +198,42 @@ TEST_CASE("ProcessLauncher.childInheritsExactlyItsHandles", "[vtextension]")
+     auto attributes = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
+                                             .lpSecurityDescriptor = nullptr,
+                                             .bInheritHandle = TRUE };
+     auto* const stray = ::CreateEventW(&attributes, TRUE, FALSE, nullptr);
+     for (auto* const filler: fillers)
+         ::CloseHandle(filler);
+     REQUIRE(stray != nullptr);
+     auto probe = launchProbe(process::makeSystemProcessLauncher(),
+                              ProbeOptions { .checkHandles = { handleText(stray) } });
+     REQUIRE(probe.has_value());
+-    auto const report = probe->report();
++    auto const report = readReport(probe->control);
+     ::CloseHandle(stray);
+     REQUIRE(report.has_value());
+     auto expected = std::vector<std::string> {};
+     for (auto const handle: *probe->childHandles)
+         expected.push_back(std::format("{}:valid", handleText(handle)));
+     expected.push_back(std::format("{}:invalid", handleText(stray)));
+     std::ranges::sort(expected);
+     CHECK(valuesOf(*report, "handle=") == expected);
+ #else
+     // Not close-on-exec, and above every number the child is given: only the launcher's own closing keeps it
+     // out of the child. (A low number would be hidden by the dup2() onto it.)
+     constexpr auto StrayAtLeast = 32;
+     auto const nullDevice = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+     REQUIRE(nullDevice != -1);
+     auto const stray = ::fcntl(nullDevice, F_DUPFD, StrayAtLeast);
+     ::close(nullDevice);
+     REQUIRE(stray >= StrayAtLeast);
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     ::close(stray);
+     REQUIRE(probe.has_value());
+-    auto const report = probe->report();
++    auto const report = readReport(probe->control);
+     REQUIRE(report.has_value());
+     auto expected = std::vector<std::string> {};
+     for (auto const descriptor: std::views::iota(0, 10))
+         expected.push_back(std::to_string(descriptor));
+     std::ranges::sort(expected);
+     CHECK(valuesOf(*report, "fd=") == expected);
+ #endif
+     CHECK(endAndReap(*probe->launcher, *probe->process));
+ }
+ 
+@@ -364,55 +248,55 @@ TEST_CASE("ProcessLauncher.childHandlesHaveFixedNumbers", "[vtextension]")
+ #endif
+ 
+ TEST_CASE("ProcessLauncher.exitIsSeenWithoutPolling", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+     auto clock = core::SteadyClock {};
+     auto set = probe->launcher->makeWaitSet(clock);
+     REQUIRE(set.has_value());
+     REQUIRE((*set)->watch(7, *probe->process).has_value());
+-    REQUIRE(probe->report().has_value());
++    REQUIRE(readReport(probe->control).has_value());
+ 
+     probe->closeControl();
+     CHECK((*set)->wait(std::nullopt) == std::vector<uint64_t> { 7 });
+     CHECK(probe->process->tryReap() == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+     (*set)->unwatch(7);
+ }
+ 
+ TEST_CASE("ProcessLauncher.killThenReap", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+     auto clock = core::SteadyClock {};
+     auto set = probe->launcher->makeWaitSet(clock);
+     REQUIRE(set.has_value());
+     REQUIRE((*set)->watch(3, *probe->process).has_value());
+-    REQUIRE(probe->report().has_value());
++    REQUIRE(readReport(probe->control).has_value());
+     CHECK_FALSE(probe->process->tryReap().has_value());
+ 
+     probe->process->kill();
+     CHECK((*set)->wait(clock.now() + ChildPatience) == std::vector<uint64_t> { 3 });
+ #ifdef _WIN32
+     auto const killed =
+         ExitStatus { .kind = ExitKind::Exited, .value = static_cast<int>(process::KilledExitCode) };
+ #else
+     auto const killed = ExitStatus { .kind = ExitKind::Signalled, .value = SIGKILL };
+ #endif
+     CHECK(probe->process->tryReap() == killed);
+ }
+ 
+ TEST_CASE("ProcessLauncher.killAfterReapDoesNothing", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+-    REQUIRE(probe->report().has_value());
++    REQUIRE(readReport(probe->control).has_value());
+     probe->closeControl();
+     auto const first = awaitReap(*probe->launcher, *probe->process);
+     REQUIRE(first == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+ 
+     // Reaped: a kill now could reach whatever process took the id over, so it reaches nothing.
+     probe->process->kill();
+     probe->process->kill();
+     CHECK(probe->process->tryReap() == first);
+ }
+ 
+@@ -425,21 +309,21 @@ TEST_CASE("ProcessLauncher.missingExecutableIsNotFound", "[vtextension]")
+                                    .environment = {},
+                                    .caps = {} };
+     CHECK(launcher->launch(spec) == std::unexpected(LaunchError::NotFound));
+ }
+ 
+ #ifdef _WIN32
+ TEST_CASE("ProcessLauncher.childIsInAKillOnCloseJob", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+-    REQUIRE(probe->report().has_value());
++    REQUIRE(readReport(probe->control).has_value());
+     auto inJob = BOOL { FALSE };
+     REQUIRE(::IsProcessInJob(probe->process->waitable(), nullptr, &inJob));
+     CHECK(inJob == TRUE);
+ 
+     auto* const watcher = ::OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(probe->process->id()));
+     REQUIRE(watcher != nullptr);
+     // Neither killed nor waited for: the job's close ends it.
+     probe->process.reset();
+     CHECK(::WaitForSingleObject(watcher, 5000) == WAIT_OBJECT_0);
+     ::CloseHandle(watcher);
+@@ -466,25 +350,49 @@ TEST_CASE("ExitWaitSet.deadlineEndsAWait", "[vtextension]")
+ {
+     auto const launcher = process::makeSystemProcessLauncher();
+     auto clock = core::SteadyClock {};
+     auto set = launcher->makeWaitSet(clock);
+     REQUIRE(set.has_value());
+     auto const start = clock.now();
+     CHECK((*set)->wait(start + std::chrono::milliseconds { 20 }) == std::vector<uint64_t> {});
+     CHECK(clock.now() - start >= std::chrono::milliseconds { 20 });
+ }
+ 
++#if defined(__linux__) || defined(__FreeBSD__)
++TEST_CASE("ExitWaitSet.closedWatchedHandleIsAnError", "[vtextension]")
++{
++    auto probe = launchProbe(process::makeSystemProcessLauncher());
++    REQUIRE(probe.has_value());
++    auto clock = core::SteadyClock {};
++    auto set = probe->launcher->makeWaitSet(clock);
++    REQUIRE(set.has_value());
++    REQUIRE((*set)->watch(5, *probe->process).has_value());
++
++    // The process descriptor closes out from under the set; a copy keeps the process's own handle restorable.
++    auto const descriptor = probe->process->waitable();
++    auto const saved = ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
++    REQUIRE(saved >= 0);
++    REQUIRE(::close(descriptor) == 0);
++    auto const waited = (*set)->wait(clock.now() + ChildPatience);
++    REQUIRE(::dup3(saved, descriptor, O_CLOEXEC) == descriptor);
++    ::close(saved);
++
++    CHECK_FALSE(waited.has_value());
++    (*set)->unwatch(5);
++}
++#endif
++
+ TEST_CASE("Channel.peerProcessExitIsClosed", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+-    REQUIRE(probe->report().has_value());
++    REQUIRE(readReport(probe->control).has_value());
+     // The lanes' other ends exist only in the probe: its exit ends their streams.
+     probe->closeControl();
+     auto buffer = std::array<uint8_t, 16> {};
+     CHECK(probe->lanes.front().receiveSome(buffer) == std::unexpected(ChannelError::Closed));
+     CHECK(endAndReap(*probe->launcher, *probe->process));
+ }
+ 
+ TEST_CASE("FakeProcessLauncher.recordsAndExits", "[vtextension]")
+ {
+     auto const launcher = std::make_shared<process::testing::FakeProcessLauncher>();
+@@ -564,10 +472,43 @@ TEST_CASE("RecordingLauncher.recordsAndRewritesLaterLaunches", "[vtextension]")
+ 
+     auto killerId = std::thread::id {};
+     auto killer = std::jthread { [&] {
+         killerId = std::this_thread::get_id();
+         (*second)->kill();
+     } };
+     killer.join();
+     CHECK(recording->killThreads() == std::vector { killerId });
+     CHECK(inner->kills() == std::vector<std::size_t> { 1 });
+ }
++
++TEST_CASE("HostBootstrap.capsHold", "[vtextension]")
++{
++    auto probe = launchProbe(process::makeSystemProcessLauncher());
++    REQUIRE(probe.has_value());
++    auto const report = readReport(probe->control);
++    REQUIRE(report.has_value());
++    probe->closeControl();
++    CHECK(awaitReap(*probe->launcher, *probe->process)
++          == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
++
++    if (valuesOf(*report, "caps=") == std::vector<std::string> { "skip" })
++        SKIP("sanitizer builds apply no caps");
++    CHECK(valuesOf(*report, "caps=") == std::vector<std::string> { "apply" });
++#ifdef __linux__
++    CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "0" });
++    CHECK(valuesOf(*report, "data=") == std::vector<std::string> { std::to_string(ProbeDataBytes) });
++#elifdef __FreeBSD__
++    CHECK(valuesOf(*report, "nproc=") == std::vector<std::string> { "0" });
++#endif
++}
++
++#ifndef _WIN32
++TEST_CASE("HostBootstrap.wrongParentExits", "[vtextension]")
++{
++    // The process the probe is told of is not its parent: it ends before it adopts anything.
++    constexpr auto ParentGoneExitCode = 72;
++    auto probe = launchProbe(process::makeSystemProcessLauncher(), ProbeOptions { .parentProcessId = 1 });
++    REQUIRE(probe.has_value());
++    CHECK(awaitReap(*probe->launcher, *probe->process)
++          == ExitStatus { .kind = ExitKind::Exited, .value = ParentGoneExitCode });
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index a2208d19d..edb16c058 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -1,39 +1,47 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // extension_host_probe: started by the launcher's tests in the place of the extension host process, it
+ // reports what it was started with, on the control channel it was handed, and exits once that channel ends.
+ //
+ //   extension_host_probe --report <helper arguments> [--check-handle=H]…
+ //
++// Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
++// as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
++//
+ // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
+-// `stdin=` and `stdout=` each `null` if it is the null device, else `other`; and `fd=N` per open descriptor
+-// (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
++// `stdin=` and `stdout=` each `null` if it is the null device, else `other`; `caps=` `apply` or `skip` as
++// the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
++// descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+ #include <array>
+ #include <bit>
+ #include <charconv>
+ #include <cstdint>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <format>
+ #include <span>
+ #include <string>
+ #include <string_view>
++#include <tuple>
+ #include <vector>
+ 
++#include <vtextension/wasm/host/HostBootstrap.hpp>
++#include <vtextension/wasm/host/HostProcess.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
++    #include <sys/resource.h>
+     #include <sys/stat.h>
+ 
+     #include <algorithm>
+     #include <ranges>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::Channel;
+@@ -42,20 +50,21 @@ using vtextension::wasm::remote::transport::parseHelperArguments;
+ namespace
+ {
+ 
+ /// Exit codes, each a way the probe failed before it reported.
+ enum class ProbeExit : uint8_t
+ {
+     Reported = 0,     ///< It reported, and its control channel ended.
+     Usage = 2,        ///< Its command line is not what it takes.
+     NoControl = 3,    ///< Its control channel cannot be adopted.
+     ReportFailed = 4, ///< The report could not be sent.
++    ParentGone = 5,   ///< It is not its parent's child: it exits as the host does then.
+ };
+ 
+ /// The prefix of the option naming a handle whose validity is reported.
+ constexpr auto CheckHandle = std::string_view { "--check-handle=" };
+ 
+ /// @return The names of the variables of @p environment (POSIX: main's, null-terminated; Windows: this
+ ///         process's), one line each.
+ [[nodiscard]] std::string environmentLines([[maybe_unused]] char const* const* environment)
+ {
+     auto lines = std::string {};
+@@ -128,42 +137,64 @@ enum class StandardStream : uint8_t
+     constexpr auto Highest = 4096L;
+     auto const openMax = ::sysconf(_SC_OPEN_MAX);
+     auto const limit = openMax > 0 ? std::min(openMax, Highest) : Highest;
+     for (auto const descriptor: std::views::iota(0, static_cast<int>(limit)))
+         if (::fcntl(descriptor, F_GETFD) != -1)
+             lines += std::format("fd={}\n", descriptor);
+ #endif
+     return lines;
+ }
+ 
++/// @return The caps it runs under, one line each.
++[[nodiscard]] std::string capLines()
++{
++    namespace host = vtextension::wasm::host;
++    auto lines = std::format("caps={}\n", host::BuildCapPolicy == host::CapPolicy::Apply ? "apply" : "skip");
++#ifndef _WIN32
++    auto const limitText = [](int resource) {
++        struct rlimit limit {};
++        if (::getrlimit(resource, &limit) != 0)
++            return std::string { "unknown" };
++        return limit.rlim_cur == RLIM_INFINITY ? std::string { "unlimited" } : std::to_string(limit.rlim_cur);
++    };
++    lines += std::format("nproc={}\ndata={}\n", limitText(RLIMIT_NPROC), limitText(RLIMIT_DATA));
++#endif
++    return lines;
++}
++
+ /// Reports what the probe was started with, then waits for its control channel to end.
+ [[nodiscard]] ProbeExit report(std::span<std::string_view const> arguments, char const* const* environment)
+ {
+     auto helperArguments = std::vector<std::string_view> {};
+     auto checked = std::vector<std::string_view> {};
+     for (auto const argument: arguments)
+         if (argument.starts_with(CheckHandle))
+             checked.push_back(argument.substr(CheckHandle.size()));
+         else
+             helperArguments.push_back(argument);
+     auto const parsed = parseHelperArguments(helperArguments);
+     if (!parsed)
+         return ProbeExit::Usage;
++    if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
++        return ProbeExit::ParentGone;
+     auto control = Channel::adopt(parsed->control);
+     if (!control)
+         return ProbeExit::NoControl;
++    std::ignore =
++        vtextension::wasm::host::capResources(parsed->dataBytes, vtextension::wasm::host::BuildCapPolicy);
+ 
+-    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\n{}{}end\n",
++    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\n{}{}{}end\n",
+                                   std::filesystem::current_path().string(),
+                                   deviceOf(StandardStream::Input),
+                                   deviceOf(StandardStream::Output),
+                                   environmentLines(environment),
++                                  capLines(),
+                                   handleLines(checked));
+     auto const bytes = std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() };
+     if (!control->send(bytes))
+         return ProbeExit::ReportFailed;
+ 
+     // Whatever arrives is ignored; the end of the stream ends the probe.
+     auto buffer = std::array<uint8_t, 64> {};
+     while (control->receiveSome(buffer))
+     {
+     }
+@@ -172,12 +203,15 @@ enum class StandardStream : uint8_t
+ 
+ } // namespace
+ 
+ // The third parameter is what POSIX systems pass and Windows' C runtime passes too: the environment, read
+ // without a global.
+ int main(int argc, char const* argv[], char const* envp[])
+ {
+     auto const arguments = std::vector<std::string_view>(argv + 1, argv + argc);
+     if (arguments.empty() || arguments.front() != "--report")
+         return static_cast<int>(ProbeExit::Usage);
+-    return static_cast<int>(report(std::span { arguments }.subspan(1), envp));
++    auto const exit = report(std::span { arguments }.subspan(1), envp);
++    if (exit == ProbeExit::ParentGone)
++        return vtextension::wasm::host::exitCodeOf(vtextension::wasm::host::HostProcessExit::ParentGone);
++    return static_cast<int>(exit);
+ }
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+new file mode 100644
+index 000000000..7b5b8aaff
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+@@ -0,0 +1,153 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
++
++#include <core/Clock.hpp>
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <algorithm>
++#include <cstddef>
++#include <iterator>
++#include <ranges>
++#include <tuple>
++
++#include <vtextension/wasm/remote/transport/HelperArguments.hpp>
++
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#else
++    #include <unistd.h>
++#endif
++
++namespace vtextension::wasm::remote::process::testing
++{
++
++using transport::Channel;
++using transport::NativeHandle;
++
++ProcessId ownProcessId() noexcept
++{
++#ifdef _WIN32
++    return static_cast<ProcessId>(::GetCurrentProcessId());
++#else
++    return static_cast<ProcessId>(::getpid());
++#endif
++}
++
++std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process)
++{
++    auto clock = core::SteadyClock {};
++    auto const deadline = clock.now() + ChildPatience;
++    auto set = launcher.makeWaitSet(clock);
++    if (!set || !(*set)->watch(0, process))
++        return std::nullopt;
++    while (true)
++    {
++        if (auto const status = process.tryReap())
++            return status;
++        if (clock.now() >= deadline)
++            return std::nullopt;
++        if (!(*set)->wait(deadline))
++            return std::nullopt;
++    }
++}
++
++bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process)
++{
++    process.kill();
++    return awaitReap(launcher, process).has_value();
++}
++
++LaunchedHelper::LaunchedHelper(std::shared_ptr<IProcessLauncher> launcher,
++                               std::unique_ptr<IProcessHandle> process,
++                               Channel control,
++                               std::vector<Channel> lanes,
++                               transport::ControlPage page,
++                               transport::WakeSender wake,
++                               std::shared_ptr<std::vector<NativeHandle>> childHandles) noexcept:
++    launcher { std::move(launcher) },
++    process { std::move(process) },
++    control { std::move(control) },
++    lanes { std::move(lanes) },
++    page { std::move(page) },
++    wake { std::move(wake) },
++    childHandles { std::move(childHandles) }
++{
++}
++
++LaunchedHelper::~LaunchedHelper()
++{
++    if (process)
++        std::ignore = endAndReap(*launcher, *process);
++}
++
++void LaunchedHelper::closeControl() noexcept
++{
++    control.shutdown();
++    auto const closed = std::move(control);
++}
++
++std::expected<LaunchedHelper, LaunchError> launchHelper(std::shared_ptr<IProcessLauncher> launcher,
++                                                        HelperLaunch launch)
++{
++    auto control = transport::makeChannelPair();
++    REQUIRE(control.has_value());
++    auto lanes = std::vector<transport::ChannelPair> {};
++    for ([[maybe_unused]] auto const i: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
++    {
++        auto lane = transport::makeChannelPair();
++        REQUIRE(lane.has_value());
++        lanes.push_back(*std::move(lane));
++    }
++    auto page = transport::ControlPage::create();
++    REQUIRE(page.has_value());
++    auto wake = transport::makeWakePair();
++    REQUIRE(wake.has_value());
++
++    auto spec = LaunchSpec { .executable = std::move(launch.executable),
++                             .inherited = {},
++                             .arguments = {},
++                             .environment = std::move(launch.environment),
++                             .caps = {} };
++    spec.inherited.push_back(control->helper.nativeHandle());
++    for (auto const& lane: lanes)
++        spec.inherited.push_back(lane.helper.nativeHandle());
++    spec.inherited.push_back(page->nativeHandle());
++    spec.inherited.push_back(wake->helper.nativeHandle());
++
++    auto childHandles = std::make_shared<std::vector<NativeHandle>>();
++    spec.arguments = [childHandles,
++                      leading = std::move(launch.leading),
++                      trailing = std::move(launch.trailing),
++                      parentProcessId = launch.parentProcessId,
++                      dataBytes = launch.dataBytes](std::span<NativeHandle const> handles) {
++        childHandles->assign(handles.begin(), handles.end());
++        auto arguments = transport::HelperArguments { .control = handles[0],
++                                                      .lanes = {},
++                                                      .controlPage = handles[1 + MaxLaneChannels],
++                                                      .wake = handles[2 + MaxLaneChannels],
++                                                      .parentProcessId = parentProcessId,
++                                                      .dataBytes = dataBytes };
++        std::ranges::copy(handles.subspan(1, MaxLaneChannels), arguments.lanes.begin());
++        auto result = leading;
++        std::ranges::copy(transport::formatHelperArguments(arguments), std::back_inserter(result));
++        if (trailing)
++            std::ranges::copy(trailing(handles), std::back_inserter(result));
++        return result;
++    };
++
++    auto process = launcher->launch(spec);
++    if (!process)
++        return std::unexpected(process.error());
++    // The helper's ends are the child's alone now: the parent's copies close here, as a connector's do when
++    // its spec goes out of scope.
++    auto parentLanes = std::vector<Channel> {};
++    for (auto& lane: lanes)
++        parentLanes.push_back(std::move(lane.parent));
++    return LaunchedHelper { std::move(launcher),    *std::move(process), std::move(control->parent),
++                            std::move(parentLanes), *std::move(page),    std::move(wake->parent),
++                            std::move(childHandles) };
++}
++
++} // namespace vtextension::wasm::remote::process::testing
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+new file mode 100644
+index 000000000..6e5e1e871
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+@@ -0,0 +1,91 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// Test-only: starts an executable the way Contour starts its extension host -- fresh channels, an interrupt
++/// page and a wake signal, inherited and named on its command line -- and holds Contour's ends of them. What
++/// the launcher's tests start the probe with, and the helper's tests the real executable.
++
++#include <chrono>
++#include <cstdint>
++#include <expected>
++#include <filesystem>
++#include <functional>
++#include <memory>
++#include <optional>
++#include <span>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/WakeSignal.hpp>
++
++namespace vtextension::wasm::remote::process::testing
++{
++
++/// How long a test waits for a child to do what it was told.
++inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
++
++/// @return This process's id.
++[[nodiscard]] ProcessId ownProcessId() noexcept;
++
++/// Reaps @p process, waiting up to ChildPatience for it to exit.
++/// @return Its status; nothing if it still ran when the patience ran out.
++[[nodiscard]] std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process);
++
++/// Kills @p process if it still runs, and reaps it.
++/// @return Whether it is reaped: whether it is gone for good.
++[[nodiscard]] bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process);
++
++/// What to start, and how.
++struct HelperLaunch
++{
++    std::filesystem::path executable;    ///< The program.
++    std::vector<std::string> leading {}; ///< Arguments before the helper arguments.
++    /// Arguments after them, given the handles' values in the child.
++    std::function<std::vector<std::string>(std::span<transport::NativeHandle const>)> trailing {};
++    ProcessId parentProcessId = ownProcessId();                      ///< What `--parent` names.
++    uint64_t dataBytes = DefaultDataBytes;                           ///< What `--data-bytes` names.
++    std::vector<std::pair<std::string, std::string>> environment {}; ///< The child's environment.
++};
++
++/// A started child: Contour's ends of everything it was handed, and the process. Its destructor ends and
++/// reaps a child that a failed assertion left running.
++class LaunchedHelper
++{
++  public:
++    LaunchedHelper(std::shared_ptr<IProcessLauncher> launcher,
++                   std::unique_ptr<IProcessHandle> process,
++                   transport::Channel control,
++                   std::vector<transport::Channel> lanes,
++                   transport::ControlPage page,
++                   transport::WakeSender wake,
++                   std::shared_ptr<std::vector<transport::NativeHandle>> childHandles) noexcept;
++    LaunchedHelper(LaunchedHelper&&) noexcept = default;
++    LaunchedHelper& operator=(LaunchedHelper&&) noexcept = delete;
++    LaunchedHelper(LaunchedHelper const&) = delete;
++    LaunchedHelper& operator=(LaunchedHelper const&) = delete;
++    ~LaunchedHelper();
++
++    std::shared_ptr<IProcessLauncher> launcher;
++    std::unique_ptr<IProcessHandle> process;
++    transport::Channel control;
++    std::vector<transport::Channel> lanes;
++    transport::ControlPage page;
++    transport::WakeSender wake;
++    std::shared_ptr<std::vector<transport::NativeHandle>>
++        childHandles; ///< What its arguments were made from.
++
++    /// Ends the child the way Contour lets a helper end: its control channel reaches end of stream.
++    void closeControl() noexcept;
++};
++
++/// Starts @p launch with fresh channels, page and wake.
++/// @return The child; why it could not be started otherwise.
++[[nodiscard]] std::expected<LaunchedHelper, LaunchError> launchHelper(
++    std::shared_ptr<IProcessLauncher> launcher, HelperLaunch launch);
++
++} // namespace vtextension::wasm::remote::process::testing
+diff --git a/src/vtextension/wasm/remote/transport/Channel_test.cpp b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+index c0a37f326..ae1c7f2e5 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_test.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+@@ -10,81 +10,56 @@
+ #include <cstdint>
+ #include <expected>
+ #include <future>
+ #include <optional>
+ #include <span>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
++#include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <csignal>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+-using vtextension::wasm::remote::transport::NativeHandle;
++using vtextension::wasm::remote::transport::testing::closeHandle;
++using vtextension::wasm::remote::transport::testing::duplicate;
+ 
+ namespace
+ {
+ 
+ /// @return Exactly @p count bytes received off @p channel; nothing if it failed first.
+ [[nodiscard]] std::optional<std::vector<uint8_t>> receiveExactly(Channel& channel, std::size_t count)
+ {
+     auto received = std::vector<uint8_t>(count);
+     auto filled = std::size_t { 0 };
+     while (filled < count)
+     {
+         auto const some = channel.receiveSome(std::span { received }.subspan(filled));
+         if (!some)
+             return std::nullopt;
+         filled += *some;
+     }
+     return received;
+ }
+ 
+-/// @return A second handle on what @p handle names, as a child process inherits one; nothing if it failed.
+-[[nodiscard]] std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
+-{
+-#ifdef _WIN32
+-    auto copy = HANDLE { nullptr };
+-    if (!::DuplicateHandle(
+-            ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
+-        return std::nullopt;
+-    return copy;
+-#else
+-    auto const copy = ::dup(handle);
+-    if (copy == -1)
+-        return std::nullopt;
+-    return copy;
+-#endif
+-}
+-
+-/// Closes a handle no channel owns.
+-void closeHandle(NativeHandle handle) noexcept
+-{
+-#ifdef _WIN32
+-    ::CloseHandle(handle);
+-#else
+-    ::close(handle);
+-#endif
+-}
+-
+ } // namespace
+ 
+ TEST_CASE("Channel.pairCarriesBytesBothWays", "[vtextension]")
+ {
+     auto pair = makeChannelPair();
+     REQUIRE(pair.has_value());
+ 
+     auto const request = std::vector<uint8_t> { 1, 2, 3, 4, 5 };
+     REQUIRE(pair->parent.send(request).has_value());
+     CHECK(receiveExactly(pair->helper, request.size()) == request);
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage.hpp b/src/vtextension/wasm/remote/transport/ControlPage.hpp
+index 62e21b9f2..09968d09d 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage.hpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage.hpp
+@@ -61,21 +61,23 @@ class ControlPage
+ 
+     /// Clears @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
+     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
+     void clear(uint32_t slot) noexcept;
+ 
+     /// @param slot The slot.
+     /// @return Whether @p slot is raised; never for one at or beyond InterruptSlotCount.
+     [[nodiscard]] bool isRaised(uint32_t slot) const noexcept;
+ 
+     /// @return The page's handle, still owned by the page: for handing it to a child process. On Windows it
+-    ///         grants read access only, so that the child cannot map the page writable.
++    ///         grants read access only, so that a well-behaved child cannot map the page writable; a hostile
++    ///         one can widen its own handle (an unnamed section's access is not checked), which grants it
++    ///         nothing, since this process never reads the page back.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     ControlPage(NativeHandle handle, uint32_t* flags) noexcept;
+ 
+     /// @return @p slot's flag.
+     [[nodiscard]] std::atomic_ref<uint32_t> flag(uint32_t slot) const noexcept;
+ 
+     /// Unmaps and closes what this page holds, if anything.
+     void release() noexcept;
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_test.cpp b/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
+index 66bd49c7e..84ad991dc 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
+@@ -3,61 +3,40 @@
+ // The page Contour and its extension host process both map: a flag raised through one mapping is seen
+ // through the other, the helper refuses a page of the wrong size, and nobody can resize it or inherit it.
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <cstdint>
+ #include <expected>
+ #include <optional>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <sys/mman.h>
+     #include <sys/wait.h>
+ 
+     #include <cerrno>
+     #include <csignal>
+     #include <format>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::ControlPage;
+-using vtextension::wasm::remote::transport::NativeHandle;
+ using vtextension::wasm::remote::transport::SharedObjectError;
+-
+-namespace
+-{
+-
+-/// @return A second handle on what @p handle names, as the helper inherits it; nothing if it failed.
+-[[nodiscard]] std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
+-{
+-#ifdef _WIN32
+-    auto copy = HANDLE { nullptr };
+-    if (!::DuplicateHandle(
+-            ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
+-        return std::nullopt;
+-    return copy;
+-#else
+-    auto const copy = ::dup(handle);
+-    if (copy == -1)
+-        return std::nullopt;
+-    return copy;
+-#endif
+-}
+-
+-} // namespace
++using vtextension::wasm::remote::transport::testing::duplicate;
+ 
+ TEST_CASE("ControlPage.raiseIsSeenThroughASecondMapping", "[vtextension]")
+ {
+     auto parent = ControlPage::create();
+     REQUIRE(parent.has_value());
+     auto const copy = duplicate(parent->nativeHandle());
+     REQUIRE(copy.has_value());
+     auto helper = ControlPage::adopt(*copy);
+     REQUIRE(helper.has_value());
+ 
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp b/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
+index 109df3790..9b154de59 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
+@@ -1,16 +1,19 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The interrupt page on Windows: an unnamed, pagefile-backed section of one page, not inheritable until it is
+ // handed over. A section cannot be resized once created, so it needs no seal. Contour maps it writable and
+-// then keeps only a handle that grants FILE_MAP_READ, the one it hands over: the helper cannot map the page
+-// writable through it.
++// then keeps only a handle that grants FILE_MAP_READ, the one it hands over: a well-behaved helper cannot map
++// the page writable through it. A hostile one can: an unnamed section carries no security descriptor that is
++// checked, so DuplicateHandle can widen the access of the helper's own handle. That grants nothing, because
++// Contour only stores to the page and never reads it back; an AppContainer around the helper narrows it
++// further.
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+diff --git a/src/vtextension/wasm/remote/transport/testing/HandleCopies.hpp b/src/vtextension/wasm/remote/transport/testing/HandleCopies.hpp
+new file mode 100644
+index 000000000..827bccd7f
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/testing/HandleCopies.hpp
+@@ -0,0 +1,49 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Test-only: second handles on what a transport end names, as the extension host process inherits them.
++#pragma once
++
++#include <optional>
++
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#else
++    #include <unistd.h>
++#endif
++
++namespace vtextension::wasm::remote::transport::testing
++{
++
++/// @return A second handle on what @p handle names, as an inherited one is: not close-on-exec (POSIX);
++/// nothing
++///         if it failed.
++[[nodiscard]] inline std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
++{
++#ifdef _WIN32
++    auto copy = HANDLE { nullptr };
++    if (!::DuplicateHandle(
++            ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
++        return std::nullopt;
++    return copy;
++#else
++    auto const copy = ::dup(handle);
++    if (copy == -1)
++        return std::nullopt;
++    return copy;
++#endif
++}
++
++/// Closes @p handle.
++inline void closeHandle(NativeHandle handle) noexcept
++{
++#ifdef _WIN32
++    ::CloseHandle(handle);
++#else
++    ::close(handle);
++#endif
++}
++
++} // namespace vtextension::wasm::remote::transport::testing
+diff --git a/src/vtextension/wasm/wasmtime/CMakeLists.txt b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+index 8435ec3ec..517914cb3 100644
+--- a/src/vtextension/wasm/wasmtime/CMakeLists.txt
++++ b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+@@ -16,20 +16,31 @@ target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE contour::w
+ # feature the backend switches, from the same list the configure-time probe checks an installed Wasmtime
+ # against (cmake/ContourThirdParties.cmake).
+ ContourThirdParties_WasmtimeFeatureChecks(_wasmtime_feature_checks ${_WASMTIME_REQUIRED_FEATURES})
+ file(CONFIGURE
+     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp"
+     CONTENT "// SPDX-License-Identifier: Apache-2.0\n// Generated by CMake from _WASMTIME_REQUIRED_FEATURES (cmake/ContourThirdParties.cmake).\n#pragma once\n\n${_wasmtime_feature_checks}"
+     @ONLY
+ )
+ target_include_directories(vtextension_wasmtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+ 
++# The engine the extension host executable runs (../host/HelperEngine.hpp): Wasmtime's, trapping through guard
++# pages and signals -- except where a sanitizer or coverage owns the signal handlers, which trap in software.
++add_library(vtextension_wasmtime_helper_engine STATIC
++    HelperEngine.cpp
++    ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/host/HelperEngine.hpp
++)
++target_link_libraries(vtextension_wasmtime_helper_engine PUBLIC vtextension_host PRIVATE vtextension_wasmtime)
++if(CONTOUR_SANITIZE OR CONTOUR_COVERAGE)
++    target_compile_definitions(vtextension_wasmtime_helper_engine PRIVATE CONTOUR_HELPER_SOFTWARE_TRAPS)
++endif()
++
+ if(VTEXTENSION_TESTING)
+     # Test support for the extension host's suite (vtextension_remote_test): the engine a host process drives,
+     # reached through a neutral probe (../testing/HostedEngine.hpp), so that the host's tests name no engine.
+     add_library(vtextension_wasmtime_hosted_engine STATIC
+         HostedEngine.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/testing/HostedEngine.hpp
+     )
+     target_link_libraries(vtextension_wasmtime_hosted_engine PUBLIC vtextension_wasmtime)
+ endif()
+ 
+diff --git a/src/vtextension/wasm/wasmtime/HelperEngine.cpp b/src/vtextension/wasm/wasmtime/HelperEngine.cpp
+new file mode 100644
+index 000000000..51f7758e7
+--- /dev/null
++++ b/src/vtextension/wasm/wasmtime/HelperEngine.cpp
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The engine of the extension host executable: Wasmtime's.
++#include <vtextension/wasm/host/HelperEngine.hpp>
++
++#include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
++
++namespace vtextension::wasm::host
++{
++
++namespace
++{
++    /// How the helper's engine traps: in software where a sanitizer or coverage owns the signal handlers,
++    /// through guard pages and signals otherwise.
++#ifdef CONTOUR_HELPER_SOFTWARE_TRAPS
++    constexpr auto HelperTrapMode = wasmtime::TrapMode::Software;
++#else
++    constexpr auto HelperTrapMode = wasmtime::TrapMode::Signals;
++#endif
++} // namespace
++
++std::unique_ptr<IHostedEngine> makeHelperEngine()
++{
++    static auto const kind = wasmtime::makeKindState();
++    return wasmtime::makeWasmtimeEngine(kind, wasmtime::WasmtimeConfig { .trapMode = HelperTrapMode });
++}
++
++} // namespace vtextension::wasm::host

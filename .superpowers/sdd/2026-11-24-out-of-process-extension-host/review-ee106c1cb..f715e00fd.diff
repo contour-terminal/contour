@@ -1,0 +1,592 @@
+# Review package: ee106c1cb..HEAD
+
+## Commits
+f715e00fd fix(vtextension): a kernel refusing what our Landlock row claims for its ABI falls back to the row before
+b45c709c7 fix(vtextension): a sanitizer build's extension host no longer dies by its own filter as it exits
+
+## Files changed
+ src/contour-extension-host/CMakeLists.txt          |  3 +-
+ src/vtextension/wasm/host/CMakeLists.txt           |  5 ++
+ src/vtextension/wasm/host/SanitizerOptions.cpp     | 33 ++++++++
+ src/vtextension/wasm/host/linux/Landlock.cpp       | 79 ++++++++++-------
+ src/vtextension/wasm/host/linux/Landlock_test.cpp  | 98 +++++++++++++++++++++-
+ src/vtextension/wasm/remote/CMakeLists.txt         |  1 +
+ src/vtextension/wasm/remote/Helper_test.cpp        | 16 ++++
+ .../wasm/remote/process/testing/LaunchedHelper.cpp | 34 ++------
+ .../wasm/remote/process/testing/LaunchedHelper.hpp |  3 +-
+ 9 files changed, 210 insertions(+), 62 deletions(-)
+
+## Diff
+diff --git a/src/contour-extension-host/CMakeLists.txt b/src/contour-extension-host/CMakeLists.txt
+index b692b672f..1a9229167 100644
+--- a/src/contour-extension-host/CMakeLists.txt
++++ b/src/contour-extension-host/CMakeLists.txt
+@@ -1,15 +1,16 @@
+ # contour-extension-host: the process Contour runs extensions in, apart from itself. Its body is
+ # vtextension_host's runExtensionHost(); main.cpp only hands it the command line and the engine.
+ if(TARGET vtextension_wasmtime)
+     add_executable(contour-extension-host main.cpp)
+-    target_link_libraries(contour-extension-host PRIVATE vtextension_host vtextension_wasmtime_helper_engine contour::wasmtime)
++    target_link_libraries(contour-extension-host PRIVATE
++        vtextension_host vtextension_host_sanitizer_options vtextension_wasmtime_helper_engine contour::wasmtime)
+     # A console program, so that it opens no window; Contour starts it without a console (CREATE_NO_WINDOW).
+     set_target_properties(contour-extension-host PROPERTIES WIN32_EXECUTABLE OFF)
+ 
+     # Installed where contour finds it (vtextension_remote_process's locateExtensionHost()): beside contour.exe
+     # on Windows; elsewhere among the private executables, CONTOUR_EXTENSION_HOST_INSTALL_DIR (../CMakeLists.txt),
+     # as no user runs it. A macOS app bundle carries it instead: contour copies it in (../contour/CMakeLists.txt).
+     if(WIN32)
+         install(TARGETS contour-extension-host RUNTIME DESTINATION bin)
+     elseif(NOT CONTOUR_MACOS_APP_BUNDLE)
+         install(TARGETS contour-extension-host RUNTIME DESTINATION "${CONTOUR_EXTENSION_HOST_INSTALL_DIR}")
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index 0bb254de9..aadf1c785 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -55,10 +55,15 @@ if(CONTOUR_COVERAGE)
+     target_compile_definitions(vtextension_host PRIVATE CONTOUR_COVERAGE_OBJECT_ROOT="${CMAKE_BINARY_DIR}")
+ endif()
+ 
+ # The memory a host hands the engine an instance runs on (MemoryProvision.hpp): a target of its own, so that an
+ # engine's backend, which Contour also links to run extensions in its own process, needs it and not the host.
+ add_library(vtextension_memory_provision STATIC
+     MemoryProvision.cpp
+     MemoryProvision.hpp
+ )
+ target_link_libraries(vtextension_memory_provision PUBLIC vtextension_remote_wire)
++
++# What a sanitizer build's sandboxed process defaults its sanitizer to (SanitizerOptions.cpp): objects, linked
++# into each executable that locks itself down -- the extension host and the probe that locks down as it does.
++add_library(vtextension_host_sanitizer_options OBJECT SanitizerOptions.cpp)
++target_link_libraries(vtextension_host_sanitizer_options PRIVATE vtextension_remote_wire)
+diff --git a/src/vtextension/wasm/host/SanitizerOptions.cpp b/src/vtextension/wasm/host/SanitizerOptions.cpp
+new file mode 100644
+index 000000000..eb44121ec
+--- /dev/null
++++ b/src/vtextension/wasm/host/SanitizerOptions.cpp
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// What a sanitizer build's sandboxed process defaults its sanitizer to, whatever environment it was started
++// with: no leak check at exit. LeakSanitizer stops the world through a cloned tracer (clone, ptrace, wait4),
++// which the extension host's system call filter kills, so every exit would end in SIGSYS. Leaks are the
++// in-process HostServer tests' to find. The runtime asks for these at start; the environment's
++// ASAN_OPTIONS/LSAN_OPTIONS still override them.
++//
++// Linked as objects into each executable that locks itself down, as a static library member defining them
++// would never be pulled in over the runtime's own weak defaults.
++#include <vtextension/wasm/BuildInstrumentation.hpp>
++
++#if CONTOUR_BUILD_INSTRUMENTATION == 2
++// The runtime looks them up by their C names, which an assembler label gives these, so that the C++ names
++// follow the project's.
++extern "C"
++{
++    /// @return AddressSanitizer's default options for this process.
++    [[gnu::used]] char const* asanDefaultOptions() __asm__("__asan_default_options");
++    /// @return LeakSanitizer's default options for this process.
++    [[gnu::used]] char const* lsanDefaultOptions() __asm__("__lsan_default_options");
++}
++
++char const* asanDefaultOptions()
++{
++    return "detect_leaks=0";
++}
++
++char const* lsanDefaultOptions()
++{
++    return "detect_leaks=0";
++}
++#endif
+diff --git a/src/vtextension/wasm/host/linux/Landlock.cpp b/src/vtextension/wasm/host/linux/Landlock.cpp
+index 343d9db04..cb8d72b9e 100644
+--- a/src/vtextension/wasm/host/linux/Landlock.cpp
++++ b/src/vtextension/wasm/host/linux/Landlock.cpp
+@@ -98,20 +98,51 @@ namespace
+     [[nodiscard]] bool isUnavailable(long error) noexcept
+     {
+         return error == -ENOSYS || error == -EOPNOTSUPP;
+     }
+ 
+     [[nodiscard]] ConfinementFailure fileSystemFailure(long error) noexcept
+     {
+         return ConfinementFailure { .step = remote::proto::LockdownStep::FileSystem,
+                                     .code = static_cast<int>(-error) };
+     }
++    /// Enforces @p abi's ruleset, granting @p allowed beneath it.
++    /// @return `Restricted`, or `Unavailable` where the ruleset cannot be made; the `-errno` of any other
++    ///         failure.
++    [[nodiscard]] std::expected<LandlockOutcome, long> enforceAbi(LandlockAbiRow const& abi,
++                                                                  std::span<PathBeneathRule const> allowed,
++                                                                  LandlockSystem const& system)
++    {
++        auto const attr = LandlockRulesetAttr { .handledAccessFs = abi.fsRights,
++                                                .handledAccessNet = abi.netRights,
++                                                .scoped = abi.scopes };
++        auto const ruleset = system.createRuleset(&attr, sizeof(attr), 0);
++        if (isUnavailable(ruleset))
++            return LandlockOutcome::Unavailable;
++        if (ruleset < 0)
++            return std::unexpected(ruleset);
++        auto const descriptor = static_cast<int>(ruleset);
++        auto const enforced = [&]() -> std::expected<LandlockOutcome, long> {
++            for (auto const& rule: allowed)
++            {
++                auto const granted = PathBeneathRule { .parent = rule.parent,
++                                                       .allowedAccess = rule.allowedAccess & abi.fsRights };
++                if (auto const added = system.addPathBeneathRule(descriptor, granted); added < 0)
++                    return std::unexpected(added);
++            }
++            if (auto const restricted = system.restrictSelf(descriptor, abi.restrictFlags); restricted < 0)
++                return std::unexpected(restricted);
++            return LandlockOutcome::Restricted;
++        }();
++        system.closeRuleset(descriptor);
++        return enforced;
++    }
+ } // namespace
+ 
+ std::span<LandlockAbiRow const> landlockAbis() noexcept
+ {
+     return AbiTable;
+ }
+ 
+ LandlockSystem systemLandlock() noexcept
+ {
+     return LandlockSystem {
+@@ -136,44 +167,30 @@ LandlockSystem systemLandlock() noexcept
+ }
+ 
+ std::expected<LandlockOutcome, ConfinementFailure> restrictFileSystem(
+     std::span<PathBeneathRule const> allowed, LandlockSystem const& system)
+ {
+     auto const version = system.createRuleset(nullptr, 0, RulesetVersion);
+     if (isUnavailable(version))
+         return LandlockOutcome::Unavailable;
+     if (version < 0)
+         return std::unexpected(fileSystemFailure(version));
+-    // The best ABI both know: the kernel's, or our newest if the kernel's is newer still.
+-    auto const newestFirst = AbiTable | std::views::reverse;
+-    auto const known = std::ranges::find_if(
+-        newestFirst, [version](LandlockAbiRow const& row) { return row.abi <= version; });
+-    if (known == newestFirst.end())
+-        return LandlockOutcome::Unavailable;
+-    auto const& abi = *known;
+-
+-    auto const attr = LandlockRulesetAttr { .handledAccessFs = abi.fsRights,
+-                                            .handledAccessNet = abi.netRights,
+-                                            .scoped = abi.scopes };
+-    auto const ruleset = system.createRuleset(&attr, sizeof(attr), 0);
+-    if (isUnavailable(ruleset))
+-        return LandlockOutcome::Unavailable;
+-    if (ruleset < 0)
+-        return std::unexpected(fileSystemFailure(ruleset));
+-    auto const descriptor = static_cast<int>(ruleset);
+-    auto const restricted = [&]() -> std::expected<LandlockOutcome, ConfinementFailure> {
+-        for (auto const& rule: allowed)
+-        {
+-            auto const granted =
+-                PathBeneathRule { .parent = rule.parent, .allowedAccess = rule.allowedAccess & abi.fsRights };
+-            if (auto const added = system.addPathBeneathRule(descriptor, granted); added < 0)
+-                return std::unexpected(fileSystemFailure(added));
+-        }
+-        if (auto const enforced = system.restrictSelf(descriptor, abi.restrictFlags); enforced < 0)
+-            return std::unexpected(fileSystemFailure(enforced));
+-        return LandlockOutcome::Restricted;
+-    }();
+-    system.closeRuleset(descriptor);
+-    return restricted;
++    // The best ABI both know: the kernel's, or our newest if the kernel's is newer still. Should the kernel
++    // refuse what our row claims for its ABI (EINVAL: a right, scope or flag it does not know), the row
++    // before it is tried, down to the first: a wrong row of ours costs that ABI's additions, not every
++    // extension.
++    auto refused = false;
++    for (auto const& abi: AbiTable | std::views::reverse)
++    {
++        if (abi.abi > version)
++            continue;
++        auto const enforced = enforceAbi(abi, allowed, system);
++        if (enforced || enforced.error() != -EINVAL)
++            return enforced.transform_error(&fileSystemFailure);
++        refused = true;
++    }
++    if (refused)
++        return std::unexpected(fileSystemFailure(-EINVAL));
++    return LandlockOutcome::Unavailable;
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/linux/Landlock_test.cpp b/src/vtextension/wasm/host/linux/Landlock_test.cpp
+index 1e16e080d..b3631ecdd 100644
+--- a/src/vtextension/wasm/host/linux/Landlock_test.cpp
++++ b/src/vtextension/wasm/host/linux/Landlock_test.cpp
+@@ -5,76 +5,92 @@
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <cerrno>
+ #include <cstdint>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <utility>
+ #include <vector>
+ 
++#include <linux/landlock.h>
+ #include <vtextension/wasm/host/linux/Landlock.hpp>
+ 
+ using namespace vtextension::wasm::host;
+ using vtextension::wasm::remote::proto::LockdownStep;
+ 
+ namespace
+ {
+ 
+ /// What the fake system calls answer: an ABI or a descriptor, or `-errno`.
+ struct Answers
+ {
+     long version = 0;    ///< The version query.
+     long created = 0;    ///< Creating the ruleset.
+     long restricted = 0; ///< Restricting.
++    /// The file system rights it does not know: a ruleset handling any of them is refused with EINVAL.
++    uint64_t unknownFsRights = 0;
++    /// Likewise its unknown network rights.
++    uint64_t unknownNetRights = 0;
++    /// Likewise its unknown flags of landlock_restrict_self().
++    uint32_t unknownRestrictFlags = 0;
+ };
+ 
+ /// The kernel the fake system calls answer as, and what they were asked. One case at a time.
+ struct FakeKernel
+ {
+     Answers answers;                         ///< What they answer.
+     std::optional<LandlockRulesetAttr> attr; ///< What the ruleset was created with.
+     std::vector<PathBeneathRule> rules;      ///< What was added.
+     std::optional<uint32_t> restrictFlags;   ///< What restricting was passed.
+     std::vector<int> closed;                 ///< What was closed.
++    int attempts = 0;                        ///< How many rulesets it was asked to create.
+ };
+ 
+ /// @return The fake kernel the fake system calls answer as: they are plain functions, which capture nothing.
+ [[nodiscard]] FakeKernel& kernel()
+ {
+     static auto instance = FakeKernel {};
+     return instance;
+ }
+ 
+ constexpr auto Ruleset = 42;
+ 
+ [[nodiscard]] LandlockSystem fakeSystem(Answers answers)
+ {
+-    kernel() = FakeKernel { .answers = answers, .attr = {}, .rules = {}, .restrictFlags = {}, .closed = {} };
++    kernel() = FakeKernel {
++        .answers = answers, .attr = {}, .rules = {}, .restrictFlags = {}, .closed = {}, .attempts = 0
++    };
+     return LandlockSystem {
+         .createRuleset =
+             [](LandlockRulesetAttr const* attr, std::size_t size, uint32_t flags) noexcept -> long {
+             if (attr == nullptr)
+                 return size == 0 && flags == 1 ? kernel().answers.version : -EINVAL;
+             kernel().attr = *attr;
++            kernel().attempts += 1;
++            if ((attr->handledAccessFs & kernel().answers.unknownFsRights) != 0
++                || (attr->handledAccessNet & kernel().answers.unknownNetRights) != 0)
++                return -EINVAL;
+             return kernel().answers.created;
+         },
+         .addPathBeneathRule = [](int ruleset, PathBeneathRule rule) noexcept -> long {
+             if (ruleset != Ruleset)
+                 return -EBADF;
+             kernel().rules.push_back(rule);
+             return 0;
+         },
+         .restrictSelf = [](int ruleset, uint32_t flags) noexcept -> long {
+             if (ruleset != Ruleset)
+                 return -EBADF;
+             kernel().restrictFlags = flags;
++            if ((flags & kernel().answers.unknownRestrictFlags) != 0)
++                return -EINVAL;
+             return kernel().answers.restricted;
+         },
+         .closeRuleset = [](int ruleset) noexcept { kernel().closed.push_back(ruleset); },
+     };
+ }
+ 
+ [[nodiscard]] LandlockAbiRow const& abiRow(int abi)
+ {
+     return landlockAbis()[static_cast<std::size_t>(abi - 1)];
+ }
+@@ -176,10 +192,90 @@ TEST_CASE("Landlock.otherErrorsAreFailures", "[vtextension][sandbox]")
+     REQUIRE_FALSE(restricted.has_value());
+     CHECK(restricted.error() == ConfinementFailure { .step = LockdownStep::FileSystem, .code = EPERM });
+     CHECK(kernel().closed == std::vector<int> { Ruleset });
+ 
+     // Anything else the version query or the ruleset's creation says.
+     CHECK(restrictFileSystem({}, fakeSystem(Answers { .version = -EFAULT })).error()
+           == ConfinementFailure { .step = LockdownStep::FileSystem, .code = EFAULT });
+     CHECK(restrictFileSystem({}, fakeSystem(Answers { .version = 4, .created = -ENOMEM })).error()
+           == ConfinementFailure { .step = LockdownStep::FileSystem, .code = ENOMEM });
+ }
++
++TEST_CASE("Landlock.aKernelRefusingAnAbiRowFallsBackToTheOneBefore", "[vtextension][sandbox]")
++{
++    // A kernel that says ABI 10 but refuses the UDP rights row 10 adds: restricted at row 9.
++    auto const udp = abiRow(10).netRights & ~abiRow(9).netRights;
++    REQUIRE(udp != 0);
++    REQUIRE(restrictFileSystem(
++                {}, fakeSystem(Answers { .version = 10, .created = Ruleset, .unknownNetRights = udp }))
++            == LandlockOutcome::Restricted);
++    REQUIRE(kernel().attr.has_value());
++    CHECK(kernel().attr->handledAccessFs == abiRow(9).fsRights);
++    CHECK(kernel().attr->handledAccessNet == abiRow(9).netRights);
++    CHECK(kernel().restrictFlags == abiRow(9).restrictFlags);
++    CHECK(kernel().attempts == 2);
++
++    // One that refuses TSYNC at restricting: restricted at row 7, every ruleset made closed again.
++    auto const threadSync = abiRow(8).restrictFlags;
++    REQUIRE(
++        restrictFileSystem(
++            {}, fakeSystem(Answers { .version = 10, .created = Ruleset, .unknownRestrictFlags = threadSync }))
++        == LandlockOutcome::Restricted);
++    CHECK(kernel().attr->handledAccessFs == abiRow(7).fsRights);
++    CHECK(kernel().restrictFlags == 0U);
++    CHECK(kernel().closed.size() == 4);
++
++    // One that refuses even the first row's rights fails, after trying every row it could have.
++    auto const refusedEverywhere = restrictFileSystem(
++        {}, fakeSystem(Answers { .version = 5, .created = Ruleset, .unknownFsRights = abiRow(1).fsRights }));
++    REQUIRE_FALSE(refusedEverywhere.has_value());
++    CHECK(refusedEverywhere.error()
++          == ConfinementFailure { .step = LockdownStep::FileSystem, .code = EINVAL });
++    CHECK(kernel().attempts == 5);
++
++    // Any other error is no reason to try an older row.
++    REQUIRE_FALSE(
++        restrictFileSystem({}, fakeSystem(Answers { .version = 10, .created = -ENOMEM })).has_value());
++    CHECK(kernel().attempts == 1);
++}
++
++TEST_CASE("Landlock.abiTableAgreesWithTheSystemHeaders", "[vtextension][sandbox]")
++{
++    // Where this build's headers name a constant, our table's value is the kernel's: each ABI's additions.
++    auto const added = [](auto LandlockAbiRow::* field, int abi) {
++        return abiRow(abi).*field & ~(abi > 1 ? abiRow(abi - 1).*field : decltype(abiRow(abi).*field) {});
++    };
++#ifdef LANDLOCK_ACCESS_FS_MAKE_SYM
++    CHECK(added(&LandlockAbiRow::fsRights, 1) == ((LANDLOCK_ACCESS_FS_MAKE_SYM << 1U) - 1U));
++#endif
++#ifdef LANDLOCK_ACCESS_FS_REFER
++    CHECK(added(&LandlockAbiRow::fsRights, 2) == LANDLOCK_ACCESS_FS_REFER);
++#endif
++#ifdef LANDLOCK_ACCESS_FS_TRUNCATE
++    CHECK(added(&LandlockAbiRow::fsRights, 3) == LANDLOCK_ACCESS_FS_TRUNCATE);
++    CHECK(LandlockTruncate == LANDLOCK_ACCESS_FS_TRUNCATE);
++#endif
++#ifdef LANDLOCK_ACCESS_NET_BIND_TCP
++    CHECK(added(&LandlockAbiRow::netRights, 4)
++          == (LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP));
++#endif
++#ifdef LANDLOCK_ACCESS_FS_IOCTL_DEV
++    CHECK(added(&LandlockAbiRow::fsRights, 5) == LANDLOCK_ACCESS_FS_IOCTL_DEV);
++#endif
++#ifdef LANDLOCK_SCOPE_SIGNAL
++    CHECK(added(&LandlockAbiRow::scopes, 6) == (LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET | LANDLOCK_SCOPE_SIGNAL));
++#endif
++#ifdef LANDLOCK_RESTRICT_SELF_TSYNC
++    CHECK(added(&LandlockAbiRow::restrictFlags, 8) == LANDLOCK_RESTRICT_SELF_TSYNC);
++#endif
++#ifdef LANDLOCK_ACCESS_FS_RESOLVE_UNIX
++    CHECK(added(&LandlockAbiRow::fsRights, 9) == LANDLOCK_ACCESS_FS_RESOLVE_UNIX);
++#endif
++#ifdef LANDLOCK_ACCESS_NET_BIND_UDP
++    CHECK(added(&LandlockAbiRow::netRights, 10)
++          == (LANDLOCK_ACCESS_NET_BIND_UDP | LANDLOCK_ACCESS_NET_CONNECT_SEND_UDP));
++#endif
++    CHECK(LandlockReadFile == LANDLOCK_ACCESS_FS_READ_FILE);
++    CHECK(LandlockWriteFile == LANDLOCK_ACCESS_FS_WRITE_FILE);
++    CHECK(LandlockReadDirectory == LANDLOCK_ACCESS_FS_READ_DIR);
++    CHECK(LandlockMakeRegular == LANDLOCK_ACCESS_FS_MAKE_REG);
++}
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 7bccc36e6..487a43808 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -121,20 +121,21 @@ if(_process_source)
+         # With --parent it is a hosting process instead: it supervises a helper of its own, for the tests of a
+         # helper outliving its parent.
+         add_executable(extension_host_probe process/testing/LaunchProbe.cpp process/testing/RecordingLauncher.hpp
+             process/testing/SandboxProbe.hpp)
+         target_link_libraries(extension_host_probe PRIVATE
+             vtextension_host vtextension_remote_process vtextension_remote_wire)
+         # Where the Linux sandbox is built (VTEXTENSION_LINUX_SANDBOX), the probe also locks itself down as the
+         # host does, and process_test proves the sandbox with it and tests its pieces.
+         if(VTEXTENSION_LINUX_SANDBOX)
+             target_sources(extension_host_probe PRIVATE process/testing/SandboxProbe.cpp)
++            target_link_libraries(extension_host_probe PRIVATE vtextension_host_sanitizer_options)
+         endif()
+ 
+         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
+         # no engine, so that it cross-builds and runs under wine.
+         add_executable(vtextension_process_test
+             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+             HostRefusals_test.cpp
+             LaneWatch_test.cpp
+             process/ExtensionHostSupervisor_test.cpp
+             process/HelperLocation_test.cpp
+diff --git a/src/vtextension/wasm/remote/Helper_test.cpp b/src/vtextension/wasm/remote/Helper_test.cpp
+index 26372d545..cb54d10db 100644
+--- a/src/vtextension/wasm/remote/Helper_test.cpp
++++ b/src/vtextension/wasm/remote/Helper_test.cpp
+@@ -274,20 +274,36 @@ TEST_CASE("Helper.locksDown", "[vtextension]")
+     auto control = receiveHello(*helper);
+     STATIC_CHECK(ThisBuildLockdown == proto::LockdownState::LockedDown);
+     {
+         auto const closed = std::move(control);
+     }
+     CHECK(awaitReap(*helper->launcher, *helper->process)
+           == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+ }
+ #endif
+ 
++TEST_CASE("Helper.exitsCleanlyWithAnEmptyEnvironment", "[vtextension]")
++{
++    // As Contour starts it: no variable at all, sanitizer options included. A sanitizer build's helper still
++    // leaves its leak check out at exit, which its filter would answer with SIGSYS.
++    auto launch = helperLaunch();
++    launch.environment = {};
++    auto helper = launchHelper(process::makeSystemProcessLauncher(), std::move(launch));
++    REQUIRE(helper.has_value());
++    auto control = receiveHello(*helper);
++    {
++        auto const closed = std::move(control);
++    }
++    CHECK(awaitReap(*helper->launcher, *helper->process)
++          == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
++}
++
+ TEST_CASE("Process.unsandboxedIsRefusedUnlessAccepted", "[vtextension]")
+ {
+     auto const requested = killsFor(process::KillReason::Requested);
+     {
+         // A helper that locked down is driven when lockdown is required; one without a sandbox is not, and
+         // says so in its Hello.
+         auto const backend = processBackend(LockdownRequirement::RequireLockedDown);
+         auto const runtime = contract::createRuntime(*backend);
+         auto const loaded = runtime->load(ModuleIdentity {}, toModule(contract::InstanceModule));
+         if constexpr (ThisBuildLockdown == proto::LockdownState::LockedDown)
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+index 90b205425..d23019f31 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.cpp
+@@ -2,78 +2,58 @@
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ 
+ #include <core/Clock.hpp>
+ #include <core/Environment.hpp>
+ 
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cstddef>
+-#include <format>
+ #include <iterator>
+ #include <optional>
+ #include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <tuple>
+ #include <vector>
+ 
+-#include <vtextension/wasm/BuildInstrumentation.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <unistd.h>
+ #endif
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+ using transport::Channel;
+ using transport::NativeHandle;
+ 
+ namespace
+ {
+-    /// A sanitizer variable a helper is handed, and what is appended to it in a sanitizer build.
+-    struct SanitizerVariable
+-    {
+-        std::string_view name;
+-        std::string_view appended; ///< Empty: nothing.
+-    };
+-
+-    constexpr auto NoLeakDetection = std::string_view { "detect_leaks=0" };
+-
+-    constexpr auto SanitizerVariables = std::array {
+-        SanitizerVariable { .name = "ASAN_OPTIONS", .appended = NoLeakDetection },
+-        SanitizerVariable { .name = "LSAN_OPTIONS", .appended = NoLeakDetection },
+-        SanitizerVariable { .name = "UBSAN_OPTIONS", .appended = {} },
+-        SanitizerVariable { .name = "TSAN_OPTIONS", .appended = {} },
+-    };
++    /// The sanitizer variables a helper is handed when this process has them. Leak detection is off in a
++    /// sandboxed helper whatever they say, by its own defaults (host/SanitizerOptions.cpp).
++    constexpr auto SanitizerVariables =
++        std::array<std::string_view, 4> { "ASAN_OPTIONS", "LSAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS" };
+ } // namespace
+ 
+ std::vector<std::pair<std::string, std::string>> sanitizerEnvironment()
+ {
+     auto environment = std::vector<std::pair<std::string, std::string>> {};
+     auto const live = core::LiveEnvironment {};
+-    for (auto const& variable: SanitizerVariables)
+-    {
+-        auto value = live.get(variable.name);
+-        if constexpr (ThisBuildInstrumentation == BuildInstrumentation::Sanitizers)
+-            if (!variable.appended.empty())
+-                value = value && !value->empty() ? std::format("{}:{}", *value, variable.appended)
+-                                                 : std::string { variable.appended };
+-        if (value)
+-            environment.emplace_back(std::string { variable.name }, *std::move(value));
+-    }
++    for (auto const name: SanitizerVariables)
++        if (auto value = live.get(name))
++            environment.emplace_back(std::string { name }, *std::move(value));
+     return environment;
+ }
+ 
+ ProcessId ownProcessId() noexcept
+ {
+     return currentProcessId();
+ }
+ 
+ std::optional<transport::NativeHandle> ownStandardError() noexcept
+ {
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+index c4beea963..a6432fb2c 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchedHelper.hpp
+@@ -30,22 +30,21 @@ namespace vtextension::wasm::remote::process::testing
+ inline constexpr auto ChildPatience = std::chrono::seconds { 5 };
+ 
+ /// @return This process's id.
+ [[nodiscard]] ProcessId ownProcessId() noexcept;
+ 
+ /// @return This process's stderr, as it is now: what a launched child reports to unless a test says
+ /// otherwise.
+ [[nodiscard]] std::optional<transport::NativeHandle> ownStandardError() noexcept;
+ 
+ /// @return The sanitizer variables a helper is handed: this process's, so that its sanitizer runtime is
+-///         configured as the tests' is; and in a sanitizer build, with leak detection off -- it stops the
+-///         world through ptrace, which the sandboxed helper may not -- whether this process has them or not.
++///         configured as the tests' is.
+ [[nodiscard]] std::vector<std::pair<std::string, std::string>> sanitizerEnvironment();
+ 
+ /// Reaps @p process, waiting up to ChildPatience for it to exit.
+ /// @return Its status; nothing if it still ran when the patience ran out, or could not be waited for.
+ [[nodiscard]] std::optional<ExitStatus> awaitReap(IProcessLauncher& launcher, IProcessHandle& process);
+ 
+ /// Kills @p process if it still runs, and reaps it.
+ /// @return Whether it is reaped: whether it is gone for good.
+ [[nodiscard]] bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process);
+ 

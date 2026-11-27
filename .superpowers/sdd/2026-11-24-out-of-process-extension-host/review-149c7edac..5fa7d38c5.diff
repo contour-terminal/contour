@@ -1,0 +1,2382 @@
+# Review package: 149c7edac..HEAD
+
+## Commits
+5fa7d38c5 build: select where extensions run and which engine the extension host uses
+afbdf29ec feat(vtextension): run extensions in a sandboxed extension host process by default on Linux
+a3f0673ba refactor(vtextension): small cleanups in the extension host and its engines
+8953a1535 test(vtextension): the sandbox probe locks down with either engine's system call rows
+377e12473 fix(vtextension): a host refused for a lasting reason is the last its connector starts
+
+## Files changed
+ CMakeLists.txt                                     |  73 ++++++++--
+ cmake/ContourThirdParties.cmake                    |  21 ++-
+ src/CMakeLists.txt                                 |  41 ++++--
+ src/contour-extension-host/CMakeLists.txt          |   6 +-
+ src/contour/CMakeLists.txt                         |  22 ++-
+ src/contour/cli/CMakeLists.txt                     |   5 +-
+ src/vtbackend/CMakeLists.txt                       |   4 +-
+ src/vtextension/CMakeLists.txt                     |  38 +++--
+ .../wasm/host/linux/SeccompFilter_test.cpp         |   3 +-
+ src/vtextension/wasm/remote/CMakeLists.txt         |  28 +++-
+ src/vtextension/wasm/remote/DefaultBackend.cpp     |  57 ++++++++
+ src/vtextension/wasm/remote/HostConnector.hpp      |   3 +-
+ src/vtextension/wasm/remote/HostRefusals.hpp       |  56 ++++++++
+ src/vtextension/wasm/remote/Hostility_test.cpp     |  41 ++++--
+ .../wasm/remote/process/HostComposition.cpp        | 156 +++++++++++++++++++++
+ .../wasm/remote/process/HostComposition.hpp        | 118 ++++++++++++++++
+ .../wasm/remote/process/HostComposition_test.cpp   | 124 ++++++++++++++++
+ .../wasm/remote/process/ProcessHostConnector.cpp   |   6 +-
+ .../wasm/remote/process/ProcessHostConnector.hpp   |  21 +--
+ .../remote/process/ProcessHostConnector_test.cpp   |  57 +++++++-
+ .../wasm/remote/process/SandboxProbe_test.cpp      |  62 +++++++-
+ .../wasm/remote/process/testing/SandboxProbe.cpp   |  50 ++++++-
+ .../wasm/remote/process/testing/SandboxProbe.hpp   |  16 ++-
+ src/vtextension/wasm/wamr/CMakeLists.txt           |   7 +-
+ src/vtextension/wasm/wamr/HelperEngine.cpp         |   3 +-
+ src/vtextension/wasm/wamr/WasiOverrides.cpp        |  11 +-
+ src/vtextension/wasm/wasmtime/CMakeLists.txt       |   5 +-
+ src/vthost/CMakeLists.txt                          |   5 +-
+ 28 files changed, 928 insertions(+), 111 deletions(-)
+
+## Diff
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 61970589d..4c3291717 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -164,29 +164,72 @@ option(CONTOUR_BUILD_WITH_MIMALLOC "Builds with mimalloc [default: OFF]" OFF)
+ option(CONTOUR_INSTALL_TOOLS "Installs tools, if built [default: OFF]" OFF)
+ option(CONTOUR_PACKAGE_TERMINFO "Package terminfo files" ON)
+ option(CONTOUR_WITH_UTEMPTER "Build with utempter support [default: ON]" ON)
+ option(CONTOUR_WITH_SYSTEMD "Build with systemd support: each session runs in a systemd scope of its own, so an out-of-memory kill inside one cannot stop Contour [default: ON]" ON)
+ option(CONTOUR_USE_CPM "Use CPM to fetch dependencies [default: ON]" ON)
+ option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
+ option(CONTOUR_BUILD_NATIVE "Build for native architecture [default: OFF]" OFF)
+ option(CONTOUR_EXTENSIONS "Enables WebAssembly status-line extensions [default: ON]" ON)
+ include(CMakeDependentOption)
+ cmake_dependent_option(CONTOUR_EXTENSIONS_BUNDLED "Builds the bundled status-line extensions; needs cargo and the wasm32-wasip1 Rust target [default: ON]" ON "CONTOUR_EXTENSIONS" OFF)
+-# The WebAssembly runtime behind src/vtextension/wasm/WasmRuntime.hpp. Each value names a backend directory,
+-# src/vtextension/wasm/<value>/, whose target vtextension_<value> defines makeDefaultBackend(); adding a runtime
+-# is adding that directory and a value here. Checked only when extensions are built: nothing reads it otherwise.
+-set(CONTOUR_WASM_RUNTIME "wamr" CACHE STRING "WebAssembly runtime backing status-line extensions")
+-set(_CONTOUR_WASM_RUNTIMES wamr)
++# Where status-line extensions run: out-of-process, in contour-extension-host processes Contour starts, one
++# per extension, each locked in the platform's sandbox; or in-process, inside Contour itself. Out of process
++# by default where Contour has a sandbox for the extension host, a row of _CONTOUR_SANDBOXED_PLATFORMS each:
++# <CMAKE_SYSTEM_NAME>:<regular expression matching CMAKE_SYSTEM_PROCESSOR>. Elsewhere a helper would be
++# refused for running unconfined, and extensions would not run at all.
++set(_CONTOUR_SANDBOXED_PLATFORMS
++    "Linux:^(x86_64|AMD64|aarch64|arm64)$"
++)
++set(CONTOUR_SANDBOXED_PLATFORM OFF)
++foreach(_platform IN LISTS _CONTOUR_SANDBOXED_PLATFORMS)
++    string(FIND "${_platform}" ":" _platform_separator)
++    string(SUBSTRING "${_platform}" 0 ${_platform_separator} _platform_system)
++    math(EXPR _platform_separator "${_platform_separator} + 1")
++    string(SUBSTRING "${_platform}" ${_platform_separator} -1 _platform_processors)
++    if(CMAKE_SYSTEM_NAME STREQUAL _platform_system AND CMAKE_SYSTEM_PROCESSOR MATCHES "${_platform_processors}")
++        set(CONTOUR_SANDBOXED_PLATFORM ON)
++    endif()
++endforeach()
++set(_CONTOUR_EXTENSION_HOSTS out-of-process in-process)
++if(CONTOUR_SANDBOXED_PLATFORM)
++    set(_CONTOUR_EXTENSION_HOST_DEFAULT out-of-process)
++else()
++    set(_CONTOUR_EXTENSION_HOST_DEFAULT in-process)
++endif()
++set(CONTOUR_EXTENSION_HOST "${_CONTOUR_EXTENSION_HOST_DEFAULT}" CACHE STRING
++    "Where status-line extensions run: out-of-process or in-process [default: out-of-process where the extension host has a sandbox]")
++set_property(CACHE CONTOUR_EXTENSION_HOST PROPERTY STRINGS ${_CONTOUR_EXTENSION_HOSTS})
++if(CONTOUR_EXTENSIONS AND NOT CONTOUR_EXTENSION_HOST IN_LIST _CONTOUR_EXTENSION_HOSTS)
++    message(FATAL_ERROR "CONTOUR_EXTENSION_HOST is \"${CONTOUR_EXTENSION_HOST}\", which is not where extensions can "
++                        "run. Known: ${_CONTOUR_EXTENSION_HOSTS}.")
++endif()
++# The WebAssembly engine that runs the extensions: in the extension host where they run out of process, in
++# Contour itself where they run in process. Each value names a backend directory, src/vtextension/wasm/<value>/;
++# adding an engine is adding that directory and a value here. Empty, the default, picks once the third parties
++# are resolved (below): wasmtime, which compiles guests to native code, where a Wasmtime was found and
++# extensions run out of process; wamr, which interprets them, otherwise. Wasmtime runs only in the extension
++# host, whose sandbox lets it make the code it compiled executable; Contour itself never may. Checked only when
++# extensions are built: nothing reads it otherwise.
++set(CONTOUR_WASM_RUNTIME "" CACHE STRING
++    "WebAssembly engine running status-line extensions: wasmtime or wamr [default: wasmtime where one is found and extensions run out of process, else wamr]")
++set(_CONTOUR_WASM_RUNTIMES wamr wasmtime)
+ set_property(CACHE CONTOUR_WASM_RUNTIME PROPERTY STRINGS ${_CONTOUR_WASM_RUNTIMES})
+-if(CONTOUR_EXTENSIONS AND NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIMES)
+-    message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly runtime "
+-                        "Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
++if(CONTOUR_EXTENSIONS AND CONTOUR_WASM_RUNTIME)
++    if(NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIMES)
++        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly "
++                            "engine Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
++    endif()
++    if(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND CONTOUR_EXTENSION_HOST STREQUAL "in-process")
++        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, which runs extensions only in the extension host, "
++                            "but CONTOUR_EXTENSION_HOST is in-process. Choose CONTOUR_EXTENSION_HOST=out-of-process, "
++                            "or CONTOUR_WASM_RUNTIME=wamr.")
++    endif()
+ endif()
+ # Whether the extension host can run Wasmtime: set ON by cmake/ContourThirdParties.cmake once a Wasmtime
+ # resolves (the pinned prebuilt archive, or an installed one), never by the user.
+ set(CONTOUR_HAVE_WASMTIME OFF)
+ option(CONTOUR_CARGO_OFFLINE "Runs cargo with --offline, for builds from vendored crates [default: OFF]" OFF)
+ option(CONTOUR_TRACY "Compiles Tracy profiler instrumentation into contour [default: OFF]" OFF)
+ option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [default: OFF]" OFF)
+ option(CONTOUR_TRACY_GUI "Builds the Tracy profiler GUI [default: OFF]" OFF)
+ option(CONTOUR_TRACY_GUI_X11 "Builds the Tracy GUI against X11 instead of Wayland [default: OFF]" OFF)
+ option(CONTOUR_TRACY_SAMPLING "Tracy captures call stacks of every thread [default: ON]" ON)
+@@ -419,20 +462,31 @@ endif()
+ # The vendored third-party code (fetched via CPM/FetchContent) must NOT be run through clang-tidy: it
+ # has no .clang-tidy config (clang-tidy then aborts with "no checks enabled") and is not ours to lint.
+ # CMAKE_CXX_CLANG_TIDY is inherited by every target created after it is set, so stash it across the
+ # dependency fetch and restore it only for our own first-party src/ tree.
+ set(_CONTOUR_SAVED_CLANG_TIDY "${CMAKE_CXX_CLANG_TIDY}")
+ unset(CMAKE_CXX_CLANG_TIDY)
+ include(ContourThirdParties)
+ include(Tracy)
+ if(CONTOUR_EXTENSIONS)
+     include(ContourCargo)
++    # The engine, now that it is known whether a Wasmtime was found (CONTOUR_WASM_RUNTIME, above).
++    if(NOT CONTOUR_WASM_RUNTIME)
++        if(CONTOUR_HAVE_WASMTIME AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
++            set(CONTOUR_WASM_RUNTIME wasmtime)
++        else()
++            set(CONTOUR_WASM_RUNTIME wamr)
++        endif()
++    elseif(CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND NOT CONTOUR_HAVE_WASMTIME)
++        message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is wasmtime, but no Wasmtime can be used: "
++                            "${CONTOUR_WASMTIME_STRING}.")
++    endif()
+ endif()
+ # Only the GUI draws text, so only the GUI has any use for a font to fall back to.
+ if(CONTOUR_FRONTEND_GUI)
+     include(NerdFontSymbols)
+     include(BundledEmojiFont)
+ endif()
+ set(CMAKE_CXX_CLANG_TIDY "${_CONTOUR_SAVED_CLANG_TIDY}")
+ # Everything added below is first-party: the production flags (LTO, hardening) reach only these targets.
+ include(ProductionBuild)
+ if(CONTOUR_WASM_GUESTS)
+@@ -479,21 +533,22 @@ macro(ContourConfigurationSummary)
+     message(STATUS "C++ standard:                                       C++${CMAKE_CXX_STANDARD} (${CMAKE_CXX_COMPILER_ID})")
+     message(STATUS "Compiler cache:                                     ${USING_COMPILER_CACHE_STRING}")
+     message(STATUS "Build with sanitizer:                               ${CONTOUR_SANITIZE}")
+     message(STATUS "Production build (LTO, hardening):                  ${CONTOUR_PRODUCTION_BUILD}")
+     message(STATUS "Build unit tests:                                   ${CONTOUR_TESTING}")
+     message(STATUS "Verify terminal state invariants:                   ${CONTOUR_VERIFY_STATE}")
+     message(STATUS "Enable with code coverage:                          ${CONTOUR_CODE_COVERAGE_ENABLED}")
+     message(STATUS "Build contour frontend GUI:                         ${CONTOUR_FRONTEND_GUI}")
+     message(STATUS "WebAssembly status-line extensions:                 ${CONTOUR_EXTENSIONS}")
+     if(CONTOUR_EXTENSIONS)
++        message(STATUS "|> Where extensions run:                            ${CONTOUR_EXTENSION_HOST}")
+         message(STATUS "|> WebAssembly runtime:                             ${CONTOUR_WASM_RUNTIME}")
+-        message(STATUS "|> Wasmtime for the extension host:                 ${CONTOUR_WASMTIME_STRING}")
++        message(STATUS "|> Wasmtime:                                        ${CONTOUR_WASMTIME_STRING}")
+     endif()
+     message(STATUS "Build contour using mimalloc:                       ${CONTOUR_BUILD_WITH_MIMALLOC}")
+     message(STATUS "Clang Tidy:                                         ${USING_TIDY_STRING}")
+     message(STATUS "|> Enable performance metrics:                      ${CONTOUR_PERF_STATS}")
+     message(STATUS "------------------------------------------------------------------------------")
+ endmacro()
+ 
+ ContourThirdPartiesSummary2()
+ ContourConfigurationSummary()
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index 56cc3ee5b..d5f752d73 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -182,23 +182,24 @@ endif()
+ # WAMR (WebAssembly Micro Runtime) hosts the status-line extensions, interpreted only: fast
+ # interpreter on, every JIT and AOT off, so no executable memory is ever mapped. libc-wasi is on
+ # (guests are wasm32-wasip1), the libc-builtin shim is off. The thread manager is required although
+ # guests get no threads: without it the interpreter never polls for wasm_runtime_terminate(), so the
+ # watchdog could not stop a call that loops. Hardware bounds checks are off (memory and native
+ # stack): they install a process-wide SIGSEGV handler, which is not a library's to take, and keep
+ # process-wide signal state that every worker thread's setup writes; the interpreter checks bounds in
+ # software instead. Waking blocked WASI calls is off as well: it installs a process-wide SIGUSR1
+ # handler, and guests cannot block (poll_oneoff is refused). An installed WAMR does not say how it was
+ # built, so a system package is accepted only once cmake/WamrTerminateProbe.cpp has shown that
+-# terminating works, that initializing the runtime leaves SIGSEGV and SIGUSR1 alone, and that it accepts
+-# exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows; otherwise WAMR is
+-# built from source.
++# terminating works, that initializing the runtime leaves SIGSEGV and SIGUSR1 alone, that it has no JIT
++# (the extension host's system call filter lets an interpreter make no memory executable), and that it
++# accepts exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows; otherwise
++# WAMR is built from source.
+ #
+ # First-party code links contour::wamr, whichever WAMR it resolves to.
+ 
+ # Why cmake/WamrTerminateProbe.cpp rejects a WAMR, by its exit code: <code>|<reason>. @FEATURE@ is the
+ # feature the probe names on standard output.
+ set(_WAMR_PROBE_REASONS
+     "2|its runtime does not initialize"
+     "3|it does not load the probe's module"
+     "4|it does not instantiate the probe's module"
+     "5|it does not set up a call into the probe's module"
+@@ -207,24 +208,23 @@ set(_WAMR_PROBE_REASONS
+     "8|it installs a SIGSEGV handler (built with hardware bounds checks)"
+     "9|it installs a SIGUSR1 handler (built with wakeup of blocking operations)"
+     "10|it loads a module using @FEATURE@, which extensions may not use"
+     "11|it refuses a module using @FEATURE@, which extensions may use"
+     "12|it compiles guest code to native code (built with a JIT; the extension host interprets)"
+ )
+ 
+ # ContourThirdParties_WamrTerminates(<target> <result-variable>)
+ #
+ # Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
+-# when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
+-# SIGSEGV or SIGUSR1 handler, it has no JIT running mode, and it loads exactly the WebAssembly features
+-# extensions may use, FALSE
+-# otherwise (including when the probe cannot run, as when cross-compiling).
++# when another thread calls wasm_runtime_terminate(), its runtime initialization installs no SIGSEGV or
++# SIGUSR1 handler, it has no JIT running mode, and it loads exactly the WebAssembly features extensions
++# may use; FALSE otherwise (including when the probe cannot run, as when cross-compiling).
+ # Sets <result-variable>_REASON to why a WAMR was rejected.
+ function(ContourThirdParties_WamrTerminates target resultVar)
+     set(${resultVar} FALSE PARENT_SCOPE)
+     if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+         set(${resultVar}_REASON "it cannot be probed when cross-compiling without an emulator" PARENT_SCOPE)
+         return()
+     endif()
+     find_package(Threads QUIET)
+     try_run(_wamr_probe_run _wamr_probe_compile
+         SOURCES "${PROJECT_SOURCE_DIR}/cmake/WamrTerminateProbe.cpp"
+@@ -589,29 +589,28 @@ if(CONTOUR_EXTENSIONS)
+             set(CONTOUR_HAVE_WASMTIME ON)
+             set(_wasmtime_resolved "Wasmtime ${WASMTIME_VERSION}")
+             set(THIRDPARTY_BUILTIN_wasmtime "CPM (Wasmtime ${WASMTIME_VERSION}, prebuilt, static)")
+         else()
+             # CPM resolved the package without the archive all the same (one of that name was added before),
+             # so there is no archive to take the headers and library from.
+             set(_wasmtime_reason "CPM resolved Wasmtime ${WASMTIME_VERSION} without fetching its archive")
+         endif()
+     endif()
+ 
+-    # Nothing ships Wasmtime yet: extensions run on WAMR (CONTOUR_WASM_RUNTIME), and only the Wasmtime
+-    # backend's own tests use it.
++    # Whether the extension host runs it is CONTOUR_WASM_RUNTIME's to say (../CMakeLists.txt).
+     if(CONTOUR_HAVE_WASMTIME)
+-        set(CONTOUR_WASMTIME_STRING "${_wasmtime_resolved} (available; only its own tests use it so far)")
++        set(CONTOUR_WASMTIME_STRING "${_wasmtime_resolved}")
+     else()
+         set(THIRDPARTY_BUILTIN_wasmtime "(not found: ${_wasmtime_reason})")
+         set(CONTOUR_WASMTIME_STRING "not available (${_wasmtime_reason})")
+     endif()
+-    message(STATUS "Wasmtime for the extension host: ${CONTOUR_WASMTIME_STRING}")
++    message(STATUS "Wasmtime: ${CONTOUR_WASMTIME_STRING}")
+ else()
+     set(THIRDPARTY_BUILTIN_wasmtime "(extensions disabled)")
+ endif()
+ 
+ # glaze, the JSON (de)serializer behind vtcontrol: structs in, structs out, schemas from the same structs.
+ #
+ # It must come before termbench-pro, whose CMakeLists declares its own, older glaze to FetchContent
+ # under the same name. FetchContent keeps the first declaration of a name and ignores every later one,
+ # so declaring ours first makes termbench-pro's FetchContent_MakeAvailable(glaze) find it populated and
+ # do nothing: one glaze in the build, and ours.
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index cc65959cc..19e7f1d61 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -18,44 +18,67 @@ endif()
+ # @executable_path/../Frameworks rpath, macdeployqt, the Info.plist keys, the icon, code signing,
+ # notarization and the DragNDrop disk image -- serves that window. A GUI-less build produces a
+ # command-line binary instead: none of that applies to it, and all of it needs a Qt that renders,
+ # which is the whole point of not building the frontend. So it installs like any other Unix CLI
+ # tool. Every bundle-only block (contour/, contour-extension-host/) is gated on this rather than on APPLE.
+ set(CONTOUR_MACOS_APP_BUNDLE OFF)
+ if(APPLE AND CONTOUR_FRONTEND_GUI)
+     set(CONTOUR_MACOS_APP_BUNDLE ON)
+ endif()
+ 
++# contour_place_extension_host_beside(<target>)
++#
++# Where extensions run out of process, has the build tree carry contour-extension-host beside <target>'s
++# executable, where locateExtensionHost()'s candidate of the program's own directory finds it: the build tree's
++# programs run extensions as installed ones do, and no build-tree path is compiled into a binary. The copy is a
++# command whose output is the placed helper, so it reruns whenever the helper is rebuilt, even when <target> is
++# not. Called in <target>'s own directory, whose binary directory <target> is built into: an OUTPUT may not name
++# a target's directory by generator expression. Nothing to do where every executable is built into one directory
++# (CMAKE_RUNTIME_OUTPUT_DIRECTORY, as on Windows), and not for a macOS bundle, which carries its own copy.
++# Defined before the modules: bench-headless (vtbackend/) is placed before the helper's directory is read.
++function(contour_place_extension_host_beside target)
++    if(NOT CONTOUR_EXTENSIONS OR NOT CONTOUR_EXTENSION_HOST STREQUAL "out-of-process" OR CMAKE_RUNTIME_OUTPUT_DIRECTORY)
++        return()
++    endif()
++    get_property(_isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
++    if(_isMultiConfig)
++        set(_placedDir "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>")
++    else()
++        set(_placedDir "${CMAKE_CURRENT_BINARY_DIR}")
++    endif()
++    set(_placed "${_placedDir}/contour-extension-host${CMAKE_EXECUTABLE_SUFFIX}")
++    add_custom_command(
++        OUTPUT "${_placed}"
++        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>" "${_placed}"
++        DEPENDS contour-extension-host "$<TARGET_FILE:contour-extension-host>"
++        COMMENT "Placing contour-extension-host beside ${target}"
++        VERBATIM
++    )
++    add_custom_target(${target}_extension_host DEPENDS "${_placed}")
++    add_dependencies(${target} ${target}_extension_host)
++endfunction()
++
+ # Before every module: their suites link its test support.
+ add_subdirectory(testing)
+ add_subdirectory(crispy)
+ add_subdirectory(text_shaper)
+ add_subdirectory(vtpty)
+ add_subdirectory(vtcontrol)
+ add_subdirectory(vtparser)
+ add_subdirectory(vtbackend)
+ if(CONTOUR_EXTENSIONS)
+     # Where contour-extension-host is installed on Unix, a private executable of Contour's, and the way there
+     # from the directory contour is installed in: how contour finds it (vtextension_remote_process).
+     include(GNUInstallDirs)
+     set(CONTOUR_EXTENSION_HOST_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}/contour")
+     # contour installs to CMAKE_INSTALL_BINDIR (../contour/CMakeLists.txt).
+     file(RELATIVE_PATH CONTOUR_EXTENSION_HOST_RELATIVE_DIR
+         "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBEXECDIR}/contour")
+-    # The engine contour-extension-host runs, whose directory (vtextension/wasm/<engine>/) defines
+-    # vtextension_<engine>_helper_engine: Wasmtime's wherever one was found (../cmake/ContourThirdParties.cmake),
+-    # as it compiles modules to native code and shares their memory with Contour; else the one
+-    # CONTOUR_WASM_RUNTIME selects, which interprets them.
+-    if(CONTOUR_HAVE_WASMTIME)
+-        set(CONTOUR_EXTENSION_HOST_ENGINE wasmtime)
+-    else()
+-        set(CONTOUR_EXTENSION_HOST_ENGINE ${CONTOUR_WASM_RUNTIME})
+-    endif()
+     add_subdirectory(vtextension)
+     add_subdirectory(contour-extension-host)
+ endif()
+ add_subdirectory(vtconformance)
+ add_subdirectory(vtworkspace)
+ add_subdirectory(vthost)
+ add_subdirectory(vtrasterizer)
+ 
+ add_subdirectory(contour)
+diff --git a/src/contour-extension-host/CMakeLists.txt b/src/contour-extension-host/CMakeLists.txt
+index 08df67c43..fab760122 100644
+--- a/src/contour-extension-host/CMakeLists.txt
++++ b/src/contour-extension-host/CMakeLists.txt
+@@ -1,14 +1,14 @@
+ # contour-extension-host: the process Contour runs extensions in, apart from itself. Its body is
+ # vtextension_host's runExtensionHost(); main.cpp only hands it the command line and the engine, the one
+-# CONTOUR_EXTENSION_HOST_ENGINE names (../CMakeLists.txt).
+-set(_extension_host_engine vtextension_${CONTOUR_EXTENSION_HOST_ENGINE}_helper_engine)
++# CONTOUR_WASM_RUNTIME names (../../CMakeLists.txt).
++set(_extension_host_engine vtextension_${CONTOUR_WASM_RUNTIME}_helper_engine)
+ 
+ add_executable(contour-extension-host main.cpp)
+ target_link_libraries(contour-extension-host PRIVATE
+     vtextension_host vtextension_host_sanitizer_options ${_extension_host_engine})
+ # A console program, so that it opens no window; Contour starts it without a console (CREATE_NO_WINDOW).
+ set_target_properties(contour-extension-host PROPERTIES WIN32_EXECUTABLE OFF)
+ 
+ # Installed where contour finds it (vtextension_remote_process's locateExtensionHost()): beside contour.exe
+ # on Windows; elsewhere among the private executables, CONTOUR_EXTENSION_HOST_INSTALL_DIR (../CMakeLists.txt),
+ # as no user runs it. A macOS app bundle carries it instead: contour copies it in (../contour/CMakeLists.txt).
+@@ -20,19 +20,19 @@ endif()
+ 
+ if(VTEXTENSION_TESTING)
+     # The extension host misbehaving on purpose, one way per --hostile=<name> (testing/HostileModes.hpp): what
+     # the crash and hostility tests start. No test mode ships in contour-extension-host itself. Never installed.
+     add_executable(contour-extension-host-hostile testing/HostileHost.cpp testing/HostileModes.hpp)
+     target_link_libraries(contour-extension-host-hostile PRIVATE
+         vtextension_host vtextension_remote_wire ${_extension_host_engine})
+     target_include_directories(contour-extension-host-hostile PRIVATE ${PROJECT_SOURCE_DIR}/src)
+     set_target_properties(contour-extension-host-hostile PROPERTIES WIN32_EXECUTABLE OFF)
+ 
+-    if(NOT CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wamr" AND TARGET vtextension_wamr_helper_engine)
++    if(NOT CONTOUR_WASM_RUNTIME STREQUAL "wamr" AND TARGET vtextension_wamr_helper_engine)
+         # The extension host on WAMR's engine, beside the one this build runs: what a build without Wasmtime
+         # ships, proven here by vtextension_wamr_helper_test. Never installed.
+         add_executable(contour-extension-host-wamr main.cpp)
+         target_link_libraries(contour-extension-host-wamr PRIVATE
+             vtextension_host vtextension_host_sanitizer_options vtextension_wamr_helper_engine)
+         set_target_properties(contour-extension-host-wamr PROPERTIES WIN32_EXECUTABLE OFF)
+     endif()
+ endif()
+diff --git a/src/contour/CMakeLists.txt b/src/contour/CMakeLists.txt
+index 6f17293a7..db131a549 100644
+--- a/src/contour/CMakeLists.txt
++++ b/src/contour/CMakeLists.txt
+@@ -812,20 +812,29 @@ endif()
+ # macOS finalizers. A GUI-less build wants a plain command-line executable and, more to the point,
+ # must not need the Qt CMake package to declare one.
+ if(CONTOUR_FRONTEND_GUI)
+     qt_add_executable(contour)
+ else()
+     add_executable(contour)
+ endif()
+ target_sources(contour PRIVATE ${_main_source_files})
+ target_link_libraries(contour PRIVATE contour_core)
+ contour_production_executable(contour)
++# The backend the GUI's and `contour daemon`'s extensions run on, which their composition roots create
++# (makeDefaultBackend()): the program links it, so that a test linking the same code names its own instead. Out
++# of process, the helper is placed beside the build tree's contour, as it is installed beside the installed one.
++if(CONTOUR_EXTENSIONS)
++    target_link_libraries(contour PRIVATE vtextension_runtime)
++    if(NOT CONTOUR_MACOS_APP_BUNDLE)
++        contour_place_extension_host_beside(contour)
++    endif()
++endif()
+ 
+ # LLVM 22's ThreadSanitizer runtime does not intercept glibc's pthread_clockjoin_np, the only join Qt
+ # 6.10's QThread::wait() uses on Linux, so it takes every waited-for QThread to be still running and
+ # aborts once glibc reuses its descriptor: platform/ThreadSanitizerJoin.cpp explains it and forwards the
+ # join to one the runtime sees. One object library for both executables that load Qt, this one and
+ # contour_gui_test, built only with ThreadSanitizer against glibc. The definition must be exported for
+ # the dynamic linker to bind Qt's call to it.
+ if(CONTOUR_FRONTEND_GUI AND CONTOUR_SANITIZE STREQUAL "thread")
+     include(CheckSymbolExists)
+     check_symbol_exists(__GLIBC__ "features.h" CONTOUR_HAVE_GLIBC)
+@@ -957,24 +966,20 @@ target_link_libraries(contour_core
+     PRIVATE
+     vthost
+ )
+ # The askpass broker compares nonces with core-cpp's constant-time comparison, which lives beside its TLS code.
+ if(CONTOUR_FRONTEND_GUI)
+     target_link_libraries(contour_core PRIVATE core::net_tls)
+ endif()
+ if(CONTOUR_EXTENSIONS)
+     target_link_libraries(contour_core PUBLIC contour_extensions)
+ endif()
+-# ContourGuiApp is a composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()).
+-if(CONTOUR_EXTENSIONS AND CONTOUR_FRONTEND_GUI)
+-    target_link_libraries(contour_core PRIVATE vtextension_runtime)
+-endif()
+ 
+ # The GUI-only layers beneath the frontend. Guarded for the same reason they are only added as
+ # subdirectories under it: without a frontend there is no Qt event to translate and no compositor,
+ # audio device or notification bus to adapt to.
+ if(CONTOUR_FRONTEND_GUI)
+     target_link_libraries(contour_core PUBLIC contour_input contour_platform)
+ endif()
+ 
+ # {{{ GUI: Declare Qt build dependencies
+ # The QML modules are GUI-only (see the guard above), so the dependency on them is too -- as is
+@@ -1296,20 +1301,25 @@ if(CONTOUR_FRONTEND_GUI)
+                 Qt6::Test
+                 Qt6::GuiPrivate # rhi/qrhi.h + qrhigles2_p.h for the end-to-end screenshot readback test
+                 Catch2::Catch2
+             )
+             target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+             if(NOT WIN32)
+                 target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
+             endif()
+         endforeach()
+         target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy contour_test_trace)
++        if(CONTOUR_EXTENSIONS)
++            # The extensions ContourGuiApp runs in its tests run in this process, on WAMR's backend: a test
++            # starts no extension host process.
++            target_link_libraries(contour_gui_test PRIVATE vtextension_wamr)
++        endif()
+ 
+         # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
+         if(TARGET contour_tsan_thread_join)
+             target_link_libraries(contour_gui_test PRIVATE contour_tsan_thread_join)
+         endif()
+ 
+         # Windows found neither Qt6Test, the one Qt library `contour` does not link, nor the
+         # offscreen QPA the registration below selects, so windeployqt's staging for the application
+         # covers neither and the suite died in the loader before main(). The Windows plugin as well,
+         # so that running the executable by hand needs no more than having built it.
+@@ -1899,21 +1909,23 @@ if(CONTOUR_TESTING)
+         CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md"
+         CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata")
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
+     endif()
+     if(CONTOUR_EXTENSIONS)
+         target_sources(contour_test PRIVATE
+             config/ExtensionDeclarations_test.cpp
+         )
+-        target_link_libraries(contour_test PRIVATE contour_extensions)
++        # `contour daemon`'s extensions run in this process, on WAMR's backend: a test starts no extension host
++        # process.
++        target_link_libraries(contour_test PRIVATE contour_extensions vtextension_wamr)
+     endif()
+     add_test(NAME contour_test COMMAND contour_test)
+     # The contour binary, for ShellIntegrationShells.profileLine: the profile line it tests asks that binary
+     # for the script, as a user's profile asks the installed one. It links Qt, and a CI runner has no display
+     # for it, so it runs offscreen.
+     if(TARGET contour)
+         set_property(TEST contour_test APPEND PROPERTY ENVIRONMENT
+                      "CONTOUR_BINARY=$<TARGET_FILE:contour>" "QT_QPA_PLATFORM=offscreen")
+     endif()
+ endif()
+diff --git a/src/contour/cli/CMakeLists.txt b/src/contour/cli/CMakeLists.txt
+index 8ab69cba2..16077d48e 100644
+--- a/src/contour/cli/CMakeLists.txt
++++ b/src/contour/cli/CMakeLists.txt
+@@ -71,22 +71,23 @@ add_library(contour_cli STATIC
+     LegacyArguments.cpp LegacyArguments.hpp
+     ShellIntegration.cpp ShellIntegration.hpp
+     "${_shell_integration_data}"
+ )
+ 
+ target_link_libraries(contour_cli
+     PUBLIC contour_config core::cli
+     PRIVATE vthost vtcontrol glaze::glaze
+ )
+ # `contour daemon` runs its profile's status-line extensions, built from contour::config's declarations. As a
+-# composition root it also links the WebAssembly runtime backend it creates (makeDefaultBackend()).
++# composition root it creates their backend (makeDefaultBackend()), which the program that links it defines:
++# the contour executable links vtextension_runtime (../CMakeLists.txt), and a test names its own.
+ if(CONTOUR_EXTENSIONS)
+-    target_link_libraries(contour_cli PRIVATE contour_extensions vtextension_runtime)
++    target_link_libraries(contour_cli PRIVATE contour_extensions)
+ endif()
+ 
+ # The binary dir is PUBLIC so that ShellIntegration.cpp's <ShellIntegrationData.hpp> resolves, and
+ # so it keeps resolving for any consumer that compiles this target's sources.
+ target_include_directories(contour_cli PUBLIC
+     "${CMAKE_CURRENT_BINARY_DIR}"
+     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+ )
+diff --git a/src/vtbackend/CMakeLists.txt b/src/vtbackend/CMakeLists.txt
+index a89ac24d2..d64e582d3 100644
+--- a/src/vtbackend/CMakeLists.txt
++++ b/src/vtbackend/CMakeLists.txt
+@@ -561,22 +561,24 @@ if(LIBTERMINAL_TESTING)
+             CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+         )
+ 
+         target_link_libraries(bench-headless
+             termbench::termbench
+             vtbackend
+         )
+         if(CONTOUR_EXTENSIONS)
+             # `throughput extensions LIST` runs status-line extensions beside the measured terminal. The tool
+             # links them; the vtbackend library does not.
+-            # A composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()).
++            # A composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()), and runs its
++            # extensions where installed programs do, out of process where the build says so.
+             target_link_libraries(bench-headless vtextension vtextension_runtime)
++            contour_place_extension_host_beside(bench-headless)
+         endif()
+ 
+         # A short run of throughput, snapshot, keypress and pty each, so that a crash like the one
+         # `bench-headless pty` had -- it used its PTY before opening it -- fails the suite.
+         add_test(NAME bench_headless_throughput_smoke COMMAND bench-headless throughput size 1 runs 1)
+         # A name that is not a workload must fail, naming the ones that are.
+         add_test(NAME bench_headless_throughput_rejects_unknown_kind
+                  COMMAND bench-headless throughput size 1 runs 1 kinds no-such-workload)
+         set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES PASS_REGULAR_EXPRESSION
+                              "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui, longlines, link-prose, link-line\\.")
+diff --git a/src/vtextension/CMakeLists.txt b/src/vtextension/CMakeLists.txt
+index c9ece1702..00c05af61 100644
+--- a/src/vtextension/CMakeLists.txt
++++ b/src/vtextension/CMakeLists.txt
+@@ -1,14 +1,14 @@
+ # vtextension: hosts WebAssembly status-line extensions on a runtime-neutral interface (wasm/WasmRuntime.hpp).
+ # Qt-free, so that both the GUI (src/contour) and the daemon (src/vthost) can link it. It links no WebAssembly
+-# runtime: the backend selected by CONTOUR_WASM_RUNTIME is its own target (wasm/<runtime>/), and a program
+-# links it through vtextension_runtime, defined at the bottom.
++# runtime: each backend is its own target (wasm/<runtime>/, and wasm/remote/ for extension host processes),
++# and a program links the one CONTOUR_EXTENSION_HOST selects through vtextension_runtime, defined at the bottom.
+ 
+ set(vtextension_SOURCES
+     BundledExtensions.cpp
+     CanonicalAbi.cpp
+     CommandLine.cpp
+     CommandPolicy.cpp
+     CompiledExtension.cpp
+     ControlImports.cpp
+     Engine.cpp
+     EventQueue.cpp
+@@ -168,50 +168,60 @@ if(VTEXTENSION_TESTING)
+                              extension-config mode=spin)
+             if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+                 add_test(NAME bench_headless_memory_extensions_smoke
+                          COMMAND bench-headless memory panes 2 seconds 0
+                                  extensions "${VTEXTENSION_TEST_MODULE_DIR}/echo.wasm")
+             endif()
+         endif()
+     else()
+         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
+     endif()
+-    # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
+-    target_link_libraries(vtextension_test PRIVATE vtextension_runtime vtextension_remote vtextension_remote_wire glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
++    # The tests run real guests in this process, on WAMR's backend, named rather than the program's selection:
++    # they start no extension host process. Its own tests are added by its directory.
++    target_link_libraries(vtextension_test PRIVATE vtextension_wamr vtextension_remote vtextension_remote_wire glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+ 
+     # Compiles the headers other modules include (the GUI, vthost) without glaze on the include path: a public
+     # header that pulled in ControlCodec.hpp, or anything else naming glaze, fails to build here, as it would in
+     # the GUI. Built with vtextension_test, so that its suite cannot pass with such a leak.
+     add_library(vtextension_public_headers_test OBJECT testing/PublicHeaders.cpp)
+     target_link_libraries(vtextension_public_headers_test PRIVATE vtextension)
+     add_dependencies(vtextension_test vtextension_public_headers_test)
+     add_test(NAME vtextension_test COMMAND vtextension_test)
+ 
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+ 
+-# The backend this build selected (CONTOUR_WASM_RUNTIME, validated in the top-level CMakeLists.txt), and the one
+-# name everything that composes a program links: the GUI, contour_cli (`contour daemon`), bench-headless and the
+-# test executables. vtextension and vthost do not. Its target defines vtextension::wasm::makeDefaultBackend().
+-add_subdirectory(wasm/${CONTOUR_WASM_RUNTIME})
+-if(CONTOUR_HAVE_WASMTIME AND NOT CONTOUR_WASM_RUNTIME STREQUAL "wasmtime")
+-    # Wasmtime's backend, beside the selected one: built and tested wherever Wasmtime was found, while no
+-    # program links it yet.
++# The engines' backends: WAMR's always, as the tests run guests in this process on it; Wasmtime's wherever one
++# was found (../../cmake/ContourThirdParties.cmake).
++add_subdirectory(wasm/wamr)
++if(CONTOUR_HAVE_WASMTIME)
+     add_subdirectory(wasm/wasmtime)
+ endif()
+ 
+ # Whether the extension host locks itself down with the Linux sandbox (wasm/host/Sandbox_linux.cpp): Linux, on the
+-# two architectures whose system calls its filter numbers. Read by both directories below.
++# architectures whose system calls its filter numbers, the rows of _CONTOUR_SANDBOXED_PLATFORMS
++# (../../CMakeLists.txt). Read by both directories below.
+ set(VTEXTENSION_LINUX_SANDBOX OFF)
+-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|aarch64|arm64)$")
++if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CONTOUR_SANDBOXED_PLATFORM)
+     set(VTEXTENSION_LINUX_SANDBOX ON)
+ endif()
+ 
+ # The protocol and channels between Contour and its extension host process, and the host's server; no engine,
+ # always built. After the backends: the host's tests run on Wasmtime's engine, where there is one.
+ add_subdirectory(wasm/remote)
+ add_subdirectory(wasm/host)
++
++# The backend a program runs its extensions on, and the one name every program that composes one links: the
++# GUI and `contour daemon` (../contour/CMakeLists.txt) and bench-headless. vtextension, vthost and the test
++# executables do not; a test names the backend it runs on. Its target defines
++# vtextension::wasm::makeDefaultBackend(): out of process, the remote backend over extension host processes
++# (vtextension_out_of_process, wasm/remote/), which links no engine; in process, the engine
++# CONTOUR_WASM_RUNTIME names.
+ add_library(vtextension_runtime INTERFACE)
+-target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})
++if(CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
++    target_link_libraries(vtextension_runtime INTERFACE vtextension_out_of_process)
++else()
++    target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})
++endif()
+diff --git a/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp b/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp
+index bdb5fc636..1ba9eda50 100644
+--- a/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp
++++ b/src/vtextension/wasm/host/linux/SeccompFilter_test.cpp
+@@ -40,22 +40,21 @@ constexpr auto Both = std::array { AuditArch::Amd64, AuditArch::AArch64 };
+ 
+ /// @return The number of @p call on @p arch, which must have it.
+ [[nodiscard]] long numberOf(SystemCall call, AuditArch arch)
+ {
+     auto const number = systemCallNumber(call, arch);
+     REQUIRE(number.has_value());
+     return *number;
+ }
+ 
+ /// @return What the filter of @p instrumentation's rows on @p arch, for an engine running @p code, decides
+-/// for
+-///         @p call with @p arguments.
++///         for @p call with @p arguments.
+ [[nodiscard]] FilterVerdict decide(BuildInstrumentation instrumentation,
+                                    AuditArch arch,
+                                    long number,
+                                    std::array<uint64_t, 6> arguments = {},
+                                    AuditArch madeOn = AuditArch::Amd64,
+                                    GuestCode code = GuestCode::Compiled)
+ {
+     auto const rows = rowsFor(code, instrumentation, arch);
+     auto const program = assembleFilter(rows, SandboxDescriptors { .control = Control }, OwnProcess, arch);
+     REQUIRE(program.has_value());
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 1bfb7f07a..025dc2024 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -132,40 +132,42 @@ if(_process_source)
+         endif()
+ 
+         # The launcher against the probe, the transport's pieces the helper inherits, and the test launchers;
+         # no engine, so that it cross-builds and runs under wine.
+         add_executable(vtextension_process_test
+             ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+             HostRefusals_test.cpp
+             LaneWatch_test.cpp
+             process/ExtensionHostSupervisor_test.cpp
+             process/HelperLocation_test.cpp
++            process/HostComposition_test.cpp
+             process/HostTimers_test.cpp
+             process/ProcessHostConnector_test.cpp
+             process/ProcessLauncher_test.cpp
+             process/testing/FakeProcessLauncher.cpp
+             process/testing/FakeProcessLauncher.hpp
+             process/testing/LaunchedHelper.cpp
+             process/testing/LaunchedHelper.hpp
+             process/testing/RecordingLauncher.hpp
+             transport/ControlPage_test.cpp
+             transport/GuestMemoryMapping_test.cpp
+             transport/HandleGrant_test.cpp
+             transport/HelperArguments_test.cpp
+             transport/SharedObject_test.cpp
+             transport/WakeSignal_test.cpp
+         )
+         # vtextension_host on every system: the launcher's tests read the host's cap policy (HostBootstrap.hpp),
+-        # whose header needs the sandbox definition only that target carries.
++        # whose header needs the sandbox definition only that target carries. vtextension_out_of_process for the
++        # composition's tests, which create backends but load nothing through a helper.
+         target_link_libraries(vtextension_process_test PRIVATE
+-            vtextension_host vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2
+-            contour_test_trace)
++            vtextension_host vtextension_out_of_process vtextension_remote_process vtextension_remote_wire
++            core::testing Catch2::Catch2 contour_test_trace)
+         if(VTEXTENSION_LINUX_SANDBOX)
+             target_sources(vtextension_process_test PRIVATE
+                 ../host/linux/Landlock_test.cpp
+                 ../host/linux/SeccompFilter_test.cpp
+                 ../host/linux/testing/BpfEvaluator.hpp
+                 process/SandboxProbe_test.cpp
+             )
+         endif()
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+@@ -188,20 +190,36 @@ add_library(vtextension_remote STATIC
+     HostConnector.hpp
+     RemoteBackend.cpp
+     RemoteBackend.hpp
+     RemoteKindState.cpp
+     RemoteKindState.hpp
+     SharedGuestMemory.cpp
+     SharedGuestMemory.hpp
+ )
+ target_link_libraries(vtextension_remote PUBLIC vtextension vtextension_remote_wire vtextension_remote_process)
+ 
++if(_process_source)
++    # vtextension_out_of_process: how a program runs its extensions out of process -- one supervisor, one
++    # kind and one connector for every backend (process/HostComposition.hpp) -- and the default backend
++    # composed of them (DefaultBackend.cpp), which a program links through vtextension_runtime
++    # (../../CMakeLists.txt). Links no engine: the engine runs in the helper.
++    add_library(vtextension_out_of_process STATIC
++        DefaultBackend.cpp
++        process/HostComposition.cpp
++        process/HostComposition.hpp
++    )
++    target_link_libraries(vtextension_out_of_process PUBLIC vtextension_remote vtextension_remote_process vtpty)
++elseif(CONTOUR_EXTENSIONS AND CONTOUR_EXTENSION_HOST STREQUAL "out-of-process")
++    message(FATAL_ERROR "CONTOUR_EXTENSION_HOST is out-of-process, but Contour cannot start processes on "
++                        "${CMAKE_SYSTEM_NAME} yet; choose in-process.")
++endif()
++
+ option(VTEXTENSION_FUZZING "Builds the extension host protocol's libFuzzer target (Clang only) [default: OFF]" OFF)
+ if(VTEXTENSION_FUZZING)
+     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+         message(FATAL_ERROR "VTEXTENSION_FUZZING needs Clang, for -fsanitize=fuzzer.")
+     endif()
+     # Decodes its input as every (direction, channel) pair, and checks that what decodes encodes again to
+     # the same PDU. CI runs the fixed-seed mutation case in vtextension_test instead.
+     #
+     # The codec is compiled into the fuzzer itself, with the fuzzer's coverage instrumentation, rather than
+     # linked from vtextension_remote_wire: the fuzzer is guided by the decoder's branches, and the library
+@@ -266,21 +284,21 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+             process/testing/FakeProcessLauncher.hpp
+         )
+     endif()
+     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+ 
+-if(VTEXTENSION_TESTING AND CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wasmtime" AND _process_source)
++if(VTEXTENSION_TESTING AND CONTOUR_WASM_RUNTIME STREQUAL "wasmtime" AND _process_source)
+     # The extension host executable itself (../../../contour-extension-host, on Wasmtime's engine, as here),
+     # started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host only for
+     # the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
+     #
+     # Beside them, the contract and the suites vtextension_test runs on the default backend, here composed by
+     # testing/ProcessDefaultBackend.cpp as the remote backend over real helper processes: their real guests
+     # run through a process boundary.
+     add_executable(vtextension_helper_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         Helper_test.cpp
+@@ -326,21 +344,21 @@ if(VTEXTENSION_TESTING AND CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wasmtime" AND
+     endif()
+ endif()
+ 
+ if(VTEXTENSION_TESTING AND TARGET vtextension_wamr_helper_engine AND _process_source)
+     # The extension host on WAMR's engine, started as Contour starts it: contour-extension-host where the build
+     # runs WAMR's, its test-only twin contour-extension-host-wamr where it runs another
+     # (../../../contour-extension-host). The contract, the bundled extensions and the process cases of
+     # vtextension_helper_test, composed by testing/ProcessDefaultBackend.cpp over that helper, locked down where
+     # the build has a sandbox.
+     set(_wamr_helper contour-extension-host-wamr)
+-    if(CONTOUR_EXTENSION_HOST_ENGINE STREQUAL "wamr")
++    if(CONTOUR_WASM_RUNTIME STREQUAL "wamr")
+         set(_wamr_helper contour-extension-host)
+     endif()
+     add_executable(vtextension_wamr_helper_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         ProcessBackend_test.cpp
+         ReviewFocusProcess_test.cpp
+         WamrHelper_test.cpp
+         process/testing/HelperComposition.cpp
+         process/testing/HelperComposition.hpp
+         process/testing/LaunchedHelper.cpp
+diff --git a/src/vtextension/wasm/remote/DefaultBackend.cpp b/src/vtextension/wasm/remote/DefaultBackend.cpp
+new file mode 100644
+index 000000000..5cf4670cc
+--- /dev/null
++++ b/src/vtextension/wasm/remote/DefaultBackend.cpp
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The default backend where extensions run out of process (CONTOUR_EXTENSION_HOST): the remote backend, over
++// extension host processes of the helper installed beside this program. Compiled into
++// vtextension_out_of_process only, which links no engine: the engine runs in the helper.
++#include <vtextension/wasm/DefaultBackend.hpp>
++
++#include <vtpty/ExecutablePath.hpp>
++
++#include <core/Clock.hpp>
++#include <core/platform/NativeFileSystem.hpp>
++
++#include <expected>
++#include <filesystem>
++#include <memory>
++#include <utility>
++
++#include <vtextension/wasm/remote/HostRefusals.hpp>
++#include <vtextension/wasm/remote/process/HelperLocation.hpp>
++#include <vtextension/wasm/remote/process/HostComposition.hpp>
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++
++namespace vtextension::wasm
++{
++
++namespace
++{
++    /// @return The extension host installed beside this program; or why there is none.
++    [[nodiscard]] std::expected<std::filesystem::path, remote::process::HelperLocationError> installedHelper()
++    {
++        auto const self = vtpty::currentExecutablePath();
++        if (!self)
++            return std::unexpected(remote::process::HelperLocationError::NotFound);
++        auto const fileSystem = core::platform::NativeFileSystem {};
++        return remote::process::locateExtensionHost(
++            *self, [&](std::filesystem::path const& path) { return fileSystem.isExecutableFile(path); });
++    }
++} // namespace
++
++std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
++{
++    auto helper = installedHelper();
++    if (helper)
++        return remote::process::sharedHostComposition(*std::move(helper))->backend(std::move(config));
++    // No helper to start: every load fails `HostUnavailable`, and the first says why.
++    return remote::process::HostComposition::create(
++               remote::process::HostCompositionConfig {
++                   .launcher = remote::process::makeSystemProcessLauncher(),
++                   .clock = &core::defaultSteadyClock(),
++                   .helper = std::move(helper),
++                   .refusals = remote::errorLogWriter(),
++                   .teardownGrace = remote::process::teardownGraceFor(ThisBuildInstrumentation),
++               })
++        ->backend(std::move(config));
++}
++
++} // namespace vtextension::wasm
+diff --git a/src/vtextension/wasm/remote/HostConnector.hpp b/src/vtextension/wasm/remote/HostConnector.hpp
+index d788ee03b..21bb25814 100644
+--- a/src/vtextension/wasm/remote/HostConnector.hpp
++++ b/src/vtextension/wasm/remote/HostConnector.hpp
+@@ -161,16 +161,17 @@ class IHostConnector
+     IHostConnector(IHostConnector&&) = delete;
+     IHostConnector& operator=(IHostConnector const&) = delete;
+     IHostConnector& operator=(IHostConnector&&) = delete;
+     virtual ~IHostConnector() = default;
+ 
+     /// Starts a host and connects to it. The host's first control PDU is its Hello.
+     /// @return The connection; `HostUnavailable` if no host could be started or connected to.
+     [[nodiscard]] virtual std::expected<HostConnection, ExtensionError> connect() = 0;
+ 
+     /// Told that the host of a connection it made was refused at the handshake (HelperIncarnation): a
+-    /// connector may keep a reason that every host it would start again shares, and start none.
++    /// connector that starts processes keeps a reason whose refusalPersistence() is `Lasting`, which every
++    /// host it would start again shares, and starts none.
+     /// @param refusal Why the host was refused.
+     virtual void refused(HostRefusal refusal) = 0;
+ };
+ 
+ } // namespace vtextension::wasm::remote
+diff --git a/src/vtextension/wasm/remote/HostRefusals.hpp b/src/vtextension/wasm/remote/HostRefusals.hpp
+index 0af2dc3e7..5e02f1a39 100644
+--- a/src/vtextension/wasm/remote/HostRefusals.hpp
++++ b/src/vtextension/wasm/remote/HostRefusals.hpp
+@@ -1,21 +1,24 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// Why Contour runs no extension host, said once: a host it could not start, or one it refused at the
+ /// handshake. Each reason is logged the first time it comes up, never again for that backend -- a reason
+ /// stays as long as the installation does, and every later attempt would only repeat it.
+ 
++#include <array>
+ #include <atomic>
++#include <cstddef>
+ #include <cstdint>
+ #include <functional>
++#include <ranges>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ /// Why no extension host serves.
+@@ -57,20 +60,73 @@ enum class RefusalSource : uint8_t
+         case HostRefusal::Unsandboxed: return RefusalSource::Handshake;
+     }
+     return RefusalSource::None;
+ }
+ 
+ static_assert(refusalSource(LastHostRefusal) != RefusalSource::None);
+ static_assert(refusalSource(static_cast<HostRefusal>(std::to_underlying(LastHostRefusal) + 1))
+                   == RefusalSource::None,
+               "LastHostRefusal must name the last reason");
+ 
++/// Whether a reason a host was refused for would hold for the next host a connector started.
++enum class RefusalPersistence : uint8_t
++{
++    Transient, ///< It may not: the next host is started.
++    Lasting,   ///< It would: a property of the system or the build, which every later host shares.
++};
++
++/// A reason, and whether it lasts.
++struct RefusalPersistenceRow
++{
++    HostRefusal refusal;            ///< The reason.
++    RefusalPersistence persistence; ///< Whether a host started again would be refused for it as well.
++};
++
++/// Every reason, one row each, at its enumerator's index. A host refused at the handshake for a lasting
++/// reason is the last its connector starts (IHostConnector::refused()).
++inline constexpr auto RefusalPersistenceRows = std::array {
++    RefusalPersistenceRow { .refusal = HostRefusal::HelperNotFound,
++                            .persistence = RefusalPersistence::Transient },
++    RefusalPersistenceRow { .refusal = HostRefusal::OutOfResources,
++                            .persistence = RefusalPersistence::Transient },
++    RefusalPersistenceRow { .refusal = HostRefusal::Unsupported,
++                            .persistence = RefusalPersistence::Transient },
++    RefusalPersistenceRow { .refusal = HostRefusal::LaunchRefused,
++                            .persistence = RefusalPersistence::Transient },
++    // The host installed with Contour speaks Contour's version; another one stays installed.
++    RefusalPersistenceRow { .refusal = HostRefusal::ProtocolVersion,
++                            .persistence = RefusalPersistence::Lasting },
++    RefusalPersistenceRow { .refusal = HostRefusal::LockdownFailed,
++                            .persistence = RefusalPersistence::Lasting },
++    // Refused only where a sandbox is required, and a system without one does not grow one.
++    RefusalPersistenceRow { .refusal = HostRefusal::Unsandboxed, .persistence = RefusalPersistence::Lasting },
++};
++
++/// @return Whether every reason has its row, at its enumerator's index.
++[[nodiscard]] consteval bool everyRefusalHasAPersistenceRow() noexcept
++{
++    if (RefusalPersistenceRows.size() != std::size_t { std::to_underlying(LastHostRefusal) } + 1)
++        return false;
++    for (auto const index: std::views::iota(std::size_t { 0 }, RefusalPersistenceRows.size()))
++        if (std::to_underlying(RefusalPersistenceRows.at(index).refusal) != index)
++            return false;
++    return true;
++}
++static_assert(everyRefusalHasAPersistenceRow());
++
++/// @param refusal A reason.
++/// @return Whether it would hold for a host started again.
++[[nodiscard]] constexpr RefusalPersistence refusalPersistence(HostRefusal refusal) noexcept
++{
++    return RefusalPersistenceRows.at(std::to_underlying(refusal)).persistence;
++}
++
+ /// @param refusal Why no extension host serves.
+ /// @return The line logged for it, user-readable, naming no engine, never empty. A host that could not be
+ ///         started says what the launcher says of its failure (launchErrors()), in one sentence for every
+ ///         such reason.
+ [[nodiscard]] std::string refusalLine(HostRefusal refusal);
+ 
+ /// @param refusal Why no extension host serves.
+ /// @param failedStep The step of its confinement a host refused as `LockdownFailed` named in its Hello.
+ /// @return refusalLine(@p refusal); for `LockdownFailed` with a step, naming that step as the confinement's
+ ///         own table phrases it (proto::lockdownSteps()).
+diff --git a/src/vtextension/wasm/remote/Hostility_test.cpp b/src/vtextension/wasm/remote/Hostility_test.cpp
+index 1c5a3321d..7d1c3b773 100644
+--- a/src/vtextension/wasm/remote/Hostility_test.cpp
++++ b/src/vtextension/wasm/remote/Hostility_test.cpp
+@@ -336,40 +336,54 @@ enum class HelperEnd : uint8_t
+     GraceExpired,
+     /// It overstayed a step's budget: one StepTimeout kill, no unclean exit.
+     StepOverran,
+     /// It crashed or exited by itself: no kill for a timeout or a violation, and one unclean exit -- a
+     /// non-zero exit or a signal the supervisor did not send. Contour, seeing the channels end, may still
+     /// ask for a kill before the end was reaped: at most one kill Requested, which does nothing.
+     OnItsOwn,
+ };
+ 
+ /// One hostile mode, what Contour asks of it, and what that must come to.
++/// Whether the connector starts another host after a hostile one.
++enum class NextHost : uint8_t
++{
++    NoneStarted, ///< None: the hostile one was refused for a reason every host would share.
++    StartedAnew, ///< One that plays by the rules.
++};
++
+ struct HostileRow
+ {
+     std::string_view mode;
+     Operation operation;
+     Failure failure;
+     HelperEnd end;
+     std::optional<HostStep> step {}; ///< The step whose budget ended it; nothing unless StepOverran.
++    NextHost next = NextHost::StartedAnew;
+ };
+ 
+ constexpr auto HostileRows = std::array {
+     HostileRow { "abort", Operation::Add, Failure::CallCrashed, HelperEnd::OnItsOwn },
+     HostileRow { "segfault", Operation::Add, Failure::CallCrashed, HelperEnd::OnItsOwn },
+     HostileRow { "garbage", Operation::Add, Failure::CallCrashed, HelperEnd::Refused },
+     HostileRow { "stop-reading", Operation::Add, Failure::CallCrashed, HelperEnd::GraceExpired },
+     HostileRow { "exit-in-callhost", Operation::PingThenAdd, Failure::CallCrashed, HelperEnd::OnItsOwn },
+     HostileRow { "over-cap", Operation::Read, Failure::ReadCrashed, HelperEnd::Refused },
+     HostileRow { "bogus-size", Operation::Read, Failure::ReadCrashed, HelperEnd::Refused },
+     HostileRow { "stall-after-header", Operation::Read, Failure::ReadCrashed, HelperEnd::GraceExpired },
+     HostileRow { "exit-before-hello", Operation::Load, Failure::HostUnavailable, HelperEnd::OnItsOwn },
+-    HostileRow { "wrong-version", Operation::Load, Failure::HostUnavailable, HelperEnd::Refused },
++    // Another protocol version stays installed: no host is started again.
++    HostileRow { "wrong-version",
++                 Operation::Load,
++                 Failure::HostUnavailable,
++                 HelperEnd::Refused,
++                 std::nullopt,
++                 NextHost::NoneStarted },
+     HostileRow { "hang-at-handshake",
+                  Operation::Load,
+                  Failure::HostUnavailable,
+                  HelperEnd::StepOverran,
+                  HostStep::Handshake },
+     HostileRow { "hang-at-create-runtime",
+                  Operation::Load,
+                  Failure::HostUnavailable,
+                  HelperEnd::StepOverran,
+                  HostStep::Handshake },
+@@ -626,29 +640,40 @@ TEST_CASE("Hostility.modes", "[vtextension][process][hostility]")
+ 
+                 // One death, whether the helper died on its own or was killed: a kill is reaped and observed
+                 // like any end. The kill names how it ended.
+                 CHECK(awaitDeaths(composition, 1));
+                 composition.supervisor().sync();
+                 CHECK(composition.supervisor().counters().deathsObserved == 1);
+                 CHECK(composition.recording().launches() == 1);
+                 CHECK(composition.supervisor().counters().uncleanExits == expectedUnclean);
+                 checkKills(composition, row.end);
+ 
+-                // The next operation runs in a host started anew, which plays by the rules.
+-                if (!outcome.module)
++                if (row.next == NextHost::NoneStarted)
++                {
++                    // Refused for good: the next operation starts no host.
++                    auto const loaded = loadInstanceModule(*runtime);
++                    REQUIRE_FALSE(loaded.has_value());
++                    CHECK(loaded.error() == ExtensionError::HostUnavailable);
++                    CHECK(composition.recording().launches() == 1);
++                }
++                else
+                 {
+-                    auto loaded = loadInstanceModule(*runtime);
+-                    REQUIRE(loaded.has_value());
+-                    outcome.module = *std::move(loaded);
++                    // The next operation runs in a host started anew, which plays by the rules.
++                    if (!outcome.module)
++                    {
++                        auto loaded = loadInstanceModule(*runtime);
++                        REQUIRE(loaded.has_value());
++                        outcome.module = *std::move(loaded);
++                    }
++                    CHECK(addsOnAFreshInstance(*backend, *outcome.module));
++                    CHECK(composition.recording().launches() == 2);
+                 }
+-                CHECK(addsOnAFreshInstance(*backend, *outcome.module));
+-                CHECK(composition.recording().launches() == 2);
+             }
+             CHECK(composition.awaitEveryHelperReaped());
+             // The one that misbehaved, if it died on its own; the one started anew exits cleanly.
+             CHECK(composition.supervisor().counters().uncleanExits == expectedUnclean);
+         }
+     }
+ }
+ 
+ namespace
+ {
+diff --git a/src/vtextension/wasm/remote/process/HostComposition.cpp b/src/vtextension/wasm/remote/process/HostComposition.cpp
+new file mode 100644
+index 000000000..afe40a3a8
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/HostComposition.cpp
+@@ -0,0 +1,156 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/remote/process/HostComposition.hpp>
++
++#include <core/Clock.hpp>
++
++#include <algorithm>
++#include <array>
++#include <expected>
++#include <filesystem>
++#include <memory>
++#include <mutex>
++#include <utility>
++
++#include <vtextension/ExtensionError.hpp>
++#include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
++
++namespace vtextension::wasm::remote::process
++{
++
++namespace
++{
++    /// A reason a supervisor could not start, and why no host serves when it cannot.
++    struct SupervisorRefusalRow
++    {
++        SupervisorError error;       ///< Why it could not start.
++        remote::HostRefusal refusal; ///< What is logged for it.
++    };
++
++    constexpr auto SupervisorRefusals = std::array {
++        // The launcher made no set to wait on: on Linux, a kernel without pidfds.
++        SupervisorRefusalRow { .error = SupervisorError::WaitSetUnavailable,
++                               .refusal = remote::HostRefusal::Unsupported },
++        SupervisorRefusalRow { .error = SupervisorError::ThreadUnavailable,
++                               .refusal = remote::HostRefusal::OutOfResources },
++    };
++
++    /// @return Why no host serves when a supervisor fails to start for @p error.
++    [[nodiscard]] constexpr remote::HostRefusal refusalOf(SupervisorError error) noexcept
++    {
++        auto const row = std::ranges::find(SupervisorRefusals, error, &SupervisorRefusalRow::error);
++        return row != SupervisorRefusals.end() ? row->refusal : remote::HostRefusal::LaunchRefused;
++    }
++
++    /// The connector of a composition that cannot start a host: every connect() fails `HostUnavailable`
++    /// without launching anything, and the first says why.
++    class UnavailableHostConnector final: public remote::IHostConnector
++    {
++      public:
++        /// @param refusal Why no host can be started.
++        /// @param refusals Where that is logged, once.
++        UnavailableHostConnector(remote::HostRefusal refusal, remote::HostRefusalLog::Writer refusals):
++            _refusal { refusal }, _refusals { std::move(refusals) }
++        {
++        }
++
++        [[nodiscard]] std::expected<remote::HostConnection, ExtensionError> connect() override
++        {
++            _refusals.refused(_refusal);
++            return std::unexpected(ExtensionError::HostUnavailable);
++        }
++
++        /// Never called: no host of it ever reached a handshake.
++        void refused(remote::HostRefusal /*refusal*/) override {}
++
++      private:
++        remote::HostRefusal _refusal;
++        remote::HostRefusalLog _refusals;
++    };
++
++    /// A supervisor, or why no host can be started.
++    using StartedSupervisor = std::expected<std::unique_ptr<ExtensionHostSupervisor>, remote::HostRefusal>;
++
++    /// @return The supervisor @p config asks for, unless there is no helper to supervise.
++    [[nodiscard]] StartedSupervisor startSupervisor(HostCompositionConfig const& config)
++    {
++        if (!config.helper)
++            return std::unexpected(remote::HostRefusal::HelperNotFound);
++        return ExtensionHostSupervisor::start(SupervisorConfig { .launcher = config.launcher,
++                                                                 .clock = config.clock,
++                                                                 .teardownGrace = config.teardownGrace })
++            .transform_error(&refusalOf);
++    }
++
++    /// @return The connector starting @p config's helper through @p supervisor; one that starts none, and
++    /// says
++    ///         why, if there is no supervisor.
++    [[nodiscard]] std::unique_ptr<remote::IHostConnector> connectorOver(StartedSupervisor const& supervisor,
++                                                                        HostCompositionConfig const& config)
++    {
++        if (!supervisor)
++            return std::make_unique<UnavailableHostConnector>(supervisor.error(), config.refusals);
++        return std::make_unique<ProcessHostConnector>((*supervisor)->mailbox(),
++                                                      ProcessHostConfig {
++                                                          .helper = *config.helper,
++                                                          .environment = defaultHelperEnvironment(),
++                                                          .extraArguments = {},
++                                                          .caps = {},
++                                                          .standardError = defaultHelperStandardError(),
++                                                      },
++                                                      config.refusals);
++    }
++} // namespace
++
++std::shared_ptr<HostComposition> HostComposition::create(HostCompositionConfig config)
++{
++    auto supervisor = startSupervisor(config);
++    auto connector = connectorOver(supervisor, config);
++    return std::make_shared<HostComposition>(
++        Passkey {}, config.teardownGrace, std::move(supervisor).value_or(nullptr), std::move(connector));
++}
++
++HostComposition::HostComposition(Passkey,
++                                 std::chrono::milliseconds teardownGrace,
++                                 std::unique_ptr<ExtensionHostSupervisor> supervisor,
++                                 std::unique_ptr<remote::IHostConnector> connector):
++    _teardownGrace { teardownGrace },
++    _kind { makeRemoteKindState() },
++    _supervisor { std::move(supervisor) },
++    _connector { std::move(connector) }
++{
++}
++
++HostComposition::~HostComposition() = default;
++
++std::unique_ptr<IWasmBackend> HostComposition::backend(BackendConfig config)
++{
++    if (!config.connector)
++        // Shares the composition's ownership: the composition lives while anything can still connect.
++        config.connector = std::shared_ptr<remote::IHostConnector> { shared_from_this(), _connector.get() };
++    return makeRemoteBackend(_kind, std::move(config));
++}
++
++std::shared_ptr<HostComposition> sharedHostComposition(std::filesystem::path helper)
++{
++    // The one composition of this process while a backend holds it, and the helper it was made for. Weak, so
++    // that the composition, and its supervisor's thread, end with the last backend rather than at exit.
++    static auto mutex = std::mutex {};
++    static auto sharedHelper = std::filesystem::path {};
++    static auto shared = std::weak_ptr<HostComposition> {};
++
++    auto const lock = std::scoped_lock { mutex };
++    if (auto composition = shared.lock(); composition && sharedHelper == helper)
++        return composition;
++    auto composition = HostComposition::create(HostCompositionConfig {
++        .launcher = makeSystemProcessLauncher(),
++        .clock = &core::defaultSteadyClock(),
++        .helper = helper,
++        .refusals = remote::errorLogWriter(),
++        .teardownGrace = teardownGraceFor(ThisBuildInstrumentation),
++    });
++    sharedHelper = std::move(helper);
++    shared = composition;
++    return composition;
++}
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/HostComposition.hpp b/src/vtextension/wasm/remote/process/HostComposition.hpp
+new file mode 100644
+index 000000000..c38b8ebc2
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/HostComposition.hpp
+@@ -0,0 +1,118 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// How a hosting process -- Contour, `contour daemon`, bench-headless -- runs its extensions in extension
++/// host processes: one supervisor over the system's launcher, one kind every remote backend shares, and one
++/// connector starting the helper. The composition lives as long as the last backend made from it, or anything
++/// of theirs that still reaches a host: it ends with them, not with the process.
++
++#include <core/Clock.hpp>
++
++#include <chrono>
++#include <expected>
++#include <filesystem>
++#include <memory>
++
++#include <vtextension/wasm/BackendConfig.hpp>
++#include <vtextension/wasm/BuildInstrumentation.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/remote/HostConnector.hpp>
++#include <vtextension/wasm/remote/HostRefusals.hpp>
++#include <vtextension/wasm/remote/RemoteBackend.hpp>
++#include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
++#include <vtextension/wasm/remote/process/HelperLocation.hpp>
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++
++namespace vtextension::wasm::remote::process
++{
++
++/// @param instrumentation How a build is instrumented.
++/// @return How long a helper that was let go may take to exit on its own in such a build, before it is
++///         killed: long enough for a sanitizer's or coverage's report to be written where there is one; no
++///         time at all where there is none, as such a helper has nothing to finish.
++[[nodiscard]] constexpr std::chrono::milliseconds teardownGraceFor(
++    BuildInstrumentation instrumentation) noexcept
++{
++    switch (instrumentation)
++    {
++        case BuildInstrumentation::None: return std::chrono::milliseconds { 0 };
++        case BuildInstrumentation::Coverage:
++        case BuildInstrumentation::Sanitizers: return std::chrono::milliseconds { 2000 };
++    }
++    return std::chrono::milliseconds { 0 };
++}
++
++/// How a hosting process composes its extension hosts.
++struct HostCompositionConfig
++{
++    /// What starts and waits for the helpers: makeSystemProcessLauncher() in Contour.
++    std::shared_ptr<IProcessLauncher> launcher;
++    core::IClock* clock = nullptr; ///< What the supervisor times by; non-null, outlives the composition.
++    /// The extension host executable; or why it was not found, in which case no helper is ever started and
++    /// every load fails `HostUnavailable`.
++    std::expected<std::filesystem::path, HelperLocationError> helper;
++    /// Where why no host serves is logged: errorLogWriter() in Contour.
++    remote::HostRefusalLog::Writer refusals;
++    /// How long a helper let go may take to exit on its own: as this build is instrumented.
++    std::chrono::milliseconds teardownGrace = teardownGraceFor(ThisBuildInstrumentation);
++};
++
++/// A supervisor over the configured launcher, the kind every backend made from it shares, and the connector
++/// that starts the helper through the supervisor.
++class HostComposition: public std::enable_shared_from_this<HostComposition>
++{
++    struct Passkey
++    {
++        explicit Passkey() = default;
++    };
++
++  public:
++    /// Starts the supervisor, unless there is no helper to supervise. A supervisor that cannot start leaves
++    /// every load failing `HostUnavailable`, and says why, once.
++    /// @param config Its launcher, clock, helper, log and teardown grace.
++    /// @return The composition.
++    [[nodiscard]] static std::shared_ptr<HostComposition> create(HostCompositionConfig config);
++
++    /// Use create(). Public for std::make_shared only.
++    HostComposition(Passkey,
++                    std::chrono::milliseconds teardownGrace,
++                    std::unique_ptr<ExtensionHostSupervisor> supervisor,
++                    std::unique_ptr<remote::IHostConnector> connector);
++
++    HostComposition(HostComposition const&) = delete;
++    HostComposition(HostComposition&&) = delete;
++    HostComposition& operator=(HostComposition const&) = delete;
++    HostComposition& operator=(HostComposition&&) = delete;
++    ~HostComposition();
++
++    /// Creates a remote backend of this composition's kind, which holds the composition for as long as it,
++    /// or anything of it, may start a host.
++    /// @param config Its budgets and lockdown requirement; a connector it names is used instead of the
++    ///        composition's, which it otherwise is given.
++    /// @return The backend.
++    [[nodiscard]] std::unique_ptr<IWasmBackend> backend(BackendConfig config);
++
++    /// Test hook.
++    /// @return The supervisor; null where none runs, as there is no helper or it could not start.
++    [[nodiscard]] ExtensionHostSupervisor const* supervisor() const noexcept { return _supervisor.get(); }
++
++    /// Test hook.
++    /// @return How long a helper let go may take to exit on its own.
++    [[nodiscard]] std::chrono::milliseconds teardownGrace() const noexcept { return _teardownGrace; }
++
++  private:
++    std::chrono::milliseconds _teardownGrace;
++    std::shared_ptr<RemoteKindState> _kind;
++    std::unique_ptr<ExtensionHostSupervisor> _supervisor;
++    std::unique_ptr<remote::IHostConnector> _connector;
++};
++
++/// The composition every default backend of this process shares while one lives: the one made for @p helper
++/// before, if a backend still holds it; a new one, over the system's launcher and clock, logging to Contour's
++/// error log, otherwise. Thread-safe.
++/// @param helper The extension host executable; an absolute path.
++/// @return The composition.
++[[nodiscard]] std::shared_ptr<HostComposition> sharedHostComposition(std::filesystem::path helper);
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/HostComposition_test.cpp b/src/vtextension/wasm/remote/process/HostComposition_test.cpp
+new file mode 100644
+index 000000000..47e8699cc
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/HostComposition_test.cpp
+@@ -0,0 +1,124 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The composition a hosting process runs its extension hosts under: one supervisor for every default backend
++// while one lives, none once the last is gone, and no helper started where none is installed.
++#include <core/Clock.hpp>
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <chrono>
++#include <expected>
++#include <filesystem>
++#include <memory>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include <vtextension/ExtensionError.hpp>
++#include <vtextension/testing/TestModules.hpp>
++#include <vtextension/wasm/BackendConfig.hpp>
++#include <vtextension/wasm/BuildInstrumentation.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/remote/HostRefusals.hpp>
++#include <vtextension/wasm/remote/process/HelperLocation.hpp>
++#include <vtextension/wasm/remote/process/HostComposition.hpp>
++#include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
++
++namespace process = vtextension::wasm::remote::process;
++using vtextension::ExtensionError;
++using vtextension::wasm::BackendConfig;
++using vtextension::wasm::BuildInstrumentation;
++using vtextension::wasm::ModuleIdentity;
++using vtextension::wasm::RuntimeLimits;
++using vtextension::wasm::ThisBuildInstrumentation;
++using vtextension::wasm::remote::HostRefusal;
++using vtextension::wasm::remote::refusalLine;
++
++namespace
++{
++
++/// A helper no case starts: nothing here loads a module through a composition that has one.
++[[nodiscard]] std::filesystem::path unstartedHelper()
++{
++    return std::filesystem::temp_directory_path() / "contour-unstarted-extension-host";
++}
++
++} // namespace
++
++TEST_CASE("HostComposition.backendsShareOneSupervisor", "[vtextension]")
++{
++    auto made = std::weak_ptr<process::HostComposition> {};
++    auto const* firstSupervisor = static_cast<process::ExtensionHostSupervisor const*>(nullptr);
++    auto first = std::unique_ptr<vtextension::wasm::IWasmBackend> {};
++    auto second = std::unique_ptr<vtextension::wasm::IWasmBackend> {};
++    {
++        auto const composition = process::sharedHostComposition(unstartedHelper());
++        REQUIRE(composition->supervisor() != nullptr);
++        made = composition;
++        firstSupervisor = composition->supervisor();
++        first = composition->backend(BackendConfig {});
++    }
++    {
++        // While the first backend lives, the second shares its composition, and so its supervisor.
++        auto const composition = process::sharedHostComposition(unstartedHelper());
++        CHECK(composition == made.lock());
++        CHECK(composition->supervisor() == firstSupervisor);
++        second = composition->backend(BackendConfig {});
++    }
++
++    // The composition lives as long as the last backend: dropping it stops the supervisor.
++    first.reset();
++    CHECK_FALSE(made.expired());
++    second.reset();
++    CHECK(made.expired());
++
++    // A third backend gets a composition, and a supervisor, of its own.
++    auto const third = process::sharedHostComposition(unstartedHelper());
++    CHECK(third->supervisor() != nullptr);
++    CHECK(made.expired());
++}
++
++TEST_CASE("HostComposition.missingHelperRefusesEveryLoad", "[vtextension]")
++{
++    auto const fake = std::make_shared<process::testing::FakeProcessLauncher>();
++    auto clock = core::ManualClock {};
++    auto lines = std::make_shared<std::vector<std::string>>();
++    {
++        auto const composition = process::HostComposition::create(process::HostCompositionConfig {
++            .launcher = fake,
++            .clock = &clock,
++            .helper = std::unexpected(process::HelperLocationError::NotFound),
++            .refusals = [lines](std::string_view line) { lines->emplace_back(line); },
++            .teardownGrace = std::chrono::milliseconds { 0 },
++        });
++        CHECK(composition->supervisor() == nullptr);
++        auto const backend = composition->backend(BackendConfig {});
++        auto const runtime =
++            backend->createRuntime(RuntimeLimits { .memoryBytes = 65536, .stackBytes = 65536 }, {});
++        REQUIRE(runtime.has_value());
++        for ([[maybe_unused]] auto const attempt: { 1, 2, 3 })
++        {
++            auto const loaded = (*runtime)->load(
++                ModuleIdentity {}, vtextension::testing::toModule(vtextension::testing::MinimalModule));
++            REQUIRE_FALSE(loaded.has_value());
++            CHECK(loaded.error() == ExtensionError::HostUnavailable);
++        }
++    }
++    // Nothing was started, and why is said once.
++    CHECK(fake->launches().empty());
++    CHECK(*lines == std::vector<std::string> { refusalLine(HostRefusal::HelperNotFound) });
++}
++
++TEST_CASE("HostComposition.teardownGraceFollowsTheBuild", "[vtextension]")
++{
++    // A helper of an instrumented build is given the time to write its report; one of any other build has
++    // nothing to write, and is killed at once.
++    STATIC_CHECK(process::teardownGraceFor(BuildInstrumentation::None) == std::chrono::milliseconds { 0 });
++    STATIC_CHECK(process::teardownGraceFor(BuildInstrumentation::Coverage) > std::chrono::milliseconds { 0 });
++    STATIC_CHECK(process::teardownGraceFor(BuildInstrumentation::Sanitizers)
++                 > std::chrono::milliseconds { 0 });
++
++    auto const expected = process::teardownGraceFor(ThisBuildInstrumentation);
++    CHECK(process::HostCompositionConfig {}.teardownGrace == expected);
++    CHECK(process::sharedHostComposition(unstartedHelper())->teardownGrace() == expected);
++}
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp b/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
+index 1db5faff9..3dbc1ad3e 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector.cpp
+@@ -96,28 +96,28 @@ namespace
+ 
+ ProcessHostConnector::ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor,
+                                            ProcessHostConfig config,
+                                            remote::HostRefusalLog::Writer refusals):
+     _supervisor { std::move(supervisor) }, _config { std::move(config) }, _refusals { std::move(refusals) }
+ {
+ }
+ 
+ void ProcessHostConnector::refused(remote::HostRefusal refusal)
+ {
+-    if (refusal == remote::HostRefusal::LockdownFailed)
+-        _lockdown.store(LockdownHistory::Failed);
++    if (remote::refusalPersistence(refusal) == remote::RefusalPersistence::Lasting)
++        _refusalHistory.store(RefusalHistory::Lasting);
+ }
+ 
+ std::expected<remote::HostConnection, ExtensionError> ProcessHostConnector::connect()
+ {
+     // Said once already, by whoever was told the host's Hello: no host is started that would fail alike.
+-    if (_lockdown.load() == LockdownHistory::Failed)
++    if (_refusalHistory.load() == RefusalHistory::Lasting)
+         return std::unexpected(ExtensionError::HostUnavailable);
+     auto control = transport::makeChannelPair();
+     auto page = transport::ControlPage::create();
+     auto wake = transport::makeWakePair();
+     if (!control || !page || !wake)
+         return std::unexpected(ExtensionError::HostUnavailable);
+     auto lanes = std::vector<transport::ChannelPair> {};
+     for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
+     {
+         auto lane = transport::makeChannelPair();
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp b/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
+index 09d26d9a6..0c81bc4b5 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector.hpp
+@@ -30,51 +30,52 @@ struct ProcessHostConfig
+     std::filesystem::path helper; ///< The extension host executable; an absolute path.
+     /// Its whole environment: by default what any host needs (defaultHelperEnvironment()).
+     std::vector<std::pair<std::string, std::string>> environment = defaultHelperEnvironment();
+     std::vector<std::string> extraArguments; ///< Appended after the handle arguments; for test helpers.
+     ResourceCaps caps {};                    ///< The caps it runs under.
+     /// Where its stderr goes (LaunchSpec::standardError): by default the null device, or this process's own
+     /// in a build whose helpers report diagnostics (defaultHelperStandardError()).
+     std::optional<transport::NativeHandle> standardError = defaultHelperStandardError();
+ };
+ 
+-/// Whether a host this connector started ever failed to confine itself.
+-enum class LockdownHistory : uint8_t
++/// Whether a host this connector started was ever refused for a lasting reason (refusalPersistence()).
++enum class RefusalHistory : uint8_t
+ {
+-    NeverFailed, ///< None did, or none was started.
+-    Failed,      ///< One did: a property of the system and the build, which every later host would share.
++    NoneLasting, ///< None was, or none was started.
++    Lasting,     ///< One was: every later host would be refused alike, on this system and build.
+ };
+ 
+ /// Starts each host as a process the supervisor launches and owns, connected over inherited channels, an
+-/// interrupt page and a wake signal. Once a host it started was refused for failing to confine itself, it
+-/// starts none again: a host would fail the same way, on this system and build, for every extension.
++/// interrupt page and a wake signal. Once a host it started was refused for a lasting reason -- it failed to
++/// confine itself, runs without the sandbox required, or speaks another protocol version -- it starts none
++/// again: a host would be refused the same way, on this system and build, for every extension.
+ class ProcessHostConnector final: public remote::IHostConnector
+ {
+   public:
+     /// @param supervisor What launches and supervises the processes.
+     /// @param config How each one is started.
+     /// @param refusals Where why a host could not be started is logged, once per reason: errorLogWriter() in
+     ///        Contour.
+     ProcessHostConnector(std::shared_ptr<SupervisorMailbox> supervisor,
+                          ProcessHostConfig config,
+                          remote::HostRefusalLog::Writer refusals);
+ 
+     /// Creates the channels, the page and the wake signal, and has the supervisor start a host on their
+     /// helper ends, which close here once it started.
+     /// @return The connection; `HostUnavailable` if any of it could not be created, or the host not started
+     ///         -- logged the first time for each reason the system gave -- and, without starting one, once a
+-    ///         host it started failed to confine itself (refused()).
++    ///         host it started was refused for a lasting reason (refused()).
+     [[nodiscard]] std::expected<remote::HostConnection, ExtensionError> connect() override;
+ 
+-    /// Keeps a `LockdownFailed` refusal for good: every later connect() fails without starting a host,
+-    /// until the connector is made again. Thread-safe.
++    /// Keeps a refusal whose refusalPersistence() is `Lasting` for good: every later connect() fails without
++    /// starting a host, until the connector is made again. Thread-safe.
+     /// @param refusal Why the host was refused.
+     void refused(remote::HostRefusal refusal) override;
+ 
+   private:
+     std::shared_ptr<SupervisorMailbox> _supervisor;
+     ProcessHostConfig _config;
+     remote::HostRefusalLog _refusals;
+-    std::atomic<LockdownHistory> _lockdown { LockdownHistory::NeverFailed };
++    std::atomic<RefusalHistory> _refusalHistory { RefusalHistory::NoneLasting };
+ };
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp b/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp
+index cf8a33305..d740563b0 100644
+--- a/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessHostConnector_test.cpp
+@@ -1,36 +1,41 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+-// The connector that starts each host as a process: a host that cannot be started is said once per reason.
++// The connector that starts each host as a process: a host that cannot be started is said once per reason,
++// and a host refused for a reason that lasts is the last it starts.
+ #include <core/Clock.hpp>
+ 
+ #include <catch2/catch_test_macros.hpp>
++#include <catch2/generators/catch_generators.hpp>
+ 
++#include <chrono>
+ #include <cstddef>
+ #include <expected>
+ #include <filesystem>
+ #include <memory>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+ #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+ #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++#include <vtextension/wasm/remote/process/testing/FakeProcessLauncher.hpp>
+ 
+ namespace process = vtextension::wasm::remote::process;
+ using vtextension::ExtensionError;
+ using vtextension::wasm::remote::HostRefusal;
+ using vtextension::wasm::remote::refusalLine;
++using vtextension::wasm::remote::RefusalPersistence;
+ 
+ TEST_CASE("ProcessHostConnector.launchFailureIsLoggedOncePerReason", "[vtextension]")
+ {
+     auto supervisor = process::ExtensionHostSupervisor::start(
+         process::SupervisorConfig { .launcher = process::makeSystemProcessLauncher(),
+                                     .clock = &core::defaultSteadyClock(),
+                                     .teardownGrace = {} });
+     REQUIRE(supervisor.has_value());
+     // Read only after the connector, and with it its writer, is gone: the connector writes on this thread.
+     auto lines = std::make_shared<std::vector<std::string>>();
+@@ -48,10 +53,60 @@ TEST_CASE("ProcessHostConnector.launchFailureIsLoggedOncePerReason", "[vtextensi
+         // Every attempt fails; the first says why.
+         for ([[maybe_unused]] auto const attempt: { 1, 2, 3 })
+         {
+             auto const connected = connector.connect();
+             REQUIRE_FALSE(connected.has_value());
+             CHECK(connected.error() == ExtensionError::HostUnavailable);
+         }
+     }
+     CHECK(*lines == std::vector<std::string> { refusalLine(HostRefusal::HelperNotFound) });
+ }
++
++TEST_CASE("ProcessHostConnector.lastingRefusalsStartNoOtherHost", "[vtextension]")
++{
++    struct Expectation
++    {
++        HostRefusal refusal;
++        RefusalPersistence persistence; ///< Lasting: no host is started after it.
++    };
++    auto const expectation = GENERATE(
++        Expectation { .refusal = HostRefusal::HelperNotFound, .persistence = RefusalPersistence::Transient },
++        Expectation { .refusal = HostRefusal::OutOfResources, .persistence = RefusalPersistence::Transient },
++        Expectation { .refusal = HostRefusal::Unsupported, .persistence = RefusalPersistence::Transient },
++        Expectation { .refusal = HostRefusal::LaunchRefused, .persistence = RefusalPersistence::Transient },
++        Expectation { .refusal = HostRefusal::ProtocolVersion, .persistence = RefusalPersistence::Lasting },
++        Expectation { .refusal = HostRefusal::LockdownFailed, .persistence = RefusalPersistence::Lasting },
++        Expectation { .refusal = HostRefusal::Unsandboxed, .persistence = RefusalPersistence::Lasting });
++    INFO(refusalLine(expectation.refusal));
++    CHECK(vtextension::wasm::remote::refusalPersistence(expectation.refusal) == expectation.persistence);
++
++    auto const fake = std::make_shared<process::testing::FakeProcessLauncher>();
++    auto clock = core::ManualClock {};
++    auto supervisor = process::ExtensionHostSupervisor::start(process::SupervisorConfig {
++        .launcher = fake, .clock = &clock, .teardownGrace = std::chrono::milliseconds { 0 } });
++    REQUIRE(supervisor.has_value());
++    {
++        auto connector =
++            process::ProcessHostConnector { (*supervisor)->mailbox(),
++                                            process::ProcessHostConfig { .helper = "contour-extension-host",
++                                                                         .environment = {},
++                                                                         .extraArguments = {},
++                                                                         .caps = {},
++                                                                         .standardError = std::nullopt },
++                                            [](std::string_view /*line*/) {} };
++        // The host of a first connection was refused, as the handshake tells the connector.
++        REQUIRE(connector.connect().has_value());
++        connector.refused(expectation.refusal);
++
++        auto const again = connector.connect();
++        if (expectation.persistence == RefusalPersistence::Lasting)
++        {
++            REQUIRE_FALSE(again.has_value());
++            CHECK(again.error() == ExtensionError::HostUnavailable);
++        }
++        else
++            CHECK(again.has_value());
++    }
++    auto const launched = fake->launches().size();
++    auto const expectedLaunches = expectation.persistence == RefusalPersistence::Lasting ? 1U : 2U;
++    CHECK(launched == expectedLaunches);
++}
+diff --git a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+index d42f3aa90..8a7aa0e10 100644
+--- a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
++++ b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+@@ -23,59 +23,77 @@
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <unistd.h>
+ 
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
++#include <vtextension/wasm/host/GuestCode.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ 
+ using namespace vtextension::wasm::remote;
+ using process::ExitKind;
+ using process::ExitStatus;
+ using process::testing::LaunchedHelper;
+ using process::testing::readReport;
++using vtextension::wasm::host::GuestCode;
+ 
+ namespace
+ {
+ 
+ /// What a probe reported before its op ran, and what came of the op.
+ struct ProbeRun
+ {
+     std::vector<std::string> lockdown;          ///< Its first report: the lockdown and the two opens.
+     std::optional<std::vector<std::string>> op; ///< Its second: the op's outcome; nothing if it never came.
+     std::optional<ExitStatus> exit;             ///< How it ended.
+ };
+ 
+ /// Whether a probe locks itself down as the host does.
+ enum class ProbeSandbox : uint8_t
+ {
+     None,   ///< Only an outer filter confines it.
+     System, ///< --sandboxed.
+ };
+ 
+-/// @return The probe started sandboxed (or not) under @p outerFilter, to run @p op.
++/// The name the probe's `--guest-code=` gives @p code.
++[[nodiscard]] constexpr std::string_view guestCodeName(GuestCode code) noexcept
++{
++    switch (code)
++    {
++        case GuestCode::Interpreted: return "interpreted";
++        case GuestCode::Compiled: return "compiled";
++    }
++    return "compiled";
++}
++
++/// @return The probe started sandboxed (or not), with the rows of an engine running @p guestCode, under
++///         @p outerFilter, to run @p op.
+ [[nodiscard]] LaunchedHelper launchProbe(std::string_view op,
+                                          std::string_view outerFilter,
+-                                         ProbeSandbox sandbox)
++                                         ProbeSandbox sandbox,
++                                         GuestCode guestCode = GuestCode::Compiled)
+ {
+     auto leading = std::vector<std::string> { "--receive-grant", std::format("--sandbox-op={}", op) };
+     if (sandbox == ProbeSandbox::System)
++    {
+         leading.emplace_back("--sandboxed");
++        leading.push_back(std::format("--guest-code={}", guestCodeName(guestCode)));
++    }
+     if (!outerFilter.empty())
+         leading.push_back(std::format("--outer-filter={}", outerFilter));
+     auto probe = process::testing::launchHelper(
+         process::makeSystemProcessLauncher(),
+         process::testing::HelperLaunch { .executable = VTEXTENSION_PROBE_PATH,
+                                          .leading = std::move(leading),
+                                          .environment = process::testing::sanitizerEnvironment() });
+     REQUIRE(probe.has_value());
+     return *std::move(probe);
+ }
+@@ -83,26 +101,28 @@ enum class ProbeSandbox : uint8_t
+ /// Ends @p probe's connection, and reaps it.
+ [[nodiscard]] std::optional<ExitStatus> endProbe(LaunchedHelper& probe)
+ {
+     probe.closeControl();
+     auto status = process::testing::awaitReap(*probe.launcher, *probe.process);
+     if (!status)
+         CHECK(process::testing::endAndReap(*probe.launcher, *probe.process));
+     return status;
+ }
+ 
+-/// Runs @p op in a probe, sandboxed unless said otherwise, under @p outerFilter.
++/// Runs @p op in a probe, sandboxed unless said otherwise, under @p outerFilter, with the rows of an engine
++/// running @p guestCode.
+ [[nodiscard]] ProbeRun runProbe(std::string_view op,
+                                 std::string_view outerFilter = {},
+-                                ProbeSandbox sandbox = ProbeSandbox::System)
++                                ProbeSandbox sandbox = ProbeSandbox::System,
++                                GuestCode guestCode = GuestCode::Compiled)
+ {
+-    auto probe = launchProbe(op, outerFilter, sandbox);
++    auto probe = launchProbe(op, outerFilter, sandbox, guestCode);
+     auto run = ProbeRun {};
+     auto const lockdown = readReport(probe.lanes.front());
+     REQUIRE(lockdown.has_value());
+     run.lockdown = *lockdown;
+     run.op = readReport(probe.lanes.at(1));
+     run.exit = endProbe(probe);
+     return run;
+ }
+ 
+ /// @return The value of @p key in @p report.
+@@ -186,20 +206,52 @@ TEST_CASE("Sandbox.forbiddenOperationsFailFromAnExecutor", "[vtextension][sandbo
+         }
+         else
+         {
+             // Killed before it could say anything: its report never came, and its status names the filter.
+             CHECK_FALSE(run.op.has_value());
+             CHECK(run.exit == Killed);
+         }
+     }
+ }
+ 
++TEST_CASE("Sandbox.onlyCompiledCodeTurnsExecutable", "[vtextension][sandbox]")
++{
++    struct Expectation
++    {
++        GuestCode guestCode;
++        std::string_view op;
++        ExitStatus exit; ///< Killed, or Clean once the op worked.
++    };
++    // An interpreter writes no code: nothing of its host's turns executable, by mapping or protecting. An
++    // engine that compiles turns what it wrote read-and-execute; it never maps memory executable.
++    constexpr auto Expectations = std::array {
++        Expectation { .guestCode = GuestCode::Interpreted, .op = "protect-executable", .exit = Killed },
++        Expectation { .guestCode = GuestCode::Interpreted, .op = "map-executable", .exit = Killed },
++        Expectation { .guestCode = GuestCode::Compiled, .op = "protect-executable", .exit = Clean },
++        Expectation { .guestCode = GuestCode::Compiled, .op = "map-executable", .exit = Killed },
++    };
++    for (auto const& expectation: Expectations)
++    {
++        INFO(guestCodeName(expectation.guestCode) << ": " << expectation.op);
++        auto const run = runProbe(expectation.op, {}, ProbeSandbox::System, expectation.guestCode);
++        CHECK(valueOf(run.lockdown, "lockdown") == "locked");
++        CHECK(run.exit == expectation.exit);
++        if (expectation.exit == Clean)
++        {
++            REQUIRE(run.op.has_value());
++            CHECK(valueOf(*run.op, "op") == "ok");
++        }
++        else
++            CHECK_FALSE(run.op.has_value());
++    }
++}
++
+ TEST_CASE("Sandbox.permittedOperationsWorkFromAnExecutor", "[vtextension][sandbox]")
+ {
+     for (auto const outerFilter: { std::string_view {}, std::string_view { "flatpak" } })
+     {
+         INFO("outer filter: " << outerFilter);
+         auto probe = launchProbe("permitted", outerFilter, ProbeSandbox::System);
+         auto const lockdown = readReport(probe.lanes.front());
+         REQUIRE(lockdown.has_value());
+         CHECK(valueOf(*lockdown, "lockdown") == "locked");
+ 
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+index cd51e402d..d8496a8da 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+@@ -60,20 +60,33 @@ namespace vtextension::wasm::remote::process::testing
+ 
+ namespace
+ {
+     namespace host = vtextension::wasm::host;
+     using transport::Channel;
+     using transport::PduStream;
+ 
+     constexpr auto SandboxedOption = std::string_view { "--sandboxed" };
+     constexpr auto OuterFilterOption = std::string_view { "--outer-filter=" };
+     constexpr auto OperationOption = std::string_view { "--sandbox-op=" };
++    constexpr auto GuestCodeOption = std::string_view { "--guest-code=" };
++
++    /// A row set the probe can lock down with: the engine's GuestCode, by the name the option gives it.
++    struct GuestCodeName
++    {
++        std::string_view name;
++        host::GuestCode code;
++    };
++
++    constexpr auto GuestCodeNames = std::array {
++        GuestCodeName { .name = "interpreted", .code = host::GuestCode::Interpreted },
++        GuestCodeName { .name = "compiled", .code = host::GuestCode::Compiled },
++    };
+ 
+     /// Exit codes of the sandboxed mode, beside the host's for a parent that is gone.
+     enum class SandboxProbeExit : uint8_t
+     {
+         Done = 0,
+         Usage = 2,
+         NoControl = 3,
+         ReportFailed = 4,
+         SetupFailed = 5,
+     };
+@@ -215,32 +228,49 @@ namespace
+     [[nodiscard]] std::string mapWritableExecutable(OperationContext&)
+     {
+         return mapAnonymous(PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE);
+     }
+ 
+     [[nodiscard]] std::string mapSharedUnfixed(OperationContext&)
+     {
+         return mapAnonymous(PROT_READ | PROT_WRITE, MAP_SHARED);
+     }
+ 
+-    [[nodiscard]] std::string protectWritableExecutable(OperationContext&)
++    /// What an engine that compiles does: maps memory writable, then makes it @p protection.
++    [[nodiscard]] std::string protectAnonymous(int protection)
+     {
+         constexpr auto Bytes = std::size_t { 4096 };
+         auto* const mapped =
+             ::mmap(nullptr, Bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+         if (mapped == MAP_FAILED)
+             return outcomeOf(-1);
+-        auto outcome = outcomeOf(::syscall(SYS_mprotect, mapped, Bytes, PROT_READ | PROT_WRITE | PROT_EXEC));
++        auto outcome = outcomeOf(::syscall(SYS_mprotect, mapped, Bytes, protection));
+         ::munmap(mapped, Bytes);
+         return outcome;
+     }
+ 
++    [[nodiscard]] std::string protectWritableExecutable(OperationContext&)
++    {
++        return protectAnonymous(PROT_READ | PROT_WRITE | PROT_EXEC);
++    }
++
++    /// Compiled code turning executable once written: read and execute, never write.
++    [[nodiscard]] std::string protectExecutable(OperationContext&)
++    {
++        return protectAnonymous(PROT_READ | PROT_EXEC);
++    }
++
++    [[nodiscard]] std::string mapExecutable(OperationContext&)
++    {
++        return mapAnonymous(PROT_READ | PROT_EXEC, MAP_PRIVATE);
++    }
++
+     [[nodiscard]] std::string channelPair(OperationContext&)
+     {
+         auto const pair = transport::makeChannelPair();
+         if (!pair)
+             return "failed:channel-pair";
+         return pair->upward == transport::UpwardDescriptors::Refused ? "upward:refused" : "upward:discarded";
+     }
+ 
+     [[nodiscard]] std::string nothing(OperationContext&)
+     {
+@@ -307,20 +337,22 @@ namespace
+         Operation { .name = "socket-unix", .run = &socketUnix },
+         Operation { .name = "send-descriptor", .run = &sendDescriptor },
+         Operation { .name = "fork", .run = &forkProcess },
+         Operation { .name = "spawn-thread", .run = &spawnThread },
+         Operation { .name = "execve", .run = &executeProgram },
+         Operation { .name = "ptrace-traceme", .run = &traceMe },
+         Operation { .name = "signal-parent", .run = &signalParent },
+         Operation { .name = "map-writable-executable", .run = &mapWritableExecutable },
+         Operation { .name = "map-shared-unfixed", .run = &mapSharedUnfixed },
+         Operation { .name = "protect-writable-executable", .run = &protectWritableExecutable },
++        Operation { .name = "map-executable", .run = &mapExecutable },
++        Operation { .name = "protect-executable", .run = &protectExecutable },
+         Operation { .name = "channel-pair", .run = &channelPair },
+         Operation { .name = "permitted", .run = &permitted },
+     };
+ 
+     /// An outer sandbox's filter: what it refuses, and with which errno; only when the call's arguments pass
+     /// `checks`, if any.
+     struct OuterRefusal
+     {
+         host::SystemCall call;
+         int error;
+@@ -450,20 +482,21 @@ namespace
+         None,   ///< Not: only an outer filter, if any, confines it.
+         System, ///< As the host does: makeSystemSandbox().
+     };
+ 
+     /// What the probe was asked for.
+     struct Request
+     {
+         Sandboxing sandboxing = Sandboxing::None;
+         OuterFilter const* outer = nullptr;
+         Operation const* operation = &Operations.front();
++        host::GuestCode guestCode = host::GuestCode::Compiled;
+         std::vector<std::string_view> helperArguments;
+     };
+ 
+     [[nodiscard]] std::optional<Request> parse(std::span<std::string_view const> arguments)
+     {
+         auto request = Request {};
+         for (auto const argument: arguments)
+         {
+             if (argument == SandboxedOption)
+                 request.sandboxing = Sandboxing::System;
+@@ -476,37 +509,45 @@ namespace
+                 request.outer = &*found;
+             }
+             else if (argument.starts_with(OperationOption))
+             {
+                 auto const name = argument.substr(OperationOption.size());
+                 auto const found = std::ranges::find(Operations, name, &Operation::name);
+                 if (found == Operations.end())
+                     return std::nullopt;
+                 request.operation = &*found;
+             }
++            else if (argument.starts_with(GuestCodeOption))
++            {
++                auto const name = argument.substr(GuestCodeOption.size());
++                auto const found = std::ranges::find(GuestCodeNames, name, &GuestCodeName::name);
++                if (found == GuestCodeNames.end())
++                    return std::nullopt;
++                request.guestCode = found->code;
++            }
+             else
+                 request.helperArguments.push_back(argument);
+         }
+         return request;
+     }
+ 
+     [[nodiscard]] int exitWith(SandboxProbeExit exit)
+     {
+         return static_cast<int>(exit);
+     }
+ } // namespace
+ 
+ bool asksForSandboxProbe(std::span<std::string_view const> arguments) noexcept
+ {
+     return std::ranges::any_of(arguments, [](std::string_view argument) {
+         return argument == SandboxedOption || argument.starts_with(OuterFilterOption)
+-               || argument.starts_with(OperationOption);
++               || argument.starts_with(OperationOption) || argument.starts_with(GuestCodeOption);
+     });
+ }
+ 
+ int runSandboxProbe(std::span<std::string_view const> arguments)
+ {
+     auto const request = parse(arguments);
+     if (!request)
+         return exitWith(SandboxProbeExit::Usage);
+     auto const parsed = transport::parseHelperArguments(request->helperArguments);
+     if (!parsed)
+@@ -551,23 +592,22 @@ int runSandboxProbe(std::span<std::string_view const> arguments)
+         openNow.wait();
+         beforeRestrict = openPath("/etc/hostname", O_RDONLY);
+         opened.count_down();
+         finish.wait();
+     });
+     if (!early)
+         return exitWith(SandboxProbeExit::SetupFailed);
+ 
+     auto const sandbox =
+         request->sandboxing == Sandboxing::System
+-            // The wider row set, of an engine that compiles: what it forbids, every engine's forbids.
+             ? host::makeSystemSandbox(host::SandboxDescriptors { .control = controlDescriptor },
+-                                      host::GuestCode::Compiled)
++                                      request->guestCode)
+             : std::unique_ptr<host::ISandbox> {};
+     auto const restricted =
+         sandbox ? sandbox->restrictBeforeThreads() : std::expected<void, host::ConfinementFailure> {};
+ 
+     auto context = OperationContext { .control = control,
+                                       .controlDescriptor = controlDescriptor,
+                                       .parentProcess = ::getppid() };
+     auto go = std::latch { 1 };
+     auto reported = std::latch { 1 };
+     auto reportSent = false;
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
+index 60ab1dc1d..f848f197c 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.hpp
+@@ -1,42 +1,44 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// Test-only, Linux: the probe's sandboxed mode, which locks itself down as the extension host does and then
+ /// tries one operation on a thread that ran before the lockdown.
+ ///
+-///   extension_host_probe --receive-grant [--sandboxed] [--outer-filter=<kind>] [--sandbox-op=<op>] <helper
+-///   arguments>
++///   extension_host_probe --receive-grant [--sandboxed] [--guest-code=<code>] [--outer-filter=<kind>]
++///   [--sandbox-op=<op>] <helper arguments>
+ ///
+ /// It binds itself to its parent and hardens itself as the host does. An outer filter, if named, is installed
+ /// first, as an outer sandbox (Flatpak's bwrap) would have: `no-landlock` (Landlock's calls fail ENOSYS),
+ /// `flatpak` (clone3 fails ENOSYS; unshare, setns, mount, personality and ptrace EPERM), `passrights`
+ /// (setting SO_PASSRIGHTS fails EPERM), or `thread` (a thread of its own installs a filter of its own). Then
+-/// it starts a thread, restricts itself (--sandboxed: makeSystemSandbox()'s restrictBeforeThreads()), starts
++/// it starts a thread, restricts itself (--sandboxed: makeSystemSandbox()'s restrictBeforeThreads(), with the
++/// rows of an engine whose guest code is `--guest-code=` `compiled`, the default, or `interpreted`), starts
+ /// the op's thread, has both try to open a file, and locks down.
+ ///
+ /// On its first lane it reports `lockdown=` `locked`, `none` (not --sandboxed) or `failed:<step>:<code>`;
+ /// `before-restrict=` and `after-restrict=`, what opening a file from each thread came to; and `end`. Then
+ /// the op's thread runs the op and reports, on its second lane, `op=` `ok`, `refused:<errno>`,
+ /// `failed:<what>` or (channel-pair) `upward:<refused|discarded>`, and `end` -- unless the op killed the
+ /// process. It exits 0 once its control channel ended.
+ ///
+ /// The ops: open-file, open-directory, socket-inet, socket-unix, send-descriptor, fork, spawn-thread,
+-/// execve, ptrace-traceme, signal-parent, map-writable-executable, map-shared-unfixed,
+-/// protect-writable-executable, channel-pair, none, and permitted, which takes one Instantiate's grant off
+-/// control as the host does and then does what the locked-down host does (see SandboxProbe.cpp).
++/// execve, ptrace-traceme, signal-parent, map-writable-executable, map-shared-unfixed, map-executable,
++/// protect-writable-executable, protect-executable, channel-pair, none, and permitted, which takes one
++/// Instantiate's grant off control as the host does and then does what the locked-down host does (see
++/// SandboxProbe.cpp).
+ 
+ #include <span>
+ #include <string_view>
+ 
+ namespace vtextension::wasm::remote::process::testing
+ {
+ 
+-/// @return Whether @p arguments ask for the sandboxed mode: any of its three options.
++/// @return Whether @p arguments ask for the sandboxed mode: any of its four options.
+ [[nodiscard]] bool asksForSandboxProbe(std::span<std::string_view const> arguments) noexcept;
+ 
+ /// Runs the sandboxed mode on @p arguments, those after `--receive-grant`.
+ /// @return The exit code.
+ [[nodiscard]] int runSandboxProbe(std::span<std::string_view const> arguments);
+ 
+ } // namespace vtextension::wasm::remote::process::testing
+diff --git a/src/vtextension/wasm/wamr/CMakeLists.txt b/src/vtextension/wasm/wamr/CMakeLists.txt
+index 734e4c086..f8fc93ccc 100644
+--- a/src/vtextension/wasm/wamr/CMakeLists.txt
++++ b/src/vtextension/wasm/wamr/CMakeLists.txt
+@@ -1,13 +1,14 @@
+ # vtextension_wamr: the WAMR backend of the WebAssembly runtime interface (../WasmRuntime.hpp). The only
+-# target that links WAMR. vtextension itself does not: whoever composes a program links vtextension_runtime,
+-# which names the selected backend, and calls makeDefaultBackend() (../DefaultBackend.hpp).
++# target that links WAMR. vtextension itself does not: a program running extensions in process links it through
++# vtextension_runtime and calls makeDefaultBackend() (../DefaultBackend.hpp), and the tests that run guests in
++# process name it.
+ # scripts/check-wasm-runtime-containment.py keeps it that way.
+ 
+ add_library(vtextension_wamr STATIC
+     DefaultBackend.cpp
+     HiddenExports.cpp
+     TableCaps.cpp
+     WamrBackend.cpp
+     WamrInstance.cpp
+     WamrModule.cpp
+     WamrThreadEnv.cpp
+@@ -24,21 +25,21 @@ target_link_libraries(vtextension_wamr PUBLIC vtextension PRIVATE contour::wamr)
+ 
+ # The engine an extension host process drives (WamrEngine.hpp): the backend, holding the null device and the
+ # runtime it needs before the host locks itself down.
+ add_library(vtextension_wamr_engine STATIC
+     WamrEngine.cpp
+     WamrEngine.hpp
+ )
+ target_link_libraries(vtextension_wamr_engine PUBLIC vtextension_wamr vtextension_remote_wire PRIVATE contour::wamr)
+ 
+ # The engine the extension host executable runs (../host/HelperEngine.hpp), where it runs WAMR's
+-# (CONTOUR_EXTENSION_HOST_ENGINE, ../../../CMakeLists.txt).
++# (CONTOUR_WASM_RUNTIME, ../../../../CMakeLists.txt).
+ add_library(vtextension_wamr_helper_engine STATIC
+     HelperEngine.cpp
+     ${PROJECT_SOURCE_DIR}/src/vtextension/wasm/host/HelperEngine.hpp
+ )
+ target_link_libraries(vtextension_wamr_helper_engine PUBLIC vtextension_host PRIVATE vtextension_wamr_engine)
+ 
+ if(TARGET vtextension_test)
+     # The backend's own tests drive WAMR's C API directly, so they, and only they, need WAMR's headers.
+     # PreparedGeneration.cpp defines the probe runtime-agnostic tests read (../testing/PreparedGeneration.hpp).
+     target_sources(vtextension_test PRIVATE
+diff --git a/src/vtextension/wasm/wamr/HelperEngine.cpp b/src/vtextension/wasm/wamr/HelperEngine.cpp
+index 3bdcf373a..c25b95df4 100644
+--- a/src/vtextension/wasm/wamr/HelperEngine.cpp
++++ b/src/vtextension/wasm/wamr/HelperEngine.cpp
+@@ -13,20 +13,21 @@ namespace vtextension::wasm::host
+ {
+ 
+ std::unique_ptr<IHostedEngine> makeHelperEngine()
+ {
+     // WAMR places linear memory where it chooses, so its instances copy memory wherever they run, and its
+     // Hello says so. Every engine shares WAMR's one process-wide state.
+     auto engine = wamr::makeWamrEngine();
+     if (engine)
+         return std::move(*engine);
+     // Why, before the host ends for the engine it lacks.
+-    tellOnStandardError(std::format("no engine: {}", wamr::wamrEngineErrorText(engine.error())));
++    tellOnStandardError(std::format("the extension host cannot run extensions: {}",
++                                    wamr::wamrEngineErrorText(engine.error())));
+     return nullptr;
+ }
+ 
+ std::unique_ptr<IHostedEngine> makeCopyingHelperEngine()
+ {
+     return makeHelperEngine();
+ }
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/wamr/WasiOverrides.cpp b/src/vtextension/wasm/wamr/WasiOverrides.cpp
+index e3e2507b9..889d2e8f5 100644
+--- a/src/vtextension/wasm/wamr/WasiOverrides.cpp
++++ b/src/vtextension/wasm/wamr/WasiOverrides.cpp
+@@ -1,13 +1,15 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/wamr/WasiOverrides.hpp>
+ 
++#include <core/Assert.hpp>
++
+ #include <algorithm>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+ #include <mutex>
+ #include <ranges>
+ #include <span>
+ #include <utility>
+ 
+ #include <wasm_export.h>
+@@ -36,21 +38,21 @@ namespace
+         auto* const memory = wasm_runtime_get_default_memory(wasm_runtime_get_module_inst(execEnv));
+         if (!memory)
+             return {};
+         auto const bytes = wasm_memory_get_cur_page_count(memory) * wasm_memory_get_bytes_per_page(memory);
+         return { static_cast<std::byte*>(wasm_memory_get_base_address(memory)),
+                  static_cast<std::size_t>(bytes) };
+     }
+ 
+     /// The raw native WasiOverrides[Index] is registered as: its arguments in WAMR's 64-bit slots, each
+     /// zero-extended to its type as the shim takes them, and its errno written back into the first slot,
+-    /// where WAMR reads an i32 result.
++    /// where WAMR reads an i32 result. Registered only once symbols() found the shim's function.
+     template <std::size_t Index>
+     void shimTrampoline(wasm_exec_env_t execEnv, uint64_t* rawArguments) noexcept
+     {
+         static auto const* const function = wasi::findShimFunction(WasiOverrides.at(Index).name);
+         auto const parameters = function->preview1.parameters();
+         uint64_t* const first = rawArguments; // WAMR's slots, of WAMR's type.
+         auto const slots = std::span { first, parameters.size() };
+         auto arguments = std::array<uint64_t, wasi::MaxPreview1Parameters> {};
+         std::ranges::transform(slots, parameters, arguments.begin(), [](uint64_t slot, ValueType type) {
+             return type == ValueType::I32 ? (slot & 0xFFFF'FFFF) : slot;
+@@ -66,30 +68,35 @@ namespace
+ 
+     template <std::size_t... Indices>
+     [[nodiscard]] consteval auto makeTrampolines(std::index_sequence<Indices...> /*indices*/)
+     {
+         return std::array<RawNative, sizeof...(Indices)> { &shimTrampoline<Indices>... };
+     }
+ 
+     /// The trampolines, indexed as WasiOverrides.
+     constexpr auto Trampolines = makeTrampolines(std::make_index_sequence<WasiOverrides.size()> {});
+ 
+-    /// What WAMR holds while registered, which it sorts in place: lives as long as the process.
++    /// What WAMR holds while registered, which it sorts in place: lives as long as the process. Fails, as a
++    /// broken contract does, should an override name a function the shim lacks: its trampoline would call
++    /// nothing.
+     [[nodiscard]] std::array<NativeSymbol, WasiOverrides.size()>& symbols()
+     {
+         static auto table = [] {
+             auto entries = std::array<NativeSymbol, WasiOverrides.size()> {};
+             for (auto const index: std::views::iota(std::size_t { 0 }, WasiOverrides.size()))
++            {
++                Require(wasi::findShimFunction(WasiOverrides.at(index).name) != nullptr);
+                 entries.at(index) = NativeSymbol { .symbol = WasiOverrides.at(index).name.data(),
+                                                    .func_ptr = reinterpret_cast<void*>(Trampolines.at(index)),
+                                                    .signature = WasiOverrides.at(index).signature,
+                                                    .attachment = nullptr };
++            }
+             return entries;
+         }();
+         return table;
+     }
+ } // namespace
+ 
+ namespace detail
+ {
+     bool registerWasiOverrides()
+     {
+diff --git a/src/vtextension/wasm/wasmtime/CMakeLists.txt b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+index b42d8aff1..31d7ff402 100644
+--- a/src/vtextension/wasm/wasmtime/CMakeLists.txt
++++ b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+@@ -1,13 +1,14 @@
+ # vtextension_wasmtime: the Wasmtime backend of the WebAssembly runtime interface (../WasmRuntime.hpp). The only
+-# target that links Wasmtime, and built only where CONTOUR_HAVE_WASMTIME is ON. It is not the default backend
+-# yet: nothing but its own tests links it. scripts/check-wasm-runtime-containment.py keeps it contained.
++# target that links Wasmtime, and built only where CONTOUR_HAVE_WASMTIME is ON. No program of Contour's links it:
++# the extension host runs it where CONTOUR_WASM_RUNTIME is wasmtime (vtextension_wasmtime_helper_engine below).
++# scripts/check-wasm-runtime-containment.py keeps it contained.
+ 
+ add_library(vtextension_wasmtime STATIC
+     WasmtimeEngine.cpp
+     WasmtimeInstance.cpp
+     WasmtimeModule.cpp
+     WasmtimeEngine.hpp
+     WasmtimeHandles.hpp
+     WasmtimeMemoryCreator.cpp
+     WasmtimeMemoryCreator.hpp
+     WasmtimeRuntime.hpp
+diff --git a/src/vthost/CMakeLists.txt b/src/vthost/CMakeLists.txt
+index cc6965a86..7f7a1e3c6 100644
+--- a/src/vthost/CMakeLists.txt
++++ b/src/vthost/CMakeLists.txt
+@@ -506,23 +506,24 @@ if(VTHOST_TESTING)
+     if(NOT WIN32)
+         # A daemon behind a real PTY keeper, out of the test binary itself (`--keeper`, `--keeper-serve`).
+         add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)
+         target_link_libraries(vthost_keeper_harness PUBLIC vthost)
+         target_sources(vthost_test PRIVATE
+             KeeperCrash_test.cpp keeperlink/KeeperChild_test.cpp keeperlink/KeeperDaemon_test.cpp
+             keeperlink/KeeperLink_test.cpp
+             keeperlink/Recovery_test.cpp keeperlink/Structure_test.cpp testing/StartTrace_test.cpp)
+         target_link_libraries(vthost_test vthost_keeper_harness)
+     endif()
+-    # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
++    # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does, in this process on
++    # WAMR's backend: a test starts no extension host process.
+     if(CONTOUR_EXTENSIONS)
+-        target_link_libraries(vthost_test vtextension_runtime)
++        target_link_libraries(vthost_test vtextension_wamr)
+     endif()
+     # The release check reads which releases metainfo.xml names (@see proto/ReleasedVersions.hpp).
+     target_compile_definitions(vthost_test PRIVATE CONTOUR_METAINFO_PATH="${PROJECT_SOURCE_DIR}/metainfo.xml")
+     # The daemon's extensions are tested end to end with a guest that runs a command, where guests are built.
+     if(CONTOUR_EXTENSIONS AND TARGET spawner_wasm)
+         target_compile_definitions(vthost_test PRIVATE
+             VTHOST_TEST_SPAWNER_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/spawner.wasm")
+         add_dependencies(vthost_test spawner_wasm)
+     endif()
+     # The daemon's font behaviour is checked with the echo guest, which renders the state it reads.

@@ -1,0 +1,1171 @@
+# Review package: 6f4f5ed56..HEAD
+
+## Commits
+19124c9e6 fix(vtextension): read a module's tables once, and as strictly as Wasmtime
+
+## Files changed
+ src/vtextension/wasm/EngineFeatures.hpp            |   2 +
+ src/vtextension/wasm/WasmBinary.hpp                | 121 ++++++++++-----------
+ src/vtextension/wasm/WasmBinary_test.cpp           |  47 +++-----
+ src/vtextension/wasm/WasmRuntime.hpp               |   6 +-
+ src/vtextension/wasm/testing/BackendContract.hpp   | 107 ++++++++++--------
+ src/vtextension/wasm/wamr/HiddenExports.cpp        |   2 +
+ src/vtextension/wasm/wamr/TableCaps.cpp            |  15 +--
+ src/vtextension/wasm/wamr/TableCaps.hpp            |   8 +-
+ src/vtextension/wasm/wamr/TableCaps_test.cpp       |  16 ++-
+ src/vtextension/wasm/wamr/WamrInstance.cpp         |  11 +-
+ src/vtextension/wasm/wamr/WamrModule.cpp           |  28 +++--
+ src/vtextension/wasm/wamr/WamrRuntime.hpp          |   9 +-
+ src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp |  15 ++-
+ src/vtextension/wasm/wasmtime/WasmtimeModule.cpp   |  13 ++-
+ src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp  |   8 +-
+ 15 files changed, 221 insertions(+), 187 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/EngineFeatures.hpp b/src/vtextension/wasm/EngineFeatures.hpp
+index aa51264e5..8e89249f9 100644
+--- a/src/vtextension/wasm/EngineFeatures.hpp
++++ b/src/vtextension/wasm/EngineFeatures.hpp
+@@ -85,20 +85,22 @@ inline constexpr auto EngineFeatures = std::to_array<FeatureRow>({
+       .featureSwitch = FeatureSwitch::AlwaysOn },
+     { .feature = EngineFeature::SaturatingFloatToInt,
+       .state = FeatureState::On,
+       .name = "saturating-float-to-int",
+       .featureSwitch = FeatureSwitch::AlwaysOn },
+     { .feature = EngineFeature::MutableGlobals,
+       .state = FeatureState::On,
+       .name = "mutable-globals",
+       .featureSwitch = FeatureSwitch::AlwaysOn },
+     { .feature = EngineFeature::MultiValue, .state = FeatureState::On, .name = "multi-value" },
++    // On, but a module may still define only one table: MaxTables (WasmRuntime.hpp) narrows the
++    // proposal's multiple tables, on every engine alike.
+     { .feature = EngineFeature::ReferenceTypes, .state = FeatureState::On, .name = "reference-types" },
+     { .feature = EngineFeature::Gc, .state = FeatureState::Off, .name = "gc" },
+     { .feature = EngineFeature::Exceptions, .state = FeatureState::Off, .name = "exceptions" },
+     { .feature = EngineFeature::Threads, .state = FeatureState::Off, .name = "threads" },
+     { .feature = EngineFeature::Memory64, .state = FeatureState::Off, .name = "memory64" },
+     { .feature = EngineFeature::MultiMemory, .state = FeatureState::Off, .name = "multi-memory" },
+     { .feature = EngineFeature::TailCalls, .state = FeatureState::Off, .name = "tail-call" },
+     { .feature = EngineFeature::Simd, .state = FeatureState::Off, .name = "simd" },
+     { .feature = EngineFeature::RelaxedSimd, .state = FeatureState::Off, .name = "relaxed-simd" },
+     { .feature = EngineFeature::ComponentModel, .state = FeatureState::Off, .name = "component-model" },
+diff --git a/src/vtextension/wasm/WasmBinary.hpp b/src/vtextension/wasm/WasmBinary.hpp
+index af91fa481..acb939e37 100644
+--- a/src/vtextension/wasm/WasmBinary.hpp
++++ b/src/vtextension/wasm/WasmBinary.hpp
+@@ -18,20 +18,21 @@
+ 
+ namespace vtextension::wasm::binary
+ {
+ 
+ /// Why a module's bytes could not be read.
+ enum class BinaryError : uint8_t
+ {
+     NotAModule, ///< No WebAssembly core module header.
+     Truncated,  ///< Something runs past the end of the bytes.
+     Malformed,  ///< An over-long LEB128 number, or a form no engine of the host accepts.
++    TooMany,    ///< More entries than the caller takes; none of them was read.
+ };
+ 
+ /// The first eight bytes of every core module: `\0asm`, then version 1 as a little-endian u32.
+ inline constexpr auto ModuleHeader =
+     std::to_array<uint8_t>({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+ 
+ /// The id of a custom section, the only kind that carries a name.
+ inline constexpr auto CustomSectionId = uint8_t { 0 };
+ 
+ /// The id of the table section, which declares the tables a module defines.
+@@ -213,97 +214,89 @@ struct Section
+ struct TableDeclaration
+ {
+     uint8_t elementType = 0;         ///< Its reference type: `funcref` (0x70) or `externref` (0x6f).
+     uint32_t initialElements = 0;    ///< Its initial size, in elements.
+     std::optional<uint32_t> maximum; ///< Its declared maximum size, in elements; nothing if none.
+ 
+     /// @return Whether both declare the same table.
+     bool operator==(TableDeclaration const&) const = default;
+ };
+ 
+-/// The tables a module defines, in the order it defines them. Imported tables are not among them.
++/// The tables a module defines, in the order it defines them, read once. Imported tables are not among
++/// them.
+ /// @param module A WebAssembly core module's bytes.
+-/// @return The tables; `Malformed` for a table whose type or limits are of a form only a feature that is
+-///         Off in EngineFeatures allows (typed references, 64-bit or shared tables, an initializer
+-///         expression): no engine of the host accepts one, so the host need not read one.
++/// @param maxTables The most tables the caller takes. The count is checked before any table is read, so
++///                  that a section declaring millions costs nothing.
++/// @return The tables. `TooMany` for more than @p maxTables. `Malformed` for a second table section, a
++///         table section with bytes after its last table, or a table whose type or limits are of a form
++///         only a feature that is Off in EngineFeatures allows (typed references, 64-bit or shared tables,
++///         an initializer expression): no engine of the host accepts one, so the host need not read one.
+ [[nodiscard]] inline std::expected<std::vector<TableDeclaration>, BinaryError> tableDeclarations(
+-    std::span<std::byte const> module)
++    std::span<std::byte const> module, uint32_t maxTables)
+ {
+     // The reference types a table may hold without the function-references proposal.
+     constexpr auto FuncRef = uint8_t { 0x70 };
+     constexpr auto ExternRef = uint8_t { 0x6f };
+     // Of a table's limits flags, only this one: whether a maximum follows.
+     constexpr auto HasMaximum = uint8_t { 0b0000'0001 };
+     return sections(module).and_then(
+         [&](std::vector<Section> const& all) -> std::expected<std::vector<TableDeclaration>, BinaryError> {
++            auto tableSections =
++                all | std::views::filter([](Section const& entry) { return entry.id == TableSectionId; });
++            auto const first = tableSections.begin();
++            if (first == tableSections.end())
++                return std::vector<TableDeclaration> {};
++            if (std::ranges::next(first) != tableSections.end())
++                return std::unexpected(BinaryError::Malformed);
++
++            auto reader = Reader { first->content, first->offset };
++            auto const count = reader.u32();
++            if (!count)
++                return std::unexpected(count.error());
++            if (*count > maxTables)
++                return std::unexpected(BinaryError::TooMany);
+             auto result = std::vector<TableDeclaration> {};
+-            for (auto const& section:
+-                 all | std::views::filter([](Section const& entry) { return entry.id == TableSectionId; }))
++            result.reserve(*count);
++            for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, *count))
+             {
+-                auto reader = Reader { section.content, section.offset };
+-                auto const count = reader.u32();
+-                if (!count)
+-                    return std::unexpected(count.error());
+-                for ([[maybe_unused]] auto const index: std::views::iota(uint32_t { 0 }, *count))
++                auto const elementType = reader.byte();
++                if (!elementType)
++                    return std::unexpected(elementType.error());
++                if (*elementType != FuncRef && *elementType != ExternRef)
++                    return std::unexpected(BinaryError::Malformed);
++                auto const flags = reader.byte();
++                if (!flags)
++                    return std::unexpected(flags.error());
++                if ((*flags & static_cast<uint8_t>(~HasMaximum)) != 0)
++                    return std::unexpected(BinaryError::Malformed);
++                auto const initial = reader.u32();
++                if (!initial)
++                    return std::unexpected(initial.error());
++                auto declaration = TableDeclaration { .elementType = *elementType,
++                                                      .initialElements = *initial,
++                                                      .maximum = std::nullopt };
++                if ((*flags & HasMaximum) != 0)
+                 {
+-                    auto const elementType = reader.byte();
+-                    if (!elementType)
+-                        return std::unexpected(elementType.error());
+-                    if (*elementType != FuncRef && *elementType != ExternRef)
+-                        return std::unexpected(BinaryError::Malformed);
+-                    auto const flags = reader.byte();
+-                    if (!flags)
+-                        return std::unexpected(flags.error());
+-                    if ((*flags & static_cast<uint8_t>(~HasMaximum)) != 0)
+-                        return std::unexpected(BinaryError::Malformed);
+-                    auto const initial = reader.u32();
+-                    if (!initial)
+-                        return std::unexpected(initial.error());
+-                    auto declaration = TableDeclaration { .elementType = *elementType,
+-                                                          .initialElements = *initial,
+-                                                          .maximum = std::nullopt };
+-                    if ((*flags & HasMaximum) != 0)
+-                    {
+-                        auto const maximum = reader.u32();
+-                        if (!maximum)
+-                            return std::unexpected(maximum.error());
+-                        declaration.maximum = *maximum;
+-                    }
+-                    result.push_back(declaration);
++                    auto const maximum = reader.u32();
++                    if (!maximum)
++                        return std::unexpected(maximum.error());
++                    declaration.maximum = *maximum;
+                 }
++                result.push_back(declaration);
+             }
++            // What the section's size covers beyond its last table, an engine refuses.
++            if (!reader.atEnd())
++                return std::unexpected(BinaryError::Malformed);
+             return result;
+         });
+ }
+ 
+-/// How many tables a module defines, and how large the largest is to begin with: what an engine must
+-/// check against its limits before instantiating it.
+-struct TableShape
+-{
+-    uint32_t count = 0;                  ///< How many tables the module defines.
+-    uint32_t largestInitialElements = 0; ///< The largest initial size among them; 0 if there is none.
+-
+-    /// @param maxTables The most tables allowed.
+-    /// @param maxElements The most elements each table may begin with.
+-    /// @return Whether the tables stay within both.
+-    [[nodiscard]] constexpr bool fitsWithin(uint32_t maxTables, uint32_t maxElements) const noexcept
+-    {
+-        return count <= maxTables && largestInitialElements <= maxElements;
+-    }
+-
+-    /// @return Whether both describe the same tables.
+-    bool operator==(TableShape const&) const = default;
+-};
+-
+-/// @return The shape of @p module's tables; why its bytes could not be read (@see tableDeclarations).
+-[[nodiscard]] inline std::expected<TableShape, BinaryError> tableShape(std::span<std::byte const> module)
++/// @return The largest initial size among @p tables, in elements; 0 if there is none.
++[[nodiscard]] inline uint32_t largestInitialElements(std::span<TableDeclaration const> tables) noexcept
+ {
+-    return tableDeclarations(module).transform([](std::vector<TableDeclaration> const& tables) {
+-        auto shape =
+-            TableShape { .count = static_cast<uint32_t>(tables.size()), .largestInitialElements = 0 };
+-        for (auto const& table: tables)
+-            shape.largestInitialElements = std::max(shape.largestInitialElements, table.initialElements);
+-        return shape;
+-    });
++    auto largest = uint32_t { 0 };
++    for (auto const& table: tables)
++        largest = std::max(largest, table.initialElements);
++    return largest;
+ }
+ 
+ } // namespace vtextension::wasm::binary
+diff --git a/src/vtextension/wasm/WasmBinary_test.cpp b/src/vtextension/wasm/WasmBinary_test.cpp
+index cb76ea37e..f18ccd24d 100644
+--- a/src/vtextension/wasm/WasmBinary_test.cpp
++++ b/src/vtextension/wasm/WasmBinary_test.cpp
+@@ -8,27 +8,26 @@
+ #include <cstdint>
+ #include <expected>
+ #include <initializer_list>
+ #include <ranges>
+ #include <string_view>
+ #include <vector>
+ 
+ #include <vtextension/wasm/WasmBinary.hpp>
+ 
+ using vtextension::wasm::binary::BinaryError;
++using vtextension::wasm::binary::largestInitialElements;
+ using vtextension::wasm::binary::largestInitialMemoryPages;
+ using vtextension::wasm::binary::Reader;
+ using vtextension::wasm::binary::sections;
+ using vtextension::wasm::binary::TableDeclaration;
+ using vtextension::wasm::binary::tableDeclarations;
+-using vtextension::wasm::binary::TableShape;
+-using vtextension::wasm::binary::tableShape;
+ 
+ namespace
+ {
+ 
+ /// @return @p values as bytes.
+ [[nodiscard]] std::vector<std::byte> raw(std::initializer_list<uint8_t> values)
+ {
+     return std::ranges::to<std::vector<std::byte>>(
+         values | std::views::transform([](uint8_t value) { return static_cast<std::byte>(value); }));
+ }
+@@ -199,49 +198,39 @@ TEST_CASE("WasmBinary.tableDeclarations", "[vtextension]")
+           .tables = std::unexpected(BinaryError::Malformed) },
+         { .description = "a table with an initializer expression",
+           .sections = raw({ 0x04, 0x04, 0x01, 0x40, 0x00, 0x70 }),
+           .tables = std::unexpected(BinaryError::Malformed) },
+         { .description = "a shared table",
+           .sections = raw({ 0x04, 0x05, 0x01, 0x70, 0x03, 0x01, 0x01 }),
+           .tables = std::unexpected(BinaryError::Malformed) },
+         { .description = "a maximum cut short",
+           .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x01, 0x01 }),
+           .tables = std::unexpected(BinaryError::Truncated) },
++        { .description = "bytes after the last table",
++          .sections = raw({ 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff }),
++          .tables = std::unexpected(BinaryError::Malformed) },
++        { .description = "more tables than are read, refused by the count alone",
++          .sections = raw({ 0x04, 0x05, 0x03, 0xff, 0xff, 0xff, 0xff }),
++          .tables = std::unexpected(BinaryError::TooMany) },
++        { .description = "a second table section",
++          .sections = raw({ 0x04, 0x04, 0x01, 0x70, 0x00, 0x01, 0x04, 0x04, 0x01, 0x70, 0x00, 0x01 }),
++          .tables = std::unexpected(BinaryError::Malformed) },
+     };
+     auto const header = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+     for (auto const& [description, body, tables]: cases)
+     {
+         INFO(description);
+         auto module = header;
+         module.insert(module.end(), body.begin(), body.end());
+-        CHECK(tableDeclarations(module) == tables);
++        CHECK(tableDeclarations(module, 2) == tables);
+     }
+ }
+ 
+-TEST_CASE("WasmBinary.tableShape", "[vtextension]")
++TEST_CASE("WasmBinary.largestInitialElements", "[vtextension]")
+ {
+-    auto module = raw({ 0x00,
+-                        0x61,
+-                        0x73,
+-                        0x6d,
+-                        0x01,
+-                        0x00,
+-                        0x00,
+-                        0x00,
+-                        0x04,
+-                        0x08,
+-                        0x02,
+-                        0x70,
+-                        0x00,
+-                        0x03,
+-                        0x70,
+-                        0x01,
+-                        0x07,
+-                        0x09 });
+-    auto const shape = tableShape(module);
+-    REQUIRE(shape.has_value());
+-    CHECK(*shape == TableShape { .count = 2, .largestInitialElements = 7 });
+-    CHECK(shape->fitsWithin(2, 7));
+-    CHECK_FALSE(shape->fitsWithin(1, 7));
+-    CHECK_FALSE(shape->fitsWithin(2, 6));
+-    CHECK(tableShape({}) == std::unexpected(BinaryError::NotAModule));
++    auto const tables = std::vector {
++        TableDeclaration { .elementType = 0x70, .initialElements = 3, .maximum = {} },
++        TableDeclaration { .elementType = 0x70, .initialElements = 7, .maximum = 9 },
++    };
++    CHECK(largestInitialElements(tables) == 7);
++    CHECK(largestInitialElements({}) == 0);
+ }
+diff --git a/src/vtextension/wasm/WasmRuntime.hpp b/src/vtextension/wasm/WasmRuntime.hpp
+index f41bdce8d..8023e6e15 100644
+--- a/src/vtextension/wasm/WasmRuntime.hpp
++++ b/src/vtextension/wasm/WasmRuntime.hpp
+@@ -116,22 +116,24 @@ struct ExportDescription
+     ExternKind kind = ExternKind::Function; ///< What is exported.
+     FunctionSignature signature;            ///< The function's signature; empty unless kind is Function.
+     uint32_t initialPages = 0; ///< The memory's initial size in 64 KiB pages; 0 unless kind is Memory.
+ };
+ 
+ /// The most elements RuntimeLimits::tableElements may allow one table, and its default. It is WAMR's own
+ /// cap on a table declared without a maximum, which that backend cannot raise; createRuntime() refuses a
+ /// higher cap with `RuntimeUnavailable` on every backend, so that all of them accept the same limits.
+ inline constexpr auto MaxTableElements = uint32_t { 1024 };
+ 
+-/// The most tables one instance may define. Every toolchain the host targets emits one, the indirect
+-/// function table; a module defining more is not instantiated (`OutOfMemory`). Without this cap the
++/// The most tables one module may define. Every toolchain the host targets emits one, the indirect
++/// function table; a module defining more is not loaded (`InvalidComponent`), by every backend before its
++/// engine reads the module, so that all refuse it at the same step. Narrower than reference-types allows
++/// (EngineFeatures.hpp), deliberately. Without this cap the
+ /// per-table one would bound nothing: each further table costs a guest three bytes of module.
+ inline constexpr auto MaxTables = uint32_t { 1 };
+ 
+ /// The limits a runtime holds every instance it creates to.
+ struct RuntimeLimits
+ {
+     std::size_t memoryBytes = 0; ///< The cap on an instance's linear memory; growth past it is refused.
+     std::size_t stackBytes = 0;  ///< The cap on an instance's stack; recursion past it traps.
+     /// The cap on the elements of each table of an instance, which lives outside linear memory and so
+     /// outside memoryBytes. A table whose initial size exceeds it is not instantiated (`OutOfMemory`), and
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index cca8db9b2..5e79f2204 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -441,20 +441,27 @@ inline constexpr auto OversizedTableModule = std::to_array<uint8_t>({
+     0x00,
+     0x00,
+     0x04,
+     0x04,
+     0x01,
+     0x70,
+     0x00,
+     0x41,
+ });
+ 
++/// Defines one table, of two elements and without a maximum, and then a byte the table section's size
++/// covers but no table does.
++///
++///     table section: 04 05 | 01 (one table) | 70 00 02 (funcref, no maximum, 2) | ff
++inline constexpr auto TrailingBytesTableModule = std::to_array<uint8_t>(
++    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff });
++
+ /// Defines one table more than MaxTables.
+ ///
+ ///     (module (table 1 funcref) (table 1 funcref))
+ inline constexpr auto TwoTablesModule = std::to_array<uint8_t>({
+     0x00,
+     0x61,
+     0x73,
+     0x6d,
+     0x01,
+     0x00,
+@@ -1275,32 +1282,41 @@ void tableInitialSizeIsCapped()
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+     auto const guard = enterThread(*backend);
+     auto const module = load(*runtime, OversizedTableModule);
+     auto context = RecordingHostContext {};
+     auto const instance = module->instantiate(context);
+     REQUIRE_FALSE(instance.has_value());
+     CHECK(instance.error() == ExtensionError::OutOfMemory);
+ }
+ 
+-/// A module defining more tables than MaxTables is not instantiated.
++/// A module defining more tables than MaxTables is not loaded.
+ template <typename T>
+ void tableCountIsCapped()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+-    auto const guard = enterThread(*backend);
+-    auto const module = load(*runtime, TwoTablesModule);
+-    auto context = RecordingHostContext {};
+-    auto const instance = module->instantiate(context);
+-    REQUIRE_FALSE(instance.has_value());
+-    CHECK(instance.error() == ExtensionError::OutOfMemory);
++    auto const module = runtime->load(vtextension::testing::toModule(TwoTablesModule));
++    REQUIRE_FALSE(module.has_value());
++    CHECK(module.error() == ExtensionError::InvalidComponent);
++}
++
++/// A table section with bytes after its last table is not loaded, though the tables before them are
++/// well-formed.
++template <typename T>
++void tableSectionWithTrailingBytesIsRefused()
++{
++    auto const backend = T::make();
++    auto const runtime = createRuntime(*backend);
++    auto const module = runtime->load(vtextension::testing::toModule(TrailingBytesTableModule));
++    REQUIRE_FALSE(module.has_value());
++    CHECK(module.error() == ExtensionError::InvalidComponent);
+ }
+ 
+ /// A table cap above MaxTableElements creates no runtime.
+ template <typename T>
+ void tableCapAboveMaximumIsRefused()
+ {
+     auto const backend = T::make();
+     auto limits = Limits;
+     limits.tableElements = MaxTableElements + 1;
+     auto const runtime = backend->createRuntime(limits, HostFunctions);
+@@ -1552,49 +1568,50 @@ void wasiStdioGoesNowhere()
+ } // namespace vtextension::wasm::testing::contract
+ 
+ /// One contract case, run against the backend of @p Traits.
+ #define CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, Name)                 \
+     TEMPLATE_TEST_CASE("WasmContract." #Name, "[wasm-contract]", Traits) \
+     {                                                                    \
+         ::vtextension::wasm::testing::contract::Name<TestType>();        \
+     }
+ 
+ /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
+-#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                         \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                  \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)               \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)            \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)            \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)     \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)       \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)            \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)         \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)              \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                      \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)              \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                      \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                  \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                           \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)      \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)             \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)         \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)  \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)          \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedCallKeepsTheOuterRecord)         \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)           \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)             \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                     \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)           \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize) \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableGrowthIsCapped)                   \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)              \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                    \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)         \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, onlyI32ExportsAreOffered)              \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)               \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                    \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                      \
+-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                \
++#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                          \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                   \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)                \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                 \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)             \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)             \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)      \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)        \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)             \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, everyAllowedWasiFunctionWorks)          \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)               \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                       \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)               \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                       \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                   \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                            \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)       \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)              \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)          \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)   \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                 \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)           \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedCallKeepsTheOuterRecord)          \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)            \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)              \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                 \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                      \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)            \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize)  \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableGrowthIsCapped)                    \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)               \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                     \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableSectionWithTrailingBytesIsRefused) \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)          \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, onlyI32ExportsAreOffered)               \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)                \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                     \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                       \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_POSIX(Traits)
+diff --git a/src/vtextension/wasm/wamr/HiddenExports.cpp b/src/vtextension/wasm/wamr/HiddenExports.cpp
+index 6e1f461b5..157b796d7 100644
+--- a/src/vtextension/wasm/wamr/HiddenExports.cpp
++++ b/src/vtextension/wasm/wamr/HiddenExports.cpp
+@@ -19,20 +19,22 @@ namespace vtextension::wasm::wamr
+ namespace
+ {
+     /// @return What @p error of the binary reader is to hideExports().
+     [[nodiscard]] constexpr ModuleBytesError moduleBytesErrorOf(binary::BinaryError error) noexcept
+     {
+         switch (error)
+         {
+             case binary::BinaryError::NotAModule: return ModuleBytesError::NotAModule;
+             case binary::BinaryError::Truncated: return ModuleBytesError::Truncated;
+             case binary::BinaryError::Malformed: return ModuleBytesError::Malformed;
++            // A limit the export reader sets none of.
++            case binary::BinaryError::TooMany: return ModuleBytesError::Malformed;
+         }
+         return ModuleBytesError::Malformed;
+     }
+ 
+     /// @return Whether @p bytes spell @p text.
+     [[nodiscard]] bool spells(std::span<std::byte const> bytes, std::string_view text) noexcept
+     {
+         return std::ranges::equal(
+             bytes, text, [](std::byte byte, char c) { return byte == static_cast<std::byte>(c); });
+     }
+diff --git a/src/vtextension/wasm/wamr/TableCaps.cpp b/src/vtextension/wasm/wamr/TableCaps.cpp
+index 3c2bbedda..51f4a2629 100644
+--- a/src/vtextension/wasm/wamr/TableCaps.cpp
++++ b/src/vtextension/wasm/wamr/TableCaps.cpp
+@@ -49,42 +49,37 @@ namespace
+             content.push_back(std::byte { table.elementType });
+             content.push_back(maximum ? HasMaximum : std::byte { 0 });
+             appendU32(content, table.initialElements);
+             if (maximum)
+                 appendU32(content, *maximum);
+         }
+         return content;
+     }
+ } // namespace
+ 
+-std::expected<std::vector<std::byte>, binary::BinaryError> capTableMaxima(std::vector<std::byte> module,
+-                                                                          uint32_t maxElements)
++std::expected<std::vector<std::byte>, binary::BinaryError> capTableMaxima(
++    std::vector<std::byte> module, std::span<binary::TableDeclaration const> tables, uint32_t maxElements)
+ {
++    if (std::ranges::none_of(tables, [&](auto const& table) { return needsCap(table, maxElements); }))
++        return module;
+     auto const all = binary::sections(module);
+     if (!all)
+         return std::unexpected(all.error());
+-    if (std::ranges::count(*all, binary::TableSectionId, &binary::Section::id) > 1)
+-        return std::unexpected(binary::BinaryError::Malformed);
+-    auto const tables = binary::tableDeclarations(module);
+-    if (!tables)
+-        return std::unexpected(tables.error());
+-    if (std::ranges::none_of(*tables, [&](auto const& table) { return needsCap(table, maxElements); }))
+-        return module;
+ 
+     auto result = std::vector<std::byte>(module.begin(), module.begin() + binary::ModuleHeader.size());
+     auto previousEnd = binary::ModuleHeader.size();
+     for (auto const& section: *all)
+     {
+         auto const end = section.offset + section.content.size();
+         if (section.id == binary::TableSectionId)
+         {
+-            auto const content = cappedTableSection(*tables, maxElements);
++            auto const content = cappedTableSection(tables, maxElements);
+             result.push_back(std::byte { binary::TableSectionId });
+             appendU32(result, static_cast<uint32_t>(content.size()));
+             result.insert(result.end(), content.begin(), content.end());
+         }
+         else
+             result.insert(result.end(),
+                           module.begin() + static_cast<std::ptrdiff_t>(previousEnd),
+                           module.begin() + static_cast<std::ptrdiff_t>(end));
+         previousEnd = end;
+     }
+diff --git a/src/vtextension/wasm/wamr/TableCaps.hpp b/src/vtextension/wasm/wamr/TableCaps.hpp
+index e8bafc0cd..e8d02e43b 100644
+--- a/src/vtextension/wasm/wamr/TableCaps.hpp
++++ b/src/vtextension/wasm/wamr/TableCaps.hpp
+@@ -9,28 +9,30 @@
+ // given a declared maximum no larger than the cap, and `table.grow` past the cap returns -1 as it does on
+ // every backend. A table whose initial size already exceeds the cap is left as it is: the backend refuses
+ // to instantiate it before WAMR could.
+ //
+ // Pure and dependency-free, so that every framing rule is table-testable.
+ #pragma once
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
++#include <span>
+ #include <vector>
+ 
+ #include <vtextension/wasm/WasmBinary.hpp>
+ 
+ namespace vtextension::wasm::wamr
+ {
+ 
+ /// Gives every table @p module defines a declared maximum of at most @p maxElements, keeping a lower one.
+ /// Only the table section is rewritten, and only if a table needs it; every other section is copied as it
+ /// was.
+ /// @param module A WebAssembly core module's bytes.
++/// @param tables Its tables, as binary::tableDeclarations() read them: the module is not read for them
++///               again.
+ /// @param maxElements The cap on each table's elements.
+-/// @return The module, rewritten or as it was; why its bytes could not be read (@see
+-///         binary::tableDeclarations), `Malformed` also for a second table section.
++/// @return The module, rewritten or as it was; why its sections could not be read.
+ [[nodiscard]] std::expected<std::vector<std::byte>, binary::BinaryError> capTableMaxima(
+-    std::vector<std::byte> module, uint32_t maxElements);
++    std::vector<std::byte> module, std::span<binary::TableDeclaration const> tables, uint32_t maxElements);
+ 
+ } // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/TableCaps_test.cpp b/src/vtextension/wasm/wamr/TableCaps_test.cpp
+index 8b90a0eb7..57858aa04 100644
+--- a/src/vtextension/wasm/wamr/TableCaps_test.cpp
++++ b/src/vtextension/wasm/wamr/TableCaps_test.cpp
+@@ -10,20 +10,21 @@
+ #include <expected>
+ #include <initializer_list>
+ #include <ranges>
+ #include <string_view>
+ #include <vector>
+ 
+ #include <vtextension/wasm/WasmBinary.hpp>
+ #include <vtextension/wasm/wamr/TableCaps.hpp>
+ 
+ using vtextension::wasm::binary::BinaryError;
++using vtextension::wasm::binary::tableDeclarations;
+ using vtextension::wasm::wamr::capTableMaxima;
+ 
+ namespace
+ {
+ 
+ using Bytes = std::vector<std::byte>;
+ 
+ /// @return @p values as bytes.
+ [[nodiscard]] Bytes raw(std::initializer_list<uint8_t> values)
+ {
+@@ -36,20 +37,23 @@ using Bytes = std::vector<std::byte>;
+ {
+     auto result = raw({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+     for (auto const value: sections)
+         result.push_back(static_cast<std::byte>(value));
+     return result;
+ }
+ 
+ /// The cap every case is rewritten under: 1024, two bytes as LEB128.
+ constexpr auto Cap = uint32_t { 1024 };
+ 
++/// The most tables a case's module is read with: two, so that the rewrite of each is seen.
++constexpr auto MaxTablesRead = uint32_t { 2 };
++
+ } // namespace
+ 
+ TEST_CASE("TableCaps.capTableMaxima", "[vtextension]")
+ {
+     struct Case
+     {
+         std::string_view description;
+         Bytes input;
+         std::expected<Bytes, BinaryError> output;
+     };
+@@ -102,32 +106,42 @@ TEST_CASE("TableCaps.capTableMaxima", "[vtextension]")
+                              0x80,
+                              0x08,
+                              0x05,
+                              0x03,
+                              0x01,
+                              0x00,
+                              0x01 }) },
+         { .description = "of two tables, only the one that needs it changes",
+           .input = module({ 0x04, 0x08, 0x02, 0x70, 0x01, 0x01, 0x02, 0x70, 0x00, 0x03 }),
+           .output = module({ 0x04, 0x0a, 0x02, 0x70, 0x01, 0x01, 0x02, 0x70, 0x01, 0x03, 0x80, 0x08 }) },
++        { .description = "bytes after the last table",
++          .input = module({ 0x04, 0x05, 0x01, 0x70, 0x00, 0x02, 0xff }),
++          .output = std::unexpected(BinaryError::Malformed) },
++        { .description = "more tables than are read",
++          .input = module({ 0x04, 0x0a, 0x03, 0x70, 0x00, 0x01, 0x70, 0x00, 0x01, 0x70, 0x00, 0x01 }),
++          .output = std::unexpected(BinaryError::TooMany) },
+         { .description = "a second table section",
+           .input = module({ 0x04, 0x04, 0x01, 0x70, 0x00, 0x01, 0x04, 0x04, 0x01, 0x70, 0x00, 0x01 }),
+           .output = std::unexpected(BinaryError::Malformed) },
+         { .description = "a typed reference table",
+           .input = module({ 0x04, 0x05, 0x01, 0x64, 0x70, 0x00, 0x01 }),
+           .output = std::unexpected(BinaryError::Malformed) },
+         { .description = "a 64-bit table",
+           .input = module({ 0x04, 0x04, 0x01, 0x70, 0x04, 0x01 }),
+           .output = std::unexpected(BinaryError::Malformed) },
+         { .description = "a table cut short",
+           .input = module({ 0x04, 0x03, 0x01, 0x70, 0x01 }),
+           .output = std::unexpected(BinaryError::Truncated) },
+         { .description = "no module",
+           .input = raw({ 0x00 }),
+           .output = std::unexpected(BinaryError::NotAModule) },
+     };
+     for (auto const& [description, input, output]: cases)
+     {
+         INFO(description);
+-        CHECK(capTableMaxima(input, Cap) == output);
++        // As the backend does: the tables are read once, and the rewrite is handed what was read.
++        auto const rewritten = tableDeclarations(input, MaxTablesRead).and_then([&](auto const& tables) {
++            return capTableMaxima(input, tables, Cap);
++        });
++        CHECK(rewritten == output);
+     }
+ }
+diff --git a/src/vtextension/wasm/wamr/WamrInstance.cpp b/src/vtextension/wasm/wamr/WamrInstance.cpp
+index 29f0e04f8..dd2424ab5 100644
+--- a/src/vtextension/wasm/wamr/WamrInstance.cpp
++++ b/src/vtextension/wasm/wamr/WamrInstance.cpp
+@@ -88,21 +88,21 @@ namespace
+         {
+         };
+ 
+       public:
+         /// @see instantiateModule
+         [[nodiscard]] static std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> create(
+             std::shared_ptr<IWasmModule const> owner,
+             WASMModuleCommon* module,
+             RuntimeLimits const& limits,
+             std::span<ExportDescription const> exports,
+-            binary::TableShape tables,
++            uint32_t largestInitialTableElements,
+             IHostContext& context);
+ 
+         /// Use create(); public only so that std::make_unique can reach it.
+         WamrInstance(PrivateTag,
+                      std::shared_ptr<IWasmModule const> owner,
+                      IHostContext& context,
+                      detail::InstanceHandle instance,
+                      detail::ExecEnvHandle execEnv,
+                      std::vector<FunctionEntry> functions) noexcept:
+             _owner { std::move(owner) },
+@@ -245,29 +245,29 @@ namespace
+         std::atomic<Interruption> _interruption = Interruption::None; ///< Written from any thread.
+         std::optional<CallFailure> _fault;                            ///< Why the running call is failing.
+         uint32_t _callDepth = 0; ///< Calls running, nested ones included.
+     };
+ 
+     std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WamrInstance::create(
+         std::shared_ptr<IWasmModule const> owner,
+         WASMModuleCommon* module,
+         RuntimeLimits const& limits,
+         std::span<ExportDescription const> exports,
+-        binary::TableShape tables,
++        uint32_t largestInitialTableElements,
+         IHostContext& context)
+     {
+         auto const capPages = capPagesOf(limits);
+         auto const exceedsCap = [&](ExportDescription const& entry) {
+             return entry.kind == ExternKind::Memory && entry.initialPages > capPages;
+         };
+         // A table is checked before WAMR allocates it, exported or not.
+-        if (std::ranges::any_of(exports, exceedsCap) || !tables.fitsWithin(MaxTables, limits.tableElements))
++        if (std::ranges::any_of(exports, exceedsCap) || largestInitialTableElements > limits.tableElements)
+             return std::unexpected(ExtensionError::OutOfMemory);
+ 
+         auto* rawArgs = static_cast<InstantiationArgs2*>(nullptr);
+         if (!wasm_runtime_instantiation_args_create(&rawArgs))
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         auto const args =
+             std::unique_ptr<InstantiationArgs2, decltype(&wasm_runtime_instantiation_args_destroy)>(
+                 rawArgs, &wasm_runtime_instantiation_args_destroy);
+         auto const stackBytes = saturated32(limits.stackBytes);
+         wasm_runtime_instantiation_args_set_default_stack_size(args.get(), stackBytes);
+@@ -317,24 +317,25 @@ namespace
+                                               std::move(functions));
+     }
+ 
+ } // namespace
+ 
+ std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiateModule(
+     std::shared_ptr<IWasmModule const> owner,
+     WASMModuleCommon* module,
+     RuntimeLimits const& limits,
+     std::span<ExportDescription const> exports,
+-    binary::TableShape tables,
++    uint32_t largestInitialTableElements,
+     IHostContext& context)
+ {
+-    return WamrInstance::create(std::move(owner), module, limits, exports, tables, context);
++    return WamrInstance::create(
++        std::move(owner), module, limits, exports, largestInitialTableElements, context);
+ }
+ 
+ namespace
+ {
+     /// @return The instance of this backend whose call is running in @p execEnv; null if there is none
+     ///         (the execution environment is someone else's, or there is no call).
+     [[nodiscard]] WamrInstance* instanceOf(wasm_exec_env_t execEnv) noexcept
+     {
+         if (!execEnv)
+             return nullptr;
+diff --git a/src/vtextension/wasm/wamr/WamrModule.cpp b/src/vtextension/wasm/wamr/WamrModule.cpp
+index e75e0524e..2ddd99861 100644
+--- a/src/vtextension/wasm/wamr/WamrModule.cpp
++++ b/src/vtextension/wasm/wamr/WamrModule.cpp
+@@ -154,71 +154,79 @@ namespace
+ 
+     /// A module loaded into WAMR.
+     class WamrModule final: public IWasmModule, public std::enable_shared_from_this<WamrModule>
+     {
+       public:
+         WamrModule(std::shared_ptr<WamrRuntime const> runtime,
+                    std::vector<std::byte> bytes,
+                    detail::ModuleHandle module,
+                    std::vector<ImportDescription> imports,
+                    std::vector<ExportDescription> exports,
+-                   binary::TableShape tables) noexcept:
++                   uint32_t largestInitialTableElements) noexcept:
+             _runtime { std::move(runtime) },
+             _bytes { std::move(bytes) },
+             _module { std::move(module) },
+             _imports { std::move(imports) },
+             _exports { std::move(exports) },
+-            _tables { tables }
++            _largestInitialTableElements { largestInitialTableElements }
+         {
+         }
+ 
+         [[nodiscard]] std::span<ImportDescription const> imports() const noexcept override
+         {
+             return _imports;
+         }
+ 
+         [[nodiscard]] std::span<ExportDescription const> exports() const noexcept override
+         {
+             return _exports;
+         }
+ 
+         [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
+             IHostContext& context) override
+         {
+-            return instantiateModule(
+-                shared_from_this(), _module.get(), _runtime->limits(), _exports, _tables, context);
++            return instantiateModule(shared_from_this(),
++                                     _module.get(),
++                                     _runtime->limits(),
++                                     _exports,
++                                     _largestInitialTableElements,
++                                     context);
+         }
+ 
+       private:
+         std::shared_ptr<WamrRuntime const> _runtime; ///< Declared first: released after the module.
+         std::vector<std::byte> _bytes;               ///< Must outlive the module, which refers into it.
+         detail::ModuleHandle _module;                ///< Unloaded before the bytes it refers into.
+         std::vector<ImportDescription> _imports;
+         std::vector<ExportDescription> _exports;
+-        binary::TableShape _tables; ///< What instantiate() checks against the table caps.
++        uint32_t _largestInitialTableElements; ///< What instantiate() checks against the table cap.
+     };
+ } // namespace
+ 
+ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
+     std::shared_ptr<WamrRuntime const> runtime, std::vector<std::byte> bytes)
+ {
+     if (bytes.size() > std::numeric_limits<uint32_t>::max())
+         return std::unexpected(ExtensionError::InvalidComponent);
+     // WAMR would run a WASI reactor's `_initialize` while instantiating, where no deadline can stop it and
+     // host functions fail; the host calls it under one (IWasmModule::instantiate). Bytes this cannot read,
+     // WAMR could not load either.
+     if (!hideExports(bytes))
+         return std::unexpected(ExtensionError::InvalidComponent);
+-    // WAMR would let a table grow past the runtime's cap: each is declared a maximum within it instead.
+-    auto const tables = binary::tableShape(bytes);
+-    auto capped = capTableMaxima(std::move(bytes), runtime->limits().tableElements);
+-    if (!tables || !capped)
++    // The tables are read once, more than MaxTables refused before any is: WAMR would let a table grow
++    // past the runtime's cap, so each is declared a maximum within it instead.
++    auto const tables = binary::tableDeclarations(bytes, MaxTables);
++    if (!tables)
++        return std::unexpected(ExtensionError::InvalidComponent);
++    auto capped = capTableMaxima(std::move(bytes), *tables, runtime->limits().tableElements);
++    // Declaring a maximum grows the module, which may no longer have a size WAMR can take.
++    if (!capped || capped->size() > std::numeric_limits<uint32_t>::max())
+         return std::unexpected(ExtensionError::InvalidComponent);
+     bytes = std::move(*capped);
+     auto errorBuffer = std::array<char, 128> {};
+     // The vector's buffer stays where it is when the vector moves into the module. WAMR may rewrite it.
+     auto module = detail::ModuleHandle { wasm_runtime_load(reinterpret_cast<uint8_t*>(bytes.data()),
+                                                            static_cast<uint32_t>(bytes.size()),
+                                                            errorBuffer.data(),
+                                                            static_cast<uint32_t>(errorBuffer.size())) };
+     if (!module)
+         return std::unexpected(ExtensionError::InvalidComponent);
+@@ -241,14 +249,14 @@ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
+     wasm_runtime_set_wasi_args_ex(
+         module.get(), nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, nullDevice, nullDevice, nullDevice);
+ 
+     auto imports = describeImports(module.get());
+     auto exports = describeExports(module.get());
+     return std::make_shared<WamrModule>(std::move(runtime),
+                                         std::move(bytes),
+                                         std::move(module),
+                                         std::move(imports),
+                                         std::move(exports),
+-                                        *tables);
++                                        binary::largestInitialElements(*tables));
+ }
+ 
+ } // namespace vtextension::wasm::wamr
+diff --git a/src/vtextension/wasm/wamr/WamrRuntime.hpp b/src/vtextension/wasm/wamr/WamrRuntime.hpp
+index 1b5b36364..b744f6156 100644
+--- a/src/vtextension/wasm/wamr/WamrRuntime.hpp
++++ b/src/vtextension/wasm/wamr/WamrRuntime.hpp
+@@ -74,31 +74,32 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
+ /// @param bytes The module's bytes; the module keeps them, as WAMR refers into them.
+ /// @return The module; `InvalidComponent` if the bytes are not a valid core module.
+ [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
+     std::shared_ptr<WamrRuntime const> runtime, std::vector<std::byte> bytes);
+ 
+ /// Instantiates a loaded module under the limits of the runtime it was loaded on.
+ /// @param owner The module being instantiated; the instance keeps it (and with it the runtime) alive.
+ /// @param module WAMR's handle on @p owner's module.
+ /// @param limits The limits of the runtime @p owner was loaded on.
+ /// @param exports @p owner's exports.
+-/// @param tables The tables @p owner defines, exported or not.
++/// @param largestInitialTableElements The largest initial size of the tables @p owner defines, exported or
++///                                    not.
+ /// @param context What the instance's host function calls reach.
+-/// @return The instance; `OutOfMemory` if a memory's initial size exceeds the cap, or the tables exceed
+-///         theirs (RuntimeLimits::tableElements, MaxTables), `InvalidComponent`
++/// @return The instance; `OutOfMemory` if a memory's or a table's initial size exceeds its cap
++///         (RuntimeLimits::memoryBytes, RuntimeLimits::tableElements), `InvalidComponent`
+ ///         if WAMR cannot instantiate the module, `RuntimeUnavailable` on a resource failure.
+ [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiateModule(
+     std::shared_ptr<IWasmModule const> owner,
+     WASMModuleCommon* module,
+     RuntimeLimits const& limits,
+     std::span<ExportDescription const> exports,
+-    binary::TableShape tables,
++    uint32_t largestInitialTableElements,
+     IHostContext& context);
+ 
+ /// The most host functions one runtime can be created with.
+ inline constexpr auto MaxHostFunctions = std::size_t { 32 };
+ 
+ /// What a host function is registered with WAMR as, in the raw calling convention.
+ ///
+ /// Every part lives as long as the process: WAMR's native registry is process-wide and is searched by
+ /// name, newest registration first, so a module may link against another runtime's registration of the
+ /// same host function, and keep what it linked to after that runtime has unregistered it.
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+index 064becd06..a2ad86777 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+@@ -116,21 +116,21 @@ namespace
+         };
+ 
+       public:
+         /// @see WasmtimeModule::instantiate
+         [[nodiscard]] static std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> create(
+             std::shared_ptr<WasmtimeModule const> owner,
+             WasmtimeRuntime const& runtime,
+             wasmtime_module_t const* module,
+             std::span<ExportDescription const> exports,
+             uint32_t largestInitialPages,
+-            binary::TableShape tables,
++            uint32_t largestInitialTableElements,
+             IHostContext& context);
+ 
+         /// Use create(); public only so that std::make_unique can reach it.
+         WasmtimeInstance(PrivateTag,
+                          std::shared_ptr<WasmtimeModule const> owner,
+                          std::unique_ptr<StoreData> data,
+                          detail::StoreHandle store,
+                          std::vector<FunctionEntry> functions,
+                          std::optional<wasmtime_memory_t> memory,
+                          wasm_engine_t const* engine) noexcept:
+@@ -293,28 +293,28 @@ namespace
+         wasm_engine_t const* _engine;             ///< The runtime's engine, whose epoch interrupt() moves.
+         uint32_t _callDepth = 0;                  ///< Calls running, nested ones included.
+     };
+ 
+     std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WasmtimeInstance::create(
+         std::shared_ptr<WasmtimeModule const> owner,
+         WasmtimeRuntime const& runtime,
+         wasmtime_module_t const* module,
+         std::span<ExportDescription const> exports,
+         uint32_t largestInitialPages,
+-        binary::TableShape tables,
++        uint32_t largestInitialTableElements,
+         IHostContext& context)
+     {
+         // Checked before instantiating, exported memories and tables and others alike: the limiter's
+         // refusal would fail the instantiation as an error indistinguishable from any other.
+         auto const limits = runtime.limits();
+         auto const capBytes = limits.memoryBytes;
+-        if (largestInitialPages * PageBytes > capBytes || !tables.fitsWithin(MaxTables, limits.tableElements))
++        if (largestInitialPages * PageBytes > capBytes || largestInitialTableElements > limits.tableElements)
+             return std::unexpected(ExtensionError::OutOfMemory);
+ 
+         auto data = std::make_unique<StoreData>(context, runtime.wasiEnvironment(), runtime.kind());
+         auto store = detail::StoreHandle { wasmtime_store_new(runtime.engine(), data.get(), nullptr) };
+         if (!store)
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         // Before anything runs in the store, a start function included: every deadline is one an interrupt
+         // of any instance of the runtime moves the epoch past.
+         wasmtime_store_epoch_deadline_callback(store.get(), &onEpochDeadline, data.get(), nullptr);
+         // Memory and tables grow up to their caps and no further (memory.grow and table.grow return -1);
+@@ -374,15 +374,20 @@ namespace
+                                                   std::move(functions),
+                                                   memory,
+                                                   runtime.engine());
+     }
+ } // namespace
+ 
+ std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> WasmtimeModule::instantiate(
+     IHostContext& context)
+ {
+     // The guest's `_initialize` is never run here: it stays an ordinary export, the caller's to call.
+-    return WasmtimeInstance::create(
+-        shared_from_this(), *_runtime, _module.get(), _exports, _largestInitialPages, _tables, context);
++    return WasmtimeInstance::create(shared_from_this(),
++                                    *_runtime,
++                                    _module.get(),
++                                    _exports,
++                                    _largestInitialPages,
++                                    _largestInitialTableElements,
++                                    context);
+ }
+ 
+ } // namespace vtextension::wasm::wasmtime
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeModule.cpp b/src/vtextension/wasm/wasmtime/WasmtimeModule.cpp
+index 4ebb50dbb..1b227f003 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeModule.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeModule.cpp
+@@ -244,47 +244,50 @@ detail::FuncTypeHandle functionType(FunctionSignature const& signature)
+     fill(parameters, signature.parameters);
+     auto results = wasm_valtype_vec_t {};
+     fill(results, signature.results);
+     // wasm_functype_new takes both vectors over.
+     return detail::FuncTypeHandle { wasm_functype_new(&parameters, &results) };
+ }
+ 
+ std::expected<std::shared_ptr<IWasmModule>, ExtensionError> loadModule(
+     std::shared_ptr<WasmtimeRuntime> runtime, wasm_engine_t* engine, std::span<std::byte const> bytes)
+ {
++    // More than MaxTables is refused before anything is compiled; Wasmtime would compile it.
++    auto const tables = binary::tableDeclarations(bytes, MaxTables);
++    if (!tables)
++        return std::unexpected(ExtensionError::InvalidComponent);
+     auto* compiled = static_cast<wasmtime_module_t*>(nullptr);
+     auto const error = detail::ErrorHandle { wasmtime_module_new(
+         engine, reinterpret_cast<uint8_t const*>(bytes.data()), bytes.size(), &compiled) };
+     auto module = detail::ModuleHandle { compiled };
+     if (error || !module)
+         return std::unexpected(ExtensionError::InvalidComponent);
+     auto imports = describeImports(module.get(), *runtime);
+     auto exports = describeExports(module.get());
+     // Wasmtime's C API describes no memory a module does not export; its bytes do.
+     auto const largestInitialPages = binary::largestInitialMemoryPages(bytes);
+-    auto const tables = binary::tableShape(bytes);
+-    if (!imports || !exports || !largestInitialPages || !tables)
++    if (!imports || !exports || !largestInitialPages)
+         return std::unexpected(ExtensionError::InvalidComponent);
+     return std::make_shared<WasmtimeModule>(std::move(runtime),
+                                             std::move(module),
+                                             std::move(*imports),
+                                             std::move(*exports),
+                                             *largestInitialPages,
+-                                            *tables);
++                                            binary::largestInitialElements(*tables));
+ }
+ 
+ WasmtimeModule::WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
+                                detail::ModuleHandle module,
+                                std::vector<ImportDescription> imports,
+                                std::vector<ExportDescription> exports,
+                                uint32_t largestInitialPages,
+-                               binary::TableShape tables) noexcept:
++                               uint32_t largestInitialTableElements) noexcept:
+     _runtime { std::move(runtime) },
+     _module { std::move(module) },
+     _imports { std::move(imports) },
+     _exports { std::move(exports) },
+     _largestInitialPages { largestInitialPages },
+-    _tables { tables }
++    _largestInitialTableElements { largestInitialTableElements }
+ {
+ }
+ 
+ } // namespace vtextension::wasm::wasmtime
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+index 5f3b11991..e700182cf 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+@@ -169,41 +169,41 @@ class WasmtimeRuntime final: public IWasmRuntime, public std::enable_shared_from
+ 
+ /// A compiled module, described once at load time.
+ class WasmtimeModule final: public IWasmModule, public std::enable_shared_from_this<WasmtimeModule>
+ {
+   public:
+     /// @param runtime The runtime it was loaded on, kept alive by it.
+     /// @param module The compiled module.
+     /// @param imports Its imports, with what the runtime provides.
+     /// @param exports Its exports.
+     /// @param largestInitialPages The largest initial size of the memories it defines, exported or not.
+-    /// @param tables The tables it defines, exported or not.
++    /// @param largestInitialTableElements The largest initial size of the tables it defines, exported or not.
+     WasmtimeModule(std::shared_ptr<WasmtimeRuntime> runtime,
+                    detail::ModuleHandle module,
+                    std::vector<ImportDescription> imports,
+                    std::vector<ExportDescription> exports,
+                    uint32_t largestInitialPages,
+-                   binary::TableShape tables) noexcept;
++                   uint32_t largestInitialTableElements) noexcept;
+ 
+     [[nodiscard]] std::span<ImportDescription const> imports() const noexcept override { return _imports; }
+     [[nodiscard]] std::span<ExportDescription const> exports() const noexcept override { return _exports; }
+     /// Defined in WasmtimeInstance.cpp. @see IWasmModule::instantiate
+     [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
+         IHostContext& context) override;
+ 
+   private:
+     std::shared_ptr<WasmtimeRuntime> _runtime; // Declared first, so released after the module.
+     detail::ModuleHandle _module;
+     std::vector<ImportDescription> _imports;
+     std::vector<ExportDescription> _exports;
+-    uint32_t _largestInitialPages; ///< In pages; what instantiate() checks against the memory cap.
+-    binary::TableShape _tables;    ///< What instantiate() checks against the table caps.
++    uint32_t _largestInitialPages;         ///< In pages; what instantiate() checks against the memory cap.
++    uint32_t _largestInitialTableElements; ///< What instantiate() checks against the table cap.
+ };
+ 
+ /// Decides whether a runtime provides an import, by module, name and signature: one of its host
+ /// functions (all-i32 parameters, no result), or an allowed WASI preview 1 function with its preview 1
+ /// signature (wasi/Preview1Signatures.hpp).
+ /// @param import The import, its linkage not yet decided.
+ /// @param hostBindings The runtime's host functions.
+ /// @return Whether it is provided.
+ [[nodiscard]] Linkage linkageOf(ImportDescription const& import, std::span<HostBinding const> hostBindings);
+ 

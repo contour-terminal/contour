@@ -1,0 +1,696 @@
+# Review package: 69a89b1d7..HEAD
+
+## Commits
+afcf521bf feat(vtextension): one table of WebAssembly features extensions may use
+
+## Files changed
+ cmake/ContourThirdParties.cmake                  |  26 +++-
+ cmake/WamrTerminateProbe.cpp                     |  69 +++++++++
+ src/vtextension/CMakeLists.txt                   |   1 +
+ src/vtextension/wasm/EngineFeatures.hpp          | 152 +++++++++++++++++++
+ src/vtextension/wasm/testing/BackendContract.hpp | 184 +++++++++++++++++++++++
+ 5 files changed, 429 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index 30c82312d..5834dc465 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -182,50 +182,56 @@ endif()
+ # WAMR (WebAssembly Micro Runtime) hosts the status-line extensions, interpreted only: fast
+ # interpreter on, every JIT and AOT off, so no executable memory is ever mapped. libc-wasi is on
+ # (guests are wasm32-wasip1), the libc-builtin shim is off. The thread manager is required although
+ # guests get no threads: without it the interpreter never polls for wasm_runtime_terminate(), so the
+ # watchdog could not stop a call that loops. Hardware bounds checks are off (memory and native
+ # stack): they install a process-wide SIGSEGV handler, which is not a library's to take, and keep
+ # process-wide signal state that every worker thread's setup writes; the interpreter checks bounds in
+ # software instead. Waking blocked WASI calls is off as well: it installs a process-wide SIGUSR1
+ # handler, and guests cannot block (poll_oneoff is refused). An installed WAMR does not say how it was
+ # built, so a system package is accepted only once cmake/WamrTerminateProbe.cpp has shown that
+-# terminating works and that initializing the runtime leaves SIGSEGV and SIGUSR1 alone; otherwise WAMR
+-# is built from source.
++# terminating works, that initializing the runtime leaves SIGSEGV and SIGUSR1 alone, and that it accepts
++# exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows; otherwise WAMR is
++# built from source.
+ #
+ # First-party code links contour::wamr, whichever WAMR it resolves to.
+ 
+ # ContourThirdParties_WamrTerminates(<target> <result-variable>)
+ #
+ # Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
+ # when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
+-# SIGSEGV or SIGUSR1 handler, FALSE otherwise (including when the probe cannot run, as when cross-compiling).
++# SIGSEGV or SIGUSR1 handler and it loads exactly the WebAssembly features extensions may use, FALSE
++# otherwise (including when the probe cannot run, as when cross-compiling).
+ # Sets <result-variable>_REASON to why a WAMR was rejected.
+ function(ContourThirdParties_WamrTerminates target resultVar)
+     set(${resultVar} FALSE PARENT_SCOPE)
+     set(${resultVar}_REASON "wasm_runtime_terminate() did not stop a call (built without WAMR_BUILD_THREAD_MGR?)" PARENT_SCOPE)
+     if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+         return()
+     endif()
+     find_package(Threads QUIET)
+     try_run(_wamr_probe_run _wamr_probe_compile
+         SOURCES "${PROJECT_SOURCE_DIR}/cmake/WamrTerminateProbe.cpp"
+         LINK_LIBRARIES ${target} Threads::Threads
+         CXX_STANDARD 20
+         NO_CACHE
+     )
+     if(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "0")
+         set(${resultVar} TRUE PARENT_SCOPE)
+     elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "8")
+         set(${resultVar}_REASON "it installs a SIGSEGV handler (built with hardware bounds checks)" PARENT_SCOPE)
+     elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "9")
+         set(${resultVar}_REASON "it installs a SIGUSR1 handler (built with wakeup of blocking operations)" PARENT_SCOPE)
++    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "10")
++        set(${resultVar}_REASON "it loads modules using SIMD, threads, tail calls or multiple memories" PARENT_SCOPE)
++    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "11")
++        set(${resultVar}_REASON "it refuses extended constant expressions (built without WAMR_BUILD_EXTENDED_CONST_EXPR)" PARENT_SCOPE)
+     endif()
+ endfunction()
+ 
+ if(CONTOUR_EXTENSIONS)
+     add_library(contour_wamr INTERFACE)
+     add_library(contour::wamr ALIAS contour_wamr)
+ 
+     set(_wamr_target "")
+     set(_wamr_rejected "")
+     if(TARGET iwasm::vmlib)
+@@ -274,20 +280,34 @@ if(CONTOUR_EXTENSIONS)
+                 "WAMR_BUILD_FAST_INTERP 1"
+                 "WAMR_BUILD_AOT 0"
+                 "WAMR_BUILD_JIT 0"
+                 "WAMR_BUILD_FAST_JIT 0"
+                 "WAMR_BUILD_LIBC_WASI 1"
+                 "WAMR_BUILD_LIBC_BUILTIN 0"
+                 "WAMR_BUILD_THREAD_MGR 1"
+                 "WAMR_BUILD_LIB_PTHREAD 0"
+                 "WAMR_BUILD_LIB_WASI_THREADS 0"
+                 "WAMR_BUILD_MULTI_MODULE 0"
++                # The WebAssembly features, as src/vtextension/wasm/EngineFeatures.hpp has them, so that WAMR
++                # accepts exactly the modules every other engine does; the backend contract checks it.
++                # Extended constant expressions are on because Wasmtime cannot refuse them.
++                "WAMR_BUILD_BULK_MEMORY 1"
++                "WAMR_BUILD_REF_TYPES 1"
++                "WAMR_BUILD_EXTENDED_CONST_EXPR 1"
++                "WAMR_BUILD_SIMD 0"
++                "WAMR_BUILD_SHARED_MEMORY 0"
++                "WAMR_BUILD_TAIL_CALL 0"
++                "WAMR_BUILD_MULTI_MEMORY 0"
++                "WAMR_BUILD_MEMORY64 0"
++                "WAMR_BUILD_GC 0"
++                "WAMR_BUILD_STRINGREF 0"
++                "WAMR_BUILD_EXCE_HANDLING 0"
+                 "WAMR_DISABLE_HW_BOUND_CHECK 1"
+                 "WAMR_DISABLE_STACK_HW_BOUND_CHECK 1"
+                 "WAMR_DISABLE_WAKEUP_BLOCKING_OP 1"
+                 # WAMR writes the linear memory's base to GS on every call, for the AOT code's sake ("segue");
+                 # the interpreter never reads it back. valgrind cannot decode wrgsbase, and the daemon's
+                 # suites run under it.
+                 "WAMR_DISABLE_WRITE_GS_BASE 1"
+                 "BUILD_SHARED_LIBS OFF"
+             EXCLUDE_FROM_ALL YES
+             SYSTEM YES
+diff --git a/cmake/WamrTerminateProbe.cpp b/cmake/WamrTerminateProbe.cpp
+index 66526e389..fa1341f11 100644
+--- a/cmake/WamrTerminateProbe.cpp
++++ b/cmake/WamrTerminateProbe.cpp
+@@ -3,32 +3,93 @@
+ // Configure-time probe (cmake/ContourThirdParties.cmake): exits 0 only if this WAMR stops a guest
+ // call that loops forever when another thread calls wasm_runtime_terminate(). That needs a WAMR built
+ // with WAMR_BUILD_THREAD_MGR=1; without it the interpreter never polls for termination, and the
+ // probe gives up after a few seconds instead of hanging the configure.
+ //
+ // It also rejects (exit code 8) a WAMR whose wasm_runtime_init() installs a SIGSEGV handler: one
+ // built with hardware bounds checks, which takes over the process's SIGSEGV and records process-wide
+ // signal state from every thread that prepares to run guests; and (exit code 9) one whose init
+ // installs a SIGUSR1 handler: one built with wakeup of blocking operations, which takes over SIGUSR1
+ // for the whole process. POSIX only; Windows has no sigaction.
++//
++// It rejects (exit code 10) a WAMR that loads a module using a feature extensions may not use (SIMD,
++// threads, tail calls, multiple memories), and (exit code 11) one that refuses extended constant
++// expressions, which extensions may use: src/vtextension/wasm/EngineFeatures.hpp is the table, and
++// the backend contract checks the same modules.
+ #include <array>
+ #include <chrono>
+ #include <cstdint>
+ #include <cstdlib>
++#include <span>
+ #include <thread>
++#include <vector>
+ 
+ #include <wasm_export.h>
+ 
+ #ifndef _WIN32
+     #include <signal.h>
+ #endif
+ 
++namespace
++{
++
++// (module (func (drop (v128.const i64x2 0 0))))
++constexpr auto SimdModule = std::to_array<std::uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
++    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // type: () -> ()
++    0x03, 0x02, 0x01, 0x00,                         // func 0: type 0
++    0x0a, 0x17, 0x01, 0x15, 0x00, 0xfd, 0x0c,       // code: v128.const
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //   its 16 bytes
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //
++    0x1a, 0x0b,                                     // drop, end
++});
++
++// (module (memory 1 1 shared))
++constexpr auto ThreadsModule = std::to_array<std::uint8_t>(
++    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x05, 0x04, 0x01, 0x03, 0x01, 0x01 });
++
++// (module (func (return_call 0)))
++constexpr auto TailCallModule = std::to_array<std::uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
++    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // type: () -> ()
++    0x03, 0x02, 0x01, 0x00,                         // func 0: type 0
++    0x0a, 0x06, 0x01, 0x04, 0x00, 0x12, 0x00, 0x0b, // return_call 0
++});
++
++// (module (memory 1) (memory 1))
++constexpr auto MultiMemoryModule = std::to_array<std::uint8_t>(
++    { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x01 });
++
++// (module (global i32 (i32.add (i32.const 1) (i32.const 2))))
++constexpr auto ExtendedConstModule = std::to_array<std::uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
++    0x06, 0x09, 0x01, 0x7f, 0x00,                   // global: i32, immutable
++    0x41, 0x01, 0x41, 0x02, 0x6a, 0x0b,             // initializer: i32.add in a constant expression
++});
++
++// Whether WAMR loads a copy of the module (WAMR may rewrite the bytes it loads).
++bool loads(std::span<std::uint8_t const> module)
++{
++    auto bytes = std::vector<std::uint8_t>(module.begin(), module.end());
++    auto error = std::array<char, 128> {};
++    auto* const loaded = wasm_runtime_load(bytes.data(),
++                                           static_cast<std::uint32_t>(bytes.size()),
++                                           error.data(),
++                                           static_cast<std::uint32_t>(error.size()));
++    if (!loaded)
++        return false;
++    wasm_runtime_unload(loaded);
++    return true;
++}
++
++} // namespace
++
+ int main()
+ {
+     // (module (func (export "spin") (loop (br 0))))
+     auto bytes = std::to_array<std::uint8_t>({
+         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                   // magic, version
+         0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                               // type: () -> ()
+         0x03, 0x02, 0x01, 0x00,                                           // func 0: type 0
+         0x07, 0x08, 0x01, 0x04, 's',  'p',  'i',  'n',  0x00, 0x00,       // export "spin" = func 0
+         0x0a, 0x09, 0x01, 0x07, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b, // loop { br 0 }
+     });
+@@ -45,20 +106,28 @@ int main()
+ #ifndef _WIN32
+     struct sigaction after {};
+     sigaction(SIGSEGV, nullptr, &after);
+     if (after.sa_handler != before.sa_handler || after.sa_flags != before.sa_flags)
+         return 8;
+     struct sigaction usr1After {};
+     sigaction(SIGUSR1, nullptr, &usr1After);
+     if (usr1After.sa_handler != usr1Before.sa_handler || usr1After.sa_flags != usr1Before.sa_flags)
+         return 9;
+ #endif
++    for (auto const disabled: { std::span<std::uint8_t const>(SimdModule),
++                                std::span<std::uint8_t const>(ThreadsModule),
++                                std::span<std::uint8_t const>(TailCallModule),
++                                std::span<std::uint8_t const>(MultiMemoryModule) })
++        if (loads(disabled))
++            return 10;
++    if (!loads(ExtendedConstModule))
++        return 11;
+     auto* const module = wasm_runtime_load(bytes.data(),
+                                            static_cast<std::uint32_t>(bytes.size()),
+                                            error.data(),
+                                            static_cast<std::uint32_t>(error.size()));
+     if (!module)
+         return 3;
+     auto* const instance = wasm_runtime_instantiate(
+         module, 16 * 1024, 0, error.data(), static_cast<std::uint32_t>(error.size()));
+     if (!instance)
+         return 4;
+diff --git a/src/vtextension/CMakeLists.txt b/src/vtextension/CMakeLists.txt
+index c4841e546..0494731c6 100644
+--- a/src/vtextension/CMakeLists.txt
++++ b/src/vtextension/CMakeLists.txt
+@@ -53,20 +53,21 @@ set(vtextension_HEADERS
+     Instance.hpp
+     Manifest.hpp
+     Placement.hpp
+     Runner.hpp
+     SessionExtensions.hpp
+     StatusLineAdapter.hpp
+     StatuslineWorld.hpp
+     Surface.hpp
+     Utf8.hpp
+     wasm/DefaultBackend.hpp
++    wasm/EngineFeatures.hpp
+     wasm/WasiAllowList.hpp
+     wasm/WasmBinary.hpp
+     wasm/WasmRuntime.hpp
+ )
+ 
+ add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
+ target_compile_definitions(vtextension PUBLIC CONTOUR_EXTENSIONS=1)
+ target_include_directories(vtextension PUBLIC
+     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+diff --git a/src/vtextension/wasm/EngineFeatures.hpp b/src/vtextension/wasm/EngineFeatures.hpp
+new file mode 100644
+index 000000000..311c9f9a0
+--- /dev/null
++++ b/src/vtextension/wasm/EngineFeatures.hpp
+@@ -0,0 +1,152 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The WebAssembly features an extension may use: the one table every engine is configured from, so
++// that each accepts exactly the modules the others accept. The backend contract holds every engine
++// to it.
++#pragma once
++
++#include <algorithm>
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <ranges>
++#include <string_view>
++
++namespace vtextension::wasm
++{
++
++/// A WebAssembly feature beyond the MVP, as engines switch them.
++enum class EngineFeature : uint8_t
++{
++    BulkMemory,
++    SignExtension,
++    SaturatingFloatToInt,
++    MutableGlobals,
++    MultiValue,
++    ReferenceTypes,
++    Gc,
++    Exceptions,
++    Threads,
++    Memory64,
++    MultiMemory,
++    TailCalls,
++    Simd,
++    RelaxedSimd,
++    ComponentModel,
++    ExtendedConst,
++    FunctionReferences,
++    RelaxedSimdDeterministic,
++    WideArithmetic,
++    BranchHinting,
++    CustomPageSizes,
++    StackSwitching,
++    ComponentModelAsync,
++    ComponentModelAsyncBuiltins,
++    ComponentModelAsyncStackful,
++    ComponentModelMap,
++};
++
++/// Whether extensions may use a feature.
++enum class FeatureState : uint8_t
++{
++    Off, ///< Every engine refuses a module that uses it.
++    On,  ///< Every engine accepts it.
++};
++
++/// Whether an engine can be told to refuse a feature.
++enum class FeatureSwitch : uint8_t
++{
++    Configurable, ///< Every engine takes a switch for it.
++    AlwaysOn,     ///< Wasmtime accepts it unconditionally (its C API has no switch), so it must be On.
++};
++
++/// One feature, whether extensions may use it, and its name in reports.
++struct FeatureRow
++{
++    EngineFeature feature {};                                  ///< The feature.
++    FeatureState state {};                                     ///< Whether extensions may use it.
++    std::string_view name;                                     ///< Its name, as the proposal calls it.
++    FeatureSwitch featureSwitch = FeatureSwitch::Configurable; ///< Whether an engine can refuse it.
++};
++
++/// The one table both engines configure from and the world check reports by name: one row per
++/// EngineFeature, in the enum's order. A feature no engine may be told to refuse is On.
++inline constexpr auto EngineFeatures = std::to_array<FeatureRow>({
++    { .feature = EngineFeature::BulkMemory, .state = FeatureState::On, .name = "bulk-memory" },
++    { .feature = EngineFeature::SignExtension,
++      .state = FeatureState::On,
++      .name = "sign-extension",
++      .featureSwitch = FeatureSwitch::AlwaysOn },
++    { .feature = EngineFeature::SaturatingFloatToInt,
++      .state = FeatureState::On,
++      .name = "saturating-float-to-int",
++      .featureSwitch = FeatureSwitch::AlwaysOn },
++    { .feature = EngineFeature::MutableGlobals,
++      .state = FeatureState::On,
++      .name = "mutable-globals",
++      .featureSwitch = FeatureSwitch::AlwaysOn },
++    { .feature = EngineFeature::MultiValue, .state = FeatureState::On, .name = "multi-value" },
++    { .feature = EngineFeature::ReferenceTypes, .state = FeatureState::On, .name = "reference-types" },
++    { .feature = EngineFeature::Gc, .state = FeatureState::Off, .name = "gc" },
++    { .feature = EngineFeature::Exceptions, .state = FeatureState::Off, .name = "exceptions" },
++    { .feature = EngineFeature::Threads, .state = FeatureState::Off, .name = "threads" },
++    { .feature = EngineFeature::Memory64, .state = FeatureState::Off, .name = "memory64" },
++    { .feature = EngineFeature::MultiMemory, .state = FeatureState::Off, .name = "multi-memory" },
++    { .feature = EngineFeature::TailCalls, .state = FeatureState::Off, .name = "tail-call" },
++    { .feature = EngineFeature::Simd, .state = FeatureState::Off, .name = "simd" },
++    { .feature = EngineFeature::RelaxedSimd, .state = FeatureState::Off, .name = "relaxed-simd" },
++    { .feature = EngineFeature::ComponentModel, .state = FeatureState::Off, .name = "component-model" },
++    { .feature = EngineFeature::ExtendedConst,
++      .state = FeatureState::On,
++      .name = "extended-const",
++      .featureSwitch = FeatureSwitch::AlwaysOn },
++    { .feature = EngineFeature::FunctionReferences,
++      .state = FeatureState::Off,
++      .name = "function-references" },
++    { .feature = EngineFeature::RelaxedSimdDeterministic,
++      .state = FeatureState::Off,
++      .name = "relaxed-simd-deterministic" },
++    { .feature = EngineFeature::WideArithmetic, .state = FeatureState::Off, .name = "wide-arithmetic" },
++    { .feature = EngineFeature::BranchHinting, .state = FeatureState::Off, .name = "branch-hinting" },
++    { .feature = EngineFeature::CustomPageSizes, .state = FeatureState::Off, .name = "custom-page-sizes" },
++    { .feature = EngineFeature::StackSwitching, .state = FeatureState::Off, .name = "stack-switching" },
++    { .feature = EngineFeature::ComponentModelAsync,
++      .state = FeatureState::Off,
++      .name = "component-model-async" },
++    { .feature = EngineFeature::ComponentModelAsyncBuiltins,
++      .state = FeatureState::Off,
++      .name = "component-model-async-builtins" },
++    { .feature = EngineFeature::ComponentModelAsyncStackful,
++      .state = FeatureState::Off,
++      .name = "component-model-async-stackful" },
++    { .feature = EngineFeature::ComponentModelMap,
++      .state = FeatureState::Off,
++      .name = "component-model-map" },
++});
++
++/// @return The row of @p feature in EngineFeatures.
++[[nodiscard]] constexpr FeatureRow const& featureRow(EngineFeature feature) noexcept
++{
++    return EngineFeatures[static_cast<std::size_t>(feature)];
++}
++
++namespace detail
++{
++    /// @return Whether EngineFeatures holds one row per feature, in the enum's order, and every feature
++    /// an engine cannot refuse is On.
++    [[nodiscard]] consteval bool engineFeaturesAreWellFormed() noexcept
++    {
++        auto const rowIsWellFormed = [](std::size_t index) {
++            auto const& row = EngineFeatures[index];
++            return static_cast<std::size_t>(row.feature) == index && !row.name.empty()
++                   && (row.featureSwitch == FeatureSwitch::Configurable || row.state == FeatureState::On);
++        };
++        return EngineFeatures.size() == static_cast<std::size_t>(EngineFeature::ComponentModelMap) + 1
++               && std::ranges::all_of(std::views::iota(std::size_t { 0 }, EngineFeatures.size()),
++                                      rowIsWellFormed);
++    }
++} // namespace detail
++
++static_assert(detail::engineFeaturesAreWellFormed());
++
++} // namespace vtextension::wasm
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index e7a312050..37c5b3d66 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -30,20 +30,21 @@
+ 
+ #ifndef _WIN32
+     #include <csignal>
+ #endif
+ 
+ #include <core/Utils.hpp>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/testing/StandardStreamsCapture.hpp>
+ #include <vtextension/testing/TestModules.hpp>
++#include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/WasiAllowList.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension::wasm::testing::contract
+ {
+ 
+ /// The import module the contract's host functions are provided under.
+ inline constexpr auto HostModule = std::string_view { "contract:test/host@0" };
+ 
+ /// The host functions every contract runtime is created with: `ping`, taking one i32, and `pair`,
+@@ -205,20 +206,158 @@ inline constexpr auto InstanceModule = std::to_array<uint8_t>({
+ ///       (func (export "pair") (param i32 i32) (call $pair (local.get 0) (local.get 1))))
+ inline constexpr auto PairModule = std::to_array<uint8_t>({
+     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x02, 0x7f, 0x7f,
+     0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74,
+     0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x61, 0x69, 0x72,
+     0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x11, 0x02, 0x06,
+     0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x70, 0x61, 0x69, 0x72, 0x00, 0x01,
+     0x0a, 0x0a, 0x01, 0x08, 0x00, 0x20, 0x00, 0x20, 0x01, 0x10, 0x00, 0x0b,
+ });
+ 
++/// Uses SIMD, which extensions may not.
++///
++///     (module (func (drop (v128.const i64x2 0 0))))
++inline constexpr auto SimdModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03,
++    0x02, 0x01, 0x00, 0x0a, 0x17, 0x01, 0x15, 0x00, 0xfd, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1a, 0x0b,
++});
++
++/// Declares a shared memory, which needs threads, which extensions may not use.
++///
++///     (module (memory 1 1 shared))
++inline constexpr auto ThreadsModule = std::to_array<uint8_t>({
++    0x00,
++    0x61,
++    0x73,
++    0x6d,
++    0x01,
++    0x00,
++    0x00,
++    0x00,
++    0x05,
++    0x04,
++    0x01,
++    0x03,
++    0x01,
++    0x01,
++});
++
++/// Makes a tail call, which extensions may not.
++///
++///     (module (func (return_call 0)))
++inline constexpr auto TailCallModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00,
++    0x00, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x12, 0x00, 0x0b,
++});
++
++/// Declares two memories, which extensions may not.
++///
++///     (module (memory 1) (memory 1))
++inline constexpr auto MultiMemoryModule = std::to_array<uint8_t>({
++    0x00,
++    0x61,
++    0x73,
++    0x6d,
++    0x01,
++    0x00,
++    0x00,
++    0x00,
++    0x05,
++    0x05,
++    0x02,
++    0x00,
++    0x01,
++    0x00,
++    0x01,
++});
++
++/// Fills memory with a bulk-memory instruction.
++///
++///     (module (memory 1) (func (memory.fill (i32.const 0) (i32.const 0) (i32.const 0))))
++inline constexpr auto BulkMemoryModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00,
++    0x00, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x0a, 0x0d, 0x01,
++    0x0b, 0x00, 0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xfc, 0x0b, 0x00, 0x0b,
++});
++
++/// Sign-extends a byte.
++///
++///     (module (func (result i32) (i32.extend8_s (i32.const 1))))
++inline constexpr auto SignExtensionModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
++    0x7f, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x07, 0x01, 0x05, 0x00, 0x41, 0x01, 0xc0, 0x0b,
++});
++
++/// Converts a float to an integer, saturating.
++///
++///     (module (func (result i32) (i32.trunc_sat_f32_s (f32.const 1))))
++inline constexpr auto SaturatingFloatToIntModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
++    0x02, 0x01, 0x00, 0x0a, 0x0b, 0x01, 0x09, 0x00, 0x43, 0x00, 0x00, 0x80, 0x3f, 0xfc, 0x00, 0x0b,
++});
++
++/// Exports a mutable global.
++///
++///     (module (global (export "g") (mut i32) (i32.const 0)))
++inline constexpr auto MutableGlobalsModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x06, 0x06, 0x01, 0x7f,
++    0x01, 0x41, 0x00, 0x0b, 0x07, 0x05, 0x01, 0x01, 0x67, 0x03, 0x00,
++});
++
++/// Returns two values.
++///
++///     (module (func (result i32 i32) (i32.const 1) (i32.const 2)))
++inline constexpr auto MultiValueModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x00, 0x02, 0x7f,
++    0x7f, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x08, 0x01, 0x06, 0x00, 0x41, 0x01, 0x41, 0x02, 0x0b,
++});
++
++/// Returns a null function reference.
++///
++///     (module (func (result funcref) (ref.null func)))
++inline constexpr auto ReferenceTypesModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
++    0x70, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0xd0, 0x70, 0x0b,
++});
++
++/// Initializes a global with an extended constant expression.
++///
++///     (module (global i32 (i32.add (i32.const 1) (i32.const 2))))
++inline constexpr auto ExtendedConstModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x06, 0x09,
++    0x01, 0x7f, 0x00, 0x41, 0x01, 0x41, 0x02, 0x6a, 0x0b,
++});
++
++/// A module using one feature beyond the MVP, and no other.
++struct FeatureModule
++{
++    EngineFeature feature {};       ///< The feature it uses.
++    std::span<uint8_t const> bytes; ///< The module.
++};
++
++/// One module per feature the contract checks: each engine accepts exactly those whose feature is On in
++/// EngineFeatures, and refuses the others.
++inline constexpr auto FeatureModules = std::array {
++    FeatureModule { .feature = EngineFeature::BulkMemory, .bytes = BulkMemoryModule },
++    FeatureModule { .feature = EngineFeature::SignExtension, .bytes = SignExtensionModule },
++    FeatureModule { .feature = EngineFeature::SaturatingFloatToInt, .bytes = SaturatingFloatToIntModule },
++    FeatureModule { .feature = EngineFeature::MutableGlobals, .bytes = MutableGlobalsModule },
++    FeatureModule { .feature = EngineFeature::MultiValue, .bytes = MultiValueModule },
++    FeatureModule { .feature = EngineFeature::ReferenceTypes, .bytes = ReferenceTypesModule },
++    FeatureModule { .feature = EngineFeature::ExtendedConst, .bytes = ExtendedConstModule },
++    FeatureModule { .feature = EngineFeature::Simd, .bytes = SimdModule },
++    FeatureModule { .feature = EngineFeature::Threads, .bytes = ThreadsModule },
++    FeatureModule { .feature = EngineFeature::TailCalls, .bytes = TailCallModule },
++    FeatureModule { .feature = EngineFeature::MultiMemory, .bytes = MultiMemoryModule },
++};
++
+ /// The WebAssembly page size, in bytes.
+ inline constexpr auto PageBytes = uint32_t { 64 } * 1024;
+ 
+ /// One host function call, as a RecordingHostContext saw it.
+ struct HostCall
+ {
+     std::size_t functionIndex = 0;   ///< The host function's index in the runtime's table.
+     std::vector<uint32_t> arguments; ///< Its flat arguments.
+     std::thread::id thread;          ///< The thread it ran on.
+ 
+@@ -368,20 +507,63 @@ template <std::size_t N>
+ template <typename T>
+ void loadRejectsNonModule()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+     auto const loaded = runtime->load({ std::byte { 1 }, std::byte { 2 } });
+     REQUIRE_FALSE(loaded.has_value());
+     CHECK(loaded.error() == ExtensionError::InvalidComponent);
+ }
+ 
++/// Loads each of FeatureModules whose feature is @p state in EngineFeatures, each in a section of its own
++/// named after the feature, and checks that it is accepted if the feature is On, refused if Off.
++template <typename T>
++void checkFeatureModules(FeatureState state)
++{
++    auto const backend = T::make();
++    auto const runtime = createRuntime(*backend);
++    auto const guard = enterThread(*backend);
++    for (auto const& [feature, bytes]: FeatureModules)
++    {
++        auto const& row = featureRow(feature);
++        if (row.state != state)
++            continue;
++        DYNAMIC_SECTION(row.name)
++        {
++            INFO("feature: " << row.name);
++            auto const module = std::as_bytes(bytes);
++            auto const loaded = runtime->load({ module.begin(), module.end() });
++            if (state == FeatureState::On)
++                CHECK(loaded.has_value());
++            else
++            {
++                REQUIRE_FALSE(loaded.has_value());
++                CHECK(loaded.error() == ExtensionError::InvalidComponent);
++            }
++        }
++    }
++}
++
++/// A module using a feature extensions may not use is refused.
++template <typename T>
++void refusesDisabledFeatures()
++{
++    checkFeatureModules<T>(FeatureState::Off);
++}
++
++/// A module using a feature extensions may use is accepted.
++template <typename T>
++void acceptsEnabledFeatures()
++{
++    checkFeatureModules<T>(FeatureState::On);
++}
++
+ /// A module's imports and exports are described as declared, with what the runtime provides.
+ template <typename T>
+ void describesImportsAndExports()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend);
+     auto const module = load(*runtime, DescribedModule);
+ 
+     CHECK(module->imports().size() == 2);
+     auto const& ping = importOf(*module, HostModule, "ping");
+@@ -967,20 +1149,22 @@ void wasiStdioGoesNowhere()
+ /// One contract case, run against the backend of @p Traits.
+ #define CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, Name)                 \
+     TEMPLATE_TEST_CASE("WasmContract." #Name, "[wasm-contract]", Traits) \
+     {                                                                    \
+         ::vtextension::wasm::testing::contract::Name<TestType>();        \
+     }
+ 
+ /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
+ #define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                        \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                 \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)              \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \

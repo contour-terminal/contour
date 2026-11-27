@@ -1,0 +1,214 @@
+926eab32f feat(vtextension): an extension host the loader ends is logged with why
+75fb55248 fix(vtextension): an instance refused for its answer's size is gone before the refusal is sent
+8538f54dc fix(vtextension): a contained extension host's environment names its container's own folders
+
+ .../wasm/remote/process/AppContainer_win32.cpp     |  3 +-
+ .../wasm/remote/process/ProcessLauncher.hpp        | 60 +++++++++++++++++-----
+ .../wasm/remote/process/ProcessLauncher_test.cpp   |  2 +
+ 3 files changed, 52 insertions(+), 13 deletions(-)
+
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+index bffd63cfd..fde4c5997 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+@@ -35,21 +35,22 @@ namespace
+     };
+     using LocalMemory = std::unique_ptr<void, LocalMemoryFree>;
+ 
+     /// The system functions the container is ensured through beyond kernel32's and advapi32's, looked up from
+     /// System32 the first time a launcher prepares a container, and imported by no executable -- neither as
+     /// it starts nor delay-loaded. An executable that links the launcher may itself run contained (the probe
+     /// does), and ole32, CoTaskMemFree()'s usual home, loads user32, whose initialisation connects to a
+     /// window station that a service's (a CI runner's, an SSH session's) does not admit an app container to:
+     /// the loader then ends the process with STATUS_DLL_INIT_FAILED (0xC0000142) before its main().
+     /// Delay-loading would take /DELAYLOAD on exactly the executables that pull this file in, and link.exe
+-    /// warns on every other (LNK4199).
++    /// warns on every other (LNK4199). userenv and combase are loaded once and deliberately never freed: that
++    /// keeps the looked-up pointers valid for as long as the process runs.
+     struct ContainerFunctions
+     {
+         decltype(&::CreateAppContainerProfile) createProfile = nullptr;             ///< userenv's.
+         decltype(&::DeriveAppContainerSidFromAppContainerName) deriveSid = nullptr; ///< userenv's.
+         decltype(&::GetAppContainerFolderPath) folderPath = nullptr;                ///< userenv's.
+         decltype(&::CoTaskMemFree) freeTaskMemory = nullptr; ///< combase's, which loads no user32.
+     };
+ 
+     /// @return The function @p name of @p library, as @p Function; nothing if either is missing.
+     template <typename Function>
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+index 10be39f19..a000324a1 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+@@ -10,27 +10,29 @@
+ /// null device, the root directory as its working directory, and no terminal of the parent's: on POSIX in a
+ /// session of its own, which has no controlling terminal; on Windows with a console of its own, which shows
+ /// no window. On POSIX the i-th inherited handle is descriptor 3 + i in the child;
+ /// on Windows a child sees inheritable duplicates under values known only once they exist, which is why the
+ /// command line is a function of them.
+ 
+ #include <core/Clock.hpp>
+ 
+ #include <algorithm>
+ #include <array>
++#include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <filesystem>
+ #include <format>
+ #include <functional>
+ #include <memory>
+ #include <optional>
++#include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ 
+@@ -123,69 +125,103 @@ struct LaunchErrorRow
+ [[nodiscard]] inline std::string_view launchErrorText(LaunchError error) noexcept
+ {
+     return launchErrors()[std::to_underlying(error)].text;
+ }
+ 
+ /// How a process ended.
+ enum class ExitKind : uint8_t
+ {
+     Exited,    ///< It exited; the value is its exit code.
+     Signalled, ///< A signal ended it; the value is the signal's number (POSIX).
++    Lost,      ///< It ended, but how is not known: another reaped it, or it could not be waited for.
+ };
+ 
+ /// How a process ended, and with what.
+ struct ExitStatus
+ {
+     ExitKind kind = ExitKind::Exited;
+-    int value = 0; ///< The exit code, or the signal's number.
++    int value = 0; ///< The exit code, or the signal's number; 0 where its status was lost.
+ 
+     bool operator==(ExitStatus const&) const = default;
+ };
+ 
+ /// How a process ended that another reaped -- a SIGCHLD handler of this process's -- or that could not be
+-/// waited for: its status is lost.
+-inline constexpr auto LostExitStatus = ExitStatus { .kind = ExitKind::Exited, .value = -1 };
++/// waited for: its status is lost. A kind of its own, so that no exit code a process really ends with --
++/// 0xFFFFFFFF on Windows -- reads as lost.
++inline constexpr auto LostExitStatus = ExitStatus { .kind = ExitKind::Lost, .value = 0 };
++
++/// How an ExitStatus's value is spelled in a log line.
++enum class ExitValueSpelling : uint8_t
++{
++    None,     ///< Not at all: there is none.
++    Decimal,  ///< In decimal.
++    ExitCode, ///< In decimal, or -- negative, an NTSTATUS -- in hex, with its KnownExitCodes reason.
++};
++
++/// One ExitKind: what a log line calls it, and how it spells the value.
++struct ExitKindRow
++{
++    ExitKind kind;              ///< The kind.
++    std::string_view text;      ///< What a log line says of it, before the value.
++    ExitValueSpelling spelling; ///< How it spells the value.
++};
++
++/// Every ExitKind, one row each, at its enumerator's index.
++inline constexpr auto ExitKinds = std::to_array<ExitKindRow>({
++    { .kind = ExitKind::Exited, .text = "exit code", .spelling = ExitValueSpelling::ExitCode },
++    { .kind = ExitKind::Signalled, .text = "signal", .spelling = ExitValueSpelling::Decimal },
++    { .kind = ExitKind::Lost, .text = "its exit status was lost", .spelling = ExitValueSpelling::None },
++});
++static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ExitKinds.size()),
++                                  [](std::size_t index) {
++                                      return std::to_underlying(ExitKinds[index].kind) == index;
++                                  })
++                  && ExitKinds.back().kind == ExitKind::Lost,
++              "ExitKinds holds every ExitKind at its enumerator's index");
+ 
+ /// An exit code that says why a process ended: on Windows, an NTSTATUS the loader ends a process with before
+ /// its main() runs. POSIX exit codes are 0 to 255, so none of these is mistaken for one.
+ struct KnownExitCode
+ {
+     uint32_t code;           ///< The exit code, as its bits read unsigned.
+     std::string_view reason; ///< Why the process ended, completing "it ended: ...".
+ };
+ 
+ /// Every exit code with a reason of its own.
+ inline constexpr auto KnownExitCodes = std::to_array<KnownExitCode>({
+     { .code = 0xC0000022, .reason = "it was denied access to a library it loads (STATUS_ACCESS_DENIED)" },
+     { .code = 0xC0000135, .reason = "a library it needs was not found (STATUS_DLL_NOT_FOUND)" },
+     { .code = 0xC0000142,
+       .reason =
+           "a library it loads failed to initialise (STATUS_DLL_INIT_FAILED); contained, usually one that "
+           "connects to a window station the app container may not use" },
+ });
+ 
+-/// @return How @p status says a process ended, for a log line: `its exit status was lost` for
+-///         LostExitStatus, `signal N`, `exit code N`, or -- for a negative code, an NTSTATUS --
++/// @return How @p status says a process ended, for a log line: its ExitKinds row's text, then its value --
++///         `its exit status was lost`, `signal N`, `exit code N`, or for a negative exit code, an NTSTATUS,
+ ///         `exit code 0xXXXXXXXX`, with its reason where KnownExitCodes has one.
+ [[nodiscard]] inline std::string exitStatusText(ExitStatus status)
+ {
+-    if (status == LostExitStatus)
+-        return "its exit status was lost";
+-    if (status.kind == ExitKind::Signalled)
+-        return std::format("signal {}", status.value);
++    auto const& row = ExitKinds[std::to_underlying(status.kind)];
++    switch (row.spelling)
++    {
++        case ExitValueSpelling::None: return std::string { row.text };
++        case ExitValueSpelling::Decimal: return std::format("{} {}", row.text, status.value);
++        case ExitValueSpelling::ExitCode: break;
++    }
+     if (status.value >= 0)
+-        return std::format("exit code {}", status.value);
++        return std::format("{} {}", row.text, status.value);
+     auto const code = static_cast<uint32_t>(status.value);
+     auto const known = std::ranges::find(KnownExitCodes, code, &KnownExitCode::code);
+     if (known == KnownExitCodes.end())
+-        return std::format("exit code 0x{:08X}", code);
+-    return std::format("exit code 0x{:08X}: {}", code, known->reason);
++        return std::format("{} 0x{:08X}", row.text, code);
++    return std::format("{} 0x{:08X}: {}", row.text, code, known->reason);
+ }
+ 
+ /// The caps on a child's resources.
+ struct ResourceCaps
+ {
+     /// The cap on its data memory, in bytes; 0 for none. Windows: the job's memory limit, applied here.
+     /// POSIX: handed to the helper as `--data-bytes`, which applies it itself.
+     uint64_t dataBytes = DefaultDataBytes;
+ };
+ 
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 483ff5507..a41fa45e6 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -144,20 +144,22 @@ TEST_CASE("ProcessLauncher.exitStatusSaysWhyWhereItKnows", "[vtextension]")
+ {
+     struct Row
+     {
+         ExitStatus status;
+         std::string_view text;
+     };
+     auto const rows = std::to_array<Row>({
+         { .status = process::LostExitStatus, .text = "its exit status was lost" },
+         { .status = { .kind = ExitKind::Exited, .value = 3 }, .text = "exit code 3" },
+         { .status = { .kind = ExitKind::Signalled, .value = 9 }, .text = "signal 9" },
++        // A process that really exits with 0xFFFFFFFF is not one whose status was lost.
++        { .status = { .kind = ExitKind::Exited, .value = -1 }, .text = "exit code 0xFFFFFFFF" },
+         { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000005U) },
+           .text = "exit code 0xC0000005" },
+         { .status = { .kind = ExitKind::Exited, .value = static_cast<int>(0xC0000142U) },
+           .text = "exit code 0xC0000142: a library it loads failed to initialise (STATUS_DLL_INIT_FAILED); "
+                   "contained, usually one that connects to a window station the app container may not use" },
+     });
+     for (auto const& row: rows)
+         CHECK(process::exitStatusText(row.status) == row.text);
+ }
+ 

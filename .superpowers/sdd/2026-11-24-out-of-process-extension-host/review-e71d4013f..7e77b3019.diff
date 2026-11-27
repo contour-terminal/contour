@@ -1,0 +1,777 @@
+# Review package: e71d4013f..HEAD
+
+## Commits
+7e77b3019 fix(vtextension): refuse a respawned host's other module, and serve no stale memory copy
+
+## Files changed
+ src/vtextension/wasm/BackendConfig.hpp             |   9 +-
+ src/vtextension/wasm/remote/CopyPathMemory.cpp     |  13 +-
+ .../wasm/remote/CopyPathMemory_test.cpp            |  26 ++
+ src/vtextension/wasm/remote/RemoteBackend.cpp      |  20 +-
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp | 359 ++++++++++++++++-----
+ 5 files changed, 333 insertions(+), 94 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/BackendConfig.hpp b/src/vtextension/wasm/BackendConfig.hpp
+index e6d42250b..cf7ba0a60 100644
+--- a/src/vtextension/wasm/BackendConfig.hpp
++++ b/src/vtextension/wasm/BackendConfig.hpp
+@@ -22,16 +22,19 @@ struct HostTimeouts
+ {
+     std::chrono::milliseconds load { 10'000 };       ///< To load a module.
+     std::chrono::milliseconds instantiate { 1'000 }; ///< To instantiate one.
+     std::chrono::milliseconds handshake { 2'000 };   ///< To say Hello once started.
+     std::chrono::milliseconds interruptGrace { 50 }; ///< To stop a call once interrupted.
+ };
+ 
+ /// How the backend that runs extensions is set up.
+ struct BackendConfig
+ {
+-    std::filesystem::path helper;                      ///< The extension host executable.
+-    HostTimeouts timeouts {};                          ///< How long a host may take; not enforced yet.
+-    std::shared_ptr<remote::IHostConnector> connector; ///< How hosts are started; null: in this process.
++    std::filesystem::path helper; ///< The extension host executable.
++    HostTimeouts timeouts {};     ///< How long a host may take; not enforced yet.
++    /// How hosts are started. Null leaves it to the composition root: the remote backend itself needs one,
++    /// and fails every load `HostUnavailable` without it, while a composition that can run hosts in this
++    /// process supplies a connector for them.
++    std::shared_ptr<remote::IHostConnector> connector;
+ };
+ 
+ } // namespace vtextension::wasm
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory.cpp b/src/vtextension/wasm/remote/CopyPathMemory.cpp
+index 816cd9628..f4cb518cd 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory.cpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory.cpp
+@@ -20,24 +20,29 @@ CopyPathMemory::CopyPathMemory(uint32_t instanceId, std::size_t capBytes, Memory
+ 
+ std::optional<std::span<std::byte>> CopyPathMemory::view(uint32_t address, uint32_t size)
+ {
+     if (size == 0)
+         return std::span<std::byte> {};
+     auto const begin = uint64_t { address };
+     auto const end = begin + size;
+     if (end > uint64_t { 1 } << 32)
+         return std::nullopt;
+ 
+-    // The latest range holding all of it: it carries every earlier range's bytes it overlaps.
+-    for (auto& range: _ranges | std::views::reverse)
+-        if (range.address <= begin && end <= range.address + uint64_t { range.bytes.size() })
+-            return std::span { range.bytes }.subspan(address - range.address, size);
++    // Served from the latest range overlapping it, if that one holds all of it: it carries every earlier
++    // range's bytes it overlaps. A range holding it all but overlapped by a later one may hold bytes the
++    // later one changed since; a range fetched anew overlays them.
++    auto const latest = std::ranges::find_if(_ranges | std::views::reverse, [&](Range const& range) {
++        return range.address < end && begin < range.address + uint64_t { range.bytes.size() };
++    });
++    if (latest != (_ranges | std::views::reverse).end() && latest->address <= begin
++        && end <= latest->address + uint64_t { latest->bytes.size() })
++        return std::span { latest->bytes }.subspan(address - latest->address, size);
+ 
+     if (_heldBytes + size > _capBytes)
+         return std::nullopt;
+     auto fetched = _fetch(address, size);
+     if (!fetched || fetched->size() != size)
+         return std::nullopt;
+ 
+     // Earlier ranges' bytes, as written, overlaid in fetch order: what was written since they were fetched
+     // is what the instance would hold now, had it been written there.
+     for (auto const& earlier: _ranges)
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory_test.cpp b/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
+index 6bd2b1933..88a86e2ce 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
+@@ -147,10 +147,36 @@ TEST_CASE("CopyPathMemory.refusesWhatItCannotHold", "[vtextension][remote]")
+ 
+     CHECK_FALSE(copies.view(250, 16).has_value());         // past the memory's end
+     CHECK_FALSE(copies.view(0xFFFF'FFF0, 32).has_value()); // past the address space; fetches nothing
+     CHECK(memory.fetches == 1);
+ 
+     REQUIRE(copies.view(0, 48).has_value());
+     CHECK_FALSE(copies.view(100, 17).has_value()); // past the cap: 48 + 17 > 64; fetches nothing
+     CHECK(memory.fetches == 2);
+     CHECK(copies.view(100, 16).has_value());
+ }
++
++TEST_CASE("CopyPathMemory.overlappedRangeIsNotServedStale", "[vtextension][remote]")
++{
++    auto memory = FakeMemory { 256 };
++    auto copies = memory.copies(1024);
++
++    // A = [0, 8), then B = [4, 12), written where it overlaps A: A's copy of [4, 8) is stale now.
++    REQUIRE(copies.view(0, 8).has_value());
++    auto const b = copies.view(4, 8);
++    REQUIRE(b.has_value());
++    (*b)[0] = std::byte { 0xB4 };
++    (*b)[3] = std::byte { 0xB7 };
++
++    auto const again = copies.view(0, 8);
++    REQUIRE(again.has_value());
++    CHECK((*again)[0] == std::byte { 0 });
++    CHECK((*again)[4] == std::byte { 0xB4 });
++    CHECK((*again)[7] == std::byte { 0xB7 });
++
++    // A view inside the latest range overlapping it is served from that range, fetching nothing.
++    auto const fetches = memory.fetches;
++    auto const inner = copies.view(4, 4);
++    REQUIRE(inner.has_value());
++    CHECK((*inner)[0] == std::byte { 0xB4 });
++    CHECK(memory.fetches == fetches);
++}
+diff --git a/src/vtextension/wasm/remote/RemoteBackend.cpp b/src/vtextension/wasm/remote/RemoteBackend.cpp
+index 3bec02f33..2c5b3f2ba 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend.cpp
+@@ -61,23 +61,26 @@ namespace
+     /// describing more imports or exports than the module has is not believed.
+     /// @return The module's description; the host's own error if it refused the module, `InvalidComponent` if
+     ///         the module is too large to send, `HostUnavailable` if the host died or broke the protocol.
+     [[nodiscard]] std::expected<LoadedModule, ExtensionError> loadInto(HelperIncarnation& incarnation,
+                                                                        std::span<std::byte const> bytes)
+     {
+         auto const moduleId = incarnation.nextModuleId();
+         auto reply = incarnation.request(proto::Load { .runtimeId = HelperIncarnation::RuntimeId,
+                                                        .moduleId = moduleId,
+                                                        .bytes = { bytes.begin(), bytes.end() } });
++        // A module too large to send is the extension's fault; anything else, an over-cap reply included, the
++        // host's, which then is dead.
+         if (!reply)
+-            return std::unexpected(reply.error() == StreamError::OverCap ? ExtensionError::InvalidComponent
+-                                                                         : ExtensionError::HostUnavailable);
++            return std::unexpected(reply.error() == StreamError::OverCap && incarnation.isAlive()
++                                       ? ExtensionError::InvalidComponent
++                                       : ExtensionError::HostUnavailable);
+         auto* const loaded = std::get_if<proto::Loaded>(&*reply);
+         if (!loaded || loaded->moduleId != moduleId)
+         {
+             incarnation.markDead();
+             return std::unexpected(ExtensionError::HostUnavailable);
+         }
+         if (loaded->error)
+             return std::unexpected(*loaded->error);
+         auto const declared = binary::declaredCounts(bytes);
+         if (!declared || loaded->imports.size() > declared->imports
+@@ -167,20 +170,22 @@ namespace
+             return _create.functions;
+         }
+ 
+       private:
+         /// @return The slot of the host modules of @p key run in; a slot of its own for an empty key.
+         [[nodiscard]] std::shared_ptr<HelperSlot> slotFor(std::string const& key)
+         {
+             if (key.empty())
+                 return std::make_shared<HelperSlot>(_connector, _create);
+             auto const lock = std::scoped_lock { _mutex };
++            // The hosts of identities whose last module went are forgotten.
++            std::erase_if(_slots, [](auto const& entry) { return entry.second.expired(); });
+             auto& entry = _slots[key];
+             auto slot = entry.lock();
+             if (!slot)
+             {
+                 slot = std::make_shared<HelperSlot>(_connector, _create);
+                 entry = slot;
+             }
+             return slot;
+         }
+ 
+@@ -383,29 +388,34 @@ namespace
+     std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> RemoteModule::instantiate(
+         IHostContext& context)
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         auto incarnation = _slot->live();
+         if (!incarnation)
+             return std::unexpected(incarnation.error());
+         auto& host = **incarnation;
+         if (*incarnation != _loadedIn)
+         {
+-            // The host it was loaded in died: loaded again in the new one, it must be the module it was.
++            // The host it was loaded in died: loaded again in the new one, it must be the module it was. An
++            // honest host describes the same bytes alike every time, so one that does not is not trusted, and
++            // the module is adopted there only once it matched.
+             auto reloaded = loadInto(host, _bytes);
+             if (!reloaded)
+                 return std::unexpected(reloaded.error());
++            if (reloaded->imports != _imports || reloaded->exports != _exports)
++            {
++                host.markDead();
++                return std::unexpected(ExtensionError::InvalidComponent);
++            }
+             _loadedIn->post(proto::Release { .target = proto::ReleaseTarget::Module, .id = _moduleId });
+             _loadedIn = *incarnation;
+             _moduleId = reloaded->moduleId;
+-            if (reloaded->imports != _imports || reloaded->exports != _exports)
+-                return std::unexpected(ExtensionError::InvalidComponent);
+         }
+ 
+         auto const instanceId = host.nextInstanceId();
+         auto reply = host.request(proto::Instantiate { .moduleId = _moduleId, .instanceId = instanceId });
+         if (!reply)
+             return std::unexpected(ExtensionError::HostUnavailable);
+         auto* const instantiated = std::get_if<proto::Instantiated>(&*reply);
+         auto const callable = [&](uint32_t ordinal) {
+             return ordinal < _exports.size() && _exports[ordinal].kind == ExternKind::Function
+                    && _exports[ordinal].signature.parameters.size() <= proto::MaxCallValues
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index d16118a5f..eaffda2a5 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -24,23 +24,23 @@
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/testing/TestModules.hpp>
+ #include <vtextension/wasm/BackendConfig.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/HostServer.hpp>
+ #include <vtextension/wasm/host/InProcessHost.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/RemoteBackend.hpp>
++#include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+-#include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::BackendConfig;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::ExportDescription;
+ using vtextension::wasm::ExternKind;
+ using vtextension::wasm::FunctionSignature;
+@@ -57,21 +57,20 @@ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
+ using vtextension::wasm::remote::HostConnection;
+ using vtextension::wasm::remote::IHostConnector;
+ using vtextension::wasm::remote::IHostHandle;
+ using vtextension::wasm::remote::makeRemoteBackend;
+ using vtextension::wasm::remote::makeRemoteKindState;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ using vtextension::wasm::remote::RemoteKindState;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+-using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::testing::makeHostedEngine;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace contract = vtextension::wasm::testing::contract;
+ 
+ namespace
+ {
+ 
+ /// The kind every remote backend of this binary shares, as a process's do.
+ [[nodiscard]] std::shared_ptr<RemoteKindState> const& sharedKind()
+@@ -253,51 +252,101 @@ class WritingHostContext final: public IHostContext
+             view->begin());
+         return {};
+     }
+ 
+     static constexpr auto Address = uint32_t { 64 };
+ 
+   private:
+     IWasmInstance* _instance = nullptr;
+ };
+ 
+-/// The helper's ends of a scripted connection.
++/// @return @p pdu as one frame; empty if it cannot be encoded.
++[[nodiscard]] std::vector<uint8_t> frameOf(proto::Pdu const& pdu)
++{
++    return proto::encodeFrame(pdu).value_or(std::vector<uint8_t> {});
++}
++
++/// @return The header of a frame of @p kind whose body is @p bodyBytes long, without the body.
++[[nodiscard]] std::vector<uint8_t> headerOf(proto::PduKind kind, uint64_t bodyBytes)
++{
++    auto header = std::vector<uint8_t> {};
++    auto length = bodyBytes + 1; // the body, and the kind's byte
++    do
++    {
++        auto const low = static_cast<uint8_t>(length & 0x7f);
++        length >>= 7;
++        header.push_back(static_cast<uint8_t>(low | (length != 0 ? 0x80 : 0x00)));
++    } while (length != 0);
++    header.push_back(static_cast<uint8_t>(kind));
++    return header;
++}
++
++/// The helper's ends of a scripted connection, all raw, to write what no PduStream would.
+ struct HelperEnds
+ {
+-    PduStream control;          ///< The control channel, framed.
+-    std::vector<Channel> lanes; ///< The lanes, raw, to write what no PduStream would.
++    Channel control;               ///< The control channel.
++    std::vector<Channel> lanes;    ///< The lanes.
++    std::vector<uint8_t> received; ///< Control bytes received and not decoded yet.
++
++    /// Sends @p frame on the control channel.
++    /// @return Whether it was sent.
++    [[nodiscard]] bool sendFrame(std::span<uint8_t const> frame) { return control.send(frame).has_value(); }
+ 
+     /// Sends @p pdu on the control channel.
+     /// @return Whether it was sent.
+-    [[nodiscard]] bool send(proto::Pdu const& pdu) { return control.send(pdu).has_value(); }
++    [[nodiscard]] bool send(proto::Pdu const& pdu) { return sendFrame(frameOf(pdu)); }
++
++    /// @return The next control PDU; nothing once the channel closed or carried what the codec refuses.
++    [[nodiscard]] std::optional<proto::Pdu> receivePdu()
++    {
++        while (true)
++        {
++            auto decoded = proto::decodeFrame(
++                received, proto::Direction::ToHelper, proto::ChannelKind::Control, proto::PduLimits {});
++            if (decoded)
++            {
++                received.erase(received.begin(),
++                               received.begin() + static_cast<std::ptrdiff_t>(decoded->consumed));
++                return std::move(decoded->pdu);
++            }
++            if (decoded.error() != proto::DecodeError::NeedMoreData)
++                return std::nullopt;
++            auto chunk = std::array<uint8_t, 4096> {};
++            auto const count = control.receiveSome(chunk);
++            if (!count)
++                return std::nullopt;
++            received.insert(
++                received.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(*count));
++        }
++    }
+ 
+     /// @return The next control PDU, if it is a @p T; nothing otherwise.
+     template <typename T>
+     [[nodiscard]] std::optional<T> receive()
+     {
+-        auto pdu = control.receive();
++        auto pdu = receivePdu();
+         if (!pdu || !std::holds_alternative<T>(*pdu))
+             return std::nullopt;
+         return std::get<T>(std::move(*pdu));
+     }
+ 
+     /// Writes @p bytes on every lane.
+     void writeOnEveryLane(std::span<uint8_t const> bytes)
+     {
+         for (auto& lane: lanes)
+             std::ignore = lane.send(bytes);
+     }
+ 
+     /// Waits until the parent closes its end of the control channel.
+     void drain()
+     {
+-        while (control.receive())
++        while (receivePdu())
+         {
+         }
+     }
+ };
+ 
+ /// A host handle that counts how often it was told to terminate.
+ class CountingHandle final: public IHostHandle
+ {
+   public:
+     explicit CountingHandle(std::shared_ptr<std::atomic<int>> terminations) noexcept:
+@@ -310,134 +359,177 @@ class CountingHandle final: public IHostHandle
+ 
+   private:
+     std::shared_ptr<std::atomic<int>> _terminations;
+ };
+ 
+ /// A connector whose host is the test: each connection runs the script on the helper's ends, on a thread of
+ /// its own, which is joined when the connector goes. A script returns once the parent closes its ends.
+ class ScriptedConnector final: public IHostConnector
+ {
+   public:
+-    using Script = std::function<void(HelperEnds&)>;
++    /// What a connection's host does, given the helper's ends and how many connections came before it.
++    using Script = std::function<void(HelperEnds&, std::size_t)>;
+ 
+     explicit ScriptedConnector(Script script): _script { std::move(script) } {}
+     ScriptedConnector(ScriptedConnector const&) = delete;
+     ScriptedConnector(ScriptedConnector&&) = delete;
+     ScriptedConnector& operator=(ScriptedConnector const&) = delete;
+     ScriptedConnector& operator=(ScriptedConnector&&) = delete;
+     ~ScriptedConnector() override = default;
+ 
+     [[nodiscard]] std::expected<HostConnection, ExtensionError> connect() override
+     {
+         auto control = makeChannelPair();
+         if (!control)
+             return std::unexpected(ExtensionError::HostUnavailable);
+         auto connection = HostConnection { .control = std::move(control->parent),
+                                            .lanes = {},
+                                            .handle = std::make_unique<CountingHandle>(_terminations) };
+-        auto ends = HelperEnds { .control = PduStream { std::move(control->helper),
+-                                                        proto::ChannelKind::Control,
+-                                                        proto::Direction::ToHelper,
+-                                                        proto::PduLimits {} },
+-                                 .lanes = {} };
++        auto ends = HelperEnds { .control = std::move(control->helper), .lanes = {}, .received = {} };
+         for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, MaxLaneChannels))
+         {
+             auto lane = makeChannelPair();
+             if (!lane)
+                 return std::unexpected(ExtensionError::HostUnavailable);
+             connection.lanes.push_back(std::move(lane->parent));
+             ends.lanes.push_back(std::move(lane->helper));
+         }
+-        _threads.emplace_back([script = _script, ends = std::move(ends)]() mutable { script(ends); });
++        _threads.emplace_back([script = _script,
++                               ends = std::move(ends),
++                               connection = _threads.size()]() mutable { script(ends, connection); });
+         return connection;
+     }
+ 
+     /// @return How often a host of this connector was told to terminate.
+     [[nodiscard]] int terminations() const noexcept { return _terminations->load(); }
+ 
+   private:
+     Script _script;
+     std::shared_ptr<std::atomic<int>> _terminations = std::make_shared<std::atomic<int>>(0);
+     std::vector<std::jthread> _threads;
+ };
+ 
+ /// The Hello an honest helper opens with.
+ constexpr auto HonestHello = proto::Hello { .version = proto::ProtocolVersion,
+                                             .memoryMode = proto::MemoryMode::Copy,
+                                             .lockdown = proto::LockdownState::Unsandboxed };
+ 
+-/// Plays an honest helper up to loading PeekModule, describing it as @p describe does, and instantiating it.
+-/// @return Whether every step went as an honest parent drives it.
+-[[nodiscard]] bool serveUpToInstantiation(HelperEnds& ends,
+-                                          std::function<proto::Loaded(uint32_t)> const& describe)
+-{
+-    if (!ends.send(HonestHello))
+-        return false;
+-    auto const create = ends.receive<proto::CreateRuntime>();
+-    if (!create
+-        || !ends.send(proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt }))
+-        return false;
+-    auto const load = ends.receive<proto::Load>();
+-    if (!load || !ends.send(describe(load->moduleId)))
+-        return false;
+-    auto const instantiate = ends.receive<proto::Instantiate>();
+-    return instantiate
+-           && ends.send(proto::Instantiated {
+-               .instanceId = instantiate->instanceId, .error = std::nullopt, .callableExports = { 1, 2 } });
++/// The callable exports an honest host names for PeekModule: `load` and `ping-then-load`.
++constexpr auto PeekCallables = std::array { uint32_t { 1 }, uint32_t { 2 } };
++
++/// What a scripted helper answers at each step: the frame it sends, built from the id the parent chose.
++struct HelperScript
++{
++    /// Answers Load.
++    std::function<std::vector<uint8_t>(uint32_t moduleId)> loaded = [](uint32_t moduleId) {
++        return frameOf(peekDescription(moduleId));
++    };
++    /// Answers Instantiate.
++    std::function<std::vector<uint8_t>(uint32_t instanceId)> instantiated = [](uint32_t instanceId) {
++        return frameOf(
++            proto::Instantiated { .instanceId = instanceId,
++                                  .error = std::nullopt,
++                                  .callableExports = { PeekCallables.begin(), PeekCallables.end() } });
++    };
++    std::vector<uint8_t> laneBytes {}; ///< Written on every lane once the instance is answered for.
++};
++
++/// Plays a helper that says Hello, creates the runtime and answers as @p script says, until the parent closes
++/// its ends.
++void serve(HelperEnds& ends, HelperScript const& script)
++{
++    auto const served = [&] {
++        if (!ends.send(HonestHello))
++            return false;
++        auto const create = ends.receive<proto::CreateRuntime>();
++        if (!create
++            || !ends.send(proto::RuntimeCreated { .runtimeId = create->runtimeId, .error = std::nullopt }))
++            return false;
++        auto const load = ends.receive<proto::Load>();
++        if (!load || !ends.sendFrame(script.loaded(load->moduleId)))
++            return false;
++        auto const instantiate = ends.receive<proto::Instantiate>();
++        return instantiate && ends.sendFrame(script.instantiated(instantiate->instanceId));
++    }();
++    if (served && !script.laneBytes.empty())
++        ends.writeOnEveryLane(script.laneBytes);
++    ends.drain();
++}
++
++/// @return A connector whose every host plays @p script.
++[[nodiscard]] std::shared_ptr<ScriptedConnector> scriptedConnector(HelperScript script)
++{
++    return std::make_shared<ScriptedConnector>(
++        [script = std::move(script)](HelperEnds& ends, std::size_t /*connection*/) { serve(ends, script); });
++}
++
++/// A runtime of a remote backend whose hosts a connector the test holds starts.
++struct ScriptedRig
++{
++    std::shared_ptr<ScriptedConnector> connector;
++    std::unique_ptr<IWasmBackend> backend = makeBackend(connector);
++    std::shared_ptr<IWasmRuntime> runtime = contract::createRuntime(*backend);
++};
++
++/// @return A PeekModule instance, served by a host playing @p script, which must succeed.
++struct ScriptedInstance
++{
++    explicit ScriptedInstance(HelperScript script): rig { .connector = scriptedConnector(std::move(script)) }
++    {
++    }
++
++    ScriptedRig rig;
++    std::unique_ptr<vtextension::wasm::IThreadGuard> guard = contract::enterThread(*rig.backend);
++    std::shared_ptr<IWasmModule> module = contract::load(*rig.runtime, PeekModule);
++    contract::RecordingHostContext context;
++    std::unique_ptr<IWasmInstance> instance = contract::instantiate(*module, context);
++};
++
++/// @return What calling `load(0)` of @p instance fails with; nothing if it returned.
++[[nodiscard]] std::optional<CallFailure> loadFailure(IWasmInstance& instance)
++{
++    auto argv = std::array<uint32_t, 1> { 0 };
++    auto const called = instance.call(contract::functionOf(instance, "load"), argv);
++    return called ? std::nullopt : std::optional { called.error() };
+ }
+ 
+ /// Loads PeekModule through a scripted host that opens with @p hello.
+ /// @return What the load failed with; nothing if it succeeded.
+ [[nodiscard]] std::optional<ExtensionError> loadAfterHello(proto::Hello hello, int& terminations)
+ {
+-    auto const connector = std::make_shared<ScriptedConnector>([hello](HelperEnds& ends) {
+-        if (ends.send(hello))
+-            ends.drain();
+-    });
++    auto const connector =
++        std::make_shared<ScriptedConnector>([hello](HelperEnds& ends, std::size_t /*connection*/) {
++            if (ends.send(hello))
++                ends.drain();
++        });
+     {
+         auto const backend = makeBackend(connector);
+         auto const runtime = contract::createRuntime(*backend);
+         auto const loaded = runtime->load(ModuleIdentity {}, toModule(PeekModule));
+         terminations = connector->terminations();
+         if (!loaded)
+             return loaded.error();
+     }
+     return std::nullopt;
+ }
+ 
+ /// Plays a helper that serves up to instantiation, then writes @p bytes on every lane; checks that the
+ /// parent's call reading them fails `HostCrashed`, and that the host was terminated exactly once.
+ void checkLaneBytesKillTheHelper(std::span<uint8_t const> bytes)
+ {
+-    auto const written = std::vector<uint8_t> { bytes.begin(), bytes.end() };
+-    auto const connector = std::make_shared<ScriptedConnector>([written](HelperEnds& ends) {
+-        if (!serveUpToInstantiation(ends, peekDescription))
+-            return;
+-        ends.writeOnEveryLane(written);
+-        ends.drain();
+-    });
+-    auto const backend = makeBackend(connector);
+-    auto const runtime = contract::createRuntime(*backend);
+-    auto const guard = contract::enterThread(*backend);
+-    auto const module = contract::load(*runtime, PeekModule);
+-    auto context = contract::RecordingHostContext {};
+-    auto const instance = contract::instantiate(*module, context);
+-
+-    auto argv = std::array<uint32_t, 1> { 0 };
+-    auto const load = contract::functionOf(*instance, "load");
+-    CHECK(instance->call(load, argv)
+-          == std::expected<void, CallFailure> { std::unexpected(CallFailure::HostCrashed) });
+-    CHECK(connector->terminations() == 1);
+-    CHECK(instance->call(load, argv)
+-          == std::expected<void, CallFailure> { std::unexpected(CallFailure::HostCrashed) });
+-    CHECK_FALSE(instance->memory(0, 4).has_value());
+-    CHECK(connector->terminations() == 1);
++    auto scripted = ScriptedInstance { HelperScript { .laneBytes = { bytes.begin(), bytes.end() } } };
++    auto& instance = *scripted.instance;
++    CHECK(loadFailure(instance) == CallFailure::HostCrashed);
++    CHECK(scripted.rig.connector->terminations() == 1);
++    CHECK(loadFailure(instance) == CallFailure::HostCrashed);
++    CHECK_FALSE(instance.memory(0, 4).has_value());
++    CHECK(scripted.rig.connector->terminations() == 1);
+ }
+ 
+ } // namespace
+ 
+ CONTOUR_WASM_BACKEND_CONTRACT(RemoteTraits)
+ 
+ TEST_CASE("RemoteBackend.sameIdentitySharesAHelper", "[vtextension][remote]")
+ {
+     auto const connector = makeConnector();
+     auto const backend = makeBackend(connector);
+@@ -568,48 +660,151 @@ TEST_CASE("RemoteBackend.lockdownFailureIsHostUnavailable", "[vtextension][remot
+ 
+ TEST_CASE("RemoteBackend.malformedPduKillsTheHelper", "[vtextension][remote]")
+ {
+     // A frame of kind zero, which names no PDU.
+     checkLaneBytesKillTheHelper(std::to_array<uint8_t>({ 0x03, 0x00, 0xff, 0xff }));
+ }
+ 
+ TEST_CASE("RemoteBackend.overCapPduKillsTheHelper", "[vtextension][remote]")
+ {
+     // A MemoryData header declaring a body 17 bytes larger than the largest memory, and nothing after it.
+-    auto header = std::vector<uint8_t> {};
+-    auto length = proto::PduLimits {}.maxMemoryBytes + 17 + 1; // the body, and the kind's byte
+-    do
+-    {
+-        auto const low = static_cast<uint8_t>(length & 0x7f);
+-        length >>= 7;
+-        header.push_back(static_cast<uint8_t>(low | (length != 0 ? 0x80 : 0x00)));
+-    } while (length != 0);
+-    header.push_back(static_cast<uint8_t>(proto::PduKind::MemoryData));
+-    checkLaneBytesKillTheHelper(header);
++    checkLaneBytesKillTheHelper(
++        headerOf(proto::PduKind::MemoryData, proto::PduLimits {}.maxMemoryBytes + 17));
+ }
+ 
+ TEST_CASE("RemoteBackend.describedMoreThanDeclaredKillsTheHelper", "[vtextension][remote]")
+ {
+-    auto const connector = std::make_shared<ScriptedConnector>([](HelperEnds& ends) {
+-        std::ignore = serveUpToInstantiation(ends, [](uint32_t moduleId) {
+-            auto loaded = peekDescription(moduleId);
+-            loaded.imports.push_back(loaded.imports.front());
+-            return loaded;
+-        });
+-        ends.drain();
+-    });
+-    auto const backend = makeBackend(connector);
+-    auto const runtime = contract::createRuntime(*backend);
+-    auto const loaded = runtime->load(ModuleIdentity {}, toModule(PeekModule));
++    auto rig = ScriptedRig { .connector = scriptedConnector(HelperScript { .loaded = [](uint32_t moduleId) {
++                                 auto loaded = peekDescription(moduleId);
++                                 loaded.imports.push_back(loaded.imports.front());
++                                 return frameOf(loaded);
++                             } }) };
++    auto const loaded = rig.runtime->load(ModuleIdentity {}, toModule(PeekModule));
+     REQUIRE_FALSE(loaded.has_value());
+     CHECK(loaded.error() == ExtensionError::HostUnavailable);
+-    CHECK(connector->terminations() == 1);
++    CHECK(rig.connector->terminations() == 1);
++}
++
++TEST_CASE("RemoteBackend.overCapReplyIsTheHostsFault", "[vtextension][remote]")
++{
++    // A Loaded larger than any description of a module may be: the host broke the protocol, the module did
++    // not.
++    auto rig =
++        ScriptedRig { .connector = scriptedConnector(HelperScript { .loaded = [](uint32_t /*moduleId*/) {
++                          return headerOf(proto::PduKind::Loaded,
++                                          (4 * proto::PduLimits {}.maxModuleBytes) + 1);
++                      } }) };
++    auto const loaded = rig.runtime->load(ModuleIdentity {}, toModule(PeekModule));
++    REQUIRE_FALSE(loaded.has_value());
++    CHECK(loaded.error() == ExtensionError::HostUnavailable);
++    CHECK(rig.connector->terminations() == 1);
++}
++
++TEST_CASE("RemoteBackend.wrongRepliesKillTheHelper", "[vtextension][remote]")
++{
++    struct Case
++    {
++        std::string_view what;
++        HelperScript script;
++    };
++    auto const instantiatedWith = [](std::vector<uint32_t> callable) {
++        return [callable = std::move(callable)](uint32_t instanceId) {
++            return frameOf(proto::Instantiated {
++                .instanceId = instanceId, .error = std::nullopt, .callableExports = callable });
++        };
++    };
++    auto const cases = std::vector<Case> {
++        { .what = "Loaded for another module",
++          .script =
++              HelperScript {
++                  .loaded = [](uint32_t moduleId) { return frameOf(peekDescription(moduleId + 1)); } } },
++        { .what = "Instantiated for another instance",
++          .script =
++              HelperScript { .instantiated =
++                                 [](uint32_t instanceId) {
++                                     return frameOf(proto::Instantiated {
++                                         .instanceId = instanceId + 1,
++                                         .error = std::nullopt,
++                                         .callableExports = { PeekCallables.begin(), PeekCallables.end() } });
++                                 } } },
++        { .what = "a callable ordinal past the exports",
++          .script = HelperScript { .instantiated = instantiatedWith({ 1, 3 }) } },
++        { .what = "a callable memory export",
++          .script = HelperScript { .instantiated = instantiatedWith({ 0 }) } },
++    };
++    for (auto const& [what, script]: cases)
++    {
++        INFO(what);
++        auto rig = ScriptedRig { .connector = scriptedConnector(script) };
++        auto const module = rig.runtime->load(ModuleIdentity {}, toModule(PeekModule));
++        auto context = contract::RecordingHostContext {};
++        auto const failure =
++            module ? module.value()->instantiate(context).error_or(ExtensionError::Trapped) : module.error();
++        CHECK(failure == ExtensionError::HostUnavailable);
++        CHECK(rig.connector->terminations() == 1);
++    }
++}
++
++TEST_CASE("RemoteBackend.memoryDataOfTheWrongSizeKillsTheHelper", "[vtextension][remote]")
++{
++    // Three bytes, where four were asked for.
++    auto scripted = ScriptedInstance { HelperScript {
++        .laneBytes =
++            frameOf(proto::MemoryData { .status = proto::MemoryStatus::Ok,
++                                        .bytes = { std::byte { 1 }, std::byte { 2 }, std::byte { 3 } } }) } };
++    CHECK_FALSE(scripted.instance->memory(0, 4).has_value());
++    // Checked before calling: had the host survived, the call would wait for an answer it never sends.
++    REQUIRE(scripted.rig.connector->terminations() == 1);
++    CHECK(loadFailure(*scripted.instance) == CallFailure::HostCrashed);
++}
++
++TEST_CASE("RemoteBackend.wrongResultCountKillsTheHelper", "[vtextension][remote]")
++{
++    // Two results, where `load` returns one.
++    auto scripted = ScriptedInstance { HelperScript {
++        .laneBytes = frameOf(proto::CallResult { .failure = std::nullopt, .argv = { 1, 2 } }) } };
++    CHECK(loadFailure(*scripted.instance) == CallFailure::HostCrashed);
++    CHECK(scripted.rig.connector->terminations() == 1);
++    CHECK(loadFailure(*scripted.instance) == CallFailure::HostCrashed);
++}
++
++TEST_CASE("RemoteBackend.respawnDescribingAnotherModuleIsRefused", "[vtextension][remote]")
++{
++    // The first host dies after instantiating; every later one describes the module without its last export.
++    auto const connector = std::make_shared<ScriptedConnector>([](HelperEnds& ends, std::size_t connection) {
++        if (connection == 0)
++        {
++            serve(ends, HelperScript { .laneBytes = { 0x03, 0x00, 0xff, 0xff } });
++            return;
++        }
++        serve(ends, HelperScript { .loaded = [](uint32_t moduleId) {
++                  auto loaded = peekDescription(moduleId);
++                  loaded.exports.pop_back();
++                  return frameOf(loaded);
++              } });
++    });
++    auto rig = ScriptedRig { .connector = connector };
++    auto const guard = contract::enterThread(*rig.backend);
++    auto const module = contract::load(*rig.runtime, PeekModule);
++    auto context = contract::RecordingHostContext {};
++    auto const first = contract::instantiate(*module, context);
++    REQUIRE(loadFailure(*first) == CallFailure::HostCrashed);
++
++    for (auto const attempt: std::views::iota(1, 3))
++    {
++        INFO("attempt " << attempt);
++        auto const respawned = module->instantiate(context);
++        REQUIRE_FALSE(respawned.has_value());
++        CHECK(respawned.error() == ExtensionError::InvalidComponent);
++        CHECK(connector->terminations() == 1 + attempt);
++    }
++    CHECK(module->exports().size() == 3);
+ }
+ 
+ TEST_CASE("RemoteBackend.fifthLaneThreadFailsItsCall", "[vtextension][remote][threading]")
+ {
+     auto const backend = makeBackend(makeConnector());
+     auto const runtime = contract::createRuntime(*backend);
+     auto const module = contract::load(*runtime, contract::InstanceModule);
+     auto parked = std::latch { static_cast<std::ptrdiff_t>(MaxLaneChannels) };
+     auto release = std::promise<void> {};
+     auto context = ParkingHostContext { parked, release.get_future().share() };

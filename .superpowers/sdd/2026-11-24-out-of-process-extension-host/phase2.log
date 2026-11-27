@@ -1,0 +1,24 @@
+4a0b5086d test(vtextension): pin that callers share a load in flight, and its failure
+45c31a567 feat(vtextension): load each extension once per process, behind a breaker for its host
+3ce6b5120 test(vtextension): name the constructor hook case for what is refused
+8b65322e7 fix(vtextension): snapshot only the memory pages the parent fetched
+e2ed5e691 test(vtextension): give the large-output render a deadline it can meet
+dade38107 fix(vtextension): refuse instantiation hooks before any engine sees them
+1931d68ce fix(vtextension): keep copied guest memory in a page shadow
+f6230198e refactor: configure the extension runtime at every composition root
+6f68f2cb7 fix(vtextension): reuse a held memory copy unless another one wrote into it
+7e77b3019 fix(vtextension): refuse a respawned host's other module, and serve no stale memory copy
+e71d4013f feat(vtextension): a backend that runs extensions in a separate host over channels
+02559f053 test(vtextension): measure what each nested call takes of a lane's stack
+b6b24f85c fix(vtextension): end a host that cannot start a lane's thread, instead of throwing
+a74ad411e feat(vtextension): carry a runtime's table cap to its host
+a4b683eae fix(vtextension): report a host that died before the host call it failed
+4cc49cc4b fix(vtextension): bound a lane's nested calls by the stack its thread has
+b0160e5b7 feat(vtextension): serve extension modules over channels from a host
+baa7df1ba refactor(vtextension): the Wasmtime backend becomes an engine a host process drives
+b9ac67ab6 test(vtextension): a pane's extensions load under their host id
+e77776254 fix(vtextension): refuse a PDU over its byte cap at the sender
+fa61f604c feat(vtextension): name a module's host at the runtime seam, and report a crashed one
+a827bcbbe fix(vtextension): refuse over-cap PDUs at the sender, and cancel only an open pipe
+16cdbe78d fix(vtextension): bound decoded lists, and end the peer's stream on shutdown
+fbfcb6778 feat(vtextension): a bounded wire protocol and channels for the extension host process

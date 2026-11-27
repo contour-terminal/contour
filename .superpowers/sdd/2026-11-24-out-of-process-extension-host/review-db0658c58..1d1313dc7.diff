@@ -1,0 +1,509 @@
+# Review package: db0658c58..HEAD
+
+## Commits
+1d1313dc7 fix(vtextension): a nested WAMR call keeps what the outer call recorded
+9b1e098f4 fix(vtextension): an interrupt during a host function call stops the Wasmtime guest
+
+## Files changed
+ src/vtextension/wasm/testing/BackendContract.hpp   | 46 +++++++++++
+ src/vtextension/wasm/wamr/WamrInstance.cpp         | 11 ++-
+ .../wasm/wasmtime/WasmtimeBackend_test.cpp         | 93 +++++++++++++++++++++-
+ src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp | 32 +++++++-
+ 4 files changed, 174 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index effee4c5f..c6179355c 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -368,20 +368,40 @@ inline constexpr auto NestedCallModule = std::to_array<uint8_t>({
+     0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61,
+     0x63, 0x74, 0x3a, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70,
+     0x69, 0x6e, 0x67, 0x00, 0x00, 0x03, 0x04, 0x03, 0x01, 0x02, 0x01, 0x07, 0x24, 0x03, 0x04, 0x66,
+     0x61, 0x69, 0x6c, 0x00, 0x01, 0x06, 0x61, 0x62, 0x73, 0x6f, 0x72, 0x62, 0x00, 0x02, 0x10, 0x61,
+     0x62, 0x73, 0x6f, 0x72, 0x62, 0x2d, 0x74, 0x68, 0x65, 0x6e, 0x2d, 0x74, 0x72, 0x61, 0x70, 0x00,
+     0x03, 0x0a, 0x19, 0x03, 0x06, 0x00, 0x41, 0x01, 0x10, 0x00, 0x0b, 0x08, 0x00, 0x41, 0x00, 0x10,
+     0x00, 0x41, 0x07, 0x0b, 0x07, 0x00, 0x41, 0x00, 0x10, 0x00, 0x00, 0x0b, 0x00, 0x0e, 0x04, 0x6e,
+     0x61, 0x6d, 0x65, 0x01, 0x07, 0x01, 0x00, 0x04, 0x70, 0x69, 0x6e, 0x67,
+ });
+ 
++/// What the growth case of the nested-call case runs: `fail` calls `ping(1)`; `grow-absorb-then-trap`
++/// grows its memory by 4 pages, ignoring a refusal, then calls `ping(0)`, then traps on its own.
++///
++///     (module
++///       (import "contract:test/host@0" "ping" (func (param i32)))
++///       (memory (export "memory") 1)
++///       (func (export "fail") (call 0 (i32.const 1)))
++///       (func (export "grow-absorb-then-trap")
++///         (drop (memory.grow (i32.const 4))) (call 0 (i32.const 0)) unreachable))
++inline constexpr auto GrowThenNestedCallModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60,
++    0x00, 0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74,
++    0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x69, 0x6e, 0x67, 0x00,
++    0x00, 0x03, 0x03, 0x02, 0x01, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x29, 0x03, 0x06, 0x6d,
++    0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x66, 0x61, 0x69, 0x6c, 0x00, 0x01, 0x15, 0x67,
++    0x72, 0x6f, 0x77, 0x2d, 0x61, 0x62, 0x73, 0x6f, 0x72, 0x62, 0x2d, 0x74, 0x68, 0x65, 0x6e, 0x2d,
++    0x74, 0x72, 0x61, 0x70, 0x00, 0x02, 0x0a, 0x15, 0x02, 0x06, 0x00, 0x41, 0x01, 0x10, 0x00, 0x0b,
++    0x0c, 0x00, 0x41, 0x04, 0x40, 0x00, 0x1a, 0x41, 0x00, 0x10, 0x00, 0x00, 0x0b,
++});
++
+ /// Passes its two parameters on to the two-parameter host function, in order.
+ ///
+ ///     (module
+ ///       (import "contract:test/host@0" "pair" (func $pair (param i32 i32)))
+ ///       (memory (export "memory") 1)
+ ///       (func (export "pair") (param i32 i32) (call $pair (local.get 0) (local.get 1))))
+ inline constexpr auto PairModule = std::to_array<uint8_t>({
+     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x02, 0x7f, 0x7f,
+     0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74,
+     0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x61, 0x69, 0x72,
+@@ -990,20 +1010,45 @@ void nestedHostFailureStaysNested()
+     REQUIRE_FALSE(trapped.has_value());
+     CHECK(trapped.error() == CallFailure::Trap);
+ 
+     auto result = std::array<uint32_t, 1> {};
+     auto const returned = instance->call(functionOf(*instance, "absorb"), result);
+     CHECK(context.nested() == nestedFailure);
+     REQUIRE(returned.has_value());
+     CHECK(result[0] == 7);
+ }
+ 
++/// What a call recorded before a host function called back into its instance is still its own once that
++/// nested call returned: a refused growth, then an absorbed nested failure, then the guest's own trap
++/// fails the call as the refused growth, where the backend reports one.
++template <typename T>
++void nestedCallKeepsTheOuterRecord()
++{
++    auto const backend = T::make();
++    auto const runtime = createRuntime(
++        *backend,
++        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes, .stackBytes = Limits.stackBytes });
++    auto const guard = enterThread(*backend);
++    auto const module = load(*runtime, GrowThenNestedCallModule);
++    auto context = AbsorbingHostContext {};
++    auto const instance = instantiate(*module, context);
++    context.attach(*instance);
++
++    auto const called = instance->call(functionOf(*instance, "grow-absorb-then-trap"), {});
++    CHECK(context.nested() == std::expected<void, CallFailure> { std::unexpected(CallFailure::HostFailure) });
++    REQUIRE_FALSE(called.has_value());
++    auto const expected = backend->capabilities().memoryGrowth == MemoryGrowthReporting::Reported
++                              ? CallFailure::MemoryGrowthRefused
++                              : CallFailure::Trap;
++    CHECK(called.error() == expected);
++}
++
+ /// Which of two runtimes alive at once goes first.
+ enum class FirstToGo : uint8_t
+ {
+     Older, ///< The one created first.
+     Newer, ///< The one created second.
+ };
+ 
+ /// Two runtimes with the same host functions are alive at once, and @p firstToGo goes: what was loaded
+ /// on the other keeps linking and calling.
+ template <typename T>
+@@ -1364,20 +1409,21 @@ void wasiStdioGoesNowhere()
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)              \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                  \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instantiateLeavesReactorToCaller)      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)         \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder)  \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)                \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedHostFailureStaysNested)          \
++    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, nestedCallKeepsTheOuterRecord)         \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)                \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callAfterTrapRuns)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)           \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesUnexportedInitialSize) \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                    \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                \
+diff --git a/src/vtextension/wasm/wamr/WamrInstance.cpp b/src/vtextension/wasm/wamr/WamrInstance.cpp
+index a69d8677f..f84557b2f 100644
+--- a/src/vtextension/wasm/wamr/WamrInstance.cpp
++++ b/src/vtextension/wasm/wamr/WamrInstance.cpp
+@@ -142,27 +142,31 @@ namespace
+                 _fault = std::nullopt;
+                 wasm_runtime_clear_exception(_instance.get());
+             }
+ 
+             // The interrupt is sticky: once requested, no call enters the guest again. Checked after the
+             // exception is cleared, so that a request landing in between is seen here, and one landing
+             // after this check finds WAMR's exception set, which stops the call before it gets far.
+             if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
+                 return std::unexpected(CallFailure::Interrupted);
+ 
++            // A nested call records its own failure from scratch; what the call it is nested in recorded so
++            // far is that call's, and comes back once the nested call returns.
++            auto const outerFault = _callDepth > 0 ? std::exchange(_fault, std::nullopt) : std::nullopt;
+             ++_callDepth;
+             auto const returned =
+                 wasm_runtime_call_wasm(_execEnv.get(), entry.function, entry.parameterCount, argv.data());
+             --_callDepth;
+             auto const failed = returned ? std::nullopt : std::optional { failure() };
+             if (_callDepth > 0)
+-                endNestedCall(failed.has_value() ? NestedCallOutcome::Failed : NestedCallOutcome::Returned);
++                endNestedCall(failed.has_value() ? NestedCallOutcome::Failed : NestedCallOutcome::Returned,
++                              outerFault);
+             if (failed)
+                 return std::unexpected(*failed);
+             return {};
+         }
+ 
+         [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+         {
+             if (size == 0)
+                 return std::span<std::byte> {};
+             auto* const memory = wasm_runtime_get_default_memory(_instance.get());
+@@ -205,23 +209,24 @@ namespace
+         {
+             if (!_fault || fault == CallFailure::HostFailure)
+                 _fault = fault;
+         }
+ 
+         /// Leaves the call a nested call returns into as it was: the nested call reports what it recorded
+         /// through its own result, and the host function that made it decides what becomes of it. WAMR
+         /// keeps a failure's exception on the instance, where it would stop the outer call as soon as the
+         /// host function returns: it is cleared, unless it is an interrupt's, which stays final.
+         /// @param outcome How the nested call ended.
+-        void endNestedCall(NestedCallOutcome outcome) noexcept
++        /// @param outerFault What the call it is nested in had recorded when the nested call began.
++        void endNestedCall(NestedCallOutcome outcome, std::optional<CallFailure> outerFault) noexcept
+         {
+-            _fault = std::nullopt;
++            _fault = outerFault;
+             if (outcome == NestedCallOutcome::Returned)
+                 return;
+             wasm_runtime_clear_exception(_instance.get());
+             // An interrupt that landed before the exception was cleared is set again.
+             if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
+                 wasm_runtime_terminate(_instance.get());
+         }
+ 
+         /// @return Why the call that just failed did.
+         [[nodiscard]] CallFailure failure() const noexcept
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+index 6e6390e53..b79a2cf57 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeBackend_test.cpp
+@@ -1,24 +1,26 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The Wasmtime backend: the backend contract every runtime must meet, and what is Wasmtime's alone,
+ // the features it enables unless told otherwise, checked with its C API directly.
+ #include <catch2/catch_message.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
++#include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <format>
++#include <future>
+ #include <memory>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+@@ -69,20 +71,23 @@ struct WasmtimeTraits
+ 
+ /// @return Whether an engine left at Wasmtime's feature defaults compiles @p bytes. Its traps are checked
+ ///         in software all the same: an engine with signal-based traps would install Wasmtime's handlers
+ ///         for the rest of this process, over the sanitizer's, and blind the signal-handler case.
+ [[nodiscard]] bool defaultEngineAccepts(std::span<std::uint8_t const> bytes)
+ {
+     namespace detail = vtextension::wasm::wasmtime::detail;
+     auto* const config = wasm_config_new();
+     wasmtime_config_signals_based_traps_set(config, false);
+     wasmtime_config_macos_use_mach_ports_set(config, false);
++    // Compiled on this thread, as the backend's engines compile: Wasmtime's compilation threads
++    // synchronize in Rust no sanitizer sees. What the engine accepts does not depend on it.
++    wasmtime_config_parallel_compilation_set(config, false);
+     auto const engine = detail::EngineHandle { wasm_engine_new_with_config(config) };
+     REQUIRE(engine);
+     auto* module = static_cast<wasmtime_module_t*>(nullptr);
+     auto const error =
+         detail::ErrorHandle { wasmtime_module_new(engine.get(), bytes.data(), bytes.size(), &module) };
+     auto const owned = detail::ModuleHandle { module };
+     return !error;
+ }
+ 
+ /// @return The module the WebAssembly text @p wat assembles to.
+@@ -144,20 +149,53 @@ constexpr auto CountingModule = std::string_view { R"((module
+     (loop $again
+       (local.set $n (i32.add (local.get $n) (i32.const 1)))
+       (br_if $again (i32.lt_u (local.get $n) (i32.const 1000000))))
+     (local.get $n))
+   (func (export "ping-then-count") (result i32) (call $ping (i32.const 0)) (call $count)))
+ )" };
+ 
+ /// What `count` of CountingModule returns.
+ constexpr auto CountedTo = uint32_t { 1'000'000 };
+ 
++/// A host context whose every host function call interrupts its own instance, calls back into it, and
++/// absorbs the failure, as a host function may when it can do without what it asked for.
++class SelfInterruptingHostContext final: public vtextension::wasm::IHostContext
++{
++  public:
++    /// Names the instance: it is created with this context, so the two are wired after both exist.
++    /// @param instance The instance; outlives every call made through this context.
++    void attach(vtextension::wasm::IWasmInstance& instance) noexcept { _instance = &instance; }
++
++    [[nodiscard]] std::expected<void, ExtensionError> callHost(
++        std::size_t /*functionIndex*/, std::span<uint32_t const> /*arguments*/) noexcept override
++    {
++        _instance->interrupt();
++        if (auto const add = _instance->function("add"))
++        {
++            auto argv = std::array<uint32_t, 2> { 2, 3 };
++            _nested = _instance->call(*add, argv);
++        }
++        return {};
++    }
++
++    /// @return What the call back into the instance returned; nothing before it was made.
++    [[nodiscard]] std::optional<std::expected<void, vtextension::wasm::CallFailure>> const& nested()
++        const noexcept
++    {
++        return _nested;
++    }
++
++  private:
++    vtextension::wasm::IWasmInstance* _instance = nullptr;
++    std::optional<std::expected<void, vtextension::wasm::CallFailure>> _nested;
++};
++
+ /// A host context whose every host function call interrupts another instance: from inside a running
+ /// call, at a known point of it.
+ class InterruptingHostContext final: public vtextension::wasm::IHostContext
+ {
+   public:
+     /// @param target The instance every host function call interrupts; outlives the context's use.
+     explicit InterruptingHostContext(vtextension::wasm::IWasmInstance& target) noexcept: _target { &target }
+     {
+     }
+ 
+@@ -357,27 +395,76 @@ TEST_CASE("Wasmtime.idleInstanceNeverWakes", "[wasmtime]")
+     namespace contract = vtextension::wasm::testing::contract;
+     auto const& kind = *WasmtimeTraits::kind();
+     auto const backend = WasmtimeTraits::make();
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+     auto const module = runtime->load(assemble(CountingModule));
+     REQUIRE(module.has_value());
+     auto context = contract::RecordingHostContext {};
+     auto const instance = contract::instantiate(**module, context);
+ 
++    // Long enough for a ticker, were one moving the epoch, to fire many times over.
++    using namespace std::chrono_literals;
++    constexpr auto RunFor = 100ms;
++    auto const count = contract::functionOf(*instance, "count");
+     auto const before = kind.epochCallbacks();
+-    auto result = std::array<uint32_t, 1> {};
+-    REQUIRE(instance->call(contract::functionOf(*instance, "count"), result).has_value());
+-    CHECK(result[0] == CountedTo);
++    auto const started = std::chrono::steady_clock::now();
++    auto calls = 0;
++    auto counted = true;
++    while (std::chrono::steady_clock::now() - started < RunFor)
++    {
++        auto result = std::array<uint32_t, 1> {};
++        counted = counted && instance->call(count, result).has_value() && result[0] == CountedTo;
++        ++calls;
++    }
++    INFO("calls of a million iterations each: " << calls);
++    CHECK(counted);
+     CHECK(kind.epochCallbacks() == before);
+ }
+ 
++TEST_CASE("Wasmtime.nestedInterruptStopsTheOuterCall", "[wasmtime]")
++{
++    // An interrupt landing during a host function call stops the guest that made it, even when the host
++    // function calls back in, finds that call interrupted, absorbs the failure and returns into a guest
++    // that would spin forever. A regression would hang: the call runs on a thread of its own, and is
++    // released by a second interrupt if it does not end in time.
++    using namespace std::chrono_literals;
++    namespace contract = vtextension::wasm::testing::contract;
++    using vtextension::wasm::CallFailure;
++    auto const backend = WasmtimeTraits::make();
++    auto const runtime = contract::createRuntime(*backend);
++    auto const guard = contract::enterThread(*backend);
++    auto const module = runtime->load(assemble(R"((module
++  (import "contract:test/host@0" "ping" (func $ping (param i32)))
++  (func (export "add") (param i32 i32) (result i32) (i32.add (local.get 0) (local.get 1)))
++  (func (export "ping-then-spin") (call $ping (i32.const 0)) (loop (br 0))))
++)"));
++    REQUIRE(module.has_value());
++    auto context = SelfInterruptingHostContext {};
++    auto const instance = contract::instantiate(**module, context);
++    context.attach(*instance);
++    auto const pingThenSpin = contract::functionOf(*instance, "ping-then-spin");
++
++    auto called = std::async(std::launch::async, [&] {
++        auto const callGuard = backend->enterThread();
++        return instance->call(pingThenSpin, {});
++    });
++    auto const ended = called.wait_for(5s) == std::future_status::ready;
++    if (!ended)
++        instance->interrupt();
++    auto const result = called.get();
++    CHECK(ended);
++    CHECK(context.nested() == std::expected<void, CallFailure> { std::unexpected(CallFailure::Interrupted) });
++    REQUIRE_FALSE(result.has_value());
++    CHECK(result.error() == CallFailure::Interrupted);
++}
++
+ TEST_CASE("Wasmtime.interruptLeavesSiblingsRunning", "[wasmtime]")
+ {
+     // An interrupt moves the epoch every instance of the runtime shares. One running when it moves wakes
+     // once, finds its own instance not interrupted, and runs on; the interrupted one stays stopped.
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::CallFailure;
+     auto const& kind = *WasmtimeTraits::kind();
+     auto const backend = WasmtimeTraits::make();
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+index 1f7a32650..441d2bd31 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+@@ -74,20 +74,31 @@ namespace
+     /// deadline starts at epoch 0, which the engine's epoch has always reached.
+     void armEpochDeadline(wasmtime_context_t* context) noexcept
+     {
+         wasmtime_context_set_epoch_deadline(context, DeadlineTicks);
+     }
+ 
+     /// Wasmtime's epoch deadline callback: called on the thread of a running guest whose deadline the
+     /// epoch reached. The epoch is the engine's, shared by every instance of the runtime, so reaching
+     /// the deadline says only that some instance was interrupted: this one's own flag decides.
+     /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
++    ///
++    /// A known window, accepted: when this callback finds the flag not set and returns, Wasmtime sets the
++    /// new deadline one tick past the epoch *as it reads it then*, after the flag was read. An interrupt()
++    /// of this instance landing between the flag read and that re-read moves the epoch the new deadline is
++    /// then counted from, so the guest is not woken again: the interrupt is lost until another one moves
++    /// the epoch. It cannot be closed from here: the callback only hands back a delta relative to an epoch
++    /// Wasmtime reads after it returns, and neither it nor wasmtime_context_set_epoch_deadline sets an
++    /// absolute deadline or compares the epoch it counts from. It takes two instances sharing an engine
++    /// (another's interrupt woke this guest) and an interrupt landing within a few instructions. The
++    /// in-process Wasmtime backend serves tests; in production the guest runs in a helper process, and the
++    /// supervisor's grace timer kills a helper whose interrupted call does not return.
+     /// @param env The instance's StoreData.
+     /// @return An error ending the call if the instance was interrupted; otherwise null, with the deadline
+     ///         moved one tick past the current epoch.
+     wasmtime_error_t* onEpochDeadline(wasmtime_context_t* /*context*/,
+                                       void* env,
+                                       uint64_t* deadlineTicks,
+                                       wasmtime_update_deadline_kind_t* updateKind) noexcept
+     {
+         auto& data = *static_cast<StoreData*>(env);
+         data.kind.countEpochCallback();
+@@ -162,21 +173,21 @@ namespace
+ 
+             // The deadline goes first, the interrupt check after it: an interrupt landing between the two is
+             // seen by the check, and one landing after the check moves the epoch past the deadline, which
+             // stops the guest at its first epoch check. The fence pairs with interrupt()'s: if setting the
+             // deadline read an epoch an interrupt moved, the check sees that interrupt's flag.
+             auto* const context = storeContext();
+             armEpochDeadline(context);
+             std::atomic_thread_fence(std::memory_order_acquire);
+             // The interrupt is sticky: once requested, no call enters the guest again.
+             if (_data->interrupt.load(std::memory_order_relaxed) == InterruptState::Interrupted)
+-                return std::unexpected(CallFailure::Interrupted);
++                return interrupted(context);
+ 
+             // A host function may call back into the instance (to allocate in guest memory): what the
+             // outermost call records is kept until it returns.
+             if (_callDepth == 0)
+                 _data->hostFailure = std::nullopt;
+ 
+             auto inlineArguments = std::array<wasmtime_val_t, InlineValues> {};
+             auto wideArguments = std::vector<wasmtime_val_t> {};
+             auto const arguments = valuesFor(entry.parameterCount, inlineArguments, wideArguments);
+             for (auto const [index, argument]: core::views::enumerate(arguments))
+@@ -197,20 +208,22 @@ namespace
+                                                                         results.data(),
+                                                                         results.size(),
+                                                                         &rawTrap) };
+             --_callDepth;
+             auto const trap = detail::TrapHandle { rawTrap };
+             auto const failed = error || trap ? std::optional { failure() } : std::nullopt;
+             // A nested call reports its host failure through its own result: the host function that made
+             // it decides what becomes of it, and the call it is nested in must not report it again.
+             if (_callDepth > 0)
+                 _data->hostFailure = std::nullopt;
++            if (failed == CallFailure::Interrupted)
++                return interrupted(context);
+             if (failed)
+                 return std::unexpected(*failed);
+ 
+             std::ranges::transform(results, argv.begin(), [](wasmtime_val_t const& result) {
+                 return static_cast<uint32_t>(result.of.i32);
+             });
+             return {};
+         }
+ 
+         [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+@@ -224,30 +237,45 @@ namespace
+             if (uint64_t { address } + size > bytes)
+                 return std::nullopt;
+             auto const whole =
+                 std::span<std::byte> { reinterpret_cast<std::byte*>(wasmtime_memory_data(context, &*_memory)),
+                                        bytes };
+             return whole.subspan(address, size);
+         }
+ 
+         /// Wait-free, from any thread, before, during or after a call: stores the flag, then moves the
+         /// engine's epoch past the deadline of every guest of the runtime running now. Each of them wakes
+-        /// once (onEpochDeadline); only this instance's stops.
++        /// once (onEpochDeadline); only this instance's stops. One landing just as this instance's guest
++        /// was woken by another instance's interrupt can be missed (the window documented at
++        /// onEpochDeadline); the helper process's supervisor kills a call that then never returns.
+         void interrupt() noexcept override
+         {
+             _data->interrupt.store(InterruptState::Interrupted, std::memory_order_relaxed);
+             // Orders the flag before the epoch increment, for whoever reads the moved epoch.
+             std::atomic_thread_fence(std::memory_order_release);
+             wasmtime_engine_increment_epoch(_engine);
+         }
+ 
+       private:
++        /// Ends a call as interrupted. A nested call also makes the deadline of the call it is nested in
++        /// due at once: the store has one deadline, which this call set one tick past an epoch the
++        /// interrupt may already have moved, and the host function may absorb this failure and return
++        /// into a guest that would then run on.
++        /// @param context The context the call runs in.
++        /// @return The failure `Interrupted`.
++        [[nodiscard]] std::unexpected<CallFailure> interrupted(wasmtime_context_t* context) const noexcept
++        {
++            if (_callDepth > 0)
++                wasmtime_context_set_epoch_deadline(context, 0);
++            return std::unexpected(CallFailure::Interrupted);
++        }
++
+         /// @return The context the store is reached through: the caller's while a host function call runs,
+         ///         the store's own otherwise.
+         [[nodiscard]] wasmtime_context_t* storeContext() const noexcept
+         {
+             if (_data->callerContext)
+                 return _data->callerContext;
+             return wasmtime_store_context(_store.get());
+         }
+ 
+         /// @return Why the call that just failed did. Decided by what the instance recorded, never by a

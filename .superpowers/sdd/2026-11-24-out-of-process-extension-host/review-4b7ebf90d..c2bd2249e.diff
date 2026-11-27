@@ -1,0 +1,2714 @@
+# Review package: 4b7ebf90d..HEAD
+
+## Commits
+c2bd2249e feat(vtextension): the extension host runs guests in memory Contour gives it
+faae235f2 docs(vtextension): note which descriptor checks Linux makes before ours
+
+## Files changed
+ src/vtextension/wasm/host/CMakeLists.txt           |   2 +
+ src/vtextension/wasm/host/HostServer.cpp           | 134 +++++++-
+ src/vtextension/wasm/host/HostServer.hpp           |   5 +
+ src/vtextension/wasm/host/HostServer_test.cpp      | 362 +++++++++++++++++++++
+ src/vtextension/wasm/host/IHostedEngine.hpp        |   7 +
+ src/vtextension/wasm/host/MemoryProvision.cpp      |  31 ++
+ src/vtextension/wasm/host/MemoryProvision.hpp      |  59 ++++
+ src/vtextension/wasm/remote/CMakeLists.txt         |   5 +
+ .../wasm/remote/transport/Channel_posix.cpp        |   2 +
+ .../wasm/remote/transport/GuestMemoryMapping.cpp   |  74 +++++
+ .../wasm/remote/transport/GuestMemoryMapping.hpp   | 112 +++++++
+ .../remote/transport/GuestMemoryMapping_posix.cpp  |  76 +++++
+ .../remote/transport/GuestMemoryMapping_test.cpp   | 207 ++++++++++++
+ .../remote/transport/GuestMemoryMapping_win32.cpp  | 165 ++++++++++
+ .../wasm/remote/transport/PduStream_test.cpp       |   1 +
+ src/vtextension/wasm/testing/DecoratedEngine.hpp   |   2 +
+ src/vtextension/wasm/testing/HostedEngine.hpp      |   6 +-
+ src/vtextension/wasm/testing/ProcessModules.hpp    |  66 ++++
+ src/vtextension/wasm/wasmtime/CMakeLists.txt       |   5 +-
+ src/vtextension/wasm/wasmtime/HostedEngine.cpp     |  11 +-
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp   |  31 +-
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp   |  18 +-
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          | 297 +++++++++++++++++
+ .../wasm/wasmtime/WasmtimeMemoryCreator.cpp        | 104 ++++++
+ .../wasm/wasmtime/WasmtimeMemoryCreator.hpp        |  44 +++
+ 25 files changed, 1813 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/host/CMakeLists.txt b/src/vtextension/wasm/host/CMakeLists.txt
+index 97648e098..13ff7795c 100644
+--- a/src/vtextension/wasm/host/CMakeLists.txt
++++ b/src/vtextension/wasm/host/CMakeLists.txt
+@@ -19,13 +19,15 @@ add_library(vtextension_host STATIC
+     ${_bootstrap_source}
+     HostProcess.cpp
+     HostProcess.hpp
+     HostServer.cpp
+     HostServer.hpp
+     IHostedEngine.hpp
+     InProcessHost.cpp
+     InProcessHost.hpp
+     InterruptListener.cpp
+     InterruptListener.hpp
++    MemoryProvision.cpp
++    MemoryProvision.hpp
+     ../remote/HostConnector.hpp
+ )
+ target_link_libraries(vtextension_host PUBLIC vtextension_remote_wire PRIVATE core::base)
+diff --git a/src/vtextension/wasm/host/HostServer.cpp b/src/vtextension/wasm/host/HostServer.cpp
+index 1e2d0fa41..a02e5d0ec 100644
+--- a/src/vtextension/wasm/host/HostServer.cpp
++++ b/src/vtextension/wasm/host/HostServer.cpp
+@@ -6,38 +6,43 @@
+ #include <algorithm>
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <span>
+ #include <string>
++#include <tuple>
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
++#include <vtextension/wasm/host/MemoryProvision.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
++#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ namespace proto = remote::proto;
+ using remote::transport::Channel;
++using remote::transport::GuestMemoryMapping;
+ using remote::transport::PduStream;
+ using remote::transport::StreamError;
+ 
+ namespace
+ {
+     /// What a request was served with: nothing to go on, or the reason the connection ends.
+     using Served = std::expected<void, ServerExit>;
+ 
+     /// @return The reason a stream's failure ends the connection with.
+     [[nodiscard]] ServerExit exitOf(StreamError error) noexcept
+@@ -82,20 +87,22 @@ namespace
+         return signature.isAllI32() && signature.parameters.size() <= proto::MaxCallValues
+                && signature.results.size() <= proto::MaxCallValues;
+     }
+ 
+     /// A runtime, and the host function strings it was created with: kept for as long as anything created
+     /// from it lives, since a backend's registry of host functions may outlive the call that created it.
+     struct RuntimeSlot
+     {
+         std::vector<proto::WireHostFunction> functions; ///< Declared first, so released last.
+         std::shared_ptr<IWasmRuntime> runtime;
++        /// Its memory cap: what the object granted to each of its instances is sized for.
++        uint64_t memoryBytes = 0;
+     };
+ 
+     /// A module, and the runtime it was loaded on.
+     struct ModuleSlot
+     {
+         std::shared_ptr<RuntimeSlot> runtime; ///< Declared first, so released after the module.
+         std::shared_ptr<IWasmModule> module;
+     };
+ 
+     /// One export a Call may name.
+@@ -200,20 +207,44 @@ class HostServer::Impl
+     class LaneHostContext final: public IHostContext
+     {
+       public:
+         [[nodiscard]] std::expected<void, ExtensionError> callHost(
+             std::size_t functionIndex, std::span<uint32_t const> arguments) noexcept override;
+     };
+ 
+     /// The lane whose call runs on this thread; null outside a call, and on the control thread.
+     static thread_local Lane* CurrentLane;
+ 
++    /// The server whose control thread is instantiating on this thread; null outside an instantiation.
++    static thread_local Impl* CurrentInstantiation;
++
++    /// Asks the parent whether instance @p instanceId's memory may grow to @p bytes, on the channel the guest
++    /// running on this thread was entered through: the lane of its call, or control while it is being
++    /// instantiated (a start function). Anywhere else growth is refused.
++    /// @return The parent's answer; Refused where nobody can be asked, or the channel failed or was answered
++    ///         with anything but Grown, which ends the connection once the guest returned.
++    [[nodiscard]] proto::GrowStatus growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept;
++
++    /// Sends Grow on @p stream and reads its one answer, which must be Grown.
++    /// @param ended Why the channel stopped serving; set here if it does, and nothing is asked once set.
++    [[nodiscard]] static proto::GrowStatus askToGrow(PduStream& stream,
++                                                     std::optional<ServerExit>& ended,
++                                                     uint32_t instanceId,
++                                                     uint64_t bytes) noexcept;
++
++    /// Checks what an Instantiate grants against how this host shares memory, and maps it.
++    /// @return Under MemoryMode::Copy nothing, once the grant is empty and nothing came with it; under
++    ///         MemoryMode::Shared the provision of the granted object, mapped, its handle adopted; a
++    ///         ProtocolViolation for a grant that is neither.
++    [[nodiscard]] std::expected<std::optional<MemoryProvision>, ServerExit> provisionOf(
++        proto::Instantiate const& request, RuntimeSlot const& runtime);
++
+     /// Ends the connection for @p reason, unless it ended already: interrupts every live instance, then shuts
+     /// every channel down, so that every thread blocked on one returns. Repeating it is harmless.
+     void finish(ServerExit reason) noexcept;
+ 
+     /// Serves the control channel until the connection ends, and ends it for the reason it does.
+     void serveControl();
+ 
+     /// Releases every instance, module and runtime the parent did not, then the control thread's guard; on
+     /// the control thread, once every executor is joined.
+     void release() noexcept;
+@@ -265,23 +296,27 @@ class HostServer::Impl
+     std::unordered_set<uint32_t> _runtimeIds;
+     std::unordered_set<uint32_t> _moduleIds;
+     std::unordered_set<uint32_t> _instanceIds;
+ 
+     std::mutex _mutex; ///< Guards what follows; never held across I/O.
+     std::unordered_map<uint32_t, std::shared_ptr<RuntimeSlot>> _runtimes;
+     std::unordered_map<uint32_t, std::shared_ptr<ModuleSlot>> _modules;
+     std::unordered_map<uint32_t, std::shared_ptr<InstanceSlot>> _instances;
+     std::unordered_map<uint32_t, uint32_t> _slotInstances; ///< The live instance at each slot held, by slot.
+     std::optional<ServerExit> _exit; ///< Why the connection ended; nothing while it serves.
++    /// Why control stopped serving during the instantiation running, through a growth asked there; the
++    /// control thread's alone.
++    std::optional<ServerExit> _instantiationEnded;
+ };
+ 
+ thread_local HostServer::Impl::Lane* HostServer::Impl::CurrentLane = nullptr;
++thread_local HostServer::Impl* HostServer::Impl::CurrentInstantiation = nullptr;
+ 
+ HostServer::Impl::Impl(IHostedEngine& engine,
+                        std::vector<Channel> lanes,
+                        Channel control,
+                        HostServerConfig config):
+     _engine { engine },
+     _config { std::move(config) },
+     _control { std::move(control), proto::ChannelKind::Control, proto::Direction::ToHelper, _config.limits }
+ {
+     _lanes.reserve(lanes.size());
+@@ -339,20 +374,27 @@ ServerExit HostServer::Impl::run()
+ void HostServer::Impl::serveControl()
+ {
+     while (true)
+     {
+         auto request = _control.receive();
+         if (!request)
+         {
+             finish(exitOf(request.error()));
+             return;
+         }
++        // Only an Instantiate claims what came with its frame: anything else that brought a handle along is a
++        // violation, and the handle is closed with the connection.
++        if (!std::holds_alternative<proto::Instantiate>(*request) && _control.takeAttachedHandle())
++        {
++            finish(ServerExit::ProtocolViolation);
++            return;
++        }
+         auto const served = std::visit([&](auto& pdu) { return serve(pdu); }, *request);
+         if (!served)
+         {
+             finish(served.error());
+             return;
+         }
+     }
+ }
+ 
+ void HostServer::Impl::release() noexcept
+@@ -418,22 +460,22 @@ std::shared_ptr<InstanceSlot> HostServer::Impl::instanceOf(uint32_t id)
+     auto const lock = std::scoped_lock { _mutex };
+     auto const found = _instances.find(id);
+     return found != _instances.end() ? found->second : nullptr;
+ }
+ 
+ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
+ {
+     if (!_runtimeIds.insert(request.runtimeId).second)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     // The engine is handed views of the server's own copy of the strings, which outlives the runtime.
+-    auto slot =
+-        std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
++    auto slot = std::make_shared<RuntimeSlot>(RuntimeSlot {
++        .functions = request.functions, .runtime = nullptr, .memoryBytes = request.memoryBytes });
+     // A stack the executors cannot hold MaxCallDepth of is refused, before the engine sees it.
+     // So is a table cap no engine accepts, before it is narrowed to RuntimeLimits' width.
+     if (request.stackBytes > proto::MaxRuntimeStackBytes || request.tableElements > MaxTableElements)
+         return send(_control,
+                     proto::RuntimeCreated { .runtimeId = request.runtimeId,
+                                             .error = ExtensionError::RuntimeUnavailable });
+     auto table = std::vector<HostFunction> {};
+     table.reserve(slot->functions.size());
+     for (auto const& function: slot->functions)
+         table.push_back(HostFunction {
+@@ -505,24 +547,37 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
+             module = found->second;
+     }
+     // A slot past the page, or one a live instance holds, could interrupt no instance, or the wrong one.
+     auto const isSlotFree = [&] {
+         auto const lock = std::scoped_lock { _mutex };
+         return request.interruptSlot < remote::transport::InterruptSlotCount
+                && !_slotInstances.contains(request.interruptSlot);
+     };
+     if (!module || !isSlotFree() || !_instanceIds.insert(request.instanceId).second)
+         return std::unexpected(ServerExit::ProtocolViolation);
+-
+-    // A start function runs here, on the control thread, where a host call finds no lane and fails.
+-    auto instance =
+-        prepare(_controlGuard).and_then([&] { return module->module->instantiate(_hostContext); });
++    auto provision = provisionOf(request, *module->runtime);
++    if (!provision)
++        return std::unexpected(provision.error());
++
++    // A start function runs here, on the control thread, where a host call finds no lane and fails, and
++    // growing its memory asks the parent on control.
++    auto instance = prepare(_controlGuard).and_then([&] {
++        auto scope = std::optional<ProvisionScope> {};
++        if (*provision)
++            scope.emplace(std::move(**provision));
++        auto const outer = std::exchange(CurrentInstantiation, this);
++        auto instantiated = module->module->instantiate(_hostContext);
++        CurrentInstantiation = outer;
++        return instantiated;
++    });
++    if (auto const ended = std::exchange(_instantiationEnded, std::nullopt))
++        return std::unexpected(*ended);
+     if (!instance)
+         return send(_control,
+                     proto::Instantiated {
+                         .instanceId = request.instanceId, .error = instance.error(), .callableExports = {} });
+ 
+     auto slot = std::make_shared<InstanceSlot>();
+     slot->module = module;
+     slot->instance = std::move(*instance);
+     slot->interruptSlot = request.interruptSlot;
+     auto callable = std::vector<uint32_t> {};
+@@ -557,20 +612,87 @@ Served HostServer::Impl::serve(proto::Instantiate const& request)
+         if (sent == &answer)
+             return;
+         // Stopped for good, as a released one is, should a lane have reached it meanwhile.
+         auto const lock = std::scoped_lock { _mutex };
+         slot->instance->interrupt();
+         _instances.erase(request.instanceId);
+         _slotInstances.erase(request.interruptSlot);
+     });
+ }
+ 
++std::expected<std::optional<MemoryProvision>, ServerExit> HostServer::Impl::provisionOf(
++    proto::Instantiate const& request, RuntimeSlot const& runtime)
++{
++    auto const& grant = request.memory;
++    if (_engine.memoryMode() == proto::MemoryMode::Copy)
++    {
++        // A host that copies memory is granted nothing, and nothing travels with the request.
++        if (grant != proto::MemoryGrant {} || _control.takeAttachedHandle())
++            return std::unexpected(ServerExit::ProtocolViolation);
++        return std::nullopt;
++    }
++
++    // The object is the one the runtime's cap sizes, and the memory spans whole pages of it at first.
++    if (grant.objectBytes != proto::memoryObjectBytes(runtime.memoryBytes)
++        || grant.initialBytes > grant.objectBytes || grant.initialBytes % proto::WasmPageBytes != 0)
++        return std::unexpected(ServerExit::ProtocolViolation);
++    auto claimed = remote::transport::claimGrantedHandle(_control, grant.handle);
++    if (!claimed)
++        return std::unexpected(ServerExit::ProtocolViolation);
++    // What cannot be mapped as the object, writable, is not the object granted: let go of unproven, never
++    // closed on Windows, where the value may name a handle of this process's own.
++    auto mapping = GuestMemoryMapping::map(
++        claimed->get(), grant.objectBytes, grant.initialBytes, _engine.memoryGuardBytes());
++    if (!mapping)
++        return std::unexpected(ServerExit::ProtocolViolation);
++    // Proven, the handle is ours, and closed: the mapping keeps the object alive.
++    std::ignore = std::move(*claimed).adopt();
++    return MemoryProvision { .memory = std::move(*mapping),
++                             .grow = [this, instanceId = request.instanceId](uint64_t bytes) {
++                                 return growOnCurrentChannel(instanceId, bytes);
++                             } };
++}
++
++proto::GrowStatus HostServer::Impl::growOnCurrentChannel(uint32_t instanceId, uint64_t bytes) noexcept
++{
++    if (auto* const lane = CurrentLane; lane != nullptr && lane->server == this)
++        return askToGrow(lane->stream, lane->ended, instanceId, bytes);
++    if (CurrentInstantiation == this)
++        return askToGrow(_control, _instantiationEnded, instanceId, bytes);
++    return proto::GrowStatus::Refused;
++}
++
++proto::GrowStatus HostServer::Impl::askToGrow(PduStream& stream,
++                                              std::optional<ServerExit>& ended,
++                                              uint32_t instanceId,
++                                              uint64_t bytes) noexcept
++{
++    if (ended)
++        return proto::GrowStatus::Refused;
++    if (auto const sent = send(stream, proto::Grow { .instanceId = instanceId, .bytes = bytes }); !sent)
++    {
++        ended = sent.error();
++        return proto::GrowStatus::Refused;
++    }
++    // Exactly one answer: the parent serves nothing else on this channel before it.
++    auto const answer = stream.receive();
++    if (!answer)
++    {
++        ended = exitOf(answer.error());
++        return proto::GrowStatus::Refused;
++    }
++    if (auto const* const grown = std::get_if<proto::Grown>(&*answer))
++        return grown->status;
++    ended = ServerExit::ProtocolViolation;
++    return proto::GrowStatus::Refused;
++}
++
+ Served HostServer::Impl::serve(proto::Release const& request)
+ {
+     // Released outside the lock; a lane still holding it releases it when its call returns.
+     auto released = std::shared_ptr<void> {};
+     {
+         auto const lock = std::scoped_lock { _mutex };
+         auto const take = [&](auto& map) {
+             if (auto const found = map.find(request.id); found != map.end())
+             {
+                 released = std::move(found->second);
+diff --git a/src/vtextension/wasm/host/HostServer.hpp b/src/vtextension/wasm/host/HostServer.hpp
+index dc4ff23ee..ec5670eb2 100644
+--- a/src/vtextension/wasm/host/HostServer.hpp
++++ b/src/vtextension/wasm/host/HostServer.hpp
+@@ -3,20 +3,25 @@
+ 
+ /// @file
+ /// The extension host's side of the protocol: serves runtimes, modules and instances of one engine to the
+ /// parent at the other end of its channels.
+ ///
+ /// The control channel creates and releases runtimes, modules and instances, on the thread that runs the
+ /// server; each lane runs one parent thread's calls, host calls and memory accesses, on an executor thread of
+ /// its own. A host call a guest makes is sent on the lane the call came in on, and the parent may call back
+ /// in, on that lane, before it answers. Ids are the parent's: one the parent never created, or creates twice,
+ /// is a protocol violation, as is any PDU out of place. A violation ends the connection.
++///
++/// An engine that shares memory (MemoryMode::Shared) runs each instance in the object its Instantiate grants:
++/// the server maps it before instantiating, and a grant it cannot map as that object is a violation. Growing
++/// that memory asks the parent first, with a Grow answered by exactly one Grown: on the lane whose call grows
++/// it, or on control while a start function runs. An engine that copies memory is granted nothing.
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <functional>
+ #include <memory>
+ #include <system_error>
+ #include <vector>
+ 
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+diff --git a/src/vtextension/wasm/host/HostServer_test.cpp b/src/vtextension/wasm/host/HostServer_test.cpp
+index 7064cf34d..4426ba766 100644
+--- a/src/vtextension/wasm/host/HostServer_test.cpp
++++ b/src/vtextension/wasm/host/HostServer_test.cpp
+@@ -13,60 +13,80 @@
+ #include <functional>
+ #include <future>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string_view>
+ #include <system_error>
+ #include <thread>
++#include <tuple>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/testing/TestModules.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+ #include <vtextension/wasm/host/HostServer.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/host/InProcessHost.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
++#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
++#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/DecoratedEngine.hpp>
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
++#include <vtextension/wasm/testing/ProcessModules.hpp>
++
++#ifndef _WIN32
++    #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
++#endif
+ 
+ using vtextension::ExtensionError;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::ModuleIdentity;
+ using vtextension::wasm::host::ExecutorThread;
+ using vtextension::wasm::host::HostFrameBytes;
+ using vtextension::wasm::host::HostServer;
+ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
+ using vtextension::wasm::host::ServerExit;
+ using vtextension::wasm::remote::MaxLaneChannels;
+ using vtextension::wasm::remote::proto::MaxCallDepth;
+ using vtextension::wasm::remote::proto::MaxRuntimeStackBytes;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
++using vtextension::wasm::remote::transport::createSharedObject;
++using vtextension::wasm::remote::transport::grantHandle;
++using vtextension::wasm::remote::transport::HandleGrant;
++using vtextension::wasm::remote::transport::HandleTarget;
+ using vtextension::wasm::remote::transport::InterruptSlotCount;
+ using vtextension::wasm::remote::transport::makeChannelPair;
++using vtextension::wasm::remote::transport::MapAccess;
++using vtextension::wasm::remote::transport::OwnedHandle;
+ using vtextension::wasm::remote::transport::PduStream;
++using vtextension::wasm::remote::transport::SharedMapping;
++using vtextension::wasm::remote::transport::SharedObjectUse;
+ using vtextension::wasm::remote::transport::StreamError;
+ using vtextension::wasm::testing::makeHostedEngine;
++#ifndef _WIN32
++using vtextension::wasm::remote::transport::testing::openDescriptorCount;
++#endif
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace contract = vtextension::wasm::testing::contract;
+ 
+ namespace
+ {
+ 
+ /// How long a test waits for the server to stop before it fails.
+ constexpr auto StopDeadline = std::chrono::seconds { 1 };
+ 
+@@ -1137,20 +1157,362 @@ TEST_CASE("HostServer.callablesPastTheCapFailTheInstantiation", "[vtextension][h
+     std::ignore = parent.loadOk(1, 1, toModule(OneExportModule));
+     CHECK(parent.instantiate(1, 1)
+           == proto::Instantiated {
+               .instanceId = 1, .error = ExtensionError::InvalidComponent, .callableExports = {} });
+ 
+     // The instance went with the refusal: a call of it is not the server's to serve.
+     parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = 0, .argv = {} });
+     CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+ }
+ 
++namespace
++{
++
++/// A guest page.
++constexpr auto GuestPage = proto::WasmPageBytes;
++
++/// The object the parent grants each instance of a runtime of the contract's limits.
++constexpr auto ObjectBytes = proto::memoryObjectBytes(contract::Limits.memoryBytes);
++
++/// One instance's memory object as the parent holds it: made, and mapped whole, its pages committed.
++class ParentObject
++{
++  public:
++    /// @param bytes The object's size.
++    explicit ParentObject(uint64_t bytes = ObjectBytes):
++        _handle { created(bytes) }, _mapping { mapped(_handle, bytes) }
++    {
++    }
++
++    /// @return A grant of the object to a host serving in this process.
++    [[nodiscard]] HandleGrant grant() const
++    {
++        auto granted = grantHandle(HandleTarget::currentProcess(), _handle.get());
++        REQUIRE(granted.has_value());
++        return *granted;
++    }
++
++    /// @return The 32-bit little-endian word at @p address, as the parent's mapping reads it.
++    [[nodiscard]] uint32_t wordAt(std::size_t address) const
++    {
++        auto word = uint32_t { 0 };
++        for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 4 }))
++            word |= std::to_integer<uint32_t>(_mapping.bytes()[address + index]) << (index * 8);
++        return word;
++    }
++
++  private:
++    [[nodiscard]] static OwnedHandle created(uint64_t bytes)
++    {
++        auto object = createSharedObject(bytes, SharedObjectUse::GuestMemory);
++        REQUIRE(object.has_value());
++        return std::move(*object);
++    }
++
++    [[nodiscard]] static SharedMapping mapped(OwnedHandle const& handle, uint64_t bytes)
++    {
++        auto mapping = SharedMapping::map(handle.get(), bytes, MapAccess::ReadWrite);
++        REQUIRE(mapping.has_value());
++        // Contour commits what it grants through its own view (Windows); the host does through its own.
++        REQUIRE(mapping->commit(0, bytes).has_value());
++        return std::move(*mapping);
++    }
++
++    OwnedHandle _handle;
++    SharedMapping _mapping;
++};
++
++/// @return A scripted parent of a host whose engine runs instances in the memory granted to them.
++[[nodiscard]] std::unique_ptr<ScriptedParent> sharingParent()
++{
++    return std::make_unique<ScriptedParent>(makeHostedEngine(proto::MemoryMode::Shared), HostServerConfig {});
++}
++
++/// Sends an Instantiate of module 1 as instance 1 on @p parent's control, granting what @p grant grants with
++/// @p memory's sizes.
++void sendGranted(ScriptedParent& parent, proto::MemoryGrant memory, HandleGrant const& grant)
++{
++    auto const sent = parent.control->send(
++        proto::Instantiate { .moduleId = 1, .instanceId = 1, .interruptSlot = 1, .memory = memory }, grant);
++    REQUIRE(sent.has_value());
++}
++
++/// Instantiates module 1 as instance 1, granting @p object with its first page open, which must succeed.
++void instantiateGranted(ScriptedParent& parent, ParentObject const& object)
++{
++    auto const grant = object.grant();
++    sendGranted(parent,
++                proto::MemoryGrant {
++                    .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
++                grant);
++    auto const answer = parent.receiveControl();
++    REQUIRE(std::holds_alternative<proto::Instantiated>(answer));
++    REQUIRE_FALSE(std::get<proto::Instantiated>(answer).error.has_value());
++}
++
++/// A parent with runtime 1 and GrowModule loaded as module 1 on a host that shares memory.
++struct GrowingParent
++{
++    std::unique_ptr<ScriptedParent> parent = sharingParent(); ///< The parent.
++    proto::Loaded loaded;                                     ///< What GrowModule was described as.
++
++    GrowingParent(): loaded { prepared(*parent) } {}
++
++  private:
++    [[nodiscard]] static proto::Loaded prepared(ScriptedParent& parent)
++    {
++        CHECK(parent.receiveControl()
++              == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
++                                             .memoryMode = proto::MemoryMode::Shared,
++                                             .lockdown = proto::LockdownState::Unsandboxed } });
++        parent.createRuntime(1);
++        return parent.loadOk(1, 1, toModule(vtextension::wasm::testing::GrowModule));
++    }
++};
++
++} // namespace
++
++TEST_CASE("HostServer.sharedInstantiateMapsTheGrant", "[vtextension][host]")
++{
++    auto growing = GrowingParent {};
++    auto& parent = *growing.parent;
++    auto const object = ParentObject {};
++#ifndef _WIN32
++    auto const descriptorsBefore = openDescriptorCount();
++#endif
++    instantiateGranted(parent, object);
++#ifndef _WIN32
++    // The host keeps the mapping, not the descriptor it came with.
++    CHECK(openDescriptorCount() == descriptorsBefore);
++#endif
++
++    parent.send(0,
++                proto::Call { .instanceId = 1,
++                              .exportOrdinal = ordinalOf(growing.loaded, "store"),
++                              .argv = { 16, 42 } });
++    CHECK(parent.receive(0) == proto::Pdu { proto::CallResult {} });
++    CHECK(object.wordAt(16) == 42);
++}
++
++TEST_CASE("HostServer.growGoesThroughTheParent", "[vtextension][host]")
++{
++    auto growing = GrowingParent {};
++    auto& parent = *growing.parent;
++    auto const object = ParentObject {};
++    instantiateGranted(parent, object);
++    auto const grow = ordinalOf(growing.loaded, "grow");
++
++    parent.send(0, proto::Call { .instanceId = 1, .exportOrdinal = grow, .argv = { 1 } });
++    CHECK(parent.receive(0) == proto::Pdu { proto::Grow { .instanceId = 1, .bytes = 2 * GuestPage } });
++
++    SECTION("granted")
++    {
++        parent.send(0, proto::Grown { .status = proto::GrowStatus::Granted });
++        CHECK(parent.receive(0)
++              == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 1 } } });
++        auto const address = static_cast<uint32_t>(GuestPage + 8);
++        parent.send(0,
++                    proto::Call { .instanceId = 1,
++                                  .exportOrdinal = ordinalOf(growing.loaded, "store"),
++                                  .argv = { address, 7 } });
++        CHECK(parent.receive(0) == proto::Pdu { proto::CallResult {} });
++        CHECK(object.wordAt(address) == 7);
++    }
++
++    SECTION("refused")
++    {
++        parent.send(0, proto::Grown { .status = proto::GrowStatus::Refused });
++        CHECK(parent.receive(0)
++              == proto::Pdu { proto::CallResult { .failure = std::nullopt, .argv = { 0xFFFF'FFFF } } });
++    }
++}
++
++TEST_CASE("HostServer.growDuringInstantiateGoesThroughTheParent", "[vtextension][host]")
++{
++    using vtextension::wasm::testing::StartGrowAddress;
++    using vtextension::wasm::testing::StartGrowValue;
++    auto parent = sharingParent();
++    parent->skipHello();
++    parent->createRuntime(1);
++    auto const loaded = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::StartGrowModule));
++    auto const object = ParentObject {};
++    auto const grant = object.grant();
++    sendGranted(*parent,
++                proto::MemoryGrant {
++                    .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
++                grant);
++
++    // The start function asks on control, before the instance is announced.
++    CHECK(parent->receiveControl() == proto::Pdu { proto::Grow { .instanceId = 1, .bytes = 2 * GuestPage } });
++    auto const answered = [&](proto::GrowStatus status) {
++        parent->sendControl(proto::Grown { .status = status });
++        auto const instantiated = parent->receiveControl();
++        REQUIRE(std::holds_alternative<proto::Instantiated>(instantiated));
++        REQUIRE_FALSE(std::get<proto::Instantiated>(instantiated).error.has_value());
++        parent->send(
++            0, proto::Call { .instanceId = 1, .exportOrdinal = ordinalOf(loaded, "grown"), .argv = {} });
++        auto const result = parent->receive(0);
++        REQUIRE(std::holds_alternative<proto::CallResult>(result));
++        return std::get<proto::CallResult>(result).argv;
++    };
++
++    SECTION("granted")
++    {
++        CHECK(answered(proto::GrowStatus::Granted) == std::vector<uint32_t> { 1 });
++        CHECK(object.wordAt(StartGrowAddress) == StartGrowValue);
++    }
++
++    SECTION("refused")
++    {
++        CHECK(answered(proto::GrowStatus::Refused) == std::vector<uint32_t> { 0xFFFF'FFFF });
++        CHECK(object.wordAt(StartGrowAddress) == 0);
++    }
++}
++
++TEST_CASE("HostServer.wrongGrantIsAViolation", "[vtextension][host]")
++{
++    /// Whether the object travels with the request.
++    enum class Granted : uint8_t
++    {
++        Nothing, ///< Nothing is granted.
++        Object,  ///< The object the parent made is.
++    };
++    /// One way a grant is not the object it must be.
++    struct WrongGrant
++    {
++        std::string_view what;
++        uint64_t madeBytes;        ///< The size of the object the parent makes.
++        proto::MemoryGrant memory; ///< What the Instantiate says; a handle of 0 is the grant's own.
++        Granted granted;           ///< Whether the object is granted at all.
++    };
++    // clang-format off
++    auto const rows = std::to_array<WrongGrant>({
++        { .what = "an object other than the runtime's cap sizes", .madeBytes = ObjectBytes + GuestPage,
++          .memory = { .handle = 0, .objectBytes = ObjectBytes + GuestPage, .initialBytes = GuestPage }, .granted = Granted::Object },
++        { .what = "more initial bytes than the object", .madeBytes = ObjectBytes,
++          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = ObjectBytes + GuestPage }, .granted = Granted::Object },
++        { .what = "initial bytes that are no whole page", .madeBytes = ObjectBytes,
++          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage + 4096 }, .granted = Granted::Object },
++        { .what = "no object granted", .madeBytes = ObjectBytes,
++          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Nothing },
++        { .what = "an object half the size", .madeBytes = ObjectBytes / 2,
++          .memory = { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Object },
++#ifdef _WIN32
++        { .what = "a value naming no object", .madeBytes = ObjectBytes,
++          .memory = { .handle = 0x1F4, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Nothing },
++#else
++        { .what = "a handle value beside the descriptor", .madeBytes = ObjectBytes,
++          .memory = { .handle = 1, .objectBytes = ObjectBytes, .initialBytes = GuestPage }, .granted = Granted::Object },
++#endif
++    });
++    // clang-format on
++    for (auto const& row: rows)
++    {
++        INFO(row.what);
++        auto parent = sharingParent();
++        parent->skipHello();
++        parent->createRuntime(1);
++        std::ignore = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::GrowModule));
++        auto const object = ParentObject { row.madeBytes };
++        auto grant = row.granted == Granted::Object ? object.grant() : HandleGrant {};
++        auto memory = row.memory;
++        if (memory.handle == 0)
++            memory.handle = grant.wireValue;
++        sendGranted(*parent, memory, grant);
++        CHECK(parent->exitWithinDeadline() == ServerExit::ProtocolViolation);
++    }
++}
++
++TEST_CASE("HostServer.anythingButGrownAnswersAGrowIsAViolation", "[vtextension][host]")
++{
++    SECTION("on a lane")
++    {
++        for (auto const& answer:
++             { proto::Pdu { proto::HostResult {} },
++               proto::Pdu { proto::MemoryRead { .instanceId = 1, .address = 0, .size = 1 } } })
++        {
++            auto growing = GrowingParent {};
++            auto& parent = *growing.parent;
++            auto const object = ParentObject {};
++            instantiateGranted(parent, object);
++            parent.send(0,
++                        proto::Call { .instanceId = 1,
++                                      .exportOrdinal = ordinalOf(growing.loaded, "grow"),
++                                      .argv = { 1 } });
++            REQUIRE(std::holds_alternative<proto::Grow>(parent.receive(0)));
++            parent.send(0, answer);
++            CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
++        }
++    }
++
++    SECTION("on control")
++    {
++        auto parent = sharingParent();
++        parent->skipHello();
++        parent->createRuntime(1);
++        std::ignore = parent->loadOk(1, 1, toModule(vtextension::wasm::testing::StartGrowModule));
++        auto const object = ParentObject {};
++        auto const grant = object.grant();
++        sendGranted(*parent,
++                    proto::MemoryGrant {
++                        .handle = grant.wireValue, .objectBytes = ObjectBytes, .initialBytes = GuestPage },
++                    grant);
++        REQUIRE(std::holds_alternative<proto::Grow>(parent->receiveControl()));
++        parent->sendControl(proto::Release { .target = proto::ReleaseTarget::Module, .id = 1 });
++        CHECK(parent->exitWithinDeadline() == ServerExit::ProtocolViolation);
++    }
++}
++
++TEST_CASE("HostServer.copyEngineRefusesAGrant", "[vtextension][host]")
++{
++    auto const grants = [] {
++        auto rows = std::vector<std::pair<std::string_view, proto::MemoryGrant>> {
++            { "an object's sizes", { .handle = 0, .objectBytes = ObjectBytes, .initialBytes = GuestPage } },
++            { "initial bytes alone", { .handle = 0, .objectBytes = 0, .initialBytes = GuestPage } },
++            { "a handle value alone", { .handle = 4, .objectBytes = 0, .initialBytes = 0 } },
++        };
++#ifndef _WIN32
++        // An empty grant that a descriptor travels with all the same.
++        rows.emplace_back("a descriptor", proto::MemoryGrant {});
++#endif
++        return rows;
++    }();
++    for (auto const& [what, memory]: grants)
++    {
++        INFO(what);
++        auto parent = ScriptedParent {};
++        parent.skipHello();
++        parent.createRuntime(1);
++        std::ignore = parent.loadOk(1, 1, toModule(vtextension::wasm::testing::GrowModule));
++        auto const object = ParentObject {};
++        // The descriptor travels only with the empty grant; Windows hands the copy engine no handle at all.
++        auto const grant = memory == proto::MemoryGrant {} ? object.grant() : HandleGrant {};
++        sendGranted(parent, memory, grant);
++        CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
++    }
++}
++
++#ifndef _WIN32
++TEST_CASE("HostServer.onlyAnInstantiateBringsAHandle", "[vtextension][host]")
++{
++    // A descriptor travelling with anything but an Instantiate is claimed by nothing: a violation, closed
++    // with the connection. (On Windows nothing travels beside a frame.)
++    auto growing = GrowingParent {};
++    auto& parent = *growing.parent;
++    auto const object = ParentObject {};
++    auto const grant = object.grant();
++    REQUIRE(parent.control->send(proto::Release { .target = proto::ReleaseTarget::Module, .id = 1 }, grant)
++                .has_value());
++    CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
++}
++#endif
++
+ TEST_CASE("InProcessHost.connectStartsAServingHost", "[vtextension][host]")
+ {
+     auto connector = InProcessHostConnector { [] { return makeHostedEngine(); }, HostServerConfig {} };
+     auto connection = connector.connect();
+     REQUIRE(connection.has_value());
+     CHECK(connection->lanes.size() == MaxLaneChannels);
+     CHECK(connector.connects() == 1);
+     CHECK(connector.liveHosts() == 1);
+ 
+     auto control = parentControl(std::move(connection->control), proto::PduLimits {});
+diff --git a/src/vtextension/wasm/host/IHostedEngine.hpp b/src/vtextension/wasm/host/IHostedEngine.hpp
+index cbeb7b7f1..01efc257d 100644
+--- a/src/vtextension/wasm/host/IHostedEngine.hpp
++++ b/src/vtextension/wasm/host/IHostedEngine.hpp
+@@ -1,29 +1,36 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// What the extension host process runs modules on: a WebAssembly backend, and how it shares an instance's
+ /// memory with Contour.
+ 
++#include <cstdint>
+ #include <functional>
+ #include <memory>
+ 
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ /// A backend a host process drives. The helper's own interface: the parent never sees one.
+ class IHostedEngine: public IWasmBackend
+ {
+   public:
+     /// @return How the engine's instances share their linear memory with the parent: what the host states in
+     ///         its Hello, and so how the parent reaches that memory.
+     [[nodiscard]] virtual remote::proto::MemoryMode memoryMode() const noexcept = 0;
++
++    /// @return Under MemoryMode::Shared, how many inaccessible bytes must follow each instance's memory
++    /// object
++    ///         where the host maps it: the guard the engine's compiled code relies on (MemoryProvision); 0
++    ///         for an engine that copies memory.
++    [[nodiscard]] virtual uint64_t memoryGuardBytes() const noexcept = 0;
+ };
+ 
+ /// Creates the engine one host runs on; null if none can be.
+ using EngineFactory = std::function<std::unique_ptr<IHostedEngine>()>;
+ 
+ } // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/MemoryProvision.cpp b/src/vtextension/wasm/host/MemoryProvision.cpp
+new file mode 100644
+index 000000000..ceb0bd4b1
+--- /dev/null
++++ b/src/vtextension/wasm/host/MemoryProvision.cpp
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/host/MemoryProvision.hpp>
++
++#include <optional>
++#include <utility>
++
++namespace vtextension::wasm::host
++{
++
++namespace
++{
++    /// The provision the calling thread's innermost scope offers; nothing outside one, or once taken.
++    thread_local auto offered = std::optional<MemoryProvision> {};
++} // namespace
++
++ProvisionScope::ProvisionScope(MemoryProvision provision):
++    _outer { std::exchange(offered, std::move(provision)) }
++{
++}
++
++ProvisionScope::~ProvisionScope()
++{
++    offered = std::move(_outer);
++}
++
++std::optional<MemoryProvision> takeProvision() noexcept
++{
++    return std::exchange(offered, std::nullopt);
++}
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/host/MemoryProvision.hpp b/src/vtextension/wasm/host/MemoryProvision.hpp
+new file mode 100644
+index 000000000..7df95aac6
+--- /dev/null
++++ b/src/vtextension/wasm/host/MemoryProvision.hpp
+@@ -0,0 +1,59 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// The memory the extension host hands the engine for the instance it is about to instantiate: the object
++/// Contour granted, mapped, and how the instance's memory asks Contour to grow.
++///
++/// An engine creates an instance's memory from inside its own instantiation, through a hook every instance of
++/// the engine shares, where nothing names the instance. So the provision travels beside the call, on the
++/// thread that makes it: the server sets it for the duration of one instantiation (ProvisionScope), and the
++/// engine's hook takes it (takeProvision()), at most once.
++
++#include <cstdint>
++#include <functional>
++#include <optional>
++
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
++
++namespace vtextension::wasm::host
++{
++
++/// Asks Contour whether an instance's memory may grow to a size, and waits for the answer.
++/// @param bytes The size it would grow to: whole guest pages, more than it spans now.
++/// @return Whether Contour granted it.
++using GrowRequest = std::function<remote::proto::GrowStatus(uint64_t bytes)>;
++
++/// What one instance's memory is made of.
++struct MemoryProvision
++{
++    /// The object Contour granted, mapped, with the bytes its memory spans at first open.
++    remote::transport::GuestMemoryMapping memory;
++    /// Asks Contour before the memory grows; nothing more is opened unless it grants.
++    GrowRequest grow;
++};
++
++/// Offers a provision to the instantiation the calling thread makes while the scope lives. Whatever is not
++/// taken by then is dropped, unmapping the object. Scopes nest: an inner one hides an outer one's until it
++/// ends.
++class ProvisionScope
++{
++  public:
++    /// @param provision What the next memory the thread's engine creates is made of.
++    explicit ProvisionScope(MemoryProvision provision);
++    ~ProvisionScope();
++    ProvisionScope(ProvisionScope const&) = delete;
++    ProvisionScope(ProvisionScope&&) = delete;
++    ProvisionScope& operator=(ProvisionScope const&) = delete;
++    ProvisionScope& operator=(ProvisionScope&&) = delete;
++
++  private:
++    std::optional<MemoryProvision> _outer; ///< The provision an enclosing scope offered, put back at the end.
++};
++
++/// Takes the provision the calling thread's innermost scope offers, so that a second memory finds none.
++/// @return The provision; nothing outside a scope, or once taken.
++[[nodiscard]] std::optional<MemoryProvision> takeProvision() noexcept;
++
++} // namespace vtextension::wasm::host
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 156246a4d..e9b9fb286 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -2,28 +2,30 @@
+ # travels on. The codec (proto/) is pure bytes-in/PDUs-out and the transport (transport/) is the operating
+ # system's byte channels; neither links a WebAssembly engine or vtextension itself, so that both the parent and
+ # the helper process link them, and both are always built. On Windows the channel's owner-only pipe DACL
+ # needs advapi32.
+ 
+ # What both processes need of the operating system, one source per platform: the channel, the shared memory
+ # objects (the interrupt page and guest memory) and the wake signal.
+ set(_transport_sources
+     transport/Channel_posix.cpp
+     transport/ControlPage_posix.cpp
++    transport/GuestMemoryMapping_posix.cpp
+     transport/HandleGrant_posix.cpp
+     transport/SharedObject_posix.cpp
+     transport/WakeSignal_posix.cpp
+ )
+ if(WIN32)
+     set(_transport_sources
+         transport/Channel_win32.cpp
+         transport/ControlPage_win32.cpp
++        transport/GuestMemoryMapping_win32.cpp
+         transport/HandleGrant_win32.cpp
+         transport/SharedObject_win32.cpp
+         transport/WakeSignal_win32.cpp
+     )
+ endif()
+ 
+ # The codec's sources, compiled into the library and, with the fuzzer's flags, into the fuzz target below: one
+ # list, so that the fuzzer never decodes with a codec the library does not ship.
+ set(_codec_sources
+     proto/Codec.cpp
+@@ -31,20 +33,22 @@ set(_codec_sources
+     proto/Pdu.hpp
+     proto/PduTable.hpp
+     proto/Wire.hpp
+ )
+ 
+ add_library(vtextension_remote_wire STATIC
+     ${_codec_sources}
+     ../BuildInstrumentation.hpp
+     transport/Channel.hpp
+     transport/ControlPage.hpp
++    transport/GuestMemoryMapping.cpp
++    transport/GuestMemoryMapping.hpp
+     transport/HandleGrant.hpp
+     transport/HelperArguments.cpp
+     transport/HelperArguments.hpp
+     transport/OwnedHandle.hpp
+     transport/PduStream.cpp
+     transport/PduStream.hpp
+     transport/SharedObject.cpp
+     transport/SharedObject.hpp
+     transport/WakeSignal.hpp
+     ${_transport_sources}
+@@ -127,20 +131,21 @@ if(_process_source)
+             process/HelperLocation_test.cpp
+             process/HostTimers_test.cpp
+             process/ProcessHostConnector_test.cpp
+             process/ProcessLauncher_test.cpp
+             process/testing/FakeProcessLauncher.cpp
+             process/testing/FakeProcessLauncher.hpp
+             process/testing/LaunchedHelper.cpp
+             process/testing/LaunchedHelper.hpp
+             process/testing/RecordingLauncher.hpp
+             transport/ControlPage_test.cpp
++            transport/GuestMemoryMapping_test.cpp
+             transport/HandleGrant_test.cpp
+             transport/HelperArguments_test.cpp
+             transport/SharedObject_test.cpp
+             transport/WakeSignal_test.cpp
+         )
+         target_link_libraries(vtextension_process_test PRIVATE
+             vtextension_remote_process vtextension_remote_wire core::testing Catch2::Catch2 contour_test_trace)
+         add_dependencies(vtextension_process_test extension_host_probe)
+         target_compile_definitions(vtextension_process_test PRIVATE
+             VTEXTENSION_PROBE_PATH="$<TARGET_FILE:extension_host_probe>")
+diff --git a/src/vtextension/wasm/remote/transport/Channel_posix.cpp b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+index 6a267807b..ee464dfca 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+@@ -232,20 +232,22 @@ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::sp
+     while (received == -1 && errno == EINTR);
+     if (received == -1)
+         return std::unexpected(channelErrorOf(errno));
+ 
+     // Owned at once, so that every one is closed should any part of the message be refused.
+     auto arrived = std::vector<OwnedHandle> {};
+     auto foreign = false;
+     auto unconfigured = false;
+     for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header))
+     {
++        // Defence in depth: on Linux the 2-descriptor buffer is too small for any other cmsg, which ends as
++        // MSG_CTRUNC instead, so this is unreachable there.
+         if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
+             || header->cmsg_len < CMSG_LEN(0))
+         {
+             foreign = true;
+             continue;
+         }
+         auto const count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+         for (auto const index: std::views::iota(std::size_t { 0 }, std::min(count, MaxReceivedHandles)))
+         {
+             auto descriptor = -1;
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping.cpp
+new file mode 100644
+index 000000000..0e7b2c334
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping.cpp
+@@ -0,0 +1,74 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// What every system's guest memory mapping shares: placing the object and opening its pages are each system's
++// own (GuestMemoryMapping_posix.cpp, GuestMemoryMapping_win32.cpp); the layout rules and owning the mapping
++// are not.
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <limits>
++#include <utility>
++
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++
++namespace vtextension::wasm::remote::transport
++{
++
++bool isGuestMemoryLayout(uint64_t objectBytes, uint64_t initialBytes, uint64_t guardBytes) noexcept
++{
++    constexpr auto Page = proto::WasmPageBytes;
++    constexpr auto Addressable = uint64_t { std::numeric_limits<std::size_t>::max() };
++    return objectBytes != 0 && objectBytes % Page == 0 && initialBytes % Page == 0 && guardBytes % Page == 0
++           && initialBytes <= objectBytes && objectBytes <= Addressable
++           && guardBytes <= Addressable - objectBytes;
++}
++
++GuestMemoryMapping::GuestMemoryMapping(std::byte* base,
++                                       uint64_t objectBytes,
++                                       uint64_t accessibleBytes,
++                                       uint64_t guardBytes) noexcept:
++    _base { base },
++    _objectBytes { objectBytes },
++    _accessibleBytes { accessibleBytes },
++    _guardBytes { guardBytes }
++{
++}
++
++GuestMemoryMapping::GuestMemoryMapping(GuestMemoryMapping&& other) noexcept:
++    _base { std::exchange(other._base, nullptr) },
++    _objectBytes { std::exchange(other._objectBytes, 0) },
++    _accessibleBytes { std::exchange(other._accessibleBytes, 0) },
++    _guardBytes { std::exchange(other._guardBytes, 0) }
++{
++}
++
++GuestMemoryMapping& GuestMemoryMapping::operator=(GuestMemoryMapping&& other) noexcept
++{
++    if (this != &other)
++    {
++        release();
++        _base = std::exchange(other._base, nullptr);
++        _objectBytes = std::exchange(other._objectBytes, 0);
++        _accessibleBytes = std::exchange(other._accessibleBytes, 0);
++        _guardBytes = std::exchange(other._guardBytes, 0);
++    }
++    return *this;
++}
++
++GuestMemoryMapping::~GuestMemoryMapping()
++{
++    release();
++}
++
++std::expected<void, MappingError> GuestMemoryMapping::open(uint64_t bytes) noexcept
++{
++    if (bytes > _objectBytes || bytes % proto::WasmPageBytes != 0)
++        return std::unexpected(MappingError::WrongSize);
++    if (bytes <= _accessibleBytes)
++        return {};
++    return openRange(_accessibleBytes, bytes).transform([&] { _accessibleBytes = bytes; });
++}
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping.hpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping.hpp
+new file mode 100644
+index 000000000..535a74d03
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping.hpp
+@@ -0,0 +1,112 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// The extension host's mapping of an instance's memory object: the object Contour made and granted it,
++/// mapped writable at the base of a reservation that also holds the guard region the engine's compiled code
++/// relies on, with only the bytes the guest's memory spans open. Growing opens more of the object, never
++/// moves it, and never closes what was open.
++///
++/// Every size is a whole number of guest pages (64 KiB), which is also Windows' allocation granularity, so
++/// that a placeholder splits there.
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++
++#include <vtextension/wasm/remote/transport/Channel.hpp>
++
++namespace vtextension::wasm::remote::transport
++{
++
++/// Why an object could not be mapped, or more of it opened.
++enum class MappingError : uint8_t
++{
++    WrongSize,   ///< The object is not the size it was granted as, or a size asked for is not one it can be.
++    Io,          ///< The system refused: the handle names no object, or one that cannot be mapped writable.
++    Unsupported, ///< This system cannot place a shared object inside a reservation.
++};
++
++/// An instance's memory object, mapped into the extension host: [0, objectBytes()) is the object, followed by
++/// guardBytes() that are never accessible; of the object only [0, accessibleBytes()) is open. Move-only;
++/// unmapped, guard included, when destroyed. It does not own the object's handle: the mapping keeps the
++/// object alive on its own.
++class GuestMemoryMapping
++{
++  public:
++    /// Maps @p object at the base of a fresh reservation of @p objectBytes + @p guardBytes, and opens its
++    /// first @p initialBytes for reading and writing. The object must be mappable writable, and of
++    /// @p objectBytes: on POSIX its size is checked (fitsSharedObject()); on Windows a section too small for
++    /// the view fails to map.
++    /// @param object The object's handle; still the caller's.
++    /// @param objectBytes The size it was granted as: whole guest pages, more than 0.
++    /// @param initialBytes How many of its bytes are open at first: whole guest pages, at most @p
++    /// objectBytes.
++    /// @param guardBytes How many inaccessible bytes follow it: whole guest pages.
++    /// @return The mapping; `WrongSize` for sizes that do not fit those rules or an object of another size,
++    ///         `Io` if the system refused, `Unsupported` if this system has no way to place it.
++    [[nodiscard]] static std::expected<GuestMemoryMapping, MappingError> map(NativeHandle object,
++                                                                             uint64_t objectBytes,
++                                                                             uint64_t initialBytes,
++                                                                             uint64_t guardBytes);
++
++    GuestMemoryMapping(GuestMemoryMapping&& other) noexcept;
++    GuestMemoryMapping& operator=(GuestMemoryMapping&& other) noexcept;
++    GuestMemoryMapping(GuestMemoryMapping const&) = delete;
++    GuestMemoryMapping& operator=(GuestMemoryMapping const&) = delete;
++    ~GuestMemoryMapping();
++
++    /// @return Where the object is mapped: the guest's byte 0. Null once moved from.
++    [[nodiscard]] std::byte* base() const noexcept { return _base; }
++
++    /// @return How many bytes from base() are open: the guest memory's current size.
++    [[nodiscard]] uint64_t accessibleBytes() const noexcept { return _accessibleBytes; }
++
++    /// @return The object's size: the most the guest memory may span.
++    [[nodiscard]] uint64_t objectBytes() const noexcept { return _objectBytes; }
++
++    /// @return How many inaccessible bytes follow the object.
++    [[nodiscard]] uint64_t guardBytes() const noexcept { return _guardBytes; }
++
++    /// Opens the object's first @p bytes for reading and writing; on Windows by committing the pages through
++    /// this view. Never closes what is open: asking for fewer bytes than are open does nothing.
++    /// @param bytes How many bytes are to be open: whole guest pages, at most objectBytes().
++    /// @return Nothing once they are open; `WrongSize` for a size that does not fit, `Io` if the system
++    ///         refused.
++    [[nodiscard]] std::expected<void, MappingError> open(uint64_t bytes) noexcept;
++
++  private:
++    GuestMemoryMapping(std::byte* base,
++                       uint64_t objectBytes,
++                       uint64_t accessibleBytes,
++                       uint64_t guardBytes) noexcept;
++
++    /// Opens [@p from, @p to), whole guest pages within the object, as this system does.
++    [[nodiscard]] std::expected<void, MappingError> openRange(uint64_t from, uint64_t to) noexcept;
++
++    /// Unmaps the object and frees the reservation, if it holds them.
++    void release() noexcept;
++
++    std::byte* _base = nullptr;    ///< The object's first byte; null once moved from.
++    uint64_t _objectBytes = 0;     ///< The object's size.
++    uint64_t _accessibleBytes = 0; ///< How much of it is open.
++    uint64_t _guardBytes = 0;      ///< The inaccessible bytes after it.
++};
++
++/// Whether sizes are ones GuestMemoryMapping::map() takes: whole guest pages, an object of at least one, its
++/// initial bytes within it, and the whole reservation addressable.
++/// @param objectBytes The object's size.
++/// @param initialBytes How many of its bytes open at first.
++/// @param guardBytes How many inaccessible bytes follow it.
++/// @return Whether they are.
++[[nodiscard]] bool isGuestMemoryLayout(uint64_t objectBytes,
++                                       uint64_t initialBytes,
++                                       uint64_t guardBytes) noexcept;
++
++/// Whether this system can map guest memory as GuestMemoryMapping does: always on POSIX; on Windows only
++/// where the placeholder functions exist (Windows 10 1803 and later) and a 64 KiB probe maps, opens and
++/// writes. Asked once; the answer is kept.
++/// @return Whether it can.
++[[nodiscard]] bool canMapGuestMemory() noexcept;
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_posix.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_posix.cpp
+new file mode 100644
+index 000000000..f1450916f
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_posix.cpp
+@@ -0,0 +1,76 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Guest memory on POSIX: an inaccessible reservation of the object and its guard (PROT_NONE, MAP_NORESERVE,
++// so that it charges nothing), the object mapped shared over its start (MAP_FIXED), writable to prove the
++// handle grants writing, and every byte past the open ones closed again. Opening more is one mprotect().
++#include <sys/mman.h>
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
++
++namespace vtextension::wasm::remote::transport
++{
++
++namespace
++{
++    /// @return The error a failed size check of the object maps to.
++    [[nodiscard]] MappingError mappingErrorOf(SharedObjectError error) noexcept
++    {
++        return error == SharedObjectError::WrongSize ? MappingError::WrongSize : MappingError::Io;
++    }
++} // namespace
++
++std::expected<GuestMemoryMapping, MappingError> GuestMemoryMapping::map(NativeHandle object,
++                                                                        uint64_t objectBytes,
++                                                                        uint64_t initialBytes,
++                                                                        uint64_t guardBytes)
++{
++    if (!isGuestMemoryLayout(objectBytes, initialBytes, guardBytes))
++        return std::unexpected(MappingError::WrongSize);
++    if (auto const sized = checkSharedObjectSize(object, objectBytes); !sized)
++        return std::unexpected(mappingErrorOf(sized.error()));
++
++    auto const objectSize = static_cast<std::size_t>(objectBytes);
++    auto const reservationSize = static_cast<std::size_t>(objectBytes + guardBytes);
++    auto* const reservation =
++        ::mmap(nullptr, reservationSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
++    if (reservation == MAP_FAILED)
++        return std::unexpected(MappingError::Io);
++    // From here on the mapping owns the reservation, and unmaps it on every way out.
++    auto mapping = GuestMemoryMapping { static_cast<std::byte*>(reservation), objectBytes, 0, guardBytes };
++    if (::mmap(reservation, objectSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, object, 0)
++        == MAP_FAILED)
++        return std::unexpected(MappingError::Io);
++    // Writable it proved the handle grants writing; only the initial bytes stay so.
++    auto const closed = objectSize - static_cast<std::size_t>(initialBytes);
++    if (closed != 0 && ::mprotect(mapping._base + initialBytes, closed, PROT_NONE) != 0)
++        return std::unexpected(MappingError::Io);
++    mapping._accessibleBytes = initialBytes;
++    return mapping;
++}
++
++std::expected<void, MappingError> GuestMemoryMapping::openRange(uint64_t from, uint64_t to) noexcept
++{
++    if (::mprotect(_base + from, static_cast<std::size_t>(to - from), PROT_READ | PROT_WRITE) != 0)
++        return std::unexpected(MappingError::Io);
++    return {};
++}
++
++void GuestMemoryMapping::release() noexcept
++{
++    // One munmap() covers the object's mapping and the guard's reservation alike.
++    if (_base != nullptr)
++        ::munmap(_base, static_cast<std::size_t>(_objectBytes + _guardBytes));
++    _base = nullptr;
++}
++
++bool canMapGuestMemory() noexcept
++{
++    return true;
++}
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
+new file mode 100644
+index 000000000..2726a6fef
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
+@@ -0,0 +1,207 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The extension host's mapping of guest memory: only the bytes the guest's memory spans are open, the object
++// and the guard after it are not, what is open is the parent's object, an object of another size is refused,
++// and opening never closes anything.
++#include <catch2/catch_test_macros.hpp>
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
++
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#elifdef __linux__
++    #include <fstream>
++    #include <string>
++#endif
++
++using vtextension::wasm::remote::transport::canMapGuestMemory;
++using vtextension::wasm::remote::transport::createSharedObject;
++using vtextension::wasm::remote::transport::GuestMemoryMapping;
++using vtextension::wasm::remote::transport::isGuestMemoryLayout;
++using vtextension::wasm::remote::transport::MapAccess;
++using vtextension::wasm::remote::transport::MappingError;
++using vtextension::wasm::remote::transport::SharedMapping;
++using vtextension::wasm::remote::transport::SharedObjectUse;
++
++namespace
++{
++
++/// A guest page.
++constexpr auto Page = uint64_t { 64 } * 1024;
++
++/// The object the cases map: four guest pages.
++constexpr auto ObjectBytes = 4 * Page;
++
++/// The guard the cases reserve after it.
++constexpr auto GuardBytes = 2 * Page;
++
++#ifdef _WIN32
++/// Whether this runs under wine.
++[[nodiscard]] bool runsUnderWine() noexcept
++{
++    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
++    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
++}
++#endif
++
++/// Skips the case where this system cannot map guest memory: only wine may say so.
++void requireGuestMapping()
++{
++#ifdef _WIN32
++    if (!canMapGuestMemory() && runsUnderWine())
++        SKIP("wine places no section view over a placeholder");
++#endif
++    REQUIRE(canMapGuestMemory());
++}
++
++#ifdef __linux__
++/// @return The permissions /proc/self/maps shows for the mapping holding @p address ("rw-s", "---p", ...);
++///         empty if none holds it.
++[[nodiscard]] std::string permissionsAt(std::byte const* address)
++{
++    auto const where = reinterpret_cast<std::uintptr_t>(address);
++    auto maps = std::ifstream { "/proc/self/maps" };
++    auto line = std::string {};
++    while (std::getline(maps, line))
++    {
++        auto const dash = line.find('-');
++        auto const space = line.find(' ');
++        if (dash == std::string::npos || space == std::string::npos)
++            continue;
++        auto const from = std::stoull(line.substr(0, dash), nullptr, 16);
++        auto const to = std::stoull(line.substr(dash + 1, space - dash - 1), nullptr, 16);
++        if (from <= where && where < to)
++            return line.substr(space + 1, 4);
++    }
++    return {};
++}
++#endif
++
++} // namespace
++
++TEST_CASE("GuestMemoryMapping.layoutIsWholeGuestPages", "[vtextension]")
++{
++    CHECK(isGuestMemoryLayout(ObjectBytes, Page, GuardBytes));
++    CHECK(isGuestMemoryLayout(ObjectBytes, 0, 0));
++    CHECK(isGuestMemoryLayout(ObjectBytes, ObjectBytes, 0));
++    CHECK_FALSE(isGuestMemoryLayout(0, 0, 0));
++    CHECK_FALSE(isGuestMemoryLayout(ObjectBytes + 1, Page, 0));
++    CHECK_FALSE(isGuestMemoryLayout(ObjectBytes, Page + 1, 0));
++    CHECK_FALSE(isGuestMemoryLayout(ObjectBytes, Page, 1));
++    CHECK_FALSE(isGuestMemoryLayout(ObjectBytes, ObjectBytes + Page, 0));
++    CHECK_FALSE(isGuestMemoryLayout(ObjectBytes, Page, UINT64_MAX - (Page - 1)));
++}
++
++TEST_CASE("GuestMemoryMapping.opensOnlyTheInitialBytes", "[vtextension]")
++{
++    requireGuestMapping();
++    auto const object = createSharedObject(ObjectBytes, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    auto const mapping = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, GuardBytes);
++    REQUIRE(mapping.has_value());
++    CHECK(mapping->accessibleBytes() == Page);
++    CHECK(mapping->objectBytes() == ObjectBytes);
++    CHECK(mapping->guardBytes() == GuardBytes);
++    auto const* const base = mapping->base();
++
++#ifdef __linux__
++    // Open and shared; closed and shared; the guard, closed and the helper's own.
++    CHECK(permissionsAt(base) == "rw-s");
++    CHECK(permissionsAt(base + Page - 1) == "rw-s");
++    CHECK(permissionsAt(base + Page) == "---s");
++    CHECK(permissionsAt(base + ObjectBytes - 1) == "---s");
++    CHECK(permissionsAt(base + ObjectBytes) == "---p");
++    CHECK(permissionsAt(base + ObjectBytes + GuardBytes - 1) == "---p");
++#elifdef _WIN32
++    auto region = MEMORY_BASIC_INFORMATION {};
++    REQUIRE(::VirtualQuery(base, &region, sizeof(region)) != 0);
++    CHECK(region.State == MEM_COMMIT);
++    CHECK(region.Protect == PAGE_READWRITE);
++    CHECK(region.Type == MEM_MAPPED);
++    CHECK(region.RegionSize == Page);
++    REQUIRE(::VirtualQuery(base + Page, &region, sizeof(region)) != 0);
++    CHECK(region.State == MEM_RESERVE);
++    CHECK(region.Type == MEM_MAPPED);
++    REQUIRE(::VirtualQuery(base + ObjectBytes, &region, sizeof(region)) != 0);
++    CHECK(region.State == MEM_RESERVE);
++    CHECK(region.Type == MEM_PRIVATE);
++    CHECK(region.RegionSize == GuardBytes);
++#else
++    SKIP("this system's mappings are not inspected");
++#endif
++}
++
++TEST_CASE("GuestMemoryMapping.openedBytesAreTheParentsBytes", "[vtextension]")
++{
++    requireGuestMapping();
++    auto const object = createSharedObject(ObjectBytes, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    auto parent = SharedMapping::map(object->get(), ObjectBytes, MapAccess::ReadWrite);
++    REQUIRE(parent.has_value());
++    // Contour commits what it grants through its own view, as the helper does through its.
++    REQUIRE(parent->commit(0, ObjectBytes).has_value());
++    auto helper = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, GuardBytes);
++    REQUIRE(helper.has_value());
++
++    helper->base()[16] = std::byte { 42 };
++    CHECK(parent->bytes()[16] == std::byte { 42 });
++    parent->bytes()[Page - 1] = std::byte { 7 };
++    CHECK(helper->base()[Page - 1] == std::byte { 7 });
++
++    REQUIRE(helper->open(2 * Page).has_value());
++    CHECK(helper->accessibleBytes() == 2 * Page);
++    helper->base()[Page + 8] = std::byte { 9 };
++    CHECK(parent->bytes()[Page + 8] == std::byte { 9 });
++}
++
++TEST_CASE("GuestMemoryMapping.refusesAnObjectTooSmall", "[vtextension]")
++{
++    requireGuestMapping();
++    auto const object = createSharedObject(ObjectBytes / 2, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    auto const mapping = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, GuardBytes);
++    REQUIRE_FALSE(mapping.has_value());
++#ifndef _WIN32
++    // POSIX measures the object; Windows only fails to map a view larger than the section.
++    CHECK(mapping.error() == MappingError::WrongSize);
++#endif
++
++    // Sizes that are no layout are refused before the object is looked at.
++    CHECK(GuestMemoryMapping::map(object->get(), ObjectBytes / 2, Page + 1, 0).error()
++          == MappingError::WrongSize);
++}
++
++TEST_CASE("GuestMemoryMapping.neverShrinks", "[vtextension]")
++{
++    requireGuestMapping();
++    auto const object = createSharedObject(ObjectBytes, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    auto mapping = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, 0);
++    REQUIRE(mapping.has_value());
++
++    REQUIRE(mapping->open(3 * Page).has_value());
++    CHECK(mapping->accessibleBytes() == 3 * Page);
++    REQUIRE(mapping->open(Page).has_value());
++    CHECK(mapping->accessibleBytes() == 3 * Page);
++    mapping->base()[(3 * Page) - 1] = std::byte { 1 };
++    CHECK(mapping->base()[(3 * Page) - 1] == std::byte { 1 });
++
++    CHECK(mapping->open(ObjectBytes + Page).error() == MappingError::WrongSize);
++    CHECK(mapping->open((3 * Page) + 1).error() == MappingError::WrongSize);
++    CHECK(mapping->accessibleBytes() == 3 * Page);
++}
++
++#ifdef _WIN32
++TEST_CASE("GuestMemoryMapping.placeholdersWork", "[vtextension]")
++{
++    if (!canMapGuestMemory() && runsUnderWine())
++        SKIP("wine places no section view over a placeholder: the helper copies memory there");
++    CHECK(canMapGuestMemory());
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_win32.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_win32.cpp
+new file mode 100644
+index 000000000..0768a47a4
+--- /dev/null
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_win32.cpp
+@@ -0,0 +1,165 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Guest memory on Windows, through placeholders: a placeholder reservation of the object and its guard
++// (VirtualAlloc2), split where the object ends, the section mapped over the object's placeholder
++// (MapViewOfFile3, MEM_REPLACE_PLACEHOLDER) with write access, and the open pages committed through this view
++// (VirtualAlloc, MEM_COMMIT): a reserved section's pages are committed by whoever touches them, so the helper
++// commits what it opens itself, whether Windows commits for the section or for each view.
++//
++// The placeholder functions are Windows 10 1803's; they are looked up in kernelbase at run time, so that an
++// older system says it cannot map guest memory (canMapGuestMemory()) rather than fail to load. A section too
++// small for the view fails to map: that is the size check, as the placeholder's view cannot be measured the
++// way SharedMapping measures a whole-section view.
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <optional>
++
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
++#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
++
++#define WIN32_LEAN_AND_MEAN
++#include <Windows.h>
++
++namespace vtextension::wasm::remote::transport
++{
++
++namespace
++{
++    using VirtualAlloc2Fn =
++        PVOID(WINAPI*)(HANDLE, PVOID, SIZE_T, ULONG, ULONG, MEM_EXTENDED_PARAMETER*, ULONG);
++    using MapViewOfFile3Fn =
++        PVOID(WINAPI*)(HANDLE, HANDLE, PVOID, ULONG64, SIZE_T, ULONG, ULONG, MEM_EXTENDED_PARAMETER*, ULONG);
++
++    /// The placeholder functions, where the system has them.
++    struct PlaceholderFunctions
++    {
++        VirtualAlloc2Fn virtualAlloc2 = nullptr;   ///< Reserves a placeholder.
++        MapViewOfFile3Fn mapViewOfFile3 = nullptr; ///< Maps a view over a placeholder.
++    };
++
++    /// @return The placeholder functions; nothing on a system without them. Looked up once.
++    [[nodiscard]] std::optional<PlaceholderFunctions> const& placeholderFunctions() noexcept
++    {
++        static auto const functions = []() -> std::optional<PlaceholderFunctions> {
++            auto* const kernelbase = ::GetModuleHandleW(L"kernelbase.dll");
++            if (kernelbase == nullptr)
++                return std::nullopt;
++            auto const found = PlaceholderFunctions {
++                .virtualAlloc2 =
++                    reinterpret_cast<VirtualAlloc2Fn>(::GetProcAddress(kernelbase, "VirtualAlloc2")),
++                .mapViewOfFile3 =
++                    reinterpret_cast<MapViewOfFile3Fn>(::GetProcAddress(kernelbase, "MapViewOfFile3")),
++            };
++            if (found.virtualAlloc2 == nullptr || found.mapViewOfFile3 == nullptr)
++                return std::nullopt;
++            return found;
++        }();
++        return functions;
++    }
++
++    /// Commits [@p from, @p from + @p bytes) through the view it lies in.
++    /// @return Whether the system committed it.
++    [[nodiscard]] std::expected<void, MappingError> commitThroughView(std::byte* from,
++                                                                      uint64_t bytes) noexcept
++    {
++        if (bytes != 0
++            && ::VirtualAlloc(from, static_cast<SIZE_T>(bytes), MEM_COMMIT, PAGE_READWRITE) == nullptr)
++            return std::unexpected(MappingError::Io);
++        return {};
++    }
++} // namespace
++
++std::expected<GuestMemoryMapping, MappingError> GuestMemoryMapping::map(NativeHandle object,
++                                                                        uint64_t objectBytes,
++                                                                        uint64_t initialBytes,
++                                                                        uint64_t guardBytes)
++{
++    if (!isGuestMemoryLayout(objectBytes, initialBytes, guardBytes))
++        return std::unexpected(MappingError::WrongSize);
++    auto const& functions = placeholderFunctions();
++    if (!functions)
++        return std::unexpected(MappingError::Unsupported);
++
++    auto* const process = ::GetCurrentProcess();
++    auto* const reservation =
++        static_cast<std::byte*>(functions->virtualAlloc2(process,
++                                                         nullptr,
++                                                         static_cast<SIZE_T>(objectBytes + guardBytes),
++                                                         MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
++                                                         PAGE_NOACCESS,
++                                                         nullptr,
++                                                         0));
++    if (reservation == nullptr)
++        return std::unexpected(MappingError::Io);
++    // Two placeholders, the object's and the guard's, so that the view replaces exactly the first.
++    if (guardBytes != 0
++        && ::VirtualFree(
++               reservation, static_cast<SIZE_T>(objectBytes), MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)
++               == 0)
++    {
++        ::VirtualFree(reservation, 0, MEM_RELEASE);
++        return std::unexpected(MappingError::Io);
++    }
++    auto const freeReservation = [&] {
++        ::VirtualFree(reservation, 0, MEM_RELEASE);
++        if (guardBytes != 0)
++            ::VirtualFree(reservation + objectBytes, 0, MEM_RELEASE);
++    };
++    if (functions->mapViewOfFile3(object,
++                                  process,
++                                  reservation,
++                                  0,
++                                  static_cast<SIZE_T>(objectBytes),
++                                  MEM_REPLACE_PLACEHOLDER,
++                                  PAGE_READWRITE,
++                                  nullptr,
++                                  0)
++        == nullptr)
++    {
++        freeReservation();
++        return std::unexpected(MappingError::Io);
++    }
++    // From here on the mapping owns the view and the guard, and releases them on every way out.
++    auto mapping = GuestMemoryMapping { reservation, objectBytes, 0, guardBytes };
++    return commitThroughView(reservation, initialBytes).transform([&] {
++        mapping._accessibleBytes = initialBytes;
++        return std::move(mapping);
++    });
++}
++
++std::expected<void, MappingError> GuestMemoryMapping::openRange(uint64_t from, uint64_t to) noexcept
++{
++    return commitThroughView(_base + from, to - from);
++}
++
++void GuestMemoryMapping::release() noexcept
++{
++    if (_base == nullptr)
++        return;
++    // Unmapping a view that replaced a placeholder frees its range; the guard is a placeholder of its own.
++    ::UnmapViewOfFile(_base);
++    if (_guardBytes != 0)
++        ::VirtualFree(_base + _objectBytes, 0, MEM_RELEASE);
++    _base = nullptr;
++}
++
++bool canMapGuestMemory() noexcept
++{
++    static auto const canMap = [] {
++        constexpr auto ProbeBytes = uint64_t { 64 } * 1024;
++        auto const object = createSharedObject(ProbeBytes, SharedObjectUse::GuestMemory);
++        if (!object)
++            return false;
++        auto const mapping = GuestMemoryMapping::map(object->get(), ProbeBytes, ProbeBytes, ProbeBytes);
++        if (!mapping)
++            return false;
++        auto* const base = static_cast<std::byte volatile*>(mapping->base());
++        base[ProbeBytes - 1] = std::byte { 0x5A };
++        return base[ProbeBytes - 1] == std::byte { 0x5A };
++    }();
++    return canMap;
++}
++
++} // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/PduStream_test.cpp b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+index 138b338be..aeca576d9 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream_test.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+@@ -401,20 +401,21 @@ TEST_CASE("PduStream.tooManyDescriptorsAreMalformed", "[vtextension]")
+                                   proto::ChannelKind::Control,
+                                   proto::Direction::ToHelper,
+                                   proto::PduLimits {} };
+         auto const before = transport::testing::openDescriptorCount();
+         {
+             auto objects = std::vector<transport::OwnedHandle> {};
+             for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, count))
+                 objects.push_back(makeObject());
+             REQUIRE(sendWithDescriptors(channels->parent.nativeHandle(), objects));
+         }
++        // With three, Linux itself drops the descriptor that does not fit the buffer as it truncates.
+         CHECK(helper.receive() == std::unexpected(StreamError::Malformed));
+         CHECK_FALSE(helper.takeAttachedHandle());
+         CHECK(transport::testing::openDescriptorCount() == before);
+     }
+ }
+ 
+     #ifdef SO_PASSCRED
+ TEST_CASE("PduStream.foreignAncillaryDataIsMalformed", "[vtextension]")
+ {
+     // Credentials, which the kernel attaches to every message once the reader asks for them: ancillary data
+diff --git a/src/vtextension/wasm/testing/DecoratedEngine.hpp b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+index 4fd451d95..6ac95f8fa 100644
+--- a/src/vtextension/wasm/testing/DecoratedEngine.hpp
++++ b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+@@ -143,16 +143,18 @@ class DecoratedEngine final: public host::IHostedEngine
+     [[nodiscard]] BackendCapabilities capabilities() const noexcept override
+     {
+         return _inner->capabilities();
+     }
+ 
+     [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+     {
+         return _inner->memoryMode();
+     }
+ 
++    [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override { return _inner->memoryGuardBytes(); }
++
+   private:
+     std::unique_ptr<host::IHostedEngine> _inner;
+     InstanceDecorator _decorate;
+ };
+ 
+ } // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/testing/HostedEngine.hpp b/src/vtextension/wasm/testing/HostedEngine.hpp
+index c80e91fd5..69b31d699 100644
+--- a/src/vtextension/wasm/testing/HostedEngine.hpp
++++ b/src/vtextension/wasm/testing/HostedEngine.hpp
+@@ -1,18 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // Test-only: an engine a host process drives, of whichever backend the test binary links. Declared here,
+ // defined by that backend's directory, so that the host's tests drive a real engine without naming one.
+ #pragma once
+ 
+ #include <memory>
+ 
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ namespace vtextension::wasm::testing
+ {
+ 
++/// @param memoryMode How its instances' memory reaches the parent: copied, or in the object the parent grants
++///        each instance (which a host then maps and provides, host/MemoryProvision.hpp).
+ /// @return A new engine of the linked backend, trapping in software. Every engine it returns shares the test
+ ///         binary's one kind state, as a process's engines do.
+-[[nodiscard]] std::unique_ptr<host::IHostedEngine> makeHostedEngine();
++[[nodiscard]] std::unique_ptr<host::IHostedEngine> makeHostedEngine(
++    remote::proto::MemoryMode memoryMode = remote::proto::MemoryMode::Copy);
+ 
+ } // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/testing/ProcessModules.hpp b/src/vtextension/wasm/testing/ProcessModules.hpp
+index 89f2fcf26..8c05da2af 100644
+--- a/src/vtextension/wasm/testing/ProcessModules.hpp
++++ b/src/vtextension/wasm/testing/ProcessModules.hpp
+@@ -15,13 +15,79 @@ namespace vtextension::wasm::testing
+ ///
+ ///     (module (func $s (loop (br 0))) (start $s))
+ inline constexpr auto StartSpinModule = std::to_array<uint8_t>({
+     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version 1
+     0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // type section: () -> ()
+     0x03, 0x02, 0x01, 0x00,                         // function section: $s has type 0
+     0x08, 0x01, 0x00,                               // start section: $s
+     0x0a, 0x09, 0x01, 0x07, 0x00,                   // code section: one body of 7 bytes, no locals
+     0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b,             // loop, br 0, end; end
+ });
++
++/// One memory of 1 page, growing to at most 16; `grow` grows it by its argument's pages and returns the old
++/// page count (-1 if refused), `store` stores an i32 at an address.
++///
++///     (module
++///       (memory (export "memory") 1 16)
++///       (func (export "grow") (param i32) (result i32) (memory.grow (local.get 0)))
++///       (func (export "store") (param i32 i32) (i32.store (local.get 0) (local.get 1))))
++inline constexpr auto GrowModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version 1
++    0x01, 0x0b, 0x02,                               // type section: two types
++    0x60, 0x01, 0x7f, 0x01, 0x7f,                   //   (i32) -> (i32)
++    0x60, 0x02, 0x7f, 0x7f, 0x00,                   //   (i32, i32) -> ()
++    0x03, 0x03, 0x02, 0x00, 0x01,                   // function section: grow, store
++    0x05, 0x04, 0x01, 0x01, 0x01, 0x10,             // memory section: min 1, max 16
++    0x07, 0x19, 0x03,                               // export section: three exports
++    0x06, 'm', 'e', 'm', 'o', 'r', 'y', 0x02, 0x00, //   memory 0
++    0x04, 'g', 'r', 'o', 'w', 0x00, 0x00,           //   function 0
++    0x05, 's', 't', 'o', 'r', 'e', 0x00, 0x01,      //   function 1
++    0x0a, 0x12, 0x02,                               // code section: two bodies
++    0x06, 0x00, 0x20, 0x00, 0x40, 0x00, 0x0b,       //   local.get 0, memory.grow; end
++    0x09, 0x00, 0x20, 0x00, 0x20, 0x01,             //   local.get 0, local.get 1,
++    0x36, 0x02, 0x00, 0x0b,                         //   i32.store; end
++});
++
++/// The address StartGrowModule's start function stores to, in the page it grew: 64 KiB + 8.
++inline constexpr auto StartGrowAddress = uint32_t { 0x1'0008 };
++
++/// What StartGrowModule's start function stores there.
++inline constexpr auto StartGrowValue = uint32_t { 42 };
++
++/// One memory of 1 page, growing to at most 16, whose start function grows it by a page, keeps what
++/// memory.grow returned in a global (-1 if refused) and, if it grew, stores StartGrowValue at
++/// StartGrowAddress; `grown` returns the global.
++///
++///     (module
++///       (memory (export "memory") 1 16)
++///       (global $grown (mut i32) (i32.const 0))
++///       (func $start
++///         (global.set $grown (memory.grow (i32.const 1)))
++///         (if (i32.ne (global.get $grown) (i32.const -1))
++///           (then (i32.store (i32.const 65544) (i32.const 42)))))
++///       (func (export "grown") (result i32) (global.get $grown))
++///       (start $start))
++inline constexpr auto StartGrowModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version 1
++    0x01, 0x08, 0x02,                               // type section: two types
++    0x60, 0x00, 0x00,                               //   () -> ()
++    0x60, 0x00, 0x01, 0x7f,                         //   () -> (i32)
++    0x03, 0x03, 0x02, 0x00, 0x01,                   // function section: $start, grown
++    0x05, 0x04, 0x01, 0x01, 0x01, 0x10,             // memory section: min 1, max 16
++    0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x00, 0x0b, // global section: mut i32 = 0
++    0x07, 0x12, 0x02,                               // export section: two exports
++    0x06, 'm', 'e', 'm', 'o', 'r', 'y', 0x02, 0x00, //   memory 0
++    0x05, 'g', 'r', 'o', 'w', 'n', 0x00, 0x01,      //   function 1
++    0x08, 0x01, 0x00,                               // start section: $start
++    0x0a, 0x20, 0x02,                               // code section: two bodies
++    0x19, 0x00,                                     //   $start: 25 bytes, no locals
++    0x41, 0x01, 0x40, 0x00, 0x24, 0x00,             //   i32.const 1, memory.grow, global.set 0
++    0x23, 0x00, 0x41, 0x7f, 0x47,                   //   global.get 0, i32.const -1, i32.ne
++    0x04, 0x40,                                     //   if
++    0x41, 0x88, 0x80, 0x04, 0x41, 0x2a,             //     i32.const 65544, i32.const 42
++    0x36, 0x02, 0x00,                               //     i32.store
++    0x0b, 0x0b,                                     //   end; end
++    0x04, 0x00, 0x23, 0x00, 0x0b,                   //   grown: global.get 0; end
++});
+ // clang-format on
+ 
+ } // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/wasmtime/CMakeLists.txt b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+index 1a20b043b..2f0842fa0 100644
+--- a/src/vtextension/wasm/wasmtime/CMakeLists.txt
++++ b/src/vtextension/wasm/wasmtime/CMakeLists.txt
+@@ -1,23 +1,26 @@
+ # vtextension_wasmtime: the Wasmtime backend of the WebAssembly runtime interface (../WasmRuntime.hpp). The only
+ # target that links Wasmtime, and built only where CONTOUR_HAVE_WASMTIME is ON. It is not the default backend
+ # yet: nothing but its own tests links it. scripts/check-wasm-runtime-containment.py keeps it contained.
+ 
+ add_library(vtextension_wasmtime STATIC
+     WasmtimeEngine.cpp
+     WasmtimeInstance.cpp
+     WasmtimeModule.cpp
+     WasmtimeEngine.hpp
+     WasmtimeHandles.hpp
++    WasmtimeMemoryCreator.cpp
++    WasmtimeMemoryCreator.hpp
+     WasmtimeRuntime.hpp
+ )
+-target_link_libraries(vtextension_wasmtime PUBLIC vtextension PRIVATE contour::wasmtime)
++# vtextension_host for the memory a host provides an instance with (../host/MemoryProvision.hpp).
++target_link_libraries(vtextension_wasmtime PUBLIC vtextension vtextension_host PRIVATE contour::wasmtime)
+ 
+ # The backstop WasmtimeEngine.cpp includes: it stops the build unless the Wasmtime headers have every
+ # feature the backend switches, from the same list the configure-time probe checks an installed Wasmtime
+ # against (cmake/ContourThirdParties.cmake).
+ ContourThirdParties_WasmtimeFeatureChecks(_wasmtime_feature_checks ${_WASMTIME_REQUIRED_FEATURES})
+ file(CONFIGURE
+     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp"
+     CONTENT "// SPDX-License-Identifier: Apache-2.0\n// Generated by CMake from _WASMTIME_REQUIRED_FEATURES (cmake/ContourThirdParties.cmake).\n#pragma once\n\n${_wasmtime_feature_checks}"
+     @ONLY
+ )
+diff --git a/src/vtextension/wasm/wasmtime/HostedEngine.cpp b/src/vtextension/wasm/wasmtime/HostedEngine.cpp
+index e8daf7a71..781f9b078 100644
+--- a/src/vtextension/wasm/wasmtime/HostedEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/HostedEngine.cpp
+@@ -2,18 +2,23 @@
+ //
+ // The hosted-engine probe of the Wasmtime engine, for the host's test binary: compiled into
+ // vtextension_remote_test only.
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ 
+ #include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
+ 
+ namespace vtextension::wasm::testing
+ {
+ 
+-std::unique_ptr<host::IHostedEngine> makeHostedEngine()
++std::unique_ptr<host::IHostedEngine> makeHostedEngine(remote::proto::MemoryMode memoryMode)
+ {
+     static auto const kind = wasmtime::makeKindState();
+-    return wasmtime::makeWasmtimeEngine(
+-        kind, wasmtime::WasmtimeConfig { .trapMode = wasmtime::TrapMode::Software });
++    return wasmtime::makeWasmtimeEngine(kind,
++                                        wasmtime::WasmtimeConfig {
++                                            .trapMode = wasmtime::TrapMode::Software,
++                                            .memory = memoryMode == remote::proto::MemoryMode::Shared
++                                                          ? wasmtime::MemorySharing::Provided
++                                                          : wasmtime::MemorySharing::Private,
++                                        });
+ }
+ 
+ } // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+index 0dff950e0..5aba91f54 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+@@ -20,20 +20,21 @@
+ #include <utility>
+ #include <vector>
+ 
+ #include <wasmtime.h>
+ 
+ #include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/WasiAllowList.hpp>
+ #include <vtextension/wasm/wasi/Preview1Shim.hpp>
+ #include <vtextension/wasm/wasi/Preview1Signatures.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
++#include <vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp>
+ // Every feature switch the table drives must exist: a Wasmtime built without one of these could neither
+ // be told to refuse what the table forbids nor be trusted to accept what it allows. Generated from the
+ // list the configure-time probe checks too (cmake/ContourThirdParties.cmake).
+ #include <vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
+ 
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ namespace
+@@ -140,20 +141,29 @@ namespace
+     {
+         auto configurable = EngineFeatures | std::views::filter([](FeatureRow const& row) {
+                                 return row.featureSwitch == FeatureSwitch::Configurable;
+                             })
+                             | std::views::transform(&FeatureRow::feature);
+         return std::ranges::equal(configurable,
+                                   featureSetters | std::views::transform(&FeatureSetterRow::feature))
+                && std::ranges::none_of(featureSetters,
+                                        [](FeatureSetterRow const& row) { return row.setter == nullptr; });
+     }
++    /// @return The guard that follows each instance's memory of an engine configured by @p config, where the
++    ///         host maps it: SignalsGuardBytes for provided memory trapping through signals, else none.
++    [[nodiscard]] uint64_t memoryGuardBytesOf(WasmtimeConfig const& config) noexcept
++    {
++        return config.memory == MemorySharing::Provided && config.trapMode == TrapMode::Signals
++                   ? SignalsGuardBytes
++                   : 0;
++    }
++
+     /// @return A configuration for one runtime's engine, from EngineFeatures, @p config and @p limits.
+     [[nodiscard]] wasm_config_t* engineConfig(WasmtimeConfig const& config, RuntimeLimits limits)
+     {
+         // featureSetters drives every switchable row of EngineFeatures: checked here, as the table cannot
+         // be checked at compile time, and every engine is configured through here.
+         Require(featureSettersMatchTheTable());
+         auto* const engineConfig = wasm_config_new();
+         for (auto const& [feature, setter]: featureSetters)
+             setter(engineConfig, featureRow(feature).state == FeatureState::On);
+         wasmtime_config_max_wasm_stack_set(engineConfig, limits.stackBytes);
+@@ -161,20 +171,33 @@ namespace
+         // epoch, and nothing else does, so no thread ticks it. WasmtimeInstance.cpp sets every store's
+         // deadline one tick ahead before each entry into guest code, and decides in the store's deadline
+         // callback whether the guest that reached it stops.
+         wasmtime_config_epoch_interruption_set(engineConfig, true);
+         wasmtime_config_signals_based_traps_set(engineConfig, config.trapMode == TrapMode::Signals);
+         wasmtime_config_cranelift_opt_level_set(engineConfig, WASMTIME_OPT_LEVEL_SPEED);
+         // Compilation runs on the loading thread, rather than on threads of Wasmtime's own.
+         wasmtime_config_parallel_compilation_set(engineConfig, false);
+         // Mach ports would install a process-wide exception handler thread on macOS.
+         wasmtime_config_macos_use_mach_ports_set(engineConfig, false);
++        if (config.memory == MemorySharing::Provided)
++        {
++            // Every memory lives in the object Contour granted for it, reserved whole, never moved, and
++            // followed by exactly the guard the host maps: nothing Wasmtime would size on its own.
++            wasmtime_config_memory_reservation_set(engineConfig,
++                                                   remote::proto::memoryObjectBytes(limits.memoryBytes));
++            wasmtime_config_memory_guard_size_set(engineConfig, memoryGuardBytesOf(config));
++            wasmtime_config_memory_reservation_for_growth_set(engineConfig, 0);
++            wasmtime_config_memory_may_move_set(engineConfig, false);
++            // Data segments are copied into the object, rather than mapped copy-on-write over it.
++            wasmtime_config_memory_init_cow_set(engineConfig, false);
++            provideMemories(engineConfig);
++        }
+         return engineConfig;
+     }
+ 
+     /// Runs a host function on behalf of the guest: hands its i32 arguments to the IHostContext of the
+     /// calling instance's store. A failure is stashed in the store's data, which is how the call that
+     /// made it tells it apart from a trap of the guest's own.
+     /// Called from Wasmtime's Rust code, which an exception must not unwind through: noexcept.
+     /// @return Null on success; a trap if the host function failed.
+     wasm_trap_t* callHostFunction(void* env,
+                                   wasmtime_caller_t* caller,
+@@ -344,21 +367,27 @@ namespace
+ 
+         [[nodiscard]] uint64_t runtimeGeneration() const noexcept override { return _kind->generation(); }
+ 
+         [[nodiscard]] BackendCapabilities capabilities() const noexcept override
+         {
+             return BackendCapabilities { .memoryGrowth = MemoryGrowthReporting::Unreported };
+         }
+ 
+         [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
+         {
+-            return remote::proto::MemoryMode::Copy;
++            return _config.memory == MemorySharing::Provided ? remote::proto::MemoryMode::Shared
++                                                             : remote::proto::MemoryMode::Copy;
++        }
++
++        [[nodiscard]] uint64_t memoryGuardBytes() const noexcept override
++        {
++            return memoryGuardBytesOf(_config);
+         }
+ 
+       private:
+         std::shared_ptr<KindState> _kind;
+         WasmtimeConfig _config;
+     };
+ } // namespace
+ 
+ KindState::KindState() noexcept: _serial { nextSerial.fetch_add(1) }
+ {
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
+index c5326590d..b232e1edc 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.hpp
+@@ -16,38 +16,54 @@
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ /// How compiled guest code detects an out-of-bounds access or a stack overflow.
+ enum class TrapMode : uint8_t
+ {
+     Software, ///< Explicit bounds and stack checks in the compiled code; no signal handler is installed.
+     Signals,  ///< Guard pages and a process signal handler, as Wasmtime does by default.
+ };
+ 
++/// Where an engine's instances keep their linear memory.
++enum class MemorySharing : uint8_t
++{
++    Private,  ///< In memory Wasmtime allocates; the host copies it to the parent (MemoryMode::Copy).
++    Provided, ///< In the object Contour granted, mapped by the host (host/MemoryProvision.hpp;
++              ///< MemoryMode::Shared).
++};
++
++/// The guard that follows provided memory under TrapMode::Signals: what lets compiled code fold a static
++/// offset into the bounds check it makes on the index.
++inline constexpr uint64_t SignalsGuardBytes = uint64_t { 32 } * 1024 * 1024;
++
+ /// How every Wasmtime engine of a process is set up.
+ struct WasmtimeConfig
+ {
+     /// How traps are detected. Software keeps the contract's promise of no process signal handler.
+     TrapMode trapMode = TrapMode::Software;
+     /// Where the WASI functions every instance imports read clocks and random bytes from.
+     wasi::ShimEnvironment wasiEnvironment = wasi::systemEnvironment();
++    /// Where instances keep their linear memory. Provided needs a provision offered around every
++    /// instantiation of a module that has memory, or that instantiation fails.
++    MemorySharing memory = MemorySharing::Private;
+ };
+ 
+ /// What all Wasmtime engines of a process share: the bring-up generation and the count of runtimes
+ /// alive. Created once by the composition root and handed to every engine it makes, so that they
+ /// behave as one (@see IWasmBackend).
+ class KindState;
+ 
+ /// Creates the state Wasmtime engines of one process share.
+ /// @return The state, with no runtime alive and generation 0.
+ [[nodiscard]] std::shared_ptr<KindState> makeKindState();
+ 
+ /// Creates a Wasmtime engine.
+ /// @param kind The state every Wasmtime engine of the process shares.
+ /// @param config How the engine sets up each Wasmtime engine it creates.
+ /// @return The engine. Refused memory growth is not reported (MemoryGrowthReporting::Unreported): the
+ ///         guest's memory.grow returns -1, and whatever the guest does about it fails the call. Its memory is
+-///         copied to the parent (MemoryMode::Copy).
++///         copied to the parent (MemoryMode::Copy) under MemorySharing::Private, and shared with it
++///         (MemoryMode::Shared) under MemorySharing::Provided.
+ [[nodiscard]] std::unique_ptr<host::IHostedEngine> makeWasmtimeEngine(std::shared_ptr<KindState> kind,
+                                                                       WasmtimeConfig config);
+ 
+ } // namespace vtextension::wasm::wasmtime
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index 3a558b00c..ecd92a297 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -24,37 +24,47 @@
+ #include <utility>
+ #include <vector>
+ 
+ #include <wasmtime.h>
+ 
+ #ifndef _WIN32
+     #include <csignal>
+ #endif
+ 
+ #include <vtextension/ExtensionError.hpp>
++#include <vtextension/wasm/BuildInstrumentation.hpp>
+ #include <vtextension/wasm/EngineFeatures.hpp>
++#include <vtextension/wasm/host/MemoryProvision.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
++#include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
++#include <vtextension/wasm/remote/transport/SharedObject.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #include <vtextension/wasm/testing/FeatureModules.hpp>
++#include <vtextension/wasm/testing/ProcessModules.hpp>
+ #include <vtextension/wasm/testing/RenderMeasurement.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
++#include <vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::wasm::FeatureState;
+ using vtextension::wasm::IWasmBackend;
+ using vtextension::wasm::MemoryGrowthReporting;
+ using vtextension::wasm::ModuleIdentity;
+ using vtextension::wasm::RuntimeLimits;
+ using vtextension::wasm::wasmtime::KindState;
+ using vtextension::wasm::wasmtime::makeKindState;
+ using vtextension::wasm::wasmtime::makeWasmtimeEngine;
++using vtextension::wasm::wasmtime::MemorySharing;
++using vtextension::wasm::wasmtime::SignalsGuardBytes;
+ using vtextension::wasm::wasmtime::TrapMode;
+ using vtextension::wasm::wasmtime::WasmtimeConfig;
+ 
+ namespace
+ {
+ 
+ /// Makes the backend under test, for the contract suite.
+ struct WasmtimeTraits
+ {
+     /// @return A Wasmtime backend of the one kind state this test binary shares, as a process would.
+@@ -205,20 +215,109 @@ class InterruptingHostContext final: public vtextension::wasm::IHostContext
+         std::size_t /*functionIndex*/, std::span<uint32_t const> /*arguments*/) noexcept override
+     {
+         _target->interrupt();
+         return {};
+     }
+ 
+   private:
+     vtextension::wasm::IWasmInstance* _target;
+ };
+ 
++namespace host = vtextension::wasm::host;
++namespace proto = vtextension::wasm::remote::proto;
++namespace transport = vtextension::wasm::remote::transport;
++
++/// A guest page.
++constexpr auto GuestPage = proto::WasmPageBytes;
++
++/// The object the parent grants each instance of a runtime of the contract's limits.
++constexpr auto ContractObjectBytes =
++    proto::memoryObjectBytes(vtextension::wasm::testing::contract::Limits.memoryBytes);
++
++/// @return An engine whose instances run in memory they are provided, of the one kind state of this binary.
++[[nodiscard]] std::unique_ptr<host::IHostedEngine> makeProvidedEngine(TrapMode trapMode = TrapMode::Software)
++{
++    return makeWasmtimeEngine(WasmtimeTraits::kind(),
++                              WasmtimeConfig { .trapMode = trapMode, .memory = MemorySharing::Provided });
++}
++
++/// One instance's memory object as the parent holds it: made, and mapped whole, its pages committed.
++class GrantedObject
++{
++  public:
++    /// @param bytes The object's size.
++    explicit GrantedObject(uint64_t bytes): _handle { created(bytes) }, _parent { mapped(_handle, bytes) } {}
++
++    /// @return The object's handle, still the parent's.
++    [[nodiscard]] transport::NativeHandle handle() const noexcept { return _handle.get(); }
++
++    /// @return The 32-bit little-endian word at @p address, as the parent's mapping reads it.
++    [[nodiscard]] uint32_t wordAt(std::size_t address) const
++    {
++        auto word = uint32_t { 0 };
++        for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 4 }))
++            word |= std::to_integer<uint32_t>(_parent.bytes()[address + index]) << (index * 8);
++        return word;
++    }
++
++    /// @return A provision of the object, mapped as the host maps it.
++    [[nodiscard]] host::MemoryProvision provision(uint64_t objectBytes,
++                                                  uint64_t initialBytes,
++                                                  uint64_t guardBytes,
++                                                  host::GrowRequest grow) const
++    {
++        auto mapping =
++            transport::GuestMemoryMapping::map(_handle.get(), objectBytes, initialBytes, guardBytes);
++        REQUIRE(mapping.has_value());
++        return host::MemoryProvision { .memory = std::move(*mapping), .grow = std::move(grow) };
++    }
++
++  private:
++    [[nodiscard]] static transport::OwnedHandle created(uint64_t bytes)
++    {
++        auto object = transport::createSharedObject(bytes, transport::SharedObjectUse::GuestMemory);
++        REQUIRE(object.has_value());
++        return std::move(*object);
++    }
++
++    [[nodiscard]] static transport::SharedMapping mapped(transport::OwnedHandle const& handle, uint64_t bytes)
++    {
++        auto mapping = transport::SharedMapping::map(handle.get(), bytes, transport::MapAccess::ReadWrite);
++        REQUIRE(mapping.has_value());
++        // Contour commits what it grants through its own view (Windows); the helper does through its own.
++        REQUIRE(mapping->commit(0, bytes).has_value());
++        return std::move(*mapping);
++    }
++
++    transport::OwnedHandle _handle;
++    transport::SharedMapping _parent;
++};
++
++/// @return A growth request answering every growth with @p status, and recording the size each asked for.
++[[nodiscard]] host::GrowRequest answering(proto::GrowStatus status, std::vector<uint64_t>& asked)
++{
++    return [status, &asked](uint64_t bytes) {
++        asked.push_back(bytes);
++        return status;
++    };
++}
++
++/// @return What instantiating @p module with @p provision offered is answered with.
++[[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IWasmInstance>, ExtensionError>
++instantiateWith(vtextension::wasm::IWasmModule& module,
++                vtextension::wasm::IHostContext& context,
++                host::MemoryProvision provision)
++{
++    auto const scope = host::ProvisionScope { std::move(provision) };
++    return module.instantiate(context);
++}
++
+ } // namespace
+ 
+ CONTOUR_WASM_BACKEND_CONTRACT(WasmtimeTraits)
+ 
+ TEST_CASE("WasmtimeEngine.kindStampsOutliveNoKind", "[wasmtime]")
+ {
+     // A kind that comes after another, here at the very same address, is not prepared on a thread for having
+     // the generation its predecessor prepared it for: a thread's stamp names its kind by serial, not address.
+     auto kind = std::optional<KindState> {};
+     kind.emplace();
+@@ -562,16 +661,214 @@ TEST_CASE("Wasmtime.interruptRacingACallStopsIt", "[wasmtime]")
+         });
+         go.store(true, std::memory_order_release);
+         auto const called = instance->call(spin, {});
+         interrupter.join();
+         if (!called.has_value() && called.error() == CallFailure::Interrupted)
+             ++stopped;
+     }
+     CHECK(stopped == Rounds);
+ }
+ 
++TEST_CASE("WasmtimeEngine.providedMemoryBacksTheInstance", "[wasmtime]")
++{
++    namespace contract = vtextension::wasm::testing::contract;
++    auto const engine = makeProvidedEngine();
++    CHECK(engine->memoryMode() == proto::MemoryMode::Shared);
++    auto const runtime = contract::createRuntime(*engine);
++    auto const guard = contract::enterThread(*engine);
++    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
++    auto const object = GrantedObject { ContractObjectBytes };
++    auto asked = std::vector<uint64_t> {};
++    auto context = contract::RecordingHostContext {};
++    auto instance = instantiateWith(
++        *module,
++        context,
++        object.provision(ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Granted, asked)));
++    REQUIRE(instance.has_value());
++
++    auto argv = std::array<uint32_t, 2> { 16, 42 };
++    REQUIRE((*instance)->call(contract::functionOf(**instance, "store"), argv).has_value());
++    CHECK(object.wordAt(16) == 42);
++    CHECK(contract::wordAt(**instance, 16) == 42);
++    CHECK(asked.empty());
++}
++
++TEST_CASE("WasmtimeEngine.growthAsksAndOpens", "[wasmtime]")
++{
++    namespace contract = vtextension::wasm::testing::contract;
++    auto const engine = makeProvidedEngine();
++    auto const runtime = contract::createRuntime(*engine);
++    auto const guard = contract::enterThread(*engine);
++    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
++    auto const object = GrantedObject { ContractObjectBytes };
++    auto context = contract::RecordingHostContext {};
++    auto asked = std::vector<uint64_t> {};
++    constexpr auto Address = static_cast<uint32_t>(GuestPage + 8);
++
++    SECTION("granted")
++    {
++        auto instance = instantiateWith(
++            *module,
++            context,
++            object.provision(
++                ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Granted, asked)));
++        REQUIRE(instance.has_value());
++        auto grown = std::array<uint32_t, 1> { 1 };
++        REQUIRE((*instance)->call(contract::functionOf(**instance, "grow"), grown).has_value());
++        CHECK(grown[0] == 1);
++        CHECK(asked == std::vector<uint64_t> { 2 * GuestPage });
++
++        auto argv = std::array<uint32_t, 2> { Address, 7 };
++        REQUIRE((*instance)->call(contract::functionOf(**instance, "store"), argv).has_value());
++        CHECK(object.wordAt(Address) == 7);
++    }
++
++    SECTION("refused")
++    {
++        auto instance = instantiateWith(
++            *module,
++            context,
++            object.provision(
++                ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Refused, asked)));
++        REQUIRE(instance.has_value());
++        auto grown = std::array<uint32_t, 1> { 1 };
++        REQUIRE((*instance)->call(contract::functionOf(**instance, "grow"), grown).has_value());
++        CHECK(grown[0] == 0xFFFF'FFFF);
++        CHECK(asked == std::vector<uint64_t> { 2 * GuestPage });
++        auto const beyond = (*instance)->memory(static_cast<uint32_t>(GuestPage), 1);
++        REQUIRE_FALSE(beyond.has_value());
++        CHECK(beyond.error() == vtextension::wasm::MemoryFailure::OutOfBounds);
++
++        // The store past the memory traps, rather than reach the closed page.
++        auto argv = std::array<uint32_t, 2> { Address, 7 };
++        CHECK_FALSE((*instance)->call(contract::functionOf(**instance, "store"), argv).has_value());
++    }
++}
++
++TEST_CASE("WasmtimeEngine.instantiateWithoutProvisionFails", "[wasmtime]")
++{
++    namespace contract = vtextension::wasm::testing::contract;
++    auto const engine = makeProvidedEngine();
++    auto const runtime = contract::createRuntime(*engine);
++    auto const guard = contract::enterThread(*engine);
++    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
++    auto context = contract::RecordingHostContext {};
++
++    auto const instance = module->instantiate(context);
++    REQUIRE_FALSE(instance.has_value());
++    CHECK(instance.error() == ExtensionError::InvalidComponent);
++}
++
++TEST_CASE("WasmtimeEngine.provisionMismatchFails", "[wasmtime]")
++{
++    namespace contract = vtextension::wasm::testing::contract;
++    auto const engine = makeProvidedEngine();
++    auto const runtime = contract::createRuntime(*engine);
++    auto const guard = contract::enterThread(*engine);
++    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
++    auto context = contract::RecordingHostContext {};
++    auto asked = std::vector<uint64_t> {};
++
++    struct Mismatch
++    {
++        std::string_view what;
++        uint64_t objectBytes;
++        uint64_t initialBytes;
++    };
++    for (auto const& [what, objectBytes, initialBytes]: {
++             Mismatch { .what = "more initial bytes than the module's minimum",
++                        .objectBytes = ContractObjectBytes,
++                        .initialBytes = 2 * GuestPage },
++             Mismatch { .what = "an object other than the runtime's reservation",
++                        .objectBytes = 2 * ContractObjectBytes,
++                        .initialBytes = GuestPage },
++         })
++    {
++        INFO(what);
++        auto const object = GrantedObject { objectBytes };
++        auto const instance = instantiateWith(
++            *module,
++            context,
++            object.provision(objectBytes, initialBytes, 0, answering(proto::GrowStatus::Granted, asked)));
++        REQUIRE_FALSE(instance.has_value());
++        CHECK(instance.error() == ExtensionError::InvalidComponent);
++    }
++}
++
++TEST_CASE("WasmtimeEngine.reservationAndGuardAreExplicit", "[wasmtime]")
++{
++    namespace contract = vtextension::wasm::testing::contract;
++    using vtextension::wasm::wasmtime::testing::lastMemoryRequest;
++    using vtextension::wasm::wasmtime::testing::MemoryRequest;
++
++    auto const instantiated = [](TrapMode trapMode) {
++        auto const engine = makeProvidedEngine(trapMode);
++        auto const runtime = contract::createRuntime(*engine);
++        auto const guard = contract::enterThread(*engine);
++        auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
++        auto const object = GrantedObject { ContractObjectBytes };
++        auto context = contract::RecordingHostContext {};
++        auto asked = std::vector<uint64_t> {};
++        auto const instance = instantiateWith(*module,
++                                              context,
++                                              object.provision(ContractObjectBytes,
++                                                               GuestPage,
++                                                               engine->memoryGuardBytes(),
++                                                               answering(proto::GrowStatus::Granted, asked)));
++        CHECK(instance.has_value());
++        return engine->memoryGuardBytes();
++    };
++
++    SECTION("software traps")
++    {
++        CHECK(instantiated(TrapMode::Software) == 0);
++        CHECK(lastMemoryRequest()
++              == MemoryRequest { .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = 0 });
++    }
++
++    SECTION("signals")
++    {
++        // A sanitizer or coverage owns the signal handlers: Wasmtime's must not replace them.
++        if constexpr (vtextension::wasm::ThisBuildInstrumentation
++                      != vtextension::wasm::BuildInstrumentation::None)
++            SKIP("an instrumented build traps in software only");
++        CHECK(instantiated(TrapMode::Signals) == SignalsGuardBytes);
++        CHECK(lastMemoryRequest()
++              == MemoryRequest {
++                  .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = SignalsGuardBytes });
++    }
++}
++
++TEST_CASE("WasmtimeEngine.privateMemoryIsUnchanged", "[wasmtime]")
++{
++    namespace contract = vtextension::wasm::testing::contract;
++    using vtextension::wasm::wasmtime::testing::lastMemoryRequest;
++    auto const engine =
++        makeWasmtimeEngine(WasmtimeTraits::kind(), WasmtimeConfig { .trapMode = TrapMode::Software });
++    CHECK(engine->memoryMode() == proto::MemoryMode::Copy);
++    CHECK(engine->memoryGuardBytes() == 0);
++    auto const runtime = contract::createRuntime(*engine);
++    auto const guard = contract::enterThread(*engine);
++    auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
++    auto const object = GrantedObject { ContractObjectBytes };
++    auto context = contract::RecordingHostContext {};
++    auto asked = std::vector<uint64_t> {};
++    auto const requestBefore = lastMemoryRequest();
++
++    // A provision offered to an engine that allocates its own memory is neither asked for nor taken.
++    auto const scope = host::ProvisionScope { object.provision(
++        ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Refused, asked)) };
++    auto const instance = contract::instantiate(*module, context);
++    auto grown = std::array<uint32_t, 1> { 1 };
++    REQUIRE(instance->call(contract::functionOf(*instance, "grow"), grown).has_value());
++    CHECK(grown[0] == 1);
++    CHECK(asked.empty());
++    CHECK(lastMemoryRequest() == requestBefore);
++    CHECK(host::takeProvision().has_value());
++}
++
+ TEST_CASE("Wasmtime.measureRender", "[.measure]")
+ {
+     // Reported, not asserted; vtextension_test's twin measures WAMR the same way.
+     auto const backend = WasmtimeTraits::make();
+     vtextension::wasm::testing::measureBundledRender(*backend, "Wasmtime");
+ }
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.cpp b/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.cpp
+new file mode 100644
+index 000000000..d5fa45436
+--- /dev/null
++++ b/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.cpp
+@@ -0,0 +1,104 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp>
++
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <optional>
++#include <utility>
++
++#include <wasmtime.h>
++
++#include <vtextension/wasm/host/MemoryProvision.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++
++namespace vtextension::wasm::wasmtime
++{
++
++namespace
++{
++    /// What Wasmtime last asked the creator for on this thread.
++    thread_local auto lastRequest = std::optional<testing::MemoryRequest> {};
++
++    /// One linear memory: the provision it was made of, owned by Wasmtime from creation to its finalizer.
++    struct ProvidedMemory
++    {
++        host::MemoryProvision provision; ///< The mapping it lives in, and how it asks to grow.
++    };
++
++    /// Wasmtime's LinearMemory::as_ptr, byte_size and byte_capacity in one: where the memory is, how much of
++    /// it the guest spans, and the most it may span without moving.
++    uint8_t* memoryOf(void* env, std::size_t* byteSize, std::size_t* byteCapacity) noexcept
++    {
++        auto const& mapping = static_cast<ProvidedMemory const*>(env)->provision.memory;
++        // The mapping's sizes are within size_t: GuestMemoryMapping::map() refused any that is not.
++        *byteSize = static_cast<std::size_t>(mapping.accessibleBytes());
++        *byteCapacity = static_cast<std::size_t>(mapping.objectBytes());
++        return reinterpret_cast<uint8_t*>(mapping.base());
++    }
++
++    /// Wasmtime's LinearMemory::grow_to: asks Contour, and opens the new bytes once it granted them. Any
++    /// error makes the guest's memory.grow return -1.
++    wasmtime_error_t* growMemory(void* env, std::size_t newBytes) noexcept
++    {
++        auto& provision = static_cast<ProvidedMemory*>(env)->provision;
++        if (newBytes <= provision.memory.accessibleBytes())
++            return nullptr;
++        if (newBytes > provision.memory.objectBytes())
++            return wasmtime_error_new("guest memory cannot grow past its object");
++        if (!provision.grow || provision.grow(newBytes) != remote::proto::GrowStatus::Granted)
++            return wasmtime_error_new("guest memory growth was refused");
++        if (!provision.memory.open(newBytes))
++            return wasmtime_error_new("guest memory could not be opened");
++        return nullptr;
++    }
++
++    /// Ends a memory: unmaps its object.
++    void finalizeMemory(void* env) noexcept
++    {
++        std::unique_ptr<ProvidedMemory> { static_cast<ProvidedMemory*>(env) }.reset();
++    }
++
++    /// Wasmtime's MemoryCreator::new_memory: the thread's provision, if it is what Wasmtime asks for.
++    wasmtime_error_t* createMemory(void* /*env*/,
++                                   wasm_memorytype_t const* /*type*/,
++                                   std::size_t minimum,
++                                   std::size_t /*maximum*/,
++                                   std::size_t reservedBytes,
++                                   std::size_t guardBytes,
++                                   wasmtime_linear_memory_t* memory) noexcept
++    {
++        lastRequest =
++            testing::MemoryRequest { .minimum = minimum, .reserved = reservedBytes, .guard = guardBytes };
++        auto provision = host::takeProvision();
++        if (!provision)
++            return wasmtime_error_new("no guest memory was provided for this memory");
++        auto const& mapping = provision->memory;
++        if (minimum != mapping.accessibleBytes() || reservedBytes != mapping.objectBytes()
++            || guardBytes > mapping.guardBytes())
++            return wasmtime_error_new("the guest memory provided is not the memory asked for");
++        auto owned = std::make_unique<ProvidedMemory>(ProvidedMemory { .provision = std::move(*provision) });
++        *memory = wasmtime_linear_memory_t { .env = owned.release(),
++                                             .get_memory = &memoryOf,
++                                             .grow_memory = &growMemory,
++                                             .finalizer = &finalizeMemory };
++        return nullptr;
++    }
++} // namespace
++
++void provideMemories(wasm_config_t* config) noexcept
++{
++    auto creator =
++        wasmtime_memory_creator_t { .env = nullptr, .new_memory = &createMemory, .finalizer = nullptr };
++    wasmtime_config_host_memory_creator_set(config, &creator);
++}
++
++namespace testing
++{
++    std::optional<MemoryRequest> lastMemoryRequest() noexcept
++    {
++        return lastRequest;
++    }
++} // namespace testing
++
++} // namespace vtextension::wasm::wasmtime
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp b/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp
+new file mode 100644
+index 000000000..d9bb12f94
+--- /dev/null
++++ b/src/vtextension/wasm/wasmtime/WasmtimeMemoryCreator.hpp
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Wasmtime's memory creator for an engine whose instances run in memory Contour gives them
++// (MemorySharing::Provided): every linear memory is the provision the instantiating thread offers
++// (host/MemoryProvision.hpp), placed where the extension host mapped Contour's object, never moved, and grown
++// only once Contour granted it.
++#pragma once
++
++#include <cstdint>
++#include <optional>
++
++struct wasm_config_t;
++
++namespace vtextension::wasm::wasmtime
++{
++
++/// Has every linear memory an engine configured with @p config creates made of the provision its
++/// instantiating thread offers. Creating one fails, and with it the instantiation, where the thread offers
++/// none, or offers one that was taken already (a second memory), or whose mapping is not what Wasmtime asks
++/// for: its open bytes must be the memory's minimum, its object Wasmtime's reservation, and its guard at
++/// least Wasmtime's.
++/// @param config The configuration; the creator is copied into it.
++void provideMemories(wasm_config_t* config) noexcept;
++
++} // namespace vtextension::wasm::wasmtime
++
++namespace vtextension::wasm::wasmtime::testing
++{
++
++/// What Wasmtime asked the memory creator for, in bytes.
++struct MemoryRequest
++{
++    uint64_t minimum = 0;  ///< The memory's initial size.
++    uint64_t reserved = 0; ///< The reservation it must stay within, never moving.
++    uint64_t guard = 0;    ///< The inaccessible bytes that must follow the reservation.
++
++    bool operator==(MemoryRequest const&) const = default;
++};
++
++/// Test-only: what Wasmtime last asked the memory creator for on the calling thread.
++/// @return The request; nothing if none was made on this thread.
++[[nodiscard]] std::optional<MemoryRequest> lastMemoryRequest() noexcept;
++
++} // namespace vtextension::wasm::wasmtime::testing

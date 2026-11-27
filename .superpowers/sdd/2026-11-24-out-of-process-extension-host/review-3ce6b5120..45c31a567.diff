@@ -1,0 +1,2853 @@
+# Review package: 3ce6b5120..HEAD
+
+## Commits
+45c31a567 feat(vtextension): load each extension once per process, behind a breaker for its host
+
+## Files changed
+ src/contour/ContourGuiApp.cpp                      |   6 +
+ src/vtbackend/bench-headless.cpp                   |   2 +-
+ src/vtextension/CMakeLists.txt                     |   5 +
+ src/vtextension/CompiledExtension.cpp              |  16 +-
+ src/vtextension/CompiledExtension.hpp              |  31 +-
+ src/vtextension/ControlImports_test.cpp            |   5 +-
+ src/vtextension/ExtensionHost.cpp                  |  14 +-
+ src/vtextension/ExtensionHost.hpp                  |   8 +-
+ src/vtextension/ExtensionHost_test.cpp             |   5 +-
+ src/vtextension/ExtensionRegistry.cpp              | 181 ++++++++
+ src/vtextension/ExtensionRegistry.hpp              | 119 +++++
+ src/vtextension/ExtensionRegistry_test.cpp         | 508 +++++++++++++++++++++
+ src/vtextension/HostBreaker.cpp                    |  62 +++
+ src/vtextension/HostBreaker.hpp                    |  82 ++++
+ src/vtextension/Instance.cpp                       |  32 +-
+ src/vtextension/Instance.hpp                       |  18 +-
+ src/vtextension/Instance_test.cpp                  |  19 +-
+ src/vtextension/Isolation_test.cpp                 |   4 +
+ src/vtextension/SessionExtensions.cpp              |  11 +-
+ src/vtextension/SessionExtensions.hpp              |  22 +-
+ src/vtextension/SessionExtensions_test.cpp         |   8 +-
+ src/vtextension/testing/Harness.hpp                |   3 +-
+ src/vtextension/testing/PublicHeaders.cpp          |   2 +
+ src/vtextension/testing/RunnerHarness.hpp          |   2 +-
+ src/vtextension/wasm/remote/CMakeLists.txt         |   1 +
+ .../wasm/remote/RegistryRemote_test.cpp            | 172 +++++++
+ src/vtextension/wasm/testing/RenderMeasurement.hpp |   2 +-
+ src/vthost/DaemonExtensions.cpp                    |   7 +
+ src/vthost/DaemonExtensions.hpp                    |   1 +
+ src/vthost/ExtensionHosting.hpp                    |   4 +
+ src/vthost/SessionHost.cpp                         |   3 +
+ src/vthost/SessionHost_test.cpp                    |  24 +
+ src/vthost/testing/FakeExtensionHosting.hpp        |   3 +
+ src/vthost/testing/KeeperFixture.cpp               |   1 +
+ 34 files changed, 1335 insertions(+), 48 deletions(-)
+
+## Diff
+diff --git a/src/contour/ContourGuiApp.cpp b/src/contour/ContourGuiApp.cpp
+index 8a99d0b4e..e7360f4d4 100644
+--- a/src/contour/ContourGuiApp.cpp
++++ b/src/contour/ContourGuiApp.cpp
+@@ -2848,20 +2848,26 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anc
+         // The Settings window is the app's own, and opens with no terminal window at all.
+         openSettings(anchor);
+         return;
+     }
+     // About, Open Configuration File and the rest show in a window, or act on a session's configuration.
+     errorLog()("Menu bar action \"{}\" needs a window, and none is open.", actions::name(action));
+ }
+ 
+ void ContourGuiApp::onConfigurationReloaded()
+ {
++#ifdef CONTOUR_EXTENSIONS
++    // A reload is what starts an extension whose host kept dying again, whether its sessions rebuild it or
++    // keep it as it was.
++    if (auto* const runtime = startedExtensionRuntime())
++        runtime->configurationReloaded();
++#endif
+     refreshChromeStyle();
+     // Every link states the reloaded session settings to its daemon, not only the launch's.
+     for (auto const& link: _daemonLinks)
+         link->onConfigurationReloaded();
+     // The app's Settings reads the configuration the reload replaced; built on first use, so maybe not yet.
+     if (_settingsController)
+         _settingsController->refresh();
+     // Guarded as refreshChromeStyle() is: the notice is built with the QML engine, which a headless
+     // app never creates.
+     if (_newDefaultsNotice)
+diff --git a/src/vtbackend/bench-headless.cpp b/src/vtbackend/bench-headless.cpp
+index d5dac347d..c0e273634 100644
+--- a/src/vtbackend/bench-headless.cpp
++++ b/src/vtbackend/bench-headless.cpp
+@@ -1538,21 +1538,21 @@ class ExtensionRig
+         config.cellPixelSize = vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) };
+         config.limits = rigLimits();
+         for (auto const& [index, module]: std::views::zip(std::views::iota(size_t { 0 }), _modules))
+             config.extensions.push_back(vtextension::ExtensionSpec {
+                 .name = module.name,
+                 .hostId = module.hostId,
+                 .module = module.module,
+                 .config = _config,
+                 .placement = index == 0 ? vtextension::Placement::TakeOver : vtextension::Placement::Segment,
+                 .runCommand = vtextension::CommandPermission::Deny });
+-        return vtextension::prepareExtensions(std::move(config), _engines.acquire());
++        return vtextension::prepareExtensions(std::move(config), _engines.acquire(), nullptr);
+     }
+ 
+     /// @param published Where the terminal hears of a published frame.
+     /// @return What one terminal's extensions reach.
+     [[nodiscard]] vtextension::ExtensionHostServices services(vtbackend::StatusLinePublishSink& published)
+     {
+         return vtextension::ExtensionHostServices {
+             .engines = _engines,
+             .runners = vtextension::RunnerServices {
+                 .scheduler = _pool,
+diff --git a/src/vtextension/CMakeLists.txt b/src/vtextension/CMakeLists.txt
+index d603a3135..ac7e92999 100644
+--- a/src/vtextension/CMakeLists.txt
++++ b/src/vtextension/CMakeLists.txt
+@@ -9,21 +9,23 @@ set(vtextension_SOURCES
+     CommandLine.cpp
+     CommandPolicy.cpp
+     CompiledExtension.cpp
+     ControlImports.cpp
+     Engine.cpp
+     EventQueue.cpp
+     ExtensionComposition.cpp
+     ExtensionConsent.cpp
+     ExtensionGrantStore.cpp
+     ExtensionHost.cpp
++    ExtensionRegistry.cpp
+     ExtensionWorkerPool.cpp
++    HostBreaker.cpp
+     HostState.cpp
+     Instance.cpp
+     Manifest.cpp
+     Runner.cpp
+     SessionExtensions.cpp
+     StatusLineAdapter.cpp
+     Surface.cpp
+     wasm/wasi/Preview1Shim.cpp
+     wasm/wasi/SystemEnvironment.cpp
+ )
+@@ -40,23 +42,25 @@ set(vtextension_HEADERS
+     DeadlineGuard.hpp
+     Engine.hpp
+     Event.hpp
+     EventQueue.hpp
+     ExtensionComposition.hpp
+     ExtensionConsent.hpp
+     ExtensionError.hpp
+     ExtensionGrantStore.hpp
+     ExtensionHost.hpp
+     ExtensionLimits.hpp
++    ExtensionRegistry.hpp
+     ExtensionScheduler.hpp
+     ExtensionWorkerPool.hpp
+     HostBindings.hpp
++    HostBreaker.hpp
+     HostState.hpp
+     IHostServices.hpp
+     Instance.hpp
+     Manifest.hpp
+     Placement.hpp
+     Runner.hpp
+     SessionExtensions.hpp
+     StatusLineAdapter.hpp
+     StatuslineWorld.hpp
+     Surface.hpp
+@@ -104,20 +108,21 @@ if(VTEXTENSION_TESTING)
+         ControlCodec_test.cpp
+         ControlImports_test.cpp
+         DeadlineGuard_test.cpp
+         Engine_test.cpp
+         EventQueue_test.cpp
+         ExtensionComposition_test.cpp
+         ExtensionConsent_test.cpp
+         ExtensionError_test.cpp
+         ExtensionGrantStore_test.cpp
+         ExtensionHost_test.cpp
++        ExtensionRegistry_test.cpp
+         ExtensionWorkerPool_test.cpp
+         HostState_test.cpp
+         Instance_test.cpp
+         Isolation_test.cpp
+         Manifest_test.cpp
+         Runner_test.cpp
+         SessionExtensions_test.cpp
+         StatusLineAdapter_test.cpp
+         Surface_test.cpp
+         Wit_test.cpp
+diff --git a/src/vtextension/CompiledExtension.cpp b/src/vtextension/CompiledExtension.cpp
+index 161bdb3db..9efa77042 100644
+--- a/src/vtextension/CompiledExtension.cpp
++++ b/src/vtextension/CompiledExtension.cpp
+@@ -109,27 +109,34 @@ namespace
+             if (entry == exports.end())
+                 return shape.presence == Presence::Optional;
+             return entry->kind == wasm::ExternKind::Function && hasShape(entry->signature, shape);
+         });
+     }
+ } // namespace
+ 
+ CompiledExtension::CompiledExtension(PrivateTag /*unused*/,
+                                      std::shared_ptr<Engine> engine,
+                                      std::optional<Manifest> manifest,
+-                                     std::shared_ptr<wasm::IWasmModule> module):
+-    _engine { std::move(engine) }, _manifest { std::move(manifest) }, _module { std::move(module) }
++                                     std::shared_ptr<wasm::IWasmModule> module,
++                                     std::shared_ptr<HostBreaker> breaker):
++    _engine { std::move(engine) },
++    _manifest { std::move(manifest) },
++    _module { std::move(module) },
++    _breaker { std::move(breaker) }
+ {
+ }
+ 
+ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtension::load(
+-    Engine& engine, wasm::ModuleIdentity identity, std::vector<std::byte> bytes)
++    Engine& engine,
++    wasm::ModuleIdentity identity,
++    std::vector<std::byte> bytes,
++    std::shared_ptr<HostBreaker> breaker)
+ {
+     // The manifest is read before the runtime sees the bytes, which its loader may rewrite in place.
+     auto manifest = parseManifest(bytes);
+     auto const startsItself = hasStartFunction(bytes);
+ 
+     // Exports an engine would run while instantiating, or read otherwise than the host does, are refused
+     // here, before any engine sees them: every engine refuses the same modules, and at once. Bytes whose
+     // exports cannot be read are no module any engine would load.
+     auto const exportNames = wasm::binary::exportNames(bytes);
+     if (!exportNames || std::ranges::any_of(*exportNames, wasm::isRefusedExportName))
+@@ -149,14 +156,15 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtens
+ 
+     // A start function would run during instantiation, which no deadline guards: the world has none,
+     // and initialization belongs in a WASI reactor's `_initialize`, which is called under one.
+     if (startsItself || !importsAreProvided(**module) || !exportsMatch(**module))
+         return std::unexpected(ExtensionError::WorldMismatch);
+ 
+     return std::make_shared<CompiledExtension>(PrivateTag {},
+                                                engine.shared_from_this(),
+                                                manifest ? std::optional { std::move(*manifest) }
+                                                         : std::nullopt,
+-                                               std::move(*module));
++                                               std::move(*module),
++                                               std::move(breaker));
+ }
+ 
+ } // namespace vtextension
+diff --git a/src/vtextension/CompiledExtension.hpp b/src/vtextension/CompiledExtension.hpp
+index 665bc1568..e78f83f7b 100644
+--- a/src/vtextension/CompiledExtension.hpp
++++ b/src/vtextension/CompiledExtension.hpp
+@@ -2,20 +2,21 @@
+ #pragma once
+ 
+ #include <cstddef>
+ #include <expected>
+ #include <memory>
+ #include <optional>
+ #include <vector>
+ 
+ #include <vtextension/Engine.hpp>
+ #include <vtextension/ExtensionError.hpp>
++#include <vtextension/HostBreaker.hpp>
+ #include <vtextension/Manifest.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension
+ {
+ 
+ /// An extension's module, loaded and checked once, from which any number of instances are created:
+ /// after a fault the host re-instantiates without reading or checking the module again.
+ ///
+ /// Loading runs none of the module's code. It reads the manifest, and checks that the module speaks
+@@ -31,46 +32,72 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
+     struct PrivateTag
+     {
+     };
+ 
+   public:
+     /// Loads and checks a module.
+     /// @param engine The engine the module is loaded on and its instances run on; the module keeps it
+     ///        alive.
+     /// @param identity Which host the module runs in, for a runtime that runs modules out of process.
+     /// @param bytes The module's bytes; the runtime's module keeps them.
++    /// @param breaker What counts the deaths of the module's host, shared by every instance of it; null for a
++    ///        module whose instances are always admitted (one not shared through an ExtensionRegistry).
+     /// @return The loaded module; `HostUnavailable` if the host it is to run in cannot be reached,
+     ///         `InvalidComponent` if it is not a valid core module,
+     ///         `ManifestInvalid` if its manifest does not parse, `WorldMismatch` if it imports
+     ///         something the host does not provide or lacks an export the world requires.
+     [[nodiscard]] static std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> load(
+-        Engine& engine, wasm::ModuleIdentity identity, std::vector<std::byte> bytes);
++        Engine& engine,
++        wasm::ModuleIdentity identity,
++        std::vector<std::byte> bytes,
++        std::shared_ptr<HostBreaker> breaker);
+ 
+     /// Use load(); public only so that std::make_shared can reach it.
+     CompiledExtension(PrivateTag,
+                       std::shared_ptr<Engine> engine,
+                       std::optional<Manifest> manifest,
+-                      std::shared_ptr<wasm::IWasmModule> module);
++                      std::shared_ptr<wasm::IWasmModule> module,
++                      std::shared_ptr<HostBreaker> breaker);
+ 
+     ~CompiledExtension() = default;
+ 
+     CompiledExtension(CompiledExtension const&) = delete;
+     CompiledExtension(CompiledExtension&&) = delete;
+     CompiledExtension& operator=(CompiledExtension const&) = delete;
+     CompiledExtension& operator=(CompiledExtension&&) = delete;
+ 
+     /// @return The manifest the module embeds; `std::nullopt` for a module that embeds none.
+     [[nodiscard]] std::optional<Manifest> const& manifest() const noexcept { return _manifest; }
+ 
+     /// @return The engine the module's instances run on.
+     [[nodiscard]] Engine& engine() const noexcept { return *_engine; }
+ 
+     /// @return The loaded runtime module, for instantiation.
+     [[nodiscard]] wasm::IWasmModule& module() const noexcept { return *_module; }
+ 
++    /// Admits an instance to be created: refused while the module's host keeps dying. Const as every pane
++    /// shares the module; the breaker it reaches is thread-safe.
++    /// @return What the instance reports its host's death with; `HostUnavailable` while the breaker is open.
++    [[nodiscard]] std::expected<HostAdmission, ExtensionError> admitHost() const noexcept
++    {
++        return _breaker ? _breaker->admit() : HostAdmission {};
++    }
++
++    /// Reports the death of the host an instance admitted under @p admission ran in. Counted once however
++    /// many instances report it. @see HostBreaker::recordHostFault()
++    void recordHostFault(HostAdmission admission) const noexcept
++    {
++        if (_breaker)
++            _breaker->recordHostFault(admission);
++    }
++
++    /// @return What counts the deaths of the module's host; null if nothing does.
++    [[nodiscard]] HostBreaker const* breaker() const noexcept { return _breaker.get(); }
++
+   private:
+     std::shared_ptr<Engine> _engine;
+     std::optional<Manifest> _manifest;
+     std::shared_ptr<wasm::IWasmModule> _module;
++    std::shared_ptr<HostBreaker> _breaker; ///< Null for a module no registry shares.
+ };
+ 
+ } // namespace vtextension
+diff --git a/src/vtextension/ControlImports_test.cpp b/src/vtextension/ControlImports_test.cpp
+index d5f693098..972a71e92 100644
+--- a/src/vtextension/ControlImports_test.cpp
++++ b/src/vtextension/ControlImports_test.cpp
+@@ -412,21 +412,21 @@ TEST_CASE("a control import the guest calls wrongly traps", "[vtextension][contr
+     CHECK(services.controlCalls.empty());
+ }
+ 
+ TEST_CASE("a module importing the control interface instantiates", "[vtextension][control]")
+ {
+     auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+     auto const threadGuard = vtextension::testing::preparedThread(*backend);
+     auto const compiled = CompiledExtension::load(
+-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule));
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule), nullptr);
+     REQUIRE(compiled.has_value());
+     auto services = FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     auto const instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+     REQUIRE(instance.has_value());
+     CHECK((*instance)->render(surface(80, 1)).has_value());
+     CHECK(services.controlCalls.empty());
+ }
+ 
+ TEST_CASE("a guest calls a control verb through the runtime", "[vtextension][control]")
+@@ -478,21 +478,22 @@ TEST_CASE("an instance's deadline expiring during a control call faults it, writ
+     };
+ 
+     auto limits = ExtensionLimits {};
+     limits.callDeadline = 20ms;
+     auto const engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+     auto const compiled = CompiledExtension::load(
+         **engine,
+         wasm::ModuleIdentity {},
+         vtextension::testing::withManifest(toModule(vtextension::testing::MinimalModule),
+-                                           "name = reader\nversion = 1\ncontrol read\n"));
++                                           "name = reader\nversion = 1\ncontrol read\n"),
++        nullptr);
+     REQUIRE(compiled.has_value());
+     auto services = FakeHostServices {};
+     services.controlAnswer =
+         R"({"version":"1","protocolVersion":4,"platform":"linux","hostname":"h","uptimeSeconds":1})";
+     // The host takes until the watchdog has interrupted the guest (bounded, so that a watchdog that never
+     // fires fails the checks below rather than hanging the test).
+     services.beforeControlAnswer = [&] {
+         auto const giveUp = std::chrono::steady_clock::now() + std::chrono::seconds { 5 };
+         while (backend.lastInstance->interrupts.load() == 0 && std::chrono::steady_clock::now() < giveUp)
+             std::this_thread::sleep_for(1ms);
+diff --git a/src/vtextension/ExtensionHost.cpp b/src/vtextension/ExtensionHost.cpp
+index d156f4e6e..b3b5d90eb 100644
+--- a/src/vtextension/ExtensionHost.cpp
++++ b/src/vtextension/ExtensionHost.cpp
+@@ -1,19 +1,20 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/ExtensionHost.hpp>
+ 
+ #include <algorithm>
+ #include <cstdint>
+ #include <optional>
+ #include <string_view>
+ #include <utility>
+ 
++#include <vtextension/ExtensionRegistry.hpp>
+ #include <vtextension/Surface.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension
+ {
+ 
+ namespace
+ {
+     /// @return How many cells @p text takes, counting one per code point: enough for a notice.
+     [[nodiscard]] int codepointCount(std::string_view text) noexcept
+@@ -67,43 +68,50 @@ std::expected<std::shared_ptr<Engine>, ExtensionError> EngineProvider::acquire()
+         return Engine::create(_backend, _limits).transform([&](std::shared_ptr<Engine> created) {
+             _engine = created;
+             return created;
+         });
+     }();
+     release(std::move(retired));
+     return engine;
+ }
+ 
+ PreparedExtensions prepareExtensions(ExtensionHostConfig config,
+-                                     std::expected<std::shared_ptr<Engine>, ExtensionError> engine)
++                                     std::expected<std::shared_ptr<Engine>, ExtensionError> engine,
++                                     ExtensionRegistry* registry)
+ {
+     auto prepared = PreparedExtensions { .extensions = {},
+                                          .engine = engine.value_or(nullptr),
+                                          .cellPixelSize = config.cellPixelSize,
+                                          .limits = config.limits };
+     // Entered only if a module is to be loaded, and so only on a thread that may: the thread that brought
+     // the runtime up already is, and a guard there does nothing.
+     auto threadGuard = std::optional<std::expected<std::unique_ptr<wasm::IThreadGuard>, ExtensionError>> {};
+     prepared.extensions.reserve(config.extensions.size());
+     for (auto& spec: config.extensions)
+     {
+         auto compiled = [&]() -> std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> {
+             if (spec.module.empty())
+                 return std::unexpected(spec.moduleError);
+             if (!engine)
+                 return std::unexpected(engine.error());
+             if (!threadGuard)
+                 threadGuard.emplace((*engine)->backend().enterThread());
+             if (!*threadGuard)
+                 return std::unexpected(threadGuard->error());
++            if (registry)
++            {
++                // Keyed before the bytes move: the key digests them.
++                auto const key = registryKeyOf(spec, ExtensionWorld::StatusLine);
++                return registry->acquire(**engine, key, std::move(spec.module));
++            }
+             return CompiledExtension::load(
+-                **engine, wasm::ModuleIdentity { spec.hostId }, std::move(spec.module));
++                **engine, wasm::ModuleIdentity { spec.hostId }, std::move(spec.module), nullptr);
+         }();
+         spec.module.clear();
+         prepared.extensions.push_back(
+             PreparedExtension { .spec = std::move(spec), .compiled = std::move(compiled) });
+     }
+     return prepared;
+ }
+ 
+ std::unique_ptr<RetiredExtension> retirementOf(PreparedExtensions prepared)
+ {
+@@ -132,21 +140,21 @@ namespace
+ 
+ ExtensionHost::ExtensionHost(ExtensionHostConfig config, ExtensionHostServices services):
+     ExtensionHost(
+         [&] {
+             // Acquired only for a module there is, so that extensions whose modules are all missing start no
+             // runtime either.
+             auto engine = hasModules(config) ? services.engines.acquire()
+                                              : std::expected<std::shared_ptr<Engine>, ExtensionError> {
+                                                    std::unexpected(ExtensionError::ModuleUnavailable)
+                                                };
+-            return prepareExtensions(std::move(config), std::move(engine));
++            return prepareExtensions(std::move(config), std::move(engine), nullptr);
+         }(),
+         services)
+ {
+ }
+ 
+ ExtensionHost::ExtensionHost(PreparedExtensions prepared, ExtensionHostServices services):
+     _engines { services.engines }
+ {
+     _entries.reserve(prepared.extensions.size());
+     for (auto& [spec, compiled]: prepared.extensions)
+diff --git a/src/vtextension/ExtensionHost.hpp b/src/vtextension/ExtensionHost.hpp
+index 9e104114b..b1952f4d7 100644
+--- a/src/vtextension/ExtensionHost.hpp
++++ b/src/vtextension/ExtensionHost.hpp
+@@ -20,20 +20,22 @@
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/ExtensionLimits.hpp>
+ #include <vtextension/Instance.hpp>
+ #include <vtextension/Placement.hpp>
+ #include <vtextension/Runner.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension
+ {
+ 
++class ExtensionRegistry;
++
+ /// Hands out the process's Engine: the one that is alive, or a new one if none is.
+ class IEngineProvider
+ {
+   public:
+     IEngineProvider() = default;
+     IEngineProvider(IEngineProvider const&) = delete;
+     IEngineProvider(IEngineProvider&&) = delete;
+     IEngineProvider& operator=(IEngineProvider const&) = delete;
+     IEngineProvider& operator=(IEngineProvider&&) = delete;
+     virtual ~IEngineProvider() = default;
+@@ -130,23 +132,27 @@ struct PreparedExtensions
+     std::shared_ptr<Engine> engine;            ///< What the modules were loaded on; null if none was.
+     vtbackend::ImageSize cellPixelSize {};     ///< One cell of the status line, in pixels.
+     ExtensionLimits limits {};                 ///< What each extension may cost.
+ };
+ 
+ /// Loads the modules of @p config: what the slow part of starting a pane's extensions is. Runs on any
+ /// thread, which it prepares for the runtime itself; runs none of the modules' code.
+ /// @param config The pane's extensions.
+ /// @param engine What to load them on: one acquired on an owner's thread; ignored (and may be an error)
+ ///        when no extension has module bytes.
++/// @param registry Where each module is shared with the other panes running it, loaded only if none does;
++///        null to load every module afresh, with no breaker for its host.
+ /// @return The loaded extensions, each with its module or the reason it has none.
+ [[nodiscard]] PreparedExtensions prepareExtensions(
+-    ExtensionHostConfig config, std::expected<std::shared_ptr<Engine>, ExtensionError> engine);
++    ExtensionHostConfig config,
++    std::expected<std::shared_ptr<Engine>, ExtensionError> engine,
++    ExtensionRegistry* registry);
+ 
+ /// @param prepared Prepared extensions.
+ /// @return What a runner retires, one node per module of @p prepared and one for its engine, linked by
+ ///         `next`: how extensions that are never started reach an owner's thread through an IRetirementSink.
+ [[nodiscard]] std::unique_ptr<RetiredExtension> retirementOf(PreparedExtensions prepared);
+ 
+ /// What the extensions of a pane reach. @see RunnerServices for the lifetime contract.
+ struct ExtensionHostServices
+ {
+     IEngineProvider& engines; ///< Where the engine comes from; asked only if there is an extension.
+diff --git a/src/vtextension/ExtensionHost_test.cpp b/src/vtextension/ExtensionHost_test.cpp
+index c26619756..281848485 100644
+--- a/src/vtextension/ExtensionHost_test.cpp
++++ b/src/vtextension/ExtensionHost_test.cpp
+@@ -106,21 +106,22 @@ TEST_CASE("ExtensionHost.runners", "[vtextension]")
+     CHECK(host.snapshot("one") != host.snapshot("two"));
+     CHECK(host.snapshot("three") == nullptr);
+ }
+ 
+ TEST_CASE("ExtensionHost.loadsUnderTheHostId", "[vtextension]")
+ {
+     // The host id names the host process a module runs in: every load passes it on to the runtime.
+     auto backend = vtextension::testing::FakeWasmBackend {};
+     auto config = ExtensionHostConfig {};
+     config.extensions.push_back(minimal("one"));
+-    auto const prepared = prepareExtensions(std::move(config), Engine::create(backend, ExtensionLimits {}));
++    auto const prepared =
++        prepareExtensions(std::move(config), Engine::create(backend, ExtensionLimits {}), nullptr);
+     REQUIRE(prepared.extensions.size() == 1);
+     CHECK(prepared.extensions.front().compiled.has_value());
+     CHECK(backend.loads() == 1);
+     CHECK(backend.lastIdentity() == wasm::ModuleIdentity { "minimal@test" });
+ }
+ 
+ TEST_CASE("ExtensionHost.unloadable", "[vtextension]")
+ {
+     // A module that does not load shows why, in its place; it gets no runner and no lane.
+     auto harness = RunnerHarness {};
+@@ -167,21 +168,21 @@ namespace
+ [[nodiscard]] PreparedExtensions preparedOnAnotherThread(std::shared_ptr<Engine> const& engine)
+ {
+     auto config = ExtensionHostConfig {};
+     config.extensions.push_back(minimal("clock"));
+     auto large = minimal("huge");
+     large.module.clear();
+     large.moduleError = ExtensionError::ModuleTooLarge;
+     config.extensions.push_back(std::move(large));
+ 
+     auto prepared = PreparedExtensions {};
+-    auto loader = std::thread { [&] { prepared = prepareExtensions(std::move(config), engine); } };
++    auto loader = std::thread { [&] { prepared = prepareExtensions(std::move(config), engine, nullptr); } };
+     loader.join();
+     REQUIRE(prepared.extensions.size() == 2);
+     CHECK(prepared.extensions[0].compiled.has_value());
+     CHECK(prepared.extensions[0].spec.module.empty());
+     REQUIRE_FALSE(prepared.extensions[1].compiled.has_value());
+     return prepared;
+ }
+ } // namespace
+ 
+ TEST_CASE("ExtensionHost.preparedElsewhere", "[vtextension]")
+diff --git a/src/vtextension/ExtensionRegistry.cpp b/src/vtextension/ExtensionRegistry.cpp
+new file mode 100644
+index 000000000..453f2337f
+--- /dev/null
++++ b/src/vtextension/ExtensionRegistry.cpp
+@@ -0,0 +1,181 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/ExtensionRegistry.hpp>
++
++#include <core/Sha256.hpp>
++#include <core/Utils.hpp>
++
++#include <algorithm>
++#include <array>
++#include <exception>
++#include <format>
++#include <ranges>
++#include <span>
++#include <utility>
++
++#include <vtextension/ExtensionHost.hpp>
++
++namespace vtextension
++{
++
++namespace
++{
++    /// One world, and the name a module identity spells it with.
++    struct WorldName
++    {
++        ExtensionWorld world;
++        std::string_view name;
++    };
++
++    /// Every world, by name.
++    constexpr auto WorldNames = std::array {
++        WorldName { .world = ExtensionWorld::StatusLine, .name = "statusline" },
++    };
++
++    /// @return What a module identity calls @p world.
++    [[nodiscard]] std::string_view nameOf(ExtensionWorld world) noexcept
++    {
++        auto const row = std::ranges::find(WorldNames, world, &WorldName::world);
++        return row != WorldNames.end() ? row->name : std::string_view { "unknown" };
++    }
++
++    /// Absorbs @p field into @p hasher after its length, as eight little-endian bytes: no field's bytes can
++    /// be read as its neighbour's.
++    void absorbField(core::Sha256& hasher, std::string_view field)
++    {
++        auto length = std::array<std::byte, 8> {};
++        auto remaining = static_cast<uint64_t>(field.size());
++        for (auto& byte: length)
++        {
++            byte = static_cast<std::byte>(remaining & 0xFFU);
++            remaining >>= 8U;
++        }
++        hasher.update(std::span<std::byte const> { length });
++        hasher.update(field);
++    }
++
++    /// @return The digest, in hex, of what makes @p spec's configuration: what it may run, then its settings
++    ///         sorted by name (settings of one name in the user's order).
++    [[nodiscard]] std::string configDigestOf(ExtensionSpec const& spec)
++    {
++        auto settings = spec.config;
++        std::ranges::stable_sort(settings, {}, &ConfigMap::value_type::first);
++        auto hasher = core::Sha256 {};
++        auto const runCommand = static_cast<char>(std::to_underlying(spec.runCommand));
++        absorbField(hasher, std::string_view { &runCommand, 1 });
++        for (auto const& [name, value]: settings)
++        {
++            absorbField(hasher, name);
++            absorbField(hasher, value);
++        }
++        return core::toLowerHexString(hasher.finish());
++    }
++} // namespace
++
++RegistryKey registryKeyOf(ExtensionSpec const& spec, ExtensionWorld world)
++{
++    return RegistryKey { .hostId = spec.hostId,
++                         .world = world,
++                         .configDigest = configDigestOf(spec),
++                         .moduleDigest = core::toLowerHexString(core::Sha256::hash(spec.module)) };
++}
++
++wasm::ModuleIdentity moduleIdentityOf(RegistryKey const& key)
++{
++    // The host id last: the world's name and the digest hold no newline, so nothing of it can be taken for
++    // them.
++    return wasm::ModuleIdentity { .key = std::format(
++                                      "{}\n{}\n{}", nameOf(key.world), key.configDigest, key.hostId) };
++}
++
++ExtensionRegistry::ExtensionRegistry(core::platform::IClock& clock, ExtensionLimits limits):
++    _clock { clock }, _limits { limits }
++{
++}
++
++bool ExtensionRegistry::isExpired(Entry const& entry) noexcept
++{
++    auto const* const live = std::get_if<std::weak_ptr<CompiledExtension>>(&entry.state);
++    return live != nullptr && live->expired();
++}
++
++std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> ExtensionRegistry::acquire(
++    Engine& engine, RegistryKey const& key, std::vector<std::byte> bytes)
++{
++    auto loaded = std::promise<LoadResult> {};
++    auto breaker = std::shared_ptr<HostBreaker> {};
++    auto serial = uint64_t { 0 };
++    {
++        auto lock = std::unique_lock { _mutex };
++        std::erase_if(_entries, isExpired);
++        auto const entry = std::ranges::find_if(_entries, [&](Entry const& candidate) {
++            return candidate.engine == &engine && candidate.key == key;
++        });
++        if (entry != _entries.end())
++        {
++            if (auto const* const loading = std::get_if<std::shared_future<LoadResult>>(&entry->state))
++            {
++                // Waited for outside the lock, which the load takes to publish its outcome.
++                auto const pending = *loading;
++                lock.unlock();
++                return pending.get();
++            }
++            // Lost its last pane since the sweep above, on another thread: a new entry takes its place.
++            if (auto live = std::get<std::weak_ptr<CompiledExtension>>(entry->state).lock())
++                return live;
++            _entries.erase(entry);
++        }
++        serial = _nextSerial++;
++        breaker = std::make_shared<HostBreaker>(_clock, _limits.faultsBeforeDisable, _limits.faultWindow);
++        _entries.push_back(Entry { .key = key,
++                                   .engine = &engine,
++                                   .serial = serial,
++                                   .breaker = breaker,
++                                   .state = loaded.get_future().share() });
++    }
++
++    auto result = LoadResult {};
++    try
++    {
++        result = CompiledExtension::load(engine, moduleIdentityOf(key), std::move(bytes), std::move(breaker));
++    }
++    catch (...)
++    {
++        settle(serial, std::unexpected(ExtensionError::InvalidComponent));
++        loaded.set_exception(std::current_exception());
++        throw;
++    }
++    settle(serial, result);
++    loaded.set_value(result);
++    return result;
++}
++
++void ExtensionRegistry::settle(uint64_t serial, LoadResult const& result) noexcept
++{
++    auto const lock = std::scoped_lock { _mutex };
++    auto const entry = std::ranges::find(_entries, serial, &Entry::serial);
++    if (entry == _entries.end())
++        return;
++    if (result)
++        entry->state = std::weak_ptr<CompiledExtension> { *result };
++    else
++        _entries.erase(entry); // the next acquire tries again
++}
++
++void ExtensionRegistry::resetBreakers() noexcept
++{
++    auto const lock = std::scoped_lock { _mutex };
++    for (auto const& entry: _entries)
++    {
++        auto& breaker = *entry.breaker; // the breaker's reset(), not the pointer's
++        breaker.reset();
++    }
++}
++
++std::size_t ExtensionRegistry::liveEntries() const
++{
++    auto const lock = std::scoped_lock { _mutex };
++    return static_cast<std::size_t>(
++        std::ranges::count_if(_entries, [](Entry const& entry) { return !isExpired(entry); }));
++}
++
++} // namespace vtextension
+diff --git a/src/vtextension/ExtensionRegistry.hpp b/src/vtextension/ExtensionRegistry.hpp
+new file mode 100644
+index 000000000..8be72195a
+--- /dev/null
++++ b/src/vtextension/ExtensionRegistry.hpp
+@@ -0,0 +1,119 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++#include <core/platform/Clock.hpp>
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <future>
++#include <memory>
++#include <mutex>
++#include <string>
++#include <string_view>
++#include <variant>
++#include <vector>
++
++#include <vtextension/CompiledExtension.hpp>
++#include <vtextension/Engine.hpp>
++#include <vtextension/ExtensionError.hpp>
++#include <vtextension/ExtensionLimits.hpp>
++#include <vtextension/HostBreaker.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
++
++namespace vtextension
++{
++
++struct ExtensionSpec;
++
++/// The world an extension speaks: which host functions and exports its module is checked against.
++enum class ExtensionWorld : uint8_t
++{
++    StatusLine, ///< The statusline world.
++};
++
++/// What names one loaded extension in a process: two panes whose keys are equal share one
++/// CompiledExtension, and so one host and one breaker.
++struct RegistryKey
++{
++    std::string hostId;       ///< The installed extension's host id, which grants are keyed on.
++    ExtensionWorld world {};  ///< The world it speaks.
++    std::string configDigest; ///< SHA-256, in hex, of its effective configuration.
++    std::string moduleDigest; ///< SHA-256, in hex, of its module's bytes.
++
++    bool operator==(RegistryKey const&) const = default;
++};
++
++/// @param spec One configured extension, its module bytes still in it.
++/// @param world The world it speaks.
++/// @return Its key: its host id, @p world, and SHA-256 digests over its effective configuration (what it
++///         may run, then its settings sorted by name, each field length-prefixed) and over its module.
++[[nodiscard]] RegistryKey registryKeyOf(ExtensionSpec const& spec, ExtensionWorld world);
++
++/// @param key An extension's key.
++/// @return Which host its module runs in: named by everything of @p key but the module, so that a changed
++///         module of the same extension reaches the same host.
++[[nodiscard]] wasm::ModuleIdentity moduleIdentityOf(RegistryKey const& key);
++
++/// The extensions loaded in one hosting process, each once, however many panes run it: what makes a
++/// configuration reload that changes nothing of an extension reuse its module and its host.
++///
++/// It keeps no extension alive: an entry is a weak reference, and the last pane dropping its
++/// CompiledExtension releases it (on that pane's owner thread). Each entry carries the HostBreaker of its
++/// extension, which every instance of it reports its host's deaths to.
++///
++/// Thread-safe: modules are acquired on the build thread, and breakers reset on the owner's.
++class ExtensionRegistry
++{
++  public:
++    /// @param clock What the breakers measure their fault window by; must outlive every entry's module.
++    /// @param limits Where each breaker's `faultsBeforeDisable` and `faultWindow` come from.
++    ExtensionRegistry(core::platform::IClock& clock, ExtensionLimits limits);
++
++    /// The live entry for @p key on @p engine, or loads one (once, however many ask at once). An entry loaded
++    /// on another engine is none of @p engine's.
++    ///
++    /// Called on a thread prepared for @p engine's backend. A load runs outside the registry's lock; a
++    /// caller asking for an entry still loading waits for that load and gets its outcome.
++    /// @param engine What the module is loaded on.
++    /// @param key What names the extension.
++    /// @param bytes The module's bytes; read only if it is to be loaded.
++    /// @return The loaded extension, or why it could not be loaded (CompiledExtension::load()).
++    [[nodiscard]] std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> acquire(
++        Engine& engine, RegistryKey const& key, std::vector<std::byte> bytes);
++
++    /// Closes every breaker, of reused and replaced entries alike: the configuration was reloaded, which
++    /// lifts what a host that kept dying was disabled for.
++    void resetBreakers() noexcept;
++
++    /// @return How many entries are loading or alive.
++    [[nodiscard]] std::size_t liveEntries() const;
++
++  private:
++    using LoadResult = std::expected<std::shared_ptr<CompiledExtension>, ExtensionError>;
++
++    /// One extension on one engine: being loaded, or loaded and referenced by panes.
++    struct Entry
++    {
++        RegistryKey key;
++        Engine const* engine;                 ///< Compared only: the entry's module keeps it alive.
++        uint64_t serial;                      ///< Tells the entry apart from a later one of the same key.
++        std::shared_ptr<HostBreaker> breaker; ///< The extension's, shared with its module.
++        /// What callers wait for while it loads; then what the panes hold.
++        std::variant<std::shared_future<LoadResult>, std::weak_ptr<CompiledExtension>> state;
++    };
++
++    /// @return Whether @p entry is loaded and no pane holds it any more.
++    [[nodiscard]] static bool isExpired(Entry const& entry) noexcept;
++
++    /// Publishes how the load of the entry @p serial went: alive on success, gone otherwise. Locks.
++    void settle(uint64_t serial, LoadResult const& result) noexcept;
++
++    core::platform::IClock& _clock;
++    ExtensionLimits _limits;
++    mutable std::mutex _mutex;
++    std::vector<Entry> _entries; ///< Guarded by _mutex.
++    uint64_t _nextSerial = 0;    ///< Guarded by _mutex.
++};
++
++} // namespace vtextension
+diff --git a/src/vtextension/ExtensionRegistry_test.cpp b/src/vtextension/ExtensionRegistry_test.cpp
+new file mode 100644
+index 000000000..52b9085ce
+--- /dev/null
++++ b/src/vtextension/ExtensionRegistry_test.cpp
+@@ -0,0 +1,508 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// One extension, loaded once per process and shared by its panes; and the breaker that counts its host's
++// deaths, once each however many panes saw one.
++#include <core/async/testing/ManualExecutor.hpp>
++#include <core/platform/Clock.hpp>
++#include <core/platform/testing/InMemoryFileSystem.hpp>
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <array>
++#include <chrono>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <filesystem>
++#include <memory>
++#include <ranges>
++#include <string>
++#include <thread>
++#include <utility>
++#include <vector>
++
++#include <vtextension/CompiledExtension.hpp>
++#include <vtextension/Engine.hpp>
++#include <vtextension/ExtensionHost.hpp>
++#include <vtextension/ExtensionRegistry.hpp>
++#include <vtextension/HostBreaker.hpp>
++#include <vtextension/Instance.hpp>
++#include <vtextension/SessionExtensions.hpp>
++#include <vtextension/testing/FakeWasmBackend.hpp>
++#include <vtextension/testing/Harness.hpp>
++#include <vtextension/testing/ManualScheduler.hpp>
++#include <vtextension/testing/QueuedOwner.hpp>
++#include <vtextension/testing/RunnerHarness.hpp>
++#include <vtextension/testing/TestModules.hpp>
++
++using namespace std::chrono_literals;
++using namespace vtextension;
++using vtextension::testing::FakeWasmBackend;
++using vtextension::testing::toModule;
++
++namespace
++{
++
++/// The limits every breaker of these tests is built with: three faults within a minute open it.
++constexpr auto Limits = ExtensionLimits {};
++static_assert(Limits.faultsBeforeDisable == 3 && Limits.faultWindow == 60s);
++
++/// @return A breaker on @p clock with the default limits.
++[[nodiscard]] HostBreaker breakerOn(core::platform::IClock& clock)
++{
++    return HostBreaker { clock, Limits.faultsBeforeDisable, Limits.faultWindow };
++}
++
++/// Records a fault against a fresh admission of @p breaker, which must admit.
++void faultOnce(HostBreaker& breaker)
++{
++    auto const admission = breaker.admit();
++    REQUIRE(admission.has_value());
++    breaker.recordHostFault(*admission);
++}
++
++/// @return MinimalModule with a custom section appended: other bytes, the same extension.
++[[nodiscard]] std::vector<std::byte> minimalModuleVariant()
++{
++    auto bytes = toModule(vtextension::testing::MinimalModule);
++    // Custom section (id 0), 2 bytes: a name of one byte, "x".
++    for (auto const byte: std::to_array<uint8_t>({ 0x00, 0x02, 0x01, 'x' }))
++        bytes.push_back(static_cast<std::byte>(byte));
++    return bytes;
++}
++
++/// @return @p bytes as the text a filesystem holds.
++[[nodiscard]] std::string asText(std::vector<std::byte> const& bytes)
++{
++    auto text = std::string {};
++    for (auto const byte: bytes)
++        text.push_back(static_cast<char>(byte));
++    return text;
++}
++
++/// An extension spec of the minimal module, under @p config.
++[[nodiscard]] ExtensionSpec minimalSpec(ConfigMap config)
++{
++    return ExtensionSpec { .name = "clock",
++                           .hostId = "clock@/ext/minimal.wasm",
++                           .module = toModule(vtextension::testing::MinimalModule),
++                           .config = std::move(config),
++                           .placement = Placement::Segment,
++                           .runCommand = CommandPermission::Deny };
++}
++
++/// An engine on a fake backend, a registry on a manual clock, and the thread prepared for both.
++struct RegistryFixture
++{
++    FakeWasmBackend fake;
++    core::platform::ManualClock clock {};
++    std::shared_ptr<Engine> engine = [this] {
++        auto created = Engine::create(fake, Limits);
++        REQUIRE(created.has_value());
++        return std::move(*created);
++    }();
++    ExtensionRegistry registry { clock, Limits };
++
++    /// @return The minimal module under @p config, acquired from the registry; it must load.
++    [[nodiscard]] std::shared_ptr<CompiledExtension> acquire(ConfigMap config = {})
++    {
++        auto const spec = minimalSpec(std::move(config));
++        auto compiled = registry.acquire(*engine,
++                                         registryKeyOf(spec, ExtensionWorld::StatusLine),
++                                         toModule(vtextension::testing::MinimalModule));
++        REQUIRE(compiled.has_value());
++        return std::move(*compiled);
++    }
++};
++
++} // namespace
++
++TEST_CASE("ExtensionRegistry.breakerOpensAtTheLimit", "[vtextension][registry]")
++{
++    auto clock = core::platform::ManualClock {};
++    auto breaker = breakerOn(clock);
++    CHECK(breaker.state() == BreakerState::Closed);
++    for ([[maybe_unused]] auto const fault: std::views::iota(0, 3))
++    {
++        faultOnce(breaker);
++        clock.advance(10s);
++    }
++    CHECK(breaker.state() == BreakerState::Open);
++    CHECK(breaker.admit().error() == ExtensionError::HostUnavailable);
++}
++
++TEST_CASE("ExtensionRegistry.faultsAgeOut", "[vtextension][registry]")
++{
++    auto clock = core::platform::ManualClock {};
++    auto breaker = breakerOn(clock);
++    faultOnce(breaker);
++    clock.advance(61s);
++    faultOnce(breaker);
++    faultOnce(breaker);
++    CHECK(breaker.state() == BreakerState::Closed);
++    CHECK(breaker.faultCount() == 2);
++}
++
++TEST_CASE("ExtensionRegistry.staleAdmissionCountsOnce", "[vtextension][registry]")
++{
++    // Ten panes admitted together saw the one death: the first report counts it, the rest are stale.
++    auto clock = core::platform::ManualClock {};
++    auto breaker = breakerOn(clock);
++    auto const admission = breaker.admit();
++    REQUIRE(admission.has_value());
++    for ([[maybe_unused]] auto const pane: std::views::iota(0, 10))
++        breaker.recordHostFault(*admission);
++    CHECK(breaker.faultCount() == 1);
++    CHECK(breaker.state() == BreakerState::Closed);
++}
++
++TEST_CASE("reload resets breaker", "[vtextension][registry]")
++{
++    auto fixture = RegistryFixture {};
++    auto const compiled = fixture.acquire();
++    REQUIRE(compiled->breaker() != nullptr);
++    auto const& breaker = *compiled->breaker();
++
++    auto const oldAdmission = compiled->admitHost();
++    REQUIRE(oldAdmission.has_value());
++    compiled->recordHostFault(*oldAdmission);
++    for ([[maybe_unused]] auto const fault: std::views::iota(0, 2))
++    {
++        auto const admission = compiled->admitHost();
++        REQUIRE(admission.has_value());
++        compiled->recordHostFault(*admission);
++    }
++    REQUIRE(breaker.state() == BreakerState::Open);
++    CHECK(compiled->admitHost().error() == ExtensionError::HostUnavailable);
++
++    fixture.registry.resetBreakers();
++    CHECK(breaker.state() == BreakerState::Closed);
++    CHECK(compiled->admitHost().has_value());
++    // A pane admitted before the reload reports a death it saw then: it counts no more.
++    compiled->recordHostFault(*oldAdmission);
++    CHECK(breaker.faultCount() == 0);
++}
++
++TEST_CASE("ExtensionRegistry.differentConfigGetsItsOwnEntry", "[vtextension][registry]")
++{
++    auto fixture = RegistryFixture {};
++    auto const plain = fixture.acquire({ { "format", "%H:%M" } });
++    auto const plainIdentity = fixture.fake.lastIdentity();
++    auto const other = fixture.acquire({ { "format", "%H:%M:%S" } });
++    auto const otherIdentity = fixture.fake.lastIdentity();
++
++    CHECK(plain != other);
++    CHECK(fixture.registry.liveEntries() == 2);
++    CHECK(fixture.fake.loads() == 2);
++    CHECK(plainIdentity != otherIdentity);
++    CHECK_FALSE(plainIdentity.key.empty());
++
++    // The same configuration again, in another order, is the same entry.
++    auto const again = fixture.acquire({ { "format", "%H:%M" } });
++    CHECK(again == plain);
++    CHECK(fixture.fake.loads() == 2);
++}
++
++TEST_CASE("ExtensionRegistry.keyOfConfigIgnoresItsOrder", "[vtextension][registry]")
++{
++    auto const forward =
++        registryKeyOf(minimalSpec({ { "a", "1" }, { "b", "2" } }), ExtensionWorld::StatusLine);
++    auto const backward =
++        registryKeyOf(minimalSpec({ { "b", "2" }, { "a", "1" } }), ExtensionWorld::StatusLine);
++    CHECK(forward == backward);
++    CHECK(forward.configDigest.size() == 64);
++    CHECK(forward.moduleDigest.size() == 64);
++
++    // A field's bytes cannot slide into its neighbour's: each is length-prefixed.
++    auto const joined = registryKeyOf(minimalSpec({ { "ab", "" } }), ExtensionWorld::StatusLine);
++    auto const split = registryKeyOf(minimalSpec({ { "a", "b" } }), ExtensionWorld::StatusLine);
++    CHECK(joined.configDigest != split.configDigest);
++
++    auto allowed = minimalSpec({});
++    allowed.runCommand = CommandPermission::Allow;
++    CHECK(registryKeyOf(allowed, ExtensionWorld::StatusLine).configDigest
++          != registryKeyOf(minimalSpec({}), ExtensionWorld::StatusLine).configDigest);
++
++    // The module's identity names no module bytes: a changed module under it reaches the same host.
++    auto changed = minimalSpec({});
++    changed.module = minimalModuleVariant();
++    auto const changedKey = registryKeyOf(changed, ExtensionWorld::StatusLine);
++    auto const unchangedKey = registryKeyOf(minimalSpec({}), ExtensionWorld::StatusLine);
++    CHECK(changedKey.moduleDigest != unchangedKey.moduleDigest);
++    CHECK(moduleIdentityOf(changedKey) == moduleIdentityOf(unchangedKey));
++}
++
++TEST_CASE("ExtensionRegistry.anEntryIsPerEngine", "[vtextension][registry]")
++{
++    // An entry loaded on another engine is one this engine cannot run.
++    auto fixture = RegistryFixture {};
++    auto const first = fixture.acquire();
++    auto other = Engine::create(fixture.fake, Limits);
++    REQUIRE(other.has_value());
++    auto const spec = minimalSpec({});
++    auto const second = fixture.registry.acquire(**other,
++                                                 registryKeyOf(spec, ExtensionWorld::StatusLine),
++                                                 toModule(vtextension::testing::MinimalModule));
++    REQUIRE(second.has_value());
++    CHECK(&(*second)->engine() == other->get());
++    CHECK(*second != first);
++    CHECK(fixture.fake.loads() == 2);
++}
++
++TEST_CASE("ExtensionRegistry.aFailedLoadLeavesNoEntry", "[vtextension][registry]")
++{
++    auto fixture = RegistryFixture {};
++    fixture.fake.loadFailure = ExtensionError::InvalidComponent;
++    auto const spec = minimalSpec({});
++    auto const failed = fixture.registry.acquire(*fixture.engine,
++                                                 registryKeyOf(spec, ExtensionWorld::StatusLine),
++                                                 toModule(vtextension::testing::MinimalModule));
++    CHECK(failed.error() == ExtensionError::InvalidComponent);
++    CHECK(fixture.registry.liveEntries() == 0);
++
++    // Tried again on the next acquire.
++    fixture.fake.loadFailure.reset();
++    CHECK(fixture.acquire() != nullptr);
++    CHECK(fixture.fake.loads() == 2);
++}
++
++TEST_CASE("ExtensionRegistry.droppedEntryIsLoadedAgain", "[vtextension][registry]")
++{
++    auto fixture = RegistryFixture {};
++    auto compiled = fixture.acquire();
++    CHECK(fixture.registry.liveEntries() == 1);
++    compiled.reset();
++    CHECK(fixture.registry.liveEntries() == 0);
++    compiled = fixture.acquire();
++    CHECK(fixture.fake.loads() == 2);
++}
++
++TEST_CASE("Instance.anOpenBreakerRefusesBeforeInstantiating", "[vtextension][registry]")
++{
++    auto fixture = RegistryFixture {};
++    auto const compiled = fixture.acquire();
++    for ([[maybe_unused]] auto const fault: std::views::iota(0, 3))
++    {
++        auto const admission = compiled->admitHost();
++        REQUIRE(admission.has_value());
++        compiled->recordHostFault(*admission);
++    }
++    auto services = vtextension::testing::FakeHostServices {};
++    auto const instance = Instance::create(*fixture.engine, *compiled, services, fixture.clock, Limits);
++    CHECK(instance.error() == ExtensionError::HostUnavailable);
++    CHECK(fixture.fake.lastInstance == nullptr);
++}
++
++TEST_CASE("Instance.reportsItsHostsDeathOnce", "[vtextension][registry]")
++{
++    auto fixture = RegistryFixture {};
++    fixture.fake.guest.exports["render"] =
++        [](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
++        return std::unexpected(wasm::CallFailure::HostCrashed);
++    };
++    auto const compiled = fixture.acquire();
++    auto services = vtextension::testing::FakeHostServices {};
++    auto const first = Instance::create(*fixture.engine, *compiled, services, fixture.clock, Limits);
++    auto const second = Instance::create(*fixture.engine, *compiled, services, fixture.clock, Limits);
++    REQUIRE(first.has_value());
++    REQUIRE(second.has_value());
++
++    // Both saw the one death, each twice: it counts once.
++    for ([[maybe_unused]] auto const call: std::views::iota(0, 2))
++    {
++        CHECK((*first)->render({}).error() == ExtensionError::HostUnavailable);
++        CHECK((*second)->render({}).error() == ExtensionError::HostUnavailable);
++    }
++    CHECK(compiled->breaker()->faultCount() == 1);
++
++    // A pane admitted after it counts the next one.
++    auto const third = Instance::create(*fixture.engine, *compiled, services, fixture.clock, Limits);
++    REQUIRE(third.has_value());
++    CHECK((*third)->render({}).error() == ExtensionError::HostUnavailable);
++    CHECK(compiled->breaker()->faultCount() == 2);
++}
++
++TEST_CASE("Instance.aTrapIsNoHostDeath", "[vtextension][registry]")
++{
++    // A guest's own fault is the runner's to count, per pane; the breaker counts only its host's deaths.
++    auto fixture = RegistryFixture {};
++    fixture.fake.guest.exports["render"] =
++        [](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
++        return std::unexpected(wasm::CallFailure::Trap);
++    };
++    auto const compiled = fixture.acquire();
++    auto services = vtextension::testing::FakeHostServices {};
++    auto const instance = Instance::create(*fixture.engine, *compiled, services, fixture.clock, Limits);
++    REQUIRE(instance.has_value());
++    CHECK((*instance)->render({}).error() == ExtensionError::Trapped);
++    CHECK(compiled->breaker()->faultCount() == 0);
++}
++
++namespace
++{
++
++/// Every service a pane's extensions reach, on a fake backend whose loads the test counts.
++struct RebuildFixture
++{
++    vtextension::testing::RunnerHarness harness;
++    FakeWasmBackend fake;
++    vtextension::testing::ManualScheduler scheduler { fake };
++    EngineProvider engines { fake, Limits };
++    core::platform::ManualClock clock {};
++    ExtensionRegistry registry { clock, Limits };
++    core::async::testing::ManualExecutor builds;
++    core::platform::testing::InMemoryFileSystem fileSystem;
++    std::shared_ptr<vtextension::testing::QueuedOwner> owner =
++        std::make_shared<vtextension::testing::QueuedOwner>();
++
++    [[nodiscard]] SessionExtensionServices services()
++    {
++        return { .engines = engines,
++                 .retirement = engines,
++                 .registry = registry,
++                 .scheduler = scheduler,
++                 .builds = builds,
++                 .grants = harness.grants,
++                 .capture = harness.capture,
++                 .wallClock = harness.wallClock,
++                 .localTime = harness.localTime,
++                 .environment = harness.environment,
++                 .fileSystem = fileSystem,
++                 .lookup = { .fileSystem = fileSystem, .bundledDirectories = {} },
++                 .limits = Limits };
++    }
++
++    /// Runs the builds, then hands their results back to the owner.
++    void build()
++    {
++        builds.drain();
++        owner->run();
++    }
++
++    /// Runs the runners' last jobs, and releases what they retired.
++    void settle()
++    {
++        scheduler.runPending();
++        engines.releaseRetired();
++    }
++};
++
++[[nodiscard]] DeclaredExtensions declaringClock()
++{
++    return DeclaredExtensions { .extensions = { DeclaredExtension { .name = "clock",
++                                                                    .path = "/ext/minimal.wasm",
++                                                                    .config = { { "format", "%H:%M" } },
++                                                                    .runCommand = CommandPermission::Deny } },
++                                .takeOver = std::nullopt };
++}
++
++} // namespace
++
++TEST_CASE("rebuild with unchanged bytes reuses the entry", "[vtextension][registry]")
++{
++    auto fixture = RebuildFixture {};
++    REQUIRE(fixture.fileSystem
++                .writeFile("/ext/minimal.wasm", asText(toModule(vtextension::testing::MinimalModule)))
++                .has_value());
++    {
++        auto extensions = SessionExtensions { SessionExtensionCallbacks {}, fixture.owner };
++        extensions.rebuild(declaringClock(), {}, fixture.services());
++        fixture.build();
++        REQUIRE_FALSE(extensions.empty());
++        CHECK(fixture.fake.loads() == 1);
++
++        // A configuration reload: the same extension, the same bytes.
++        extensions.rebuild(declaringClock(), {}, fixture.services());
++        fixture.build();
++        CHECK(fixture.fake.loads() == 1);
++        CHECK(fixture.registry.liveEntries() == 1);
++
++        // The module changed on disk: loaded anew.
++        REQUIRE(
++            fixture.fileSystem.writeFile("/ext/minimal.wasm", asText(minimalModuleVariant())).has_value());
++        extensions.rebuild(declaringClock(), {}, fixture.services());
++        fixture.build();
++        CHECK(fixture.fake.loads() == 2);
++    }
++    fixture.settle();
++}
++
++TEST_CASE("ExtensionRuntime.configurationReloadedResetsEveryBreaker", "[vtextension][registry]")
++{
++    auto harness = vtextension::testing::RunnerHarness {};
++    auto fake = FakeWasmBackend {};
++    auto fileSystem = core::platform::testing::InMemoryFileSystem {};
++    auto runtime = ExtensionRuntime { ExtensionRuntimeConfig { .grantsFile = "/config/extension-grants.txt",
++                                                               .bundledDirectories = {},
++                                                               .workerCount = 1,
++                                                               .limits = Limits },
++                                      ExtensionRuntimeServices { .backend = fake,
++                                                                 .capture = harness.capture,
++                                                                 .wallClock = harness.wallClock,
++                                                                 .localTime = harness.localTime,
++                                                                 .environment = harness.environment,
++                                                                 .fileSystem = fileSystem } };
++    auto const engine = runtime.sessionServices().engines.acquire();
++    REQUIRE(engine.has_value());
++    auto const spec = minimalSpec({});
++    auto const compiled =
++        runtime.sessionServices().registry.acquire(**engine,
++                                                   registryKeyOf(spec, ExtensionWorld::StatusLine),
++                                                   toModule(vtextension::testing::MinimalModule));
++    REQUIRE(compiled.has_value());
++    for ([[maybe_unused]] auto const fault: std::views::iota(0, 3))
++    {
++        auto const admission = (*compiled)->admitHost();
++        REQUIRE(admission.has_value());
++        (*compiled)->recordHostFault(*admission);
++    }
++    REQUIRE((*compiled)->breaker()->state() == BreakerState::Open);
++
++    runtime.configurationReloaded();
++    CHECK((*compiled)->breaker()->state() == BreakerState::Closed);
++}
++
++TEST_CASE("registry drop races instantiate", "[vtextension][registry][threading]")
++{
++    // The last pane closing on one thread while a rebuild acquires and instantiates the same entry on
++    // another: whichever wins, the instance is made from a live module, and no entry is left behind.
++    auto fixture = RegistryFixture {};
++    auto services = vtextension::testing::FakeHostServices {};
++    for ([[maybe_unused]] auto const round: std::views::iota(0, 200))
++    {
++        auto first = fixture.acquire();
++        auto dropper = std::jthread { [&first] { first.reset(); } };
++        auto const spec = minimalSpec({});
++        auto const second = fixture.registry.acquire(*fixture.engine,
++                                                     registryKeyOf(spec, ExtensionWorld::StatusLine),
++                                                     toModule(vtextension::testing::MinimalModule));
++        REQUIRE(second);
++        auto const instance = Instance::create(*fixture.engine, **second, services, fixture.clock, Limits);
++        CHECK(instance);
++        dropper.join();
++        CHECK(fixture.registry.liveEntries() <= 1);
++    }
++}
++
++TEST_CASE("ExtensionRegistry.concurrentAcquiresLoadOnce", "[vtextension][registry][threading]")
++{
++    // Panes built at once (a window restored with many tabs) ask for one extension together: one load.
++    auto fixture = RegistryFixture {};
++    constexpr auto Threads = 8;
++    auto results = std::vector<std::shared_ptr<CompiledExtension>>(Threads);
++    {
++        auto threads = std::vector<std::jthread> {};
++        for (auto const index: std::views::iota(0, Threads))
++            threads.emplace_back([&fixture, &results, index] {
++                auto const spec = minimalSpec({});
++                auto compiled = fixture.registry.acquire(*fixture.engine,
++                                                         registryKeyOf(spec, ExtensionWorld::StatusLine),
++                                                         toModule(vtextension::testing::MinimalModule));
++                if (compiled)
++                    results[static_cast<std::size_t>(index)] = std::move(*compiled);
++            });
++    }
++    CHECK(fixture.fake.loads() == 1);
++    CHECK(std::ranges::all_of(results,
++                              [&](auto const& result) { return result && result == results.front(); }));
++}
+diff --git a/src/vtextension/HostBreaker.cpp b/src/vtextension/HostBreaker.cpp
+new file mode 100644
+index 000000000..042ef22c5
+--- /dev/null
++++ b/src/vtextension/HostBreaker.cpp
+@@ -0,0 +1,62 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/HostBreaker.hpp>
++
++#include <algorithm>
++
++namespace vtextension
++{
++
++HostBreaker::HostBreaker(core::platform::IClock& clock,
++                         std::size_t faultsBeforeDisable,
++                         std::chrono::seconds faultWindow):
++    _clock { clock }, _faultsBeforeDisable { faultsBeforeDisable }, _faultWindow { faultWindow }
++{
++}
++
++std::expected<HostAdmission, ExtensionError> HostBreaker::admit() noexcept
++{
++    auto const lock = std::scoped_lock { _mutex };
++    if (_state == BreakerState::Open)
++        return std::unexpected(ExtensionError::HostUnavailable);
++    return HostAdmission { .epoch = _epoch };
++}
++
++void HostBreaker::recordHostFault(HostAdmission admission) noexcept
++{
++    auto const now = _clock.now();
++    auto const lock = std::scoped_lock { _mutex };
++    // Another pane reported this death already, or the configuration was reloaded since.
++    if (admission.epoch != _epoch)
++        return;
++    ++_epoch;
++    // Pruned as Runner prunes a pane's faults: a death counts while it is no older than the window.
++    _faults.push_back(now);
++    while (_faults.front() + _faultWindow < now)
++        _faults.pop_front();
++    if (_faults.size() >= _faultsBeforeDisable)
++        _state = BreakerState::Open;
++}
++
++void HostBreaker::reset() noexcept
++{
++    auto const lock = std::scoped_lock { _mutex };
++    _faults.clear();
++    _state = BreakerState::Closed;
++    ++_epoch;
++}
++
++BreakerState HostBreaker::state() const noexcept
++{
++    auto const lock = std::scoped_lock { _mutex };
++    return _state;
++}
++
++std::size_t HostBreaker::faultCount() const noexcept
++{
++    auto const now = _clock.now();
++    auto const lock = std::scoped_lock { _mutex };
++    return static_cast<std::size_t>(std::ranges::count_if(
++        _faults, [&](core::platform::SteadyTimePoint fault) { return fault + _faultWindow >= now; }));
++}
++
++} // namespace vtextension
+diff --git a/src/vtextension/HostBreaker.hpp b/src/vtextension/HostBreaker.hpp
+new file mode 100644
+index 000000000..fa6f32036
+--- /dev/null
++++ b/src/vtextension/HostBreaker.hpp
+@@ -0,0 +1,82 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++#include <core/platform/Clock.hpp>
++
++#include <chrono>
++#include <cstddef>
++#include <cstdint>
++#include <deque>
++#include <expected>
++#include <mutex>
++
++#include <vtextension/ExtensionError.hpp>
++
++namespace vtextension
++{
++
++/// Whether an extension's host may be started.
++enum class BreakerState : uint8_t
++{
++    Closed, ///< It may: its host died fewer than `faultsBeforeDisable` times within the window.
++    Open,   ///< It may not, until the configuration is reloaded.
++};
++
++/// What an instance was admitted under: the breaker's epoch then. A host death it reports counts only while
++/// no other report or reset came in between.
++struct HostAdmission
++{
++    uint64_t epoch = 0; ///< The breaker's epoch when the instance was admitted.
++};
++
++/// Counts an extension's host deaths, once each however many panes saw it, and stops starting its host once
++/// it died `faultsBeforeDisable` times within `faultWindow`: an extension whose host keeps dying then spawns
++/// nothing more until the configuration is reloaded (reset()).
++///
++/// A guest's own faults (traps, deadlines) are no host death; each pane's Runner counts those itself.
++///
++/// **One death, once.** Every instance is admitted under the breaker's current epoch, and reports its host's
++/// death with that admission. The first report of an epoch counts and advances the epoch; every other pane
++/// admitted under the same epoch saw the same death, and its report is stale. An instance admitted between a
++/// death and its first report undercounts: one such death in a race, never more.
++///
++/// Thread-safe: panes report from their lanes, the owner's thread resets.
++class HostBreaker
++{
++  public:
++    /// @param clock What the fault window is measured by; must outlive the breaker.
++    /// @param faultsBeforeDisable How many deaths within @p faultWindow open the breaker.
++    /// @param faultWindow The window deaths are counted within.
++    HostBreaker(core::platform::IClock& clock,
++                std::size_t faultsBeforeDisable,
++                std::chrono::seconds faultWindow);
++
++    /// Admits an instance to be created.
++    /// @return What it reports its host's death with; `HostUnavailable` while the breaker is open.
++    [[nodiscard]] std::expected<HostAdmission, ExtensionError> admit() noexcept;
++
++    /// Counts a host death an instance saw, unless another report or a reset came since it was admitted.
++    /// @param admission What the instance was admitted under.
++    void recordHostFault(HostAdmission admission) noexcept;
++
++    /// Closes the breaker and forgets every death: the configuration was reloaded. Reports of instances
++    /// admitted before count no more.
++    void reset() noexcept;
++
++    /// @return Whether the host may be started.
++    [[nodiscard]] BreakerState state() const noexcept;
++
++    /// @return How many deaths were counted within the fault window, as of now.
++    [[nodiscard]] std::size_t faultCount() const noexcept;
++
++  private:
++    core::platform::IClock& _clock;
++    std::size_t _faultsBeforeDisable;
++    std::chrono::seconds _faultWindow;
++    mutable std::mutex _mutex;
++    std::deque<core::platform::SteadyTimePoint> _faults; ///< Within the window, oldest first; guarded.
++    uint64_t _epoch = 0;                                 ///< Advances with every counted death; guarded.
++    BreakerState _state = BreakerState::Closed;          ///< Guarded by _mutex.
++};
++
++} // namespace vtextension
+diff --git a/src/vtextension/Instance.cpp b/src/vtextension/Instance.cpp
+index d0b8022e0..17d101bc0 100644
+--- a/src/vtextension/Instance.cpp
++++ b/src/vtextension/Instance.cpp
+@@ -229,46 +229,65 @@ struct Instance::HostCalls
+             &requestFrame, &log, &state, &runCommand, &control<Import>...
+         };
+     }(std::make_index_sequence<ControlImportCount> {});
+     static_assert(StatuslineHostFunctions.size() == 4, "a handler for every statusline host function");
+ };
+ 
+ Instance::Instance(PrivateTag /*unused*/,
+                    std::shared_ptr<CompiledExtension const> compiled,
+                    IHostServices& services,
+                    core::platform::IClock& clock,
+-                   ExtensionLimits limits):
++                   ExtensionLimits limits,
++                   HostAdmission admission):
+     _compiled { std::move(compiled) },
+     _engine { _compiled->engine().shared_from_this() },
+     _services { services },
+     _clock { clock },
+     _limits { limits },
+     _declaredControl { declaredControlOf(*_compiled) },
+-    _memory { std::make_unique<GuestMemory>(*this) }
++    _memory { std::make_unique<GuestMemory>(*this) },
++    _admission { admission }
+ {
+ }
+ 
+ Instance::~Instance() = default;
+ 
+ std::expected<std::unique_ptr<Instance>, ExtensionError> Instance::create(Engine& engine,
+                                                                           CompiledExtension const& compiled,
+                                                                           IHostServices& services,
+                                                                           core::platform::IClock& clock,
+                                                                           ExtensionLimits limits)
+ {
+     Require(&engine == &compiled.engine());
+     // The memory and stack caps are the engine's runtime's: an instance cannot be held to others.
+     Require(limits.memoryBytes == engine.limits().memoryBytes
+             && limits.stackBytes == engine.limits().stackBytes);
+-    auto instance =
+-        std::make_unique<Instance>(PrivateTag {}, compiled.shared_from_this(), services, clock, limits);
+-    return instance->instantiate().transform([&] { return std::move(instance); });
++    // Refused before anything is instantiated: a host that keeps dying is not started again.
++    auto const admission = compiled.admitHost();
++    if (!admission)
++        return std::unexpected(admission.error());
++    auto instance = std::make_unique<Instance>(
++        PrivateTag {}, compiled.shared_from_this(), services, clock, limits, *admission);
++    if (auto instantiated = instance->instantiate(); !instantiated)
++    {
++        instance->reportHostFault(instantiated.error());
++        return std::unexpected(instantiated.error());
++    }
++    return instance;
++}
++
++void Instance::reportHostFault(ExtensionError error) noexcept
++{
++    if (error != ExtensionError::HostUnavailable)
++        return;
++    if (auto const admission = std::exchange(_admission, std::nullopt))
++        _compiled->recordHostFault(*admission);
+ }
+ 
+ std::expected<void, ExtensionError> Instance::instantiate()
+ {
+     auto& module = _compiled->module();
+ 
+     auto const exceedsCap = [&](wasm::ExportDescription const& entry) {
+         return entry.kind == wasm::ExternKind::Memory
+                && uint64_t { entry.initialPages } * WasmPageBytes > _limits.memoryBytes;
+     };
+@@ -331,21 +350,24 @@ auto Instance::guarded(std::chrono::milliseconds timeout, Body const& body) -> d
+     auto result = runGuarded(*_engine, watchToken(), timeout, body);
+ 
+     if (!result)
+         _fault = result.error();
+     else if (isDeadlineExpired())
+         // The deadline expired after the guest returned, while the host was still lifting the result:
+         // the call overran all the same, and the instance is interrupted.
+         _fault = ExtensionError::DeadlineExceeded;
+ 
+     if (_fault)
++    {
++        reportHostFault(*_fault);
+         return std::unexpected(*_fault);
++    }
+     return result;
+ }
+ 
+ std::expected<void, ExtensionError> Instance::callExport(wasm::ExportFunction function,
+                                                          std::span<uint32_t> argv)
+ {
+     return _instance->call(function, argv).transform_error([this](wasm::CallFailure failure) {
+         return guestFailure(failure);
+     });
+ }
+diff --git a/src/vtextension/Instance.hpp b/src/vtextension/Instance.hpp
+index 66b531c83..e547d2499 100644
+--- a/src/vtextension/Instance.hpp
++++ b/src/vtextension/Instance.hpp
+@@ -53,54 +53,61 @@ using ConfigMap = std::vector<std::pair<std::string, std::string>>;
+ ///   callControlImport(): checked against the manifest's `control` lines and the user's grant, then
+ ///   handed to IHostServices::callControl. Unlike a command, a verb counts against the call's deadline,
+ ///   which keeps running while the host answers; an answer that comes after it passed is dropped, never
+ ///   written into the guest.
+ /// - **Host calls do not nest.** A host function called while another is in progress (from the
+ ///   guest's `cabi_realloc`, which the host calls to store a result) faults the call as `Trapped`.
+ /// - **Faults are final.** A call that fails for any reason (trap, deadline, memory, an output over
+ ///   `maxRenderBytes`, or a guest that breaks the Canonical ABI) leaves the instance unusable: every
+ ///   later call fails with the same error without entering the guest. The host creates a new
+ ///   instance to recover.
++/// - **Host deaths.** An instance is created only if the module's breaker admits it
++///   (CompiledExtension::admitHost()); a host death it sees (`HostUnavailable`, while instantiating or from
++///   any call) it reports to that breaker, once. Its other faults are the Runner's to count.
+ /// - **Threads.** Calls must not overlap. A thread other than the one that created the first engine
+ ///   holds a thread guard of the engine's backend while it calls in; calling in without one is a
+ ///   precondition violation. The host services are called on the calling thread, from inside the call.
+ class Instance final: private wasm::IHostContext
+ {
+     struct PrivateTag
+     {
+     };
+ 
+   public:
+     /// Instantiates a compiled extension.
+     /// @param engine The engine; it must be the one @p compiled was loaded on.
+     /// @param compiled The module; the instance keeps it alive.
+     /// @param services What the guest's imports call; it must outlive the instance.
+     /// @param clock What measures how much of a call's deadline is spent; it must outlive the
+     ///        instance. The watchdog itself enforces deadlines in real time.
+     /// @param limits The limits this instance is held to. Its `memoryBytes` and `stackBytes` must be the
+     ///        engine's (@p engine's limits()), whose runtime enforces them; the rest are the instance's.
+-    /// @return The instance; `OutOfMemory` if the module needs more memory than @p limits allow,
+-    ///         `InvalidComponent` if the runtime cannot instantiate it, or the error a WASI reactor's
++    /// @return The instance; `HostUnavailable` if the module's host keeps dying (its breaker is open: nothing
++    /// is
++    ///         instantiated) or cannot be reached, `OutOfMemory` if the module needs more memory than @p
++    ///         limits allow, `InvalidComponent` if the runtime cannot instantiate it, or the error a WASI
++    ///         reactor's
+     ///         `_initialize` failed with.
+     [[nodiscard]] static std::expected<std::unique_ptr<Instance>, ExtensionError> create(
+         Engine& engine,
+         CompiledExtension const& compiled,
+         IHostServices& services,
+         core::platform::IClock& clock,
+         ExtensionLimits limits);
+ 
+     /// Use create(); public only so that std::make_unique can reach it.
+     Instance(PrivateTag,
+              std::shared_ptr<CompiledExtension const> compiled,
+              IHostServices& services,
+              core::platform::IClock& clock,
+-             ExtensionLimits limits);
++             ExtensionLimits limits,
++             HostAdmission admission);
+ 
+     ~Instance() override;
+ 
+     Instance(Instance const&) = delete;
+     Instance(Instance&&) = delete;
+     Instance& operator=(Instance const&) = delete;
+     Instance& operator=(Instance&&) = delete;
+ 
+     /// Calls the extension's `load` with its configuration.
+     /// @param config The extension's settings.
+@@ -174,33 +181,38 @@ class Instance final: private wasm::IHostContext
+     [[nodiscard]] std::expected<void, ExtensionError> callExport(wasm::ExportFunction function,
+                                                                  std::span<uint32_t> argv);
+ 
+     /// Calls an export's post-return function, if the guest has one, with the export's results.
+     [[nodiscard]] std::expected<void, ExtensionError> callPostReturn(OptionalFunction function,
+                                                                      uint32_t result);
+ 
+     /// @return Why the call that just failed in the guest failed, given what the runtime reported.
+     [[nodiscard]] ExtensionError guestFailure(wasm::CallFailure failure) const noexcept;
+ 
++    /// Reports @p error to the module's breaker if it is a death of the instance's host, the first time only.
++    void reportHostFault(ExtensionError error) noexcept;
++
+     /// Records an error a host function hit: the call it faults fails with it.
+     /// @return The error, for the runtime.
+     [[nodiscard]] std::unexpected<ExtensionError> failHostCall(ExtensionError error) noexcept;
+ 
+     std::shared_ptr<CompiledExtension const> _compiled;
+     std::shared_ptr<Engine> _engine;
+     IHostServices& _services;
+     core::platform::IClock& _clock;
+     ExtensionLimits _limits;
+     vtcontrol::ControlGrants _declaredControl; ///< The control permissions the manifest declares.
+     /// Written by the watchdog, from its own thread, before it interrupts the instance. Once Expired it
+     /// stays so: the instance is faulted for good by then.
+     std::atomic<DeadlineState> _deadlineState = DeadlineState::Running;
+     std::unique_ptr<wasm::IWasmInstance> _instance; ///< Null only until instantiate() succeeded.
+     Exports _exports;
+     std::unique_ptr<GuestMemory> _memory;
+     std::optional<ExtensionError> _fault;
++    /// What the instance was admitted under; taken by the one report of its host's death.
++    std::optional<HostAdmission> _admission;
+     std::optional<ExtensionError> _hostCallError; ///< What a host function failed with, this call.
+     HostCallState _hostCall = HostCallState::Idle;
+     core::platform::SteadyTimePoint _deadline; ///< When the current call's deadline expires, by _clock.
+ };
+ 
+ } // namespace vtextension
+diff --git a/src/vtextension/Instance_test.cpp b/src/vtextension/Instance_test.cpp
+index 5cb7e99b9..6b3cb7162 100644
+--- a/src/vtextension/Instance_test.cpp
++++ b/src/vtextension/Instance_test.cpp
+@@ -41,34 +41,35 @@ using vtextension::testing::toModule;
+ 
+ namespace
+ {
+ 
+ /// Loads @p module on a fresh engine of @p backend and returns how that went.
+ [[nodiscard]] std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> loadModule(
+     wasm::IWasmBackend& backend, std::vector<std::byte> module)
+ {
+     auto const engine = Engine::create(backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+-    return CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
++    return CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module), nullptr);
+ }
+ 
+ /// Loads @p module on a fresh engine under @p limits and, if that succeeds, creates an instance of it, which
+ /// is discarded.
+ /// @return The error loading or creating it failed with; nothing if both succeeded.
+ [[nodiscard]] std::optional<ExtensionError> outcomeOf(std::vector<std::byte> module,
+                                                       ExtensionLimits limits = {})
+ {
+     auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, limits);
+     REQUIRE(engine.has_value());
+     auto const threadGuard = vtextension::testing::preparedThread(*backend);
+-    auto const compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
++    auto const compiled =
++        CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module), nullptr);
+     if (!compiled)
+         return compiled.error();
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     return errorOf(Instance::create(**engine, **compiled, services, clock, limits));
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("CompiledExtension.load", "[vtextension]")
+@@ -136,39 +137,39 @@ TEST_CASE("CompiledExtension.passesHostUnavailableThrough", "[vtextension]")
+     CHECK(errorOf(loadModule(backend, toModule(vtextension::testing::MinimalModule)))
+           == ExtensionError::InvalidComponent);
+ }
+ 
+ TEST_CASE("CompiledExtension.passesIdentityToTheRuntime", "[vtextension]")
+ {
+     auto backend = vtextension::testing::FakeWasmBackend {};
+     auto const engine = Engine::create(backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+     auto const compiled = CompiledExtension::load(
+-        **engine, wasm::ModuleIdentity { "x" }, toModule(vtextension::testing::MinimalModule));
++        **engine, wasm::ModuleIdentity { "x" }, toModule(vtextension::testing::MinimalModule), nullptr);
+     REQUIRE(compiled.has_value());
+     CHECK(backend.loads() == 1);
+     CHECK(backend.lastIdentity() == wasm::ModuleIdentity { "x" });
+ }
+ 
+ TEST_CASE("Instance.hostCrashedIsHostUnavailable", "[vtextension]")
+ {
+     // The host running the instance died mid-call: neither a trap nor an overrun, but a host to report.
+     auto backend = vtextension::testing::FakeWasmBackend {};
+     backend.guest.exports["render"] =
+         [](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
+         return std::unexpected(wasm::CallFailure::HostCrashed);
+     };
+     auto const limits = ExtensionLimits {};
+     auto const engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+     auto const compiled = CompiledExtension::load(
+-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+     REQUIRE(instance.has_value());
+     CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::HostUnavailable);
+ }
+ 
+ TEST_CASE("Instance.hostCrashedOutranksAFailedHostCall", "[vtextension]")
+ {
+@@ -178,21 +179,21 @@ TEST_CASE("Instance.hostCrashedOutranksAFailedHostCall", "[vtextension]")
+     backend.guest.exports["render"] =
+         [&](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
+         constexpr auto NoSuchFunction = std::size_t { 999 };
+         std::ignore = backend.lastInstance->callHost(NoSuchFunction, {});
+         return std::unexpected(wasm::CallFailure::HostCrashed);
+     };
+     auto const limits = ExtensionLimits {};
+     auto const engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+     auto const compiled = CompiledExtension::load(
+-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+     REQUIRE(instance.has_value());
+     CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::HostUnavailable);
+ }
+ 
+ TEST_CASE("Instance.minimal", "[vtextension]")
+ {
+@@ -205,21 +206,21 @@ TEST_CASE("Instance.minimal", "[vtextension]")
+ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
+ {
+     // The minimal module asks for one 64 KiB page up front; a cap below that refuses it.
+     auto limits = ExtensionLimits {};
+     limits.memoryBytes = std::size_t { 32 } * 1024;
+     auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, limits);
+     REQUIRE(engine.has_value());
+     auto const threadGuard = vtextension::testing::preparedThread(*backend);
+     auto const compiled = CompiledExtension::load(
+-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     CHECK(errorOf(Instance::create(**engine, **compiled, services, clock, limits))
+           == ExtensionError::OutOfMemory);
+ }
+ 
+ TEST_CASE("Instance.malicious", "[vtextension]")
+ {
+     // A guest that forges addresses and lengths gets an error, never a host access outside its memory.
+@@ -322,21 +323,21 @@ class HastyClock final: public core::platform::IClock
+ 
+ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
+ {
+     // When the call's deadline is spent by the time the guest asks for a command, the command does
+     // not run, and the call fails as overrun.
+     auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+     auto const threadGuard = vtextension::testing::preparedThread(*backend);
+     auto const compiled = CompiledExtension::load(
+-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MaliciousModule));
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MaliciousModule), nullptr);
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     services.commandAnswer = "";
+     auto clock = HastyClock {};
+     auto instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+     REQUIRE(instance.has_value());
+ 
+     CHECK(errorOf((*instance)->render(surface(80, 10))) == ExtensionError::DeadlineExceeded);
+     CHECK(services.commands.empty());
+ }
+@@ -381,21 +382,21 @@ TEST_CASE("Instance.expiredBetweenCalls", "[vtextension]")
+         auto const giveUp = std::chrono::steady_clock::now() + std::chrono::seconds { 5 };
+         while (backend.lastInstance->interrupts.load() == 0 && std::chrono::steady_clock::now() < giveUp)
+             std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+     };
+ 
+     auto limits = ExtensionLimits {};
+     limits.callDeadline = std::chrono::milliseconds { 20 };
+     auto const engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+     auto const compiled = CompiledExtension::load(
+-        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
++        **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+     REQUIRE(instance.has_value());
+ 
+     CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::DeadlineExceeded);
+     CHECK(postRenders == 0);
+     REQUIRE(backend.lastInstance != nullptr);
+     CHECK(backend.lastInstance->interrupts.load() == 1);
+@@ -441,21 +442,21 @@ TEST_CASE("Instance.growthRefusedInHostCallAllocation", "[vtextension]")
+             auto const resultAddress = std::array { uint32_t { 64 } };
+             if (!backend.lastInstance->callHost(StateFunction, resultAddress))
+                 return std::unexpected(wasm::CallFailure::Trap); // the guest traps on its own afterwards
+             return {};
+         };
+ 
+         auto const limits = ExtensionLimits {};
+         auto const engine = Engine::create(backend, limits);
+         REQUIRE(engine.has_value());
+         auto const compiled = CompiledExtension::load(
+-            **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
++            **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule), nullptr);
+         REQUIRE(compiled.has_value());
+         auto services = vtextension::testing::FakeHostServices {};
+         services.snapshot.title = "a title the host must allocate for";
+         auto clock = core::platform::ManualClock {};
+         auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+         REQUIRE(instance.has_value());
+ 
+         CHECK(errorOf((*instance)->render(surface(80, 1))) == testCase.error);
+         CHECK(reallocs == 1);
+         CHECK((*instance)->fault() == testCase.error);
+diff --git a/src/vtextension/Isolation_test.cpp b/src/vtextension/Isolation_test.cpp
+index c631d69b5..d02fa2ff6 100644
+--- a/src/vtextension/Isolation_test.cpp
++++ b/src/vtextension/Isolation_test.cpp
+@@ -2,20 +2,21 @@
+ //
+ // What the terminal pays for status-line extensions, as structure rather than time: a stalled extension never
+ // makes the parser wait (A1), its code never runs on the thread that feeds the terminal (A1), and a pane
+ // without extensions starts nothing for them (A2). None of these cases measures the machine; how fast the
+ // terminal runs with and without extensions is measured apart (`bench-headless throughput extensions ...`).
+ #include <vtbackend/screen/StatusLineExtensions.hpp>
+ #include <vtbackend/screen/Terminal.hpp>
+ #include <vtbackend/testing/MockTerm.hpp>
+ 
+ #include <core/async/testing/ManualExecutor.hpp>
++#include <core/platform/Clock.hpp>
+ 
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <atomic>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <format>
+ #include <functional>
+ #include <future>
+@@ -253,28 +254,31 @@ TEST_CASE("Isolation.noEngineWhenUnused", "[vtextension][isolation]")
+ {
+     // A pane as the GUI and the daemon build one: its terminal holds the pane's (empty) extensions for life,
+     // and is told everything a session tells it. With no extension declared, nothing is built, no engine is
+     // created, no lane assigned and no worker thread started -- even with every service at hand.
+     auto harness = RunnerHarness {};
+     auto counting = CountingEngineProvider { *harness.backend };
+     auto pool = ExtensionWorkerPool(*harness.backend, 2);
+     auto scheduler = CountingScheduler { pool };
+     auto builds = core::async::testing::ManualExecutor {};
+     auto owner = std::make_shared<QueuedOwner>();
++    auto clock = core::platform::ManualClock {};
++    auto registry = vtextension::ExtensionRegistry { clock, {} };
+     {
+         auto extensions = SessionExtensions { SessionExtensionCallbacks {}, owner };
+         auto mock = vtbackend::MockTerm { PaneSize, extensions.terminalServices() };
+         extensions.rebuild(DeclaredExtensions {},
+                            vtbackend::ImageSize { vtbackend::Width(8), vtbackend::Height(16) },
+                            SessionExtensionServices {
+                                .engines = counting,
+                                .retirement = counting,
++                               .registry = registry,
+                                .scheduler = scheduler,
+                                .builds = builds,
+                                .grants = harness.grants,
+                                .capture = harness.capture,
+                                .wallClock = harness.wallClock,
+                                .localTime = harness.localTime,
+                                .environment = harness.environment,
+                                .fileSystem = harness.fileSystem,
+                                .lookup = { .fileSystem = harness.fileSystem, .bundledDirectories = {} },
+                                .limits = {} });
+diff --git a/src/vtextension/SessionExtensions.cpp b/src/vtextension/SessionExtensions.cpp
+index 82c2c381d..ef724a9c0 100644
+--- a/src/vtextension/SessionExtensions.cpp
++++ b/src/vtextension/SessionExtensions.cpp
+@@ -34,24 +34,25 @@ namespace
+                     return extension.compiled && *extension.compiled;
+                 }))
+                 _sink.retire(retirementOf(std::move(_prepared)));
+         }
+ 
+         BuildResult(BuildResult const&) = delete;
+         BuildResult(BuildResult&&) = delete;
+         BuildResult& operator=(BuildResult const&) = delete;
+         BuildResult& operator=(BuildResult&&) = delete;
+ 
+-        /// Loads @p config's modules on the engine the build holds. On the build thread.
+-        void prepare(ExtensionHostConfig config)
++        /// Loads @p config's modules on the engine the build holds, sharing each through @p registry. On the
++        /// build thread.
++        void prepare(ExtensionHostConfig config, ExtensionRegistry& registry)
+         {
+-            _prepared = prepareExtensions(std::move(config), _engine);
++            _prepared = prepareExtensions(std::move(config), _engine, &registry);
+             // The prepared extensions hold the engine now, if there is one.
+             _engine = std::unexpected(ExtensionError::RuntimeUnavailable);
+         }
+ 
+         /// @return What was built, which the result no longer holds. On the owner's thread.
+         [[nodiscard]] PreparedExtensions take() { return std::exchange(_prepared, {}); }
+ 
+       private:
+         IRetirementSink& _sink;
+         std::expected<std::shared_ptr<Engine>, ExtensionError> _engine;
+@@ -66,21 +67,21 @@ namespace
+                                        vtbackend::ImageSize cellPixelSize,
+                                        SessionExtensionServices services,
+                                        std::shared_ptr<BuildResult> result,
+                                        std::shared_ptr<IOwnerThread> owner,
+                                        std::function<void(PreparedExtensions)> adopt)
+     {
+         co_await core::async::ResumeOn { services.builds };
+         auto composed = composeExtensions(declared, services.lookup, cellPixelSize, services.limits);
+         for (auto const& diagnostic: composed.diagnostics)
+             errorLog()("{}", diagnostic);
+-        result->prepare(std::move(composed.host));
++        result->prepare(std::move(composed.host), services.registry);
+         owner->post([result = std::move(result), adopt = std::move(adopt)]() { adopt(result->take()); });
+     }
+ } // namespace
+ 
+ ReplaceableStatusLineExtensions::ReplaceableStatusLineExtensions(std::shared_ptr<HostedExtensions> initial):
+     _owned { std::move(initial) }
+ {
+     _current.store(_owned);
+ }
+ 
+@@ -201,29 +202,31 @@ void SessionExtensions::install(std::shared_ptr<HostedExtensions> next)
+     previous.reset();
+ }
+ 
+ ExtensionRuntime::ExtensionRuntime(ExtensionRuntimeConfig config, ExtensionRuntimeServices services):
+     _services { services },
+     _bundledDirectories { std::move(config.bundledDirectories) },
+     _limits { config.limits },
+     _grants { services.fileSystem, std::move(config.grantsFile) },
+     _engines { services.backend, config.limits },
+     _pool { services.backend, config.workerCount },
++    _registry { _pool.clock(), config.limits },
+     _builds { std::make_unique<core::async::ThreadPoolExecutor>(1) }
+ {
+ }
+ 
+ SessionExtensionServices ExtensionRuntime::sessionServices() noexcept
+ {
+     Require(_builds != nullptr); // not after stop()
+     return { .engines = _engines,
+              .retirement = _engines,
++             .registry = _registry,
+              .scheduler = _pool,
+              .builds = *_builds,
+              .grants = _grants,
+              .capture = _services.capture,
+              .wallClock = _services.wallClock,
+              .localTime = _services.localTime,
+              .environment = _services.environment,
+              .fileSystem = _services.fileSystem,
+              .lookup = ExtensionModuleLookup { .fileSystem = _services.fileSystem,
+                                                .bundledDirectories = _bundledDirectories },
+diff --git a/src/vtextension/SessionExtensions.hpp b/src/vtextension/SessionExtensions.hpp
+index 69f617ac3..10dcf1b77 100644
+--- a/src/vtextension/SessionExtensions.hpp
++++ b/src/vtextension/SessionExtensions.hpp
+@@ -20,41 +20,43 @@
+ #include <optional>
+ #include <string>
+ #include <string_view>
+ #include <vector>
+ 
+ #include <vtextension/AtomicSharedPtr.hpp>
+ #include <vtextension/ExtensionComposition.hpp>
+ #include <vtextension/ExtensionGrantStore.hpp>
+ #include <vtextension/ExtensionHost.hpp>
+ #include <vtextension/ExtensionLimits.hpp>
++#include <vtextension/ExtensionRegistry.hpp>
+ #include <vtextension/ExtensionScheduler.hpp>
+ #include <vtextension/ExtensionWorkerPool.hpp>
+ #include <vtextension/IHostServices.hpp>
+ #include <vtextension/StatusLineAdapter.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension
+ {
+ 
+ /// What every pane's extensions reach. Each must outlive every pane's extensions; the build executor must be
+ /// destroyed (joined) before the retirement sink and what the builds read, and the scheduler before what its
+ /// jobs reach: the grants, the capture, the environment, the filesystem and the retirement sink.
+ /// @see RunnerServices
+ struct SessionExtensionServices
+ {
+-    IEngineProvider& engines;                       ///< Where the engine comes from.
+-    IRetirementSink& retirement;                    ///< Where runners and abandoned builds hand engines back.
+-    IExtensionScheduler& scheduler;                 ///< The lanes the runners live on.
+-    core::async::IExecutor& builds;                 ///< Where modules are found, read and loaded.
+-    IGrantStore& grants;                            ///< Where command permissions are looked up.
+-    vtpty::CommandCapture& capture;                 ///< Runs the commands extensions ask for.
++    IEngineProvider& engines;       ///< Where the engine comes from.
++    IRetirementSink& retirement;    ///< Where runners and abandoned builds hand engines back.
++    ExtensionRegistry& registry;    ///< Where a module is shared with the other panes running it.
++    IExtensionScheduler& scheduler; ///< The lanes the runners live on.
++    core::async::IExecutor& builds; ///< Where modules are found, read and loaded.
++    IGrantStore& grants;            ///< Where command permissions are looked up.
++    vtpty::CommandCapture& capture; ///< Runs the commands extensions ask for.
+     core::platform::IWallClock const& wallClock;    ///< The time `state` answers with.
+     vtbackend::LocalTimeConverter const& localTime; ///< The time zone `state`'s UTC offset is read in.
+     core::Environment const& environment;           ///< What the extensions' private terminals read.
+     core::platform::FileSystem const& fileSystem;   ///< Where those terminals look paths up.
+     ExtensionModuleLookup lookup;                   ///< Where modules are found.
+     ExtensionLimits limits;                         ///< What each extension may cost.
+ };
+ 
+ /// What a pane hears from its extensions.
+ struct SessionExtensionCallbacks
+@@ -238,36 +240,41 @@ struct ExtensionRuntimeServices
+     core::platform::FileSystem const& fileSystem;   ///< Where modules, grants and paths are read.
+ };
+ 
+ /// The application's share of status-line extensions: the grants, the engine, the worker pool every pane's
+ /// extensions run on, and the thread their modules are read and loaded on. Created the first time a pane has
+ /// extensions, so that a process without any reads no grants file, starts no runtime and no thread.
+ ///
+ /// **Lifetime.** Owned by the application, declared after what it borrows (the backend, the capture, the
+ /// environment, the filesystem) and before the session manager, whose sessions -- and so every runner -- are
+ /// destroyed first. Its own members are declared so that the build thread is joined first (a build blocked on
+-/// a hung filesystem delays that), then the pool, whose workers run the jobs still posted (each runner's last
++/// a hung filesystem delays that), then the registry's entries go (each a weak reference, with its breaker,
++/// which reads the pool's clock), then the pool, whose workers run the jobs still posted (each runner's last
+ /// job destroys its instance on its lane and retires the engine), before the engine provider releases what
+ /// was retired, on this thread, and before the grants go.
+ class ExtensionRuntime
+ {
+   public:
+     /// @param config What it is.
+     /// @param services What it borrows.
+     ExtensionRuntime(ExtensionRuntimeConfig config, ExtensionRuntimeServices services);
+ 
+     /// @return What a pane's extensions reach.
+     [[nodiscard]] SessionExtensionServices sessionServices() noexcept;
+ 
+     /// @return Where the user's answers are kept.
+     [[nodiscard]] IGrantStore& grants() noexcept { return _grants; }
+ 
++    /// Tells the runtime the configuration was reloaded: every extension's breaker closes, so that one whose
++    /// host kept dying is started again. Owner's thread.
++    void configurationReloaded() noexcept { _registry.resetBreakers(); }
++
+     /// @return How many worker threads run; none until the first extension is started.
+     [[nodiscard]] std::size_t runningWorkers() const noexcept { return _pool.runningWorkers(); }
+ 
+     /// Releases, on the calling (GUI) thread, the engines and modules runners retired since.
+     void releaseRetired() noexcept { _engines.releaseRetired(); }
+ 
+     /// Joins the build thread, then the workers, as destruction does, but keeps everything they reach --
+     /// the grants, the engine provider each retires to -- alive: a build it ends hands its result to the
+     /// owner's thread, which drops it there while the provider still exists. Call once every pane's
+     /// extensions are destroyed, so each runner's last job is posted already; no pane may be built after.
+@@ -278,14 +285,15 @@ class ExtensionRuntime
+         _pool.stop();
+     }
+ 
+   private:
+     ExtensionRuntimeServices _services;
+     std::vector<std::filesystem::path> _bundledDirectories;
+     ExtensionLimits _limits;
+     ExtensionGrantStore _grants;
+     EngineProvider _engines;
+     ExtensionWorkerPool _pool;
++    ExtensionRegistry _registry;                     ///< After the pool, whose clock its breakers read.
+     std::unique_ptr<core::async::IExecutor> _builds; ///< Last: joined first.
+ };
+ 
+ } // namespace vtextension
+diff --git a/src/vtextension/SessionExtensions_test.cpp b/src/vtextension/SessionExtensions_test.cpp
+index 31812e29f..12afadbce 100644
+--- a/src/vtextension/SessionExtensions_test.cpp
++++ b/src/vtextension/SessionExtensions_test.cpp
+@@ -1,12 +1,13 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <core/async/testing/ManualExecutor.hpp>
++#include <core/platform/Clock.hpp>
+ #include <core/platform/testing/InMemoryFileSystem.hpp>
+ 
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <atomic>
+ #include <cstddef>
+ #include <filesystem>
+ #include <functional>
+ #include <memory>
+ #include <optional>
+@@ -51,29 +52,32 @@ namespace
+     return text;
+ }
+ 
+ /// The services a pane's extensions reach: the harness's manual scheduler, a manual build executor, and an
+ /// in-memory filesystem the test fills.
+ struct Fixture
+ {
+     RunnerHarness harness;
+     vtextension::ExtensionLimits limits {}; ///< What the engines are created with, and each extension costs.
+     vtextension::EngineProvider engines { *harness.backend, limits };
++    core::platform::ManualClock clock {};
++    vtextension::ExtensionRegistry registry { clock, limits };
+     core::async::testing::ManualExecutor builds;
+     core::platform::testing::InMemoryFileSystem fileSystem;
+     std::shared_ptr<QueuedOwner> owner = std::make_shared<QueuedOwner>();
+     int replaced = 0;
+ 
+     [[nodiscard]] SessionExtensionServices services()
+     {
+         return { .engines = engines,
+                  .retirement = engines,
++                 .registry = registry,
+                  .scheduler = harness.scheduler,
+                  .builds = builds,
+                  .grants = harness.grants,
+                  .capture = harness.capture,
+                  .wallClock = harness.wallClock,
+                  .localTime = harness.localTime,
+                  .environment = harness.environment,
+                  .fileSystem = fileSystem,
+                  .lookup = { .fileSystem = fileSystem, .bundledDirectories = {} },
+                  .limits = limits };
+@@ -115,22 +119,22 @@ struct Fixture
+                                                               Placement placement)
+ {
+     auto config = ExtensionHostConfig {};
+     config.extensions.push_back(ExtensionSpec { .name = std::move(name),
+                                                 .hostId = "test@/gone.wasm",
+                                                 .module = {},
+                                                 .config = {},
+                                                 .placement = placement,
+                                                 .runCommand = vtextension::CommandPermission::Deny });
+     return std::make_shared<HostedExtensions>(
+-        vtextension::prepareExtensions(std::move(config),
+-                                       std::unexpected(vtextension::ExtensionError::ModuleUnavailable)),
++        vtextension::prepareExtensions(
++            std::move(config), std::unexpected(vtextension::ExtensionError::ModuleUnavailable), nullptr),
+         vtextension::ExtensionHostServices {
+             .engines = fixture.engines,
+             .runners = fixture.harness.services(fixture.harness.scheduler, fixture.engines) });
+ }
+ } // namespace
+ 
+ TEST_CASE("ReplaceableStatusLineExtensions: forwards to what it holds", "[vtextension][extensions]")
+ {
+     auto fixture = Fixture {};
+     auto forwarder = ReplaceableStatusLineExtensions { nullptr };
+diff --git a/src/vtextension/testing/Harness.hpp b/src/vtextension/testing/Harness.hpp
+index 2fe8c302a..088db5259 100644
+--- a/src/vtextension/testing/Harness.hpp
++++ b/src/vtextension/testing/Harness.hpp
+@@ -152,21 +152,22 @@ class RunningGuest
+   public:
+     /// Loads @p module and instantiates it under @p limits.
+     explicit RunningGuest(std::vector<std::byte> module, ExtensionLimits limits = {}):
+         _backend { wasm::makeDefaultBackend(wasm::BackendConfig {}) }, _limits { limits }
+     {
+         auto engine = Engine::create(*_backend, limits);
+         REQUIRE(engine.has_value());
+         _engine = std::move(*engine);
+         // Prepared once the engine's runtime is up: a backend prepares no thread before it has one.
+         _threadGuard = preparedThread(*_backend);
+-        auto compiled = CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module));
++        auto compiled =
++            CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module), nullptr);
+         REQUIRE(compiled.has_value());
+         _compiled = std::move(*compiled);
+         restart();
+     }
+ 
+     /// Replaces the instance with a fresh one of the same module.
+     void restart()
+     {
+         _instance.reset();
+         auto instance = Instance::create(*_engine, *_compiled, services, clock, _limits);
+diff --git a/src/vtextension/testing/PublicHeaders.cpp b/src/vtextension/testing/PublicHeaders.cpp
+index ac5a2630b..8ee2647a0 100644
+--- a/src/vtextension/testing/PublicHeaders.cpp
++++ b/src/vtextension/testing/PublicHeaders.cpp
+@@ -13,23 +13,25 @@
+ #include <vtextension/DeadlineGuard.hpp>
+ #include <vtextension/Engine.hpp>
+ #include <vtextension/Event.hpp>
+ #include <vtextension/EventQueue.hpp>
+ #include <vtextension/ExtensionComposition.hpp>
+ #include <vtextension/ExtensionConsent.hpp>
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/ExtensionGrantStore.hpp>
+ #include <vtextension/ExtensionHost.hpp>
+ #include <vtextension/ExtensionLimits.hpp>
++#include <vtextension/ExtensionRegistry.hpp>
+ #include <vtextension/ExtensionScheduler.hpp>
+ #include <vtextension/ExtensionWorkerPool.hpp>
+ #include <vtextension/HostBindings.hpp>
++#include <vtextension/HostBreaker.hpp>
+ #include <vtextension/HostState.hpp>
+ #include <vtextension/IHostServices.hpp>
+ #include <vtextension/Instance.hpp>
+ #include <vtextension/Manifest.hpp>
+ #include <vtextension/Placement.hpp>
+ #include <vtextension/Runner.hpp>
+ #include <vtextension/SessionExtensions.hpp>
+ #include <vtextension/StatusLineAdapter.hpp>
+ #include <vtextension/StatuslineWorld.hpp>
+ #include <vtextension/Surface.hpp>
+diff --git a/src/vtextension/testing/RunnerHarness.hpp b/src/vtextension/testing/RunnerHarness.hpp
+index 81d71cd9d..5d4b20772 100644
+--- a/src/vtextension/testing/RunnerHarness.hpp
++++ b/src/vtextension/testing/RunnerHarness.hpp
+@@ -48,21 +48,21 @@ struct LoadedModule
+ /// @param backend What the engine is created from; must outlive the engine and the module.
+ /// @param bytes The module.
+ /// @param limits What the engine allows.
+ /// @return The engine and the module loaded on it.
+ [[nodiscard]] inline LoadedModule loadModule(wasm::IWasmBackend& backend,
+                                              std::vector<std::byte> bytes,
+                                              ExtensionLimits const& limits = {})
+ {
+     auto engine = Engine::create(backend, limits);
+     REQUIRE(engine.has_value());
+-    auto compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(bytes));
++    auto compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(bytes), nullptr);
+     REQUIRE(compiled.has_value());
+     return LoadedModule { .engine = std::move(*engine), .compiled = std::move(*compiled) };
+ }
+ 
+ /// Reads every instant as UTC, so that no test depends on the zone of the machine it runs on.
+ [[nodiscard]] inline std::chrono::local_seconds utcLocalTime(
+     std::chrono::system_clock::time_point when) noexcept
+ {
+     return std::chrono::local_seconds { std::chrono::floor<std::chrono::seconds>(when).time_since_epoch() };
+ }
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index ffb261e45..881aa14b1 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -78,20 +78,21 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+     # Wasmtime's, the engine a host process runs, reached through its directory's neutral test probe
+     # (vtextension_wasmtime_hosted_engine).
+     #
+     # Beside them, the suites vtextension_test runs on the default backend, here composed by
+     # testing/RemoteDefaultBackend.cpp as the remote backend over hosts in this process: their real guests
+     # run through the protocol.
+     add_executable(vtextension_remote_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         ../host/ExecutorThread_test.cpp
+         ../host/HostServer_test.cpp
++        RegistryRemote_test.cpp
+         RemoteBackend_test.cpp
+         testing/RemoteDefaultBackend.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/ControlImports_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Engine_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionHost_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionWorkerPool_test.cpp
+         ${PROJECT_SOURCE_DIR}/src/vtextension/Instance_test.cpp
+     )
+     target_link_libraries(vtextension_remote_test PRIVATE
+diff --git a/src/vtextension/wasm/remote/RegistryRemote_test.cpp b/src/vtextension/wasm/remote/RegistryRemote_test.cpp
+new file mode 100644
+index 000000000..f56638181
+--- /dev/null
++++ b/src/vtextension/wasm/remote/RegistryRemote_test.cpp
+@@ -0,0 +1,172 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The registry and its breaker over a real host: one extension's helper shared by its panes, whose death
++// counts once however many of them saw it, and which an open breaker no longer spawns.
++#include <core/platform/Clock.hpp>
++
++#include <catch2/catch_test_macros.hpp>
++
++#include <cstddef>
++#include <expected>
++#include <memory>
++#include <optional>
++#include <ranges>
++#include <thread>
++#include <utility>
++#include <vector>
++
++#include <vtextension/CompiledExtension.hpp>
++#include <vtextension/Engine.hpp>
++#include <vtextension/ExtensionError.hpp>
++#include <vtextension/ExtensionHost.hpp>
++#include <vtextension/ExtensionLimits.hpp>
++#include <vtextension/ExtensionRegistry.hpp>
++#include <vtextension/HostBreaker.hpp>
++#include <vtextension/Instance.hpp>
++#include <vtextension/testing/Harness.hpp>
++#include <vtextension/testing/TestModules.hpp>
++#include <vtextension/wasm/BackendConfig.hpp>
++#include <vtextension/wasm/DefaultBackend.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/host/HostServer.hpp>
++#include <vtextension/wasm/host/InProcessHost.hpp>
++#include <vtextension/wasm/testing/HostedEngine.hpp>
++
++using namespace vtextension;
++using vtextension::testing::surface;
++using vtextension::testing::toModule;
++using vtextension::wasm::host::HostServerConfig;
++using vtextension::wasm::host::InProcessHostConnector;
++
++namespace
++{
++
++/// Every pane of these tests is held to the default limits.
++constexpr auto Limits = ExtensionLimits {};
++
++/// @return A connector starting each host in this process, on an engine of its own.
++[[nodiscard]] std::shared_ptr<InProcessHostConnector> makeConnector()
++{
++    return std::make_shared<InProcessHostConnector>([] { return wasm::testing::makeHostedEngine(); },
++                                                    HostServerConfig {});
++}
++
++/// A registry and an engine whose hosts run in this process, started through a connector the test sees.
++struct RemoteRig
++{
++    /// @param hosts What starts the hosts.
++    explicit RemoteRig(std::shared_ptr<InProcessHostConnector> hosts = makeConnector()):
++        connector { std::move(hosts) }
++    {
++    }
++
++    std::shared_ptr<InProcessHostConnector> connector;
++    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend(
++        wasm::BackendConfig { .helper = {}, .timeouts = {}, .connector = connector });
++    std::shared_ptr<Engine> engine = [this] {
++        auto created = Engine::create(*backend, Limits);
++        REQUIRE(created.has_value());
++        return std::move(*created);
++    }();
++    std::unique_ptr<wasm::IThreadGuard> threadGuard = vtextension::testing::preparedThread(*backend);
++    core::platform::ManualClock clock;
++    ExtensionRegistry registry { clock, Limits };
++    vtextension::testing::FakeHostServices services;
++
++    /// @return The minimal statusline module, acquired from the registry; it must load.
++    [[nodiscard]] std::shared_ptr<CompiledExtension> acquire()
++    {
++        auto compiled = registry.acquire(*engine, key(), toModule(vtextension::testing::MinimalModule));
++        REQUIRE(compiled.has_value());
++        return std::move(*compiled);
++    }
++
++    /// @return A pane's instance of @p compiled, or why there is none.
++    [[nodiscard]] std::expected<std::unique_ptr<Instance>, ExtensionError> instantiate(
++        CompiledExtension const& compiled)
++    {
++        return Instance::create(*engine, compiled, services, clock, Limits);
++    }
++
++    /// @return The key every pane of these tests names its extension by.
++    [[nodiscard]] static RegistryKey key()
++    {
++        auto const spec = ExtensionSpec { .name = "clock",
++                                          .hostId = "clock@/ext/minimal.wasm",
++                                          .module = toModule(vtextension::testing::MinimalModule),
++                                          .config = {},
++                                          .placement = Placement::Segment,
++                                          .runCommand = CommandPermission::Deny };
++        return registryKeyOf(spec, ExtensionWorld::StatusLine);
++    }
++};
++
++} // namespace
++
++TEST_CASE("one death counts once across panes", "[vtextension][remote][registry]")
++{
++    auto rig = RemoteRig {};
++    auto const compiled = rig.acquire();
++    auto panes = std::vector<std::unique_ptr<Instance>> {};
++    for ([[maybe_unused]] auto const pane: std::views::iota(0, 10))
++    {
++        auto instance = rig.instantiate(*compiled);
++        REQUIRE(instance.has_value());
++        panes.push_back(std::move(*instance));
++    }
++    REQUIRE(rig.connector->connects() == 1);
++
++    CHECK(rig.connector->terminateAll() == 1);
++    for (auto const& pane: panes)
++        CHECK(pane->render(surface(10, 1)).error() == ExtensionError::HostUnavailable);
++    CHECK(compiled->breaker()->faultCount() == 1);
++    CHECK(compiled->breaker()->state() == BreakerState::Closed);
++    CHECK(rig.connector->connects() == 1);
++
++    // One respawn, for the next pane.
++    auto const next = rig.instantiate(*compiled);
++    REQUIRE(next.has_value());
++    CHECK(rig.connector->connects() == 2);
++}
++
++TEST_CASE("breaker open fails fast without spawning", "[vtextension][remote][registry]")
++{
++    auto rig = RemoteRig {};
++    auto const compiled = rig.acquire();
++    for ([[maybe_unused]] auto const death: std::views::iota(0, 3))
++    {
++        auto const instance = rig.instantiate(*compiled);
++        REQUIRE(instance.has_value());
++        REQUIRE(rig.connector->terminateAll() == 1);
++        CHECK((*instance)->render(surface(10, 1)).error() == ExtensionError::HostUnavailable);
++    }
++    REQUIRE(compiled->breaker()->state() == BreakerState::Open);
++    auto const connects = rig.connector->connects();
++
++    CHECK(rig.instantiate(*compiled).error() == ExtensionError::HostUnavailable);
++    CHECK(rig.connector->connects() == connects);
++    CHECK(rig.connector->liveHosts() == 0);
++}
++
++TEST_CASE("registry drop races instantiate (remote)", "[vtextension][remote][registry][threading]")
++{
++    // As over the fake backend, with a real helper behind each entry: whichever thread wins, nothing is
++    // left running once every reference is gone.
++    auto const connector = makeConnector();
++    {
++        auto rig = RemoteRig { connector };
++        for ([[maybe_unused]] auto const round: std::views::iota(0, 200))
++        {
++            auto first = std::optional { rig.acquire() };
++            auto dropper = std::jthread { [&first] { first.reset(); } };
++            auto const second = rig.registry.acquire(
++                *rig.engine, RemoteRig::key(), toModule(vtextension::testing::MinimalModule));
++            REQUIRE(second);
++            auto const instance = rig.instantiate(**second);
++            CHECK(instance);
++            dropper.join();
++            CHECK(rig.registry.liveEntries() <= 1);
++        }
++    }
++    CHECK(connector->liveHosts() == 0);
++}
+diff --git a/src/vtextension/wasm/testing/RenderMeasurement.hpp b/src/vtextension/wasm/testing/RenderMeasurement.hpp
+index e759667c7..9d8e2bec1 100644
+--- a/src/vtextension/wasm/testing/RenderMeasurement.hpp
++++ b/src/vtextension/wasm/testing/RenderMeasurement.hpp
+@@ -72,21 +72,21 @@ struct RenderMeasurement
+     REQUIRE(engine.has_value());
+     // Calls in on this thread, which a backend may not have prepared by creating the engine alone.
+     auto const guard = backend.enterThread();
+     REQUIRE(guard.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     services.snapshot.focus = FocusState::Focused;
+     auto guestClock = core::ManualClock {};
+ 
+     auto measurement = RenderMeasurement {};
+     auto const loadStart = clock.now();
+-    auto compiled = CompiledExtension::load(**engine, ModuleIdentity {}, std::move(module));
++    auto compiled = CompiledExtension::load(**engine, ModuleIdentity {}, std::move(module), nullptr);
+     measurement.load = clock.now() - loadStart;
+     REQUIRE(compiled.has_value());
+ 
+     auto const startStart = clock.now();
+     auto instance = Instance::create(**engine, **compiled, services, guestClock, limits);
+     REQUIRE(instance.has_value());
+     REQUIRE((*instance)->load({}).has_value());
+     measurement.start = clock.now() - startStart;
+ 
+     REQUIRE((*instance)->render(sizes.front()).has_value());
+diff --git a/src/vthost/DaemonExtensions.cpp b/src/vthost/DaemonExtensions.cpp
+index 0ba0beac0..02fa2a906 100644
+--- a/src/vthost/DaemonExtensions.cpp
++++ b/src/vthost/DaemonExtensions.cpp
+@@ -162,20 +162,27 @@ GrantState DaemonExtensions::lookup(std::string_view hostId, std::string_view di
+ {
+     return _runtime ? wireGrantStateOf(_runtime->grants().lookup(hostId, digest)) : GrantState::Pending;
+ }
+ 
+ void DaemonExtensions::releaseRetired() noexcept
+ {
+     if (_runtime)
+         _runtime->releaseRetired();
+ }
+ 
++void DaemonExtensions::configurationReloaded() noexcept
++{
++    // A runtime not started yet has no breaker to reset.
++    if (_runtime)
++        _runtime->configurationReloaded();
++}
++
+ void DaemonExtensions::stop() noexcept
+ {
+     _stopped = true;
+     // First, so that the joins below wait for no command: each run sees the request and ends.
+     _services.commandShutdown.request_stop();
+     if (_runtime)
+         _runtime->stop();
+ }
+ 
+ } // namespace vthost
+diff --git a/src/vthost/DaemonExtensions.hpp b/src/vthost/DaemonExtensions.hpp
+index 921ce84c7..d071f7cc7 100644
+--- a/src/vthost/DaemonExtensions.hpp
++++ b/src/vthost/DaemonExtensions.hpp
+@@ -67,20 +67,21 @@ class DaemonExtensions final: public IExtensionHosting
+   public:
+     /// @param config What the extensions are.
+     /// @param services What they borrow.
+     DaemonExtensions(DaemonExtensionsConfig config, DaemonExtensionServices services);
+ 
+     [[nodiscard]] std::unique_ptr<ISessionExtensions> createSession(SessionExtensionEvents events,
+                                                                     OwnerPost post) override;
+     void answer(std::string_view hostId, std::string_view digest, GrantState answer) override;
+     [[nodiscard]] GrantState lookup(std::string_view hostId, std::string_view digest) const override;
+     void releaseRetired() noexcept override;
++    void configurationReloaded() noexcept override;
+     void stop() noexcept override;
+ 
+     /// @return How many worker threads run; none until the first extension is started.
+     [[nodiscard]] std::size_t runningWorkers() const noexcept
+     {
+         return _runtime ? _runtime->runningWorkers() : 0;
+     }
+ 
+   private:
+     /// @return The runtime, made on first use.
+diff --git a/src/vthost/ExtensionHosting.hpp b/src/vthost/ExtensionHosting.hpp
+index de2bc36fb..8a3b5dcb7 100644
+--- a/src/vthost/ExtensionHosting.hpp
++++ b/src/vthost/ExtensionHosting.hpp
+@@ -103,18 +103,22 @@ class IExtensionHosting
+     virtual void answer(std::string_view hostId, std::string_view digest, GrantState answer) = 0;
+ 
+     /// @param hostId An installed extension.
+     /// @param digest A manifest digest.
+     /// @return The answer recorded for them; Pending for none.
+     [[nodiscard]] virtual GrantState lookup(std::string_view hostId, std::string_view digest) const = 0;
+ 
+     /// Releases, on the loop thread, the engines and modules runners retired since.
+     virtual void releaseRetired() noexcept = 0;
+ 
++    /// Tells the extensions the host's configuration was reloaded: an extension whose host process kept dying
++    /// is started again.
++    virtual void configurationReloaded() noexcept = 0;
++
+     /// Stops every extension for good, for a host about to go: cancels the commands in flight, then joins
+     /// the threads builds and runners run on, keeping alive what they reach. Called by the host once its
+     /// sessions -- and so every runner -- are gone, and before it drains its loop of what they posted; after
+     /// it, nothing of this posts any more, and no session is created. Idempotent.
+     virtual void stop() noexcept = 0;
+ };
+ 
+ } // namespace vthost
+diff --git a/src/vthost/SessionHost.cpp b/src/vthost/SessionHost.cpp
+index 172227455..ff4cf0755 100644
+--- a/src/vthost/SessionHost.cpp
++++ b/src/vthost/SessionHost.cpp
+@@ -2027,20 +2027,23 @@ HostedSession* SessionHost::hostedSession(SessionId session) noexcept
+ {
+     auto const it = _sessions.find(session.value);
+     return it != _sessions.end() ? it->second.get() : nullptr;
+ }
+ 
+ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles)
+ {
+     if (!profiles)
+         return;
+     _profiles = std::move(profiles);
++    // A reload is what starts an extension whose host process kept dying again.
++    if (_extensions)
++        _extensions->configurationReloaded();
+     auto relimited = std::vector<SessionId> {};
+     for (auto const& [id, session]: _sessions)
+     {
+         // A client that named no profile stated its own settings, which no profile of this host's replaces.
+         if (session->settingsOrigin() == SettingsOrigin::Client)
+             continue;
+         // Normalized as a spawn's settings are, so a reload cannot hand a running session a limit no new
+         // session could have.
+         auto const limits =
+             hostedSessionSettings(_profiles->resolve(session->profileName()).settings).historyLimits;
+diff --git a/src/vthost/SessionHost_test.cpp b/src/vthost/SessionHost_test.cpp
+index 3e0df2a65..9f40ae173 100644
+--- a/src/vthost/SessionHost_test.cpp
++++ b/src/vthost/SessionHost_test.cpp
+@@ -3780,20 +3780,44 @@ TEST_CASE("replaceProfiles re-limits running sessions and serves new ones from t
+     h.host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+ 
+     CHECK(terminal->settings().historyLimits.guaranteed
+           == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(3000) });
+     CHECK(h.host.terminal(running) == terminal);                  // the same terminal...
+     CHECK(h.programs == std::vector<std::string> { "/bin/zsh" }); // ...and no PTY respawned
+     REQUIRE(h.host.createTab({ .profileName = "main" }) != nullptr);
+     CHECK(h.programs == std::vector<std::string> { "/bin/zsh", "/bin/zsh-next" });
+ }
+ 
++TEST_CASE("replaceProfiles tells the extensions of the reload", "[vthost][profiles][reload]")
++{
++    // A reload is what starts an extension whose host process kept dying again: the daemon's as the GUI's.
++    auto clock = core::platform::ManualClock {};
++    auto const source = core::net::makeDefaultBackend();
++    auto loop = core::net::EventLoop { *source, clock };
++    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
++    auto host = SessionHost { loop,
++                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
++                                  return std::make_unique<vtpty::MockPty>(size);
++                              },
++                              vtbackend::Settings {},
++                              core::defaultEnvironment(),
++                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
++                                                          .extensions = hosting } };
++
++    // No catalog, no reload.
++    host.replaceProfiles(nullptr);
++    CHECK(hosting->reloads == 0);
++
++    host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
++    CHECK(hosting->reloads == 1);
++}
++
+ TEST_CASE("replaceProfiles leaves the limits a client stated for an unnamed session",
+           "[vthost][profiles][reload]")
+ {
+     // A client that shares no ProfileByName states its own settings; the host's default profile is not its.
+     auto h = ProfileHost {};
+     auto stated = vtbackend::Settings {};
+     stated.historyLimits =
+         vtbackend::HistoryLimits::plain(vtbackend::MaxHistoryLineCount { vtbackend::LineCount(200) });
+     auto const* tab = h.host.createTab({ .settings = stated });
+     REQUIRE(tab != nullptr);
+diff --git a/src/vthost/testing/FakeExtensionHosting.hpp b/src/vthost/testing/FakeExtensionHosting.hpp
+index 8b7ab0564..ca56092bc 100644
+--- a/src/vthost/testing/FakeExtensionHosting.hpp
++++ b/src/vthost/testing/FakeExtensionHosting.hpp
+@@ -121,21 +121,24 @@ class FakeExtensionHosting final: public IExtensionHosting
+     }
+ 
+     [[nodiscard]] GrantState lookup(std::string_view hostId, std::string_view digest) const override
+     {
+         auto const found = answers.find({ std::string { hostId }, std::string { digest } });
+         return found != answers.end() ? found->second : GrantState::Pending;
+     }
+ 
+     void releaseRetired() noexcept override { ++releases; }
+ 
++    void configurationReloaded() noexcept override { ++reloads; }
++
+     void stop() noexcept override { ++stops; }
+ 
+     /// Every session's extensions made, oldest first; a session gone leaves its pointer dangling.
+     std::vector<FakeSessionExtensions*> sessions;
+     std::map<std::pair<std::string, std::string>, GrantState> answers; ///< What lookup() answers.
+     std::vector<GrantState> answered; ///< Every answer() call's answer, in order.
+     int releases = 0;                 ///< How many times releaseRetired() was called.
++    int reloads = 0;                  ///< How many times configurationReloaded() was called.
+     int stops = 0;                    ///< How many times stop() was called.
+ };
+ 
+ } // namespace vthost::testing
+diff --git a/src/vthost/testing/KeeperFixture.cpp b/src/vthost/testing/KeeperFixture.cpp
+index de9b264e7..70165e8b5 100644
+--- a/src/vthost/testing/KeeperFixture.cpp
++++ b/src/vthost/testing/KeeperFixture.cpp
+@@ -247,20 +247,21 @@ namespace
+         {
+         }
+ 
+         [[nodiscard]] GrantState lookup(std::string_view /*hostId*/,
+                                         std::string_view /*digest*/) const override
+         {
+             return GrantState::Pending;
+         }
+ 
+         void releaseRetired() noexcept override {}
++        void configurationReloaded() noexcept override {}
+ 
+         void stop() noexcept override
+         {
+             if (!_watch.joinable())
+                 return;
+             _watch.request_stop();
+             _watch.join();
+         }
+ 
+       private:

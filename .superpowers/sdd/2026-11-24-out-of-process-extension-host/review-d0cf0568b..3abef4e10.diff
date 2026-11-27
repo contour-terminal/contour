@@ -1,0 +1,2798 @@
+# Review package: d0cf0568b..HEAD
+
+## Commits
+3abef4e10 refactor(vtextension): count a registry waiter out with core::Finally
+161737157 test(vtextension): promise and check concurrent instantiation of one module
+ad7feb73f perf(vtextension): size an extension host stream's buffer to the frame once
+7edcfdf0c fix(vtextension): name a Wasmtime kind in a thread's stamp by serial
+b5707570c fix(vtextension): treat a host's implausible load refusal as a protocol break
+cea3496e3 fix(vtextension): refuse a stack no extension host runs before starting one
+07aa6b700 fix(vtextension): count a host dying during a memory read as the host's
+
+## Files changed
+ src/vtextension/CompiledExtension.hpp              |   1 +
+ src/vtextension/ExtensionRegistry.cpp              |   9 +-
+ src/vtextension/Instance.cpp                       |  14 +-
+ src/vtextension/testing/FakeWasmBackend.hpp        |   5 +-
+ src/vtextension/wasm/WasmRuntime.hpp               |  23 ++-
+ src/vtextension/wasm/host/HostServer.cpp           |   4 +-
+ src/vtextension/wasm/host/HostServer.hpp           |  16 +--
+ src/vtextension/wasm/host/HostServer_test.cpp      | 137 +++---------------
+ src/vtextension/wasm/remote/CopyPathMemory.cpp     |  27 ++--
+ src/vtextension/wasm/remote/CopyPathMemory.hpp     |  21 ++-
+ .../wasm/remote/CopyPathMemory_test.cpp            |  47 ++++--
+ .../wasm/remote/RegistryRemote_test.cpp            |  86 +++++++++++
+ src/vtextension/wasm/remote/RemoteBackend.cpp      |  52 +++++--
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp |  86 ++++++++++-
+ src/vtextension/wasm/remote/proto/Codec.cpp        | 104 +++++++++-----
+ src/vtextension/wasm/remote/proto/Codec.hpp        |  14 ++
+ src/vtextension/wasm/remote/proto/Pdu.hpp          |  13 ++
+ .../wasm/remote/transport/PduStream.cpp            |  45 ++++--
+ .../wasm/remote/transport/PduStream.hpp            |  21 ++-
+ .../wasm/remote/transport/PduStream_test.cpp       |  38 +++++
+ src/vtextension/wasm/testing/BackendContract.hpp   |  79 ++++++++++-
+ src/vtextension/wasm/testing/DecoratedEngine.hpp   | 158 +++++++++++++++++++++
+ src/vtextension/wasm/wamr/WamrInstance.cpp         |   7 +-
+ src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp   |  22 ++-
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          |  27 ++++
+ src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp |   7 +-
+ src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp  |   8 ++
+ 27 files changed, 803 insertions(+), 268 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/CompiledExtension.hpp b/src/vtextension/CompiledExtension.hpp
+index e78f83f7b..455c32b9f 100644
+--- a/src/vtextension/CompiledExtension.hpp
++++ b/src/vtextension/CompiledExtension.hpp
+@@ -83,20 +83,21 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
+     }
+ 
+     /// Reports the death of the host an instance admitted under @p admission ran in. Counted once however
+     /// many instances report it. @see HostBreaker::recordHostFault()
+     void recordHostFault(HostAdmission admission) const noexcept
+     {
+         if (_breaker)
+             _breaker->recordHostFault(admission);
+     }
+ 
++    /// Test hook: what the registry's tests observe the breaker by.
+     /// @return What counts the deaths of the module's host; null if nothing does.
+     [[nodiscard]] HostBreaker const* breaker() const noexcept { return _breaker.get(); }
+ 
+   private:
+     std::shared_ptr<Engine> _engine;
+     std::optional<Manifest> _manifest;
+     std::shared_ptr<wasm::IWasmModule> _module;
+     std::shared_ptr<HostBreaker> _breaker; ///< Null for a module no registry shares.
+ };
+ 
+diff --git a/src/vtextension/ExtensionRegistry.cpp b/src/vtextension/ExtensionRegistry.cpp
+index dd2266209..cabbbac55 100644
+--- a/src/vtextension/ExtensionRegistry.cpp
++++ b/src/vtextension/ExtensionRegistry.cpp
+@@ -12,26 +12,20 @@
+ #include <span>
+ #include <utility>
+ 
+ #include <vtextension/ExtensionHost.hpp>
+ 
+ namespace vtextension
+ {
+ 
+ namespace
+ {
+-    /// Counts a waiter out however its wait ends, a load's exception included.
+-    struct DecrementOnExit
+-    {
+-        void operator()(std::atomic<std::size_t>* counter) const noexcept { --*counter; }
+-    };
+-
+     /// One world, and the name a module identity spells it with.
+     struct WorldName
+     {
+         ExtensionWorld world;
+         std::string_view name;
+     };
+ 
+     /// Every world, by name.
+     constexpr auto WorldNames = std::array {
+         WorldName { .world = ExtensionWorld::StatusLine, .name = "statusline" },
+@@ -117,21 +111,22 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> ExtensionRegis
+             return candidate.engine == &engine && candidate.key == key;
+         });
+         if (entry != _entries.end())
+         {
+             if (auto const* const loading = std::get_if<std::shared_future<LoadResult>>(&entry->state))
+             {
+                 // Waited for outside the lock, which the load takes to publish its outcome.
+                 auto const pending = *loading;
+                 lock.unlock();
+                 ++_waiting;
+-                auto const waited = std::unique_ptr<std::atomic<std::size_t>, DecrementOnExit> { &_waiting };
++                // Counted out however the wait ends, a load's exception included.
++                auto const waited = core::Finally { [this] { --_waiting; } };
+                 return pending.get();
+             }
+             // Lost its last pane since the sweep above, on another thread: a new entry takes its place.
+             if (auto live = std::get<std::weak_ptr<CompiledExtension>>(entry->state).lock())
+                 return live;
+             _entries.erase(entry);
+         }
+         serial = _nextSerial++;
+         breaker = std::make_shared<HostBreaker>(_clock, _limits.faultsBeforeDisable, _limits.faultWindow);
+         _entries.push_back(Entry { .key = key,
+diff --git a/src/vtextension/Instance.cpp b/src/vtextension/Instance.cpp
+index 17d101bc0..90692ec1e 100644
+--- a/src/vtextension/Instance.cpp
++++ b/src/vtextension/Instance.cpp
+@@ -83,24 +83,30 @@ namespace detail
+ class Instance::GuestMemory final: public abi::IGuestMemory
+ {
+   public:
+     explicit GuestMemory(Instance& instance) noexcept: _instance { instance } {}
+ 
+     /// Gives the next lift the full budget of one host call.
+     void resetLiftBudget() noexcept { _liftBudget = _instance._limits.maxHostCallBytes; }
+ 
+     [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
+     {
+-        auto const bytes = _instance._instance->memory(address, size);
+-        if (!bytes)
+-            return std::unexpected(ExtensionError::Trapped);
+-        return *bytes;
++        // A guest that names memory it does not have traps; a host that died meanwhile is the host's fault,
++        // and counts as such.
++        return _instance._instance->memory(address, size).transform_error([](wasm::MemoryFailure failure) {
++            switch (failure)
++            {
++                case wasm::MemoryFailure::OutOfBounds: return ExtensionError::Trapped;
++                case wasm::MemoryFailure::HostCrashed: return ExtensionError::HostUnavailable;
++            }
++            return ExtensionError::Trapped;
++        });
+     }
+ 
+     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
+     {
+         auto argv = std::array<uint32_t, 4> { 0, 0, alignment, size }; // old pointer, old size, align, size
+         if (auto called = _instance.callExport(_instance._exports.realloc, argv); !called)
+             return std::unexpected(called.error());
+         // The guest's allocator is the guest's: what it answers is checked like any other address.
+         auto const address = argv[0];
+         if (alignment == 0 || address % alignment != 0)
+diff --git a/src/vtextension/testing/FakeWasmBackend.hpp b/src/vtextension/testing/FakeWasmBackend.hpp
+index 376836610..292f785d8 100644
+--- a/src/vtextension/testing/FakeWasmBackend.hpp
++++ b/src/vtextension/testing/FakeWasmBackend.hpp
+@@ -87,28 +87,29 @@ class FakeWasmInstance final: public wasm::IWasmInstance
+                                                               std::span<uint32_t> argv) override
+     {
+         if (_interruption.load(std::memory_order_acquire) == Interruption::Requested)
+             return std::unexpected(wasm::CallFailure::Interrupted);
+         auto const hook = _guest.exports.find(_names.at(function.index));
+         if (hook == _guest.exports.end() || !hook->second)
+             return {};
+         return hook->second(argv);
+     }
+ 
+-    [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
++    [[nodiscard]] std::expected<std::span<std::byte>, wasm::MemoryFailure> memory(uint32_t address,
++                                                                                  uint32_t size) override
+     {
+         if (_guest.onMemoryAccess)
+             _guest.onMemoryAccess();
+         if (size == 0)
+             return std::span<std::byte> {};
+         if (uint64_t { address } + size > linearMemory.size())
+-            return std::nullopt;
++            return std::unexpected(wasm::MemoryFailure::OutOfBounds);
+         return std::span { linearMemory }.subspan(address, size);
+     }
+ 
+     void interrupt() noexcept override
+     {
+         _interruption.store(Interruption::Requested, std::memory_order_release);
+         interrupts.fetch_add(1, std::memory_order_relaxed);
+     }
+ 
+     /// Calls a host function as the guest would, from inside a hook: synchronously, on the calling thread.
+diff --git a/src/vtextension/wasm/WasmRuntime.hpp b/src/vtextension/wasm/WasmRuntime.hpp
+index a2dd2b015..d5859cddb 100644
+--- a/src/vtextension/wasm/WasmRuntime.hpp
++++ b/src/vtextension/wasm/WasmRuntime.hpp
+@@ -72,20 +72,27 @@ enum class MemoryGrowthReporting : uint8_t
+ enum class CallFailure : uint8_t
+ {
+     Trap,                ///< The guest trapped, for any reason not named below.
+     Interrupted,         ///< IWasmInstance::interrupt() stopped the call, or had before it began.
+     MemoryGrowthRefused, ///< The guest trapped after its memory refused to grow past the cap; only
+                          ///< from a backend declaring MemoryGrowthReporting::Reported.
+     HostFailure,         ///< A host function the guest called failed (IHostContext::callHost).
+     HostCrashed,         ///< The host running the instance died; every later call fails so.
+ };
+ 
++/// Why a view of an instance's memory could not be had.
++enum class MemoryFailure : uint8_t
++{
++    OutOfBounds, ///< A byte of the range lies outside the memory, or the instance has none.
++    HostCrashed, ///< The host running the instance died before it could serve the range.
++};
++
+ /// Which host a module runs in. Modules with equal keys share one; an empty key gets a host of its own.
+ /// In-process backends ignore it.
+ struct ModuleIdentity
+ {
+     std::string key; ///< What names the host; empty for a host of the module's own.
+ 
+     /// @return Whether both name the same host.
+     bool operator==(ModuleIdentity const&) const = default;
+ };
+ 
+@@ -239,22 +246,24 @@ class IWasmInstance
+     /// @param function A handle function() returned on this instance.
+     /// @param argv The parameters on entry, the results on return; as large as the larger of the two.
+     /// @return Nothing on success; otherwise why the call failed.
+     [[nodiscard]] virtual std::expected<void, CallFailure> call(ExportFunction function,
+                                                                 std::span<uint32_t> argv) = 0;
+ 
+     /// A bounds-checked view of the instance's linear memory. Valid until the next call into the
+     /// instance, which may grow (and so move) the memory.
+     /// @param address The guest address the view starts at.
+     /// @param size The view's size in bytes; 0 yields an empty span.
+-    /// @return The view; nothing if any byte of it lies outside the memory.
+-    [[nodiscard]] virtual std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) = 0;
++    /// @return The view; `OutOfBounds` if any byte of it lies outside the memory, `HostCrashed` if the host
++    ///         running the instance died (only from a backend whose instances run in another process).
++    [[nodiscard]] virtual std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
++                                                                                    uint32_t size) = 0;
+ 
+     /// Stops the call running in the instance, if any, for good: callable from any thread, and final.
+     /// Every later call() fails as CallFailure::Interrupted without entering the guest, including when
+     /// no call was running at the moment of the interrupt. A per-call check of a flag could not close
+     /// the window between the check and the entry; a sticky interrupt does.
+     virtual void interrupt() noexcept = 0;
+ };
+ 
+ /// A loaded, uninstantiated module. Describing it runs none of its code.
+ class IWasmModule
+@@ -271,21 +280,23 @@ class IWasmModule
+     /// @return The module's imports, in declaration order, each with whether the runtime provides it.
+     ///         A backend reports this truthfully at load time: an import described as satisfied never
+     ///         traps as unlinked when called. Applying an allow-list is the caller's business.
+     [[nodiscard]] virtual std::span<ImportDescription const> imports() const noexcept = 0;
+ 
+     /// @return The module's exports, in declaration order.
+     [[nodiscard]] virtual std::span<ExportDescription const> exports() const noexcept = 0;
+ 
+     /// Instantiates the module under the runtime's limits, with WASI preview 1 as the backend provides
+     /// it: no arguments, no environment, no preopened directory, and standard streams whose writes
+-    /// reach nobody. May run on another prepared thread than the one that loaded the module.
++    /// reach nobody. May run on another prepared thread than the one that loaded the module, and on several
++    /// prepared threads at once: concurrent instantiations of one module neither fail nor disturb one another
++    /// (the panes sharing one compiled extension instantiate it on their own workers).
+     ///
+     /// A WASI reactor (a module that imports WASI and exports `_initialize`, as every Rust guest built
+     /// with Rust 1.100 or newer does) is not initialized here: the backend never runs its `_initialize`,
+     /// which here would run before any IWasmInstance exists to interrupt it, under no deadline, and with
+     /// host functions failing. The instance exports it under its own name, and the caller calls it,
+     /// exactly once (wasi-libc's traps on a second call), before any other export.
+     /// @param context What the instance's host function calls reach; must outlive the instance.
+     /// @return The instance, which keeps the module alive; `OutOfMemory` if a memory's initial size
+     ///         exceeds the runtime's memory cap, `InvalidComponent` if the runtime cannot instantiate the
+     ///         module, `RuntimeUnavailable` on a resource failure.
+@@ -333,23 +344,23 @@ class IThreadGuard
+     [[nodiscard]] virtual uint64_t generation() const noexcept = 0;
+ };
+ 
+ /// One kind of WebAssembly runtime, as the composition root creates and injects it.
+ ///
+ /// **One per kind.** A backend may be created more than once per process, and all backends of one kind
+ /// behave as one: a runtime's state may be process-wide, and two backend objects never disagree
+ /// about whether a thread is prepared or which generation is current.
+ ///
+ /// **Threading.** Calls into one instance never overlap, but may come from any prepared thread; a module
+-/// may be loaded on one prepared thread and instantiated on another; different instances of one
+-/// runtime may run on different threads at once. A runtime with single-entry execution contexts meets
+-/// this internally.
++/// may be loaded on one prepared thread and instantiated on another, or on several at once; different
++/// instances of one runtime may run on different threads at once. A runtime with single-entry execution
++/// contexts meets this internally.
+ ///
+ /// **Synchronous execution.** An export call runs on the calling thread, and every host function it
+ /// calls runs synchronously on that same thread before the call returns.
+ ///
+ /// **No signal handlers.** A backend installs no process signal handler, neither a trap handler for
+ /// out-of-bounds accesses nor a wake-up signal: signal state is process-wide, and belongs to the
+ /// process (and to a sanitizer, if any).
+ ///
+ /// **Host functions.** A backend's registry of host functions may be process-wide, as WAMR's is: an
+ /// import is then resolved against the host functions of every runtime of the kind alive at load time,
+diff --git a/src/vtextension/wasm/host/HostServer.cpp b/src/vtextension/wasm/host/HostServer.cpp
+index 7b00a083e..88ceb06d5 100644
+--- a/src/vtextension/wasm/host/HostServer.cpp
++++ b/src/vtextension/wasm/host/HostServer.cpp
+@@ -408,21 +408,21 @@ std::shared_ptr<InstanceSlot> HostServer::Impl::instanceOf(uint32_t id)
+ 
+ Served HostServer::Impl::serve(proto::CreateRuntime const& request)
+ {
+     if (!_runtimeIds.insert(request.runtimeId).second)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     // The engine is handed views of the server's own copy of the strings, which outlives the runtime.
+     auto slot =
+         std::make_shared<RuntimeSlot>(RuntimeSlot { .functions = request.functions, .runtime = nullptr });
+     // A stack the executors cannot hold MaxCallDepth of is refused, before the engine sees it.
+     // So is a table cap no engine accepts, before it is narrowed to RuntimeLimits' width.
+-    if (request.stackBytes > MaxRuntimeStackBytes || request.tableElements > MaxTableElements)
++    if (request.stackBytes > proto::MaxRuntimeStackBytes || request.tableElements > MaxTableElements)
+         return send(_control,
+                     proto::RuntimeCreated { .runtimeId = request.runtimeId,
+                                             .error = ExtensionError::RuntimeUnavailable });
+     auto table = std::vector<HostFunction> {};
+     table.reserve(slot->functions.size());
+     for (auto const& function: slot->functions)
+         table.push_back(HostFunction {
+             .module = function.module, .name = function.name, .parameterCount = function.parameterCount });
+     auto created =
+         _engine.createRuntime(RuntimeLimits { .memoryBytes = static_cast<std::size_t>(request.memoryBytes),
+@@ -594,21 +594,21 @@ Served HostServer::Impl::serve(Lane& lane, proto::Call const& request)
+ {
+     auto const slot = instanceOf(request.instanceId);
+     if (!slot)
+         return std::unexpected(ServerExit::ProtocolViolation);
+     auto const callable = slot->exports.find(request.exportOrdinal);
+     if (callable == slot->exports.end() || request.argv.size() != callable->second.parameters)
+         return std::unexpected(ServerExit::ProtocolViolation);
+ 
+     // Each guest call on the lane runs on its executor's stack, with a stack limit of its own: the depth
+     // bounds what they take together (ExecutorStackBytes).
+-    if (lane.calls.size() >= MaxCallDepth)
++    if (lane.calls.size() >= proto::MaxCallDepth)
+         return std::unexpected(ServerExit::ProtocolViolation);
+ 
+     auto result = proto::CallResult {};
+     {
+         auto const hold = InstanceHold::take(*slot, lane.tag);
+         if (!hold)
+             return std::unexpected(ServerExit::ProtocolViolation);
+         if (std::exchange(slot->write, WriteState::Clean) == WriteState::Failed || !prepare(lane.guard))
+             result.failure = CallFailure::Trap;
+         else
+diff --git a/src/vtextension/wasm/host/HostServer.hpp b/src/vtextension/wasm/host/HostServer.hpp
+index 79d5797f5..14692178d 100644
+--- a/src/vtextension/wasm/host/HostServer.hpp
++++ b/src/vtextension/wasm/host/HostServer.hpp
+@@ -12,47 +12,35 @@
+ /// is a protocol violation, as is any PDU out of place. A violation ends the connection.
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <functional>
+ #include <memory>
+ #include <system_error>
+ #include <vector>
+ 
+-#include <vtextension/ExtensionLimits.hpp>
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+-/// The most guest calls one lane runs at once: its outermost call, and those the parent makes back in while
+-/// host calls wait. A Call past it is a protocol violation.
+-inline constexpr std::size_t MaxCallDepth = 8;
+-
+-/// The largest stack a runtime may give each instance's calls (RuntimeLimits::stackBytes); a CreateRuntime
+-/// asking for more is refused (`RuntimeUnavailable`). Each guest call on a lane sets its own limit from where
+-/// the lane's stack stands, so the lane's thread must hold MaxCallDepth of them.
+-inline constexpr std::size_t MaxRuntimeStackBytes = std::size_t { 1024 } * 1024;
+-
+ /// What one guest call on a lane may take of its thread's stack besides the guest's own: the engine's entry,
+ /// the host call's way out and the server's frames serving the lane meanwhile, sanitizers included.
+ inline constexpr std::size_t HostFrameBytes = std::size_t { 256 } * 1024;
+ 
+ /// The stack each lane's executor thread runs on: MaxCallDepth guest calls at their largest.
+-inline constexpr std::size_t ExecutorStackBytes = MaxCallDepth * (MaxRuntimeStackBytes + HostFrameBytes);
+-
+-static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
+-              "a host runs the stack the parent gives");
++inline constexpr std::size_t ExecutorStackBytes =
++    remote::proto::MaxCallDepth * (remote::proto::MaxRuntimeStackBytes + HostFrameBytes);
+ 
+ /// Starts the thread a lane's executor runs on, with the stack it asks for, as ExecutorThread::start does.
+ using ExecutorStarter =
+     std::function<std::expected<ExecutorThread, std::error_code>(std::size_t, std::function<void()>)>;
+ 
+ /// How a host server runs.
+ struct HostServerConfig
+ {
+     remote::proto::PduLimits limits {}; ///< The caps of the PDUs it receives, and sends.
+     /// How far the host confined itself, as its Hello states.
+diff --git a/src/vtextension/wasm/host/HostServer_test.cpp b/src/vtextension/wasm/host/HostServer_test.cpp
+index ff8063b7f..8b0b2dfec 100644
+--- a/src/vtextension/wasm/host/HostServer_test.cpp
++++ b/src/vtextension/wasm/host/HostServer_test.cpp
+@@ -29,35 +29,36 @@
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/ExecutorThread.hpp>
+ #include <vtextension/wasm/host/HostServer.hpp>
+ #include <vtextension/wasm/host/IHostedEngine.hpp>
+ #include <vtextension/wasm/host/InProcessHost.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
++#include <vtextension/wasm/testing/DecoratedEngine.hpp>
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ 
+ using vtextension::ExtensionError;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::ModuleIdentity;
+ using vtextension::wasm::host::ExecutorThread;
+ using vtextension::wasm::host::HostFrameBytes;
+ using vtextension::wasm::host::HostServer;
+ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
+-using vtextension::wasm::host::MaxCallDepth;
+-using vtextension::wasm::host::MaxRuntimeStackBytes;
+ using vtextension::wasm::host::ServerExit;
+ using vtextension::wasm::remote::MaxLaneChannels;
++using vtextension::wasm::remote::proto::MaxCallDepth;
++using vtextension::wasm::remote::proto::MaxRuntimeStackBytes;
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::ChannelError;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+ using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::remote::transport::StreamError;
+ using vtextension::wasm::testing::makeHostedEngine;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace contract = vtextension::wasm::testing::contract;
+ 
+@@ -257,155 +258,52 @@ class StackProbe
+         auto const lock = std::scoped_lock { _mutex };
+         return _frames;
+     }
+ 
+   private:
+     mutable std::mutex _mutex;
+     std::vector<std::uintptr_t> _frames;
+ };
+ 
+ /// An instance of a probed engine: records where each call begins, and forwards everything.
+-class ProbedInstance final: public vtextension::wasm::IWasmInstance
++class ProbedInstance final: public vtextension::wasm::testing::ForwardingInstance
+ {
+   public:
+     ProbedInstance(std::unique_ptr<vtextension::wasm::IWasmInstance> inner,
+                    std::shared_ptr<StackProbe> probe):
+-        _inner { std::move(inner) }, _probe { std::move(probe) }
++        ForwardingInstance { std::move(inner) }, _probe { std::move(probe) }
+     {
+     }
+ 
+-    [[nodiscard]] std::optional<vtextension::wasm::ExportFunction> function(
+-        std::string_view name) const override
+-    {
+-        return _inner->function(name);
+-    }
+-
+     [[nodiscard]] std::expected<void, CallFailure> call(vtextension::wasm::ExportFunction function,
+                                                         std::span<uint32_t> argv) override
+     {
+         // The frame's own address, not a local's: a sanitizer may keep locals on a stack of its own.
+         _probe->record(reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0)));
+-        return _inner->call(function, argv);
+-    }
+-
+-    [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
+-    {
+-        return _inner->memory(address, size);
++        return ForwardingInstance::call(function, argv);
+     }
+ 
+-    void interrupt() noexcept override { _inner->interrupt(); }
+-
+   private:
+-    std::unique_ptr<vtextension::wasm::IWasmInstance> _inner;
+     std::shared_ptr<StackProbe> _probe;
+ };
+ 
+-/// A module of a probed engine, whose instances are probed.
+-class ProbedModule final: public vtextension::wasm::IWasmModule
++/// @return A hosted engine whose instances record where each of their calls begins on its thread's stack.
++[[nodiscard]] std::unique_ptr<vtextension::wasm::host::IHostedEngine> makeProbedEngine(
++    std::shared_ptr<StackProbe> probe)
+ {
+-  public:
+-    ProbedModule(std::shared_ptr<vtextension::wasm::IWasmModule> inner, std::shared_ptr<StackProbe> probe):
+-        _inner { std::move(inner) }, _probe { std::move(probe) }
+-    {
+-    }
+-
+-    [[nodiscard]] std::span<vtextension::wasm::ImportDescription const> imports() const noexcept override
+-    {
+-        return _inner->imports();
+-    }
+-
+-    [[nodiscard]] std::span<vtextension::wasm::ExportDescription const> exports() const noexcept override
+-    {
+-        return _inner->exports();
+-    }
+-
+-    [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IWasmInstance>, ExtensionError>
+-    instantiate(vtextension::wasm::IHostContext& context) override
+-    {
+-        return _inner->instantiate(context).transform(
+-            [this](std::unique_ptr<vtextension::wasm::IWasmInstance> instance)
+-                -> std::unique_ptr<vtextension::wasm::IWasmInstance> {
+-                return std::make_unique<ProbedInstance>(std::move(instance), _probe);
+-            });
+-    }
+-
+-  private:
+-    std::shared_ptr<vtextension::wasm::IWasmModule> _inner;
+-    std::shared_ptr<StackProbe> _probe;
+-};
+-
+-/// A runtime of a probed engine, whose modules are probed.
+-class ProbedRuntime final: public vtextension::wasm::IWasmRuntime
+-{
+-  public:
+-    ProbedRuntime(std::shared_ptr<vtextension::wasm::IWasmRuntime> inner, std::shared_ptr<StackProbe> probe):
+-        _inner { std::move(inner) }, _probe { std::move(probe) }
+-    {
+-    }
+-
+-    [[nodiscard]] std::expected<std::shared_ptr<vtextension::wasm::IWasmModule>, ExtensionError> load(
+-        ModuleIdentity identity, std::vector<std::byte> bytes) override
+-    {
+-        return _inner->load(std::move(identity), std::move(bytes))
+-            .transform([this](std::shared_ptr<vtextension::wasm::IWasmModule> module)
+-                           -> std::shared_ptr<vtextension::wasm::IWasmModule> {
+-                return std::make_shared<ProbedModule>(std::move(module), _probe);
+-            });
+-    }
+-
+-  private:
+-    std::shared_ptr<vtextension::wasm::IWasmRuntime> _inner;
+-    std::shared_ptr<StackProbe> _probe;
+-};
+-
+-/// A hosted engine whose instances record where each of their calls begins on its thread's stack.
+-class ProbedEngine final: public vtextension::wasm::host::IHostedEngine
+-{
+-  public:
+-    ProbedEngine(std::unique_ptr<vtextension::wasm::host::IHostedEngine> inner,
+-                 std::shared_ptr<StackProbe> probe):
+-        _inner { std::move(inner) }, _probe { std::move(probe) }
+-    {
+-    }
+-
+-    [[nodiscard]] std::expected<std::shared_ptr<vtextension::wasm::IWasmRuntime>, ExtensionError>
+-    createRuntime(vtextension::wasm::RuntimeLimits limits,
+-                  std::span<vtextension::wasm::HostFunction const> hostFunctions) override
+-    {
+-        return _inner->createRuntime(limits, hostFunctions)
+-            .transform([this](std::shared_ptr<vtextension::wasm::IWasmRuntime> runtime)
+-                           -> std::shared_ptr<vtextension::wasm::IWasmRuntime> {
+-                return std::make_shared<ProbedRuntime>(std::move(runtime), _probe);
+-            });
+-    }
+-
+-    [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IThreadGuard>, ExtensionError>
+-    enterThread() override
+-    {
+-        return _inner->enterThread();
+-    }
+-
+-    [[nodiscard]] bool isCurrentThreadPrepared() const override { return _inner->isCurrentThreadPrepared(); }
+-
+-    [[nodiscard]] uint64_t runtimeGeneration() const noexcept override { return _inner->runtimeGeneration(); }
+-
+-    [[nodiscard]] vtextension::wasm::BackendCapabilities capabilities() const noexcept override
+-    {
+-        return _inner->capabilities();
+-    }
+-
+-    [[nodiscard]] proto::MemoryMode memoryMode() const noexcept override { return _inner->memoryMode(); }
+-
+-  private:
+-    std::unique_ptr<vtextension::wasm::host::IHostedEngine> _inner;
+-    std::shared_ptr<StackProbe> _probe;
+-};
++    return std::make_unique<vtextension::wasm::testing::DecoratedEngine>(
++        makeHostedEngine(),
++        [probe = std::move(probe)](std::unique_ptr<vtextension::wasm::IWasmInstance> instance)
++            -> std::unique_ptr<vtextension::wasm::IWasmInstance> {
++            return std::make_unique<ProbedInstance>(std::move(instance), probe);
++        });
++}
+ 
+ /// @return The ordinal of the export named @p name, which @p loaded must describe.
+ [[nodiscard]] uint32_t ordinalOf(proto::Loaded const& loaded, std::string_view name)
+ {
+     for (auto const [ordinal, description]: std::views::zip(std::views::iota(uint32_t { 0 }), loaded.exports))
+         if (description.name == name)
+             return ordinal;
+     FAIL("no export named " << name);
+     return 0;
+ }
+@@ -748,22 +646,21 @@ TEST_CASE("HostServer.callDepthIsBounded", "[vtextension][host]")
+         CHECK(parent.exitWithinDeadline() == ServerExit::ProtocolViolation);
+     }
+ }
+ 
+ TEST_CASE("HostServer.nestedCallsFitTheExecutorStack", "[vtextension][host]")
+ {
+     // Each instance's calls get a stack limit of their own, counted from where the lane's stack stands when
+     // they begin: MaxCallDepth calls into as many instances, each nearly filling the largest stack a runtime
+     // may give, must fit one executor's stack.
+     auto const probe = std::make_shared<StackProbe>();
+-    auto parent =
+-        ScriptedParent { std::make_unique<ProbedEngine>(makeHostedEngine(), probe), HostServerConfig {} };
++    auto parent = ScriptedParent { makeProbedEngine(probe), HostServerConfig {} };
+     parent.skipHello();
+     auto functions = std::vector<proto::WireHostFunction> {};
+     for (auto const& function: contract::HostFunctions)
+         functions.push_back(proto::WireHostFunction { .module = std::string { function.module },
+                                                       .name = std::string { function.name },
+                                                       .parameterCount = function.parameterCount });
+     parent.sendControl(proto::CreateRuntime { .runtimeId = 1,
+                                               .memoryBytes = contract::Limits.memoryBytes,
+                                               .stackBytes = MaxRuntimeStackBytes,
+                                               .functions = std::move(functions) });
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory.cpp b/src/vtextension/wasm/remote/CopyPathMemory.cpp
+index a4e142025..c72876d74 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory.cpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory.cpp
+@@ -24,53 +24,62 @@ namespace
+ CopyPathMemory::CopyPathMemory(uint32_t instanceId, std::size_t memoryBytes, MemoryFetch fetch):
+     _instanceId { instanceId },
+     _memoryBytes { std::min(memoryBytes, AddressSpaceBytes) },
+     _fetch { std::move(fetch) },
+     // Default-initialized: nothing writes the buffer, so the system commits only the pages fetched into it.
+     _shadow { std::make_unique_for_overwrite<std::byte[]>(_memoryBytes) },
+     _slots((_memoryBytes + PageBytes - 1) / PageBytes, NoSlot)
+ {
+ }
+ 
+-std::optional<std::span<std::byte>> CopyPathMemory::view(uint32_t address, uint32_t size)
++std::expected<std::span<std::byte>, MemoryFailure> CopyPathMemory::view(uint32_t address, uint32_t size)
+ {
+     if (size == 0)
+         return std::span<std::byte> {};
+     auto const begin = std::size_t { address };
+     auto const end = begin + size; // cannot overflow: both are 32-bit
+     if (end > _memoryBytes)
+-        return std::nullopt;
++        return std::unexpected(MemoryFailure::OutOfBounds);
+ 
+     // One fetch per run of adjacent absent pages.
+     auto const firstPage = begin / PageBytes;
+     auto const endPage = ((end - 1) / PageBytes) + 1;
+     auto runBegin = std::optional<std::size_t> {};
+     for (auto const page: std::views::iota(firstPage, endPage))
+     {
+         auto const absent = _slots[page] == NoSlot;
+         if (absent && !runBegin)
+             runBegin = page;
+-        else if (!absent && runBegin && !fetchPages(*std::exchange(runBegin, std::nullopt), page))
+-            return std::nullopt;
++        else if (!absent && runBegin)
++        {
++            if (auto fetched = fetchPages(*std::exchange(runBegin, std::nullopt), page); !fetched)
++                return std::unexpected(fetched.error());
++        }
++    }
++    if (runBegin)
++    {
++        if (auto fetched = fetchPages(*runBegin, endPage); !fetched)
++            return std::unexpected(fetched.error());
+     }
+-    if (runBegin && !fetchPages(*runBegin, endPage))
+-        return std::nullopt;
+     return std::span { _shadow.get(), _memoryBytes }.subspan(begin, size);
+ }
+ 
+-std::expected<void, CopyPathMemory::FetchError> CopyPathMemory::fetchPages(std::size_t first, std::size_t end)
++std::expected<void, MemoryFailure> CopyPathMemory::fetchPages(std::size_t first, std::size_t end)
+ {
+     auto const address = first * PageBytes;
+     auto const size = pageEnd(end - 1) - address;
+     auto fetched = _fetch(static_cast<uint32_t>(address), static_cast<uint32_t>(size));
+-    if (!fetched || fetched->size() != size)
+-        return std::unexpected(FetchError::Unreachable);
++    if (!fetched)
++        return std::unexpected(fetched.error());
++    // A fetch answering other than the range asked for is refused as that range.
++    if (fetched->size() != size)
++        return std::unexpected(MemoryFailure::OutOfBounds);
+     std::ranges::copy(*fetched, _shadow.get() + address);
+     // Each page's snapshot takes the next slot of the arena, which keeps its capacity across clear().
+     for (auto const page: std::views::iota(first, end))
+     {
+         _slots[page] = static_cast<uint32_t>(_fetched.size());
+         _fetched.push_back(page);
+         _snapshots.resize(_fetched.size() * PageBytes);
+         auto const pageBytes =
+             std::span { *fetched }.subspan((page - first) * PageBytes, pageEnd(page) - (page * PageBytes));
+         std::ranges::copy(pageBytes, snapshotOf(page).begin());
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory.hpp b/src/vtextension/wasm/remote/CopyPathMemory.hpp
+index a9d8a8ec5..9c37b9b7a 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory.hpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory.hpp
+@@ -8,29 +8,31 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <functional>
+ #include <limits>
+ #include <memory>
+ #include <optional>
+ #include <span>
+ #include <vector>
+ 
++#include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ /// Reads a range of an instance's memory from its host.
+-/// @return The range's bytes, exactly as many as asked for; nothing if the range lies outside the memory or
+-///         the host could not be reached.
+-using MemoryFetch = std::function<std::optional<std::vector<std::byte>>(uint32_t address, uint32_t size)>;
++/// @return The range's bytes, exactly as many as asked for; `OutOfBounds` if the range lies outside the
++///         memory, `HostCrashed` if the host could not be reached.
++using MemoryFetch =
++    std::function<std::expected<std::vector<std::byte>, MemoryFailure>(uint32_t address, uint32_t size)>;
+ 
+ /// The parts of one instance's memory the parent read since the instance last ran, in a shadow of the whole
+ /// memory, at the same offsets. A page is fetched the first time a view reaches it, and every view of the
+ /// same bytes is the same shadow memory: a write through one view is what every other view of those bytes
+ /// reads. What was written goes back to the instance (flush()) before it next runs, after which the fetched
+ /// pages are forgotten (clear()).
+ ///
+ /// The shadow is allocated once and left untouched until a page is fetched into it, so that only the pages
+ /// read take memory where the system commits it lazily (Linux, macOS, the BSDs). Windows commits the
+ /// allocation up front, charging it against the commit limit while its pages stay unused. What each fetched
+@@ -47,47 +49,42 @@ class CopyPathMemory
+     /// @param instanceId The instance the writes flush() returns are addressed to.
+     /// @param memoryBytes The largest the instance's memory may be; no view reaches past it.
+     /// @param fetch Where pages not held yet are read from.
+     CopyPathMemory(uint32_t instanceId, std::size_t memoryBytes, MemoryFetch fetch);
+ 
+     /// A view of [@p address, @p address + @p size) in the shadow, fetching the pages of it not held yet: one
+     /// fetch per run of adjacent missing pages. Valid until the CopyPathMemory goes; its bytes are the
+     /// instance's only until clear().
+     /// @param address The guest address the view starts at.
+     /// @param size The view's size in bytes; 0 yields an empty span, fetching nothing.
+-    /// @return The view; nothing if the range reaches past the memory's limit or could not be fetched.
+-    [[nodiscard]] std::optional<std::span<std::byte>> view(uint32_t address, uint32_t size);
++    /// @return The view; `OutOfBounds` if the range reaches past the memory's limit or the host refused it,
++    ///         `HostCrashed` if the host could not be reached.
++    [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> view(uint32_t address, uint32_t size);
+ 
+     /// @return One write per maximal run of bytes changed since they were fetched or last flushed, in address
+     ///         order. What they return counts as unchanged from then on.
+     [[nodiscard]] std::vector<proto::MemoryWrite> flush();
+ 
+     /// Forgets every fetched page: the next view of it fetches it again.
+     void clear() noexcept;
+ 
+     /// Test hook.
+     /// @return How many bytes the snapshots of the fetched pages take: a page's worth per page fetched since
+     ///         clear(), and nothing for the rest of the memory.
+     [[nodiscard]] std::size_t snapshotBytes() const noexcept;
+ 
+   private:
+     /// The slot of a page that has none: it was not fetched since the instance last ran.
+     static constexpr auto NoSlot = std::numeric_limits<uint32_t>::max();
+ 
+-    /// Why pages could not be fetched.
+-    enum class FetchError : uint8_t
+-    {
+-        Unreachable, ///< The host refused the range, or could not be reached.
+-    };
+-
+     /// Fetches pages [@p first, @p end) into the shadow, all of them absent, and snapshots each.
+-    [[nodiscard]] std::expected<void, FetchError> fetchPages(std::size_t first, std::size_t end);
++    [[nodiscard]] std::expected<void, MemoryFailure> fetchPages(std::size_t first, std::size_t end);
+ 
+     /// @return The snapshot of page @p page, which must have been fetched: its bytes as fetched or last
+     /// flushed.
+     [[nodiscard]] std::span<std::byte> snapshotOf(std::size_t page) noexcept;
+ 
+     /// @return The address one past page @p page's last byte.
+     [[nodiscard]] std::size_t pageEnd(std::size_t page) const noexcept;
+ 
+     uint32_t _instanceId;
+     std::size_t _memoryBytes;
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory_test.cpp b/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
+index 0fbb9dd50..0acd9bc02 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
+@@ -1,25 +1,27 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The parent's copies of an instance's memory: what is fetched, and what is written back.
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <cstddef>
+ #include <cstdint>
++#include <expected>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/CopyPathMemory.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ 
++using vtextension::wasm::MemoryFailure;
+ using vtextension::wasm::remote::CopyPathMemory;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ 
+ namespace
+ {
+ 
+ /// The instance the tests' writes are addressed to.
+ constexpr auto InstanceId = uint32_t { 7 };
+ 
+@@ -30,31 +32,32 @@ class FakeMemory
+     /// @param size The memory's size in bytes; byte i holds i, modulo 256.
+     explicit FakeMemory(std::size_t size = 3 * CopyPathMemory::PageBytes)
+     {
+         for (auto const index: std::views::iota(std::size_t { 0 }, size))
+             _bytes.push_back(static_cast<std::byte>(index & 0xFF));
+     }
+ 
+     /// @return A CopyPathMemory over this memory, as large as it may grow.
+     [[nodiscard]] CopyPathMemory copies()
+     {
+-        return CopyPathMemory { InstanceId,
+-                                _bytes.size(),
+-                                [this](uint32_t address,
+-                                       uint32_t size) -> std::optional<std::vector<std::byte>> {
+-                                    ++fetches;
+-                                    reads.push_back(Read { .address = address, .size = size });
+-                                    if (std::size_t { address } + size > _bytes.size())
+-                                        return std::nullopt;
+-                                    auto const range = std::span { _bytes }.subspan(address, size);
+-                                    return std::vector<std::byte> { range.begin(), range.end() };
+-                                } };
++        return CopyPathMemory {
++            InstanceId,
++            _bytes.size(),
++            [this](uint32_t address, uint32_t size) -> std::expected<std::vector<std::byte>, MemoryFailure> {
++                ++fetches;
++                reads.push_back(Read { .address = address, .size = size });
++                if (std::size_t { address } + size > _bytes.size())
++                    return std::unexpected(MemoryFailure::OutOfBounds);
++                auto const range = std::span { _bytes }.subspan(address, size);
++                return std::vector<std::byte> { range.begin(), range.end() };
++            }
++        };
+     }
+ 
+     /// Applies @p writes in order.
+     void apply(std::vector<proto::MemoryWrite> const& writes)
+     {
+         for (auto const& write: writes)
+         {
+             REQUIRE(write.instanceId == InstanceId);
+             REQUIRE(std::size_t { write.address } + write.bytes.size() <= _bytes.size());
+             std::ranges::copy(write.bytes, _bytes.begin() + write.address);
+@@ -246,31 +249,45 @@ TEST_CASE("CopyPathMemory.viewAcrossPages", "[vtextension][remote]")
+     copies.clear();
+     REQUIRE(copies.view(Page - 2, 4).has_value());
+     CHECK(memory.reads.back() == FakeMemory::Read { .address = 0, .size = 2 * Page });
+ }
+ 
+ TEST_CASE("CopyPathMemory.refusesWhatLiesPastTheMemory", "[vtextension][remote]")
+ {
+     auto memory = FakeMemory {};
+     auto copies = memory.copies();
+ 
+-    CHECK_FALSE(copies.view((3 * Page) - 8, 16).has_value()); // past the memory's limit
+-    CHECK_FALSE(copies.view(0xFFFF'FFF0, 32).has_value());    // past the address space
++    CHECK(copies.view((3 * Page) - 8, 16).error() == MemoryFailure::OutOfBounds); // past the memory's limit
++    CHECK_FALSE(copies.view(0xFFFF'FFF0, 32).has_value());                        // past the address space
+     CHECK_FALSE(copies.view(0xFFFF'FFFF, 0xFFFF'FFFF).has_value());
+     CHECK(memory.fetches == 0);
+     CHECK(copies.view((3 * Page) - 8, 8).has_value());
+ 
+     // A memory smaller than its limit refuses what it does not hold: its host cannot read it.
+     auto copiesOfSmall = CopyPathMemory { InstanceId, 2 * std::size_t { Page }, [](uint32_t, uint32_t) {
+-                                             return std::optional<std::vector<std::byte>> {};
++                                             return std::expected<std::vector<std::byte>, MemoryFailure> {
++                                                 std::unexpect, MemoryFailure::OutOfBounds
++                                             };
+                                          } };
+-    CHECK_FALSE(copiesOfSmall.view(Page, 4).has_value());
++    CHECK(copiesOfSmall.view(Page, 4).error() == MemoryFailure::OutOfBounds);
++}
++
++TEST_CASE("CopyPathMemory.reportsAHostGoneAsSuch", "[vtextension][remote]")
++{
++    // A host that cannot be reached is not a range out of bounds: the caller blames the host, not the guest.
++    auto copies = CopyPathMemory { InstanceId, 2 * std::size_t { Page }, [](uint32_t, uint32_t) {
++                                      return std::expected<std::vector<std::byte>, MemoryFailure> {
++                                          std::unexpect, MemoryFailure::HostCrashed
++                                      };
++                                  } };
++    CHECK(copies.view(0, 4).error() == MemoryFailure::HostCrashed);
++    CHECK(copies.view(Page - 2, 4).error() == MemoryFailure::HostCrashed);
+ }
+ 
+ TEST_CASE("CopyPathMemory.snapshotsOnlyTheFetchedPages", "[vtextension][remote]")
+ {
+     auto memory = FakeMemory { 64 * std::size_t { Page } };
+     auto copies = memory.copies();
+     CHECK(copies.snapshotBytes() == 0);
+ 
+     REQUIRE(copies.view(Page - 2, 4).has_value());
+     REQUIRE(copies.view(40 * Page, 8).has_value());
+diff --git a/src/vtextension/wasm/remote/RegistryRemote_test.cpp b/src/vtextension/wasm/remote/RegistryRemote_test.cpp
+index f56638181..d911514be 100644
+--- a/src/vtextension/wasm/remote/RegistryRemote_test.cpp
++++ b/src/vtextension/wasm/remote/RegistryRemote_test.cpp
+@@ -1,42 +1,46 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The registry and its breaker over a real host: one extension's helper shared by its panes, whose death
+ // counts once however many of them saw it, and which an open breaker no longer spawns.
+ #include <core/platform/Clock.hpp>
+ 
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <atomic>
+ #include <cstddef>
++#include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <optional>
+ #include <ranges>
++#include <span>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/CompiledExtension.hpp>
+ #include <vtextension/Engine.hpp>
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/ExtensionHost.hpp>
+ #include <vtextension/ExtensionLimits.hpp>
+ #include <vtextension/ExtensionRegistry.hpp>
+ #include <vtextension/HostBreaker.hpp>
+ #include <vtextension/Instance.hpp>
+ #include <vtextension/testing/Harness.hpp>
+ #include <vtextension/testing/TestModules.hpp>
+ #include <vtextension/wasm/BackendConfig.hpp>
+ #include <vtextension/wasm/DefaultBackend.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/host/HostServer.hpp>
+ #include <vtextension/wasm/host/InProcessHost.hpp>
++#include <vtextension/wasm/testing/DecoratedEngine.hpp>
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ 
+ using namespace vtextension;
+ using vtextension::testing::surface;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
+ 
+ namespace
+ {
+@@ -94,20 +98,86 @@ struct RemoteRig
+         auto const spec = ExtensionSpec { .name = "clock",
+                                           .hostId = "clock@/ext/minimal.wasm",
+                                           .module = toModule(vtextension::testing::MinimalModule),
+                                           .config = {},
+                                           .placement = Placement::Segment,
+                                           .runCommand = CommandPermission::Deny };
+         return registryKeyOf(spec, ExtensionWorld::StatusLine);
+     }
+ };
+ 
++/// Whether the next memory read a host serves kills it.
++enum class ReadFate : uint8_t
++{
++    Served, ///< The read is served.
++    Fatal,  ///< The host dies serving it: it answers nothing more.
++};
++
++/// Kills every host a connector started once armed, from inside the next memory read one of them serves:
++/// after the host answered the call that the read follows, and before it answers the read.
++class DeathOnRead
++{
++  public:
++    /// @param connector The connector whose hosts die; must outlive every read.
++    void arm(InProcessHostConnector& connector) noexcept
++    {
++        _connector = &connector;
++        _fate.store(ReadFate::Fatal, std::memory_order_release);
++    }
++
++    /// Called by a host serving a read: kills it if armed, once.
++    void onRead() noexcept
++    {
++        if (_fate.exchange(ReadFate::Served, std::memory_order_acq_rel) == ReadFate::Fatal)
++            _connector->terminateAll();
++    }
++
++  private:
++    InProcessHostConnector* _connector = nullptr;
++    std::atomic<ReadFate> _fate { ReadFate::Served };
++};
++
++/// An instance in a host that consults a DeathOnRead before each memory read it serves.
++class DyingOnRead final: public wasm::testing::ForwardingInstance
++{
++  public:
++    DyingOnRead(std::unique_ptr<wasm::IWasmInstance> inner, std::shared_ptr<DeathOnRead> death) noexcept:
++        ForwardingInstance { std::move(inner) }, _death { std::move(death) }
++    {
++    }
++
++    [[nodiscard]] std::expected<std::span<std::byte>, wasm::MemoryFailure> memory(uint32_t address,
++                                                                                  uint32_t size) override
++    {
++        _death->onRead();
++        return ForwardingInstance::memory(address, size);
++    }
++
++  private:
++    std::shared_ptr<DeathOnRead> _death;
++};
++
++/// @return A connector whose hosts' instances die on the read @p death arms.
++[[nodiscard]] std::shared_ptr<InProcessHostConnector> makeDyingConnector(
++    std::shared_ptr<DeathOnRead> const& death)
++{
++    return std::make_shared<InProcessHostConnector>(
++        [death] {
++            return std::make_unique<wasm::testing::DecoratedEngine>(
++                wasm::testing::makeHostedEngine(), [death](std::unique_ptr<wasm::IWasmInstance> instance) {
++                    return std::unique_ptr<wasm::IWasmInstance> { std::make_unique<DyingOnRead>(
++                        std::move(instance), death) };
++                });
++        },
++        HostServerConfig {});
++}
++
+ } // namespace
+ 
+ TEST_CASE("one death counts once across panes", "[vtextension][remote][registry]")
+ {
+     auto rig = RemoteRig {};
+     auto const compiled = rig.acquire();
+     auto panes = std::vector<std::unique_ptr<Instance>> {};
+     for ([[maybe_unused]] auto const pane: std::views::iota(0, 10))
+     {
+         auto instance = rig.instantiate(*compiled);
+@@ -163,10 +233,26 @@ TEST_CASE("registry drop races instantiate (remote)", "[vtextension][remote][reg
+                 *rig.engine, RemoteRig::key(), toModule(vtextension::testing::MinimalModule));
+             REQUIRE(second);
+             auto const instance = rig.instantiate(**second);
+             CHECK(instance);
+             dropper.join();
+             CHECK(rig.registry.liveEntries() <= 1);
+         }
+     }
+     CHECK(connector->liveHosts() == 0);
+ }
++
++TEST_CASE("host death during a memory read counts as the host's", "[vtextension][remote][registry]")
++{
++    // The host answers the render honestly, then dies before it answers the read of the string it returned:
++    // the pane sees the host gone, not a guest trap, and the death counts once against the extension.
++    auto const death = std::make_shared<DeathOnRead>();
++    auto rig = RemoteRig { makeDyingConnector(death) };
++    auto const compiled = rig.acquire();
++    auto const instance = rig.instantiate(*compiled);
++    REQUIRE(instance.has_value());
++
++    death->arm(*rig.connector);
++    CHECK((*instance)->render(surface(10, 1)).error() == ExtensionError::HostUnavailable);
++    CHECK(compiled->breaker()->faultCount() == 1);
++    CHECK(rig.connector->liveHosts() == 0);
++}
+diff --git a/src/vtextension/wasm/remote/RemoteBackend.cpp b/src/vtextension/wasm/remote/RemoteBackend.cpp
+index 2773ae036..c0a37374b 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend.cpp
+@@ -1,89 +1,109 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/remote/RemoteBackend.hpp>
+ 
+ #include <core/log/LogStore.hpp>
+ 
+ #include <algorithm>
++#include <array>
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <map>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
++#include <vtextension/ExtensionWorkerPool.hpp>
+ #include <vtextension/wasm/WasmBinary.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ #include <vtextension/wasm/remote/CopyPathMemory.hpp>
+ #include <vtextension/wasm/remote/HelperIncarnation.hpp>
+ #include <vtextension/wasm/remote/HostConnector.hpp>
+ #include <vtextension/wasm/remote/RemoteKindState.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ using transport::PduStream;
+ using transport::StreamError;
+ 
++// Every worker calls on a lane of its own: a host serving fewer would leave a worker without one.
++static_assert(MaxLaneChannels == MaxExtensionWorkers, "one lane per extension worker");
++
+ namespace
+ {
+     /// The largest instance memory the protocol carries (one MemoryData or MemoryWrite holds at most this
+     /// much), and so the limit of the memory the parent's copy reaches, whatever its runtime's cap: no view
+     /// reaches past it.
+     constexpr auto MaxCopiedBytes = static_cast<std::size_t>(proto::PduLimits {}.maxMemoryBytes);
+ 
++    /// What a host may refuse a module or an instance with; any other refusal breaks the protocol. What the
++    /// others say (a trap, a deadline, a host gone) cannot be the outcome of loading or instantiating in a
++    /// host that serves, and believing it would let a host blame the extension for its own failure.
++    constexpr auto HostRefusals = std::array { ExtensionError::InvalidComponent,
++                                               ExtensionError::OutOfMemory,
++                                               ExtensionError::RuntimeUnavailable,
++                                               ExtensionError::ModuleTooLarge };
++
++    /// @return Whether a host may refuse a module or an instance with @p error.
++    [[nodiscard]] constexpr bool isHostRefusal(ExtensionError error) noexcept
++    {
++        return std::ranges::contains(HostRefusals, error);
++    }
++
+     /// Whether an instance was interrupted (IWasmInstance::interrupt()).
+     enum class InterruptState : uint8_t
+     {
+         Running,     ///< Not interrupted: its calls run.
+         Interrupted, ///< Interrupted, for good: no call of it runs again.
+     };
+ 
+     /// A module as one incarnation describes it, under the id it was loaded with there.
+     struct LoadedModule
+     {
+         uint32_t moduleId = 0;                  ///< Its id in the incarnation.
+         std::vector<ImportDescription> imports; ///< What it imports, as described.
+         std::vector<ExportDescription> exports; ///< What it exports, as described.
+     };
+ 
+     /// Loads @p bytes in @p incarnation, and checks the description against what the module declares: a host
+     /// describing more imports or exports than the module has is not believed.
+-    /// @return The module's description; the host's own error if it refused the module, `InvalidComponent` if
+-    ///         the module is too large to send, `HostUnavailable` if the host died or broke the protocol.
++    /// @return The module's description; the host's own error if it refused the module (one of HostRefusals),
++    ///         `InvalidComponent` if the module is too large to send, `HostUnavailable` if the host died or
++    ///         broke the protocol, a refusal of any other kind included.
+     [[nodiscard]] std::expected<LoadedModule, ExtensionError> loadInto(HelperIncarnation& incarnation,
+                                                                        std::span<std::byte const> bytes)
+     {
+         auto const moduleId = incarnation.nextModuleId();
+         auto reply = incarnation.request(proto::Load { .runtimeId = HelperIncarnation::RuntimeId,
+                                                        .moduleId = moduleId,
+                                                        .bytes = { bytes.begin(), bytes.end() } });
+         // A module too large to send is the extension's fault; anything else, an over-cap reply included, the
+         // host's, which then is dead.
+         if (!reply)
+             return std::unexpected(reply.error() == StreamError::OverCap && incarnation.isAlive()
+                                        ? ExtensionError::InvalidComponent
+                                        : ExtensionError::HostUnavailable);
+         auto* const loaded = std::get_if<proto::Loaded>(&*reply);
+-        if (!loaded || loaded->moduleId != moduleId)
++        if (!loaded || loaded->moduleId != moduleId || (loaded->error && !isHostRefusal(*loaded->error)))
+         {
+             incarnation.markDead();
+             return std::unexpected(ExtensionError::HostUnavailable);
+         }
+         if (loaded->error)
+             return std::unexpected(*loaded->error);
+         auto const declared = binary::declaredCounts(bytes);
+         if (!declared || loaded->imports.size() > declared->imports
+             || loaded->exports.size() > declared->exports)
+         {
+@@ -306,26 +326,27 @@ namespace
+                 auto const& description = exports[ordinal];
+                 if (description.name == name && description.signature.isAllI32())
+                     return ExportFunction { .index = ordinal };
+             }
+             return std::nullopt;
+         }
+ 
+         [[nodiscard]] std::expected<void, CallFailure> call(ExportFunction function,
+                                                             std::span<uint32_t> argv) override;
+ 
+-        [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
++        [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
++                                                                                uint32_t size) override
+         {
+             if (size == 0)
+                 return std::span<std::byte> {};
+             if (!_incarnation->isAlive())
+-                return std::nullopt;
++                return std::unexpected(MemoryFailure::HostCrashed);
+             return _memory.view(address, size);
+         }
+ 
+         void interrupt() noexcept override
+         {
+             _interrupt.store(InterruptState::Interrupted);
+             _incarnation->interrupt(_instanceId);
+         }
+ 
+       private:
+@@ -338,21 +359,24 @@ namespace
+ 
+         /// Kills the host: anything out of place on a channel means it can no longer be trusted.
+         /// @return The failure every call into one of its instances fails with from now on.
+         [[nodiscard]] std::unexpected<CallFailure> crashed() noexcept
+         {
+             _incarnation->markDead();
+             return std::unexpected(CallFailure::HostCrashed);
+         }
+ 
+         /// Reads a range of the instance's memory on the calling thread's lane.
+-        [[nodiscard]] std::optional<std::vector<std::byte>> fetch(uint32_t address, uint32_t size);
++        /// @return The range's bytes; `OutOfBounds` if the host refused the range or the thread has no lane,
++        ///         `HostCrashed` if the host died or broke the protocol, which kills it.
++        [[nodiscard]] std::expected<std::vector<std::byte>, MemoryFailure> fetch(uint32_t address,
++                                                                                 uint32_t size);
+ 
+         /// Sends what was written to the instance's memory on @p lane, then drops every copy: the instance
+         /// is about to run.
+         [[nodiscard]] std::expected<void, CallFailure> flushTo(PduStream& lane);
+ 
+         /// Runs the host call @p request asks for, and answers it on @p lane.
+         [[nodiscard]] std::expected<void, CallFailure> serveHostCall(PduStream& lane,
+                                                                      proto::CallHost const& request);
+ 
+         std::shared_ptr<RemoteModule> _module;
+@@ -426,20 +450,21 @@ namespace
+         auto reply = host.request(proto::Instantiate { .moduleId = _moduleId, .instanceId = instanceId });
+         if (!reply)
+             return std::unexpected(ExtensionError::HostUnavailable);
+         auto* const instantiated = std::get_if<proto::Instantiated>(&*reply);
+         auto const callable = [&](uint32_t ordinal) {
+             return ordinal < _exports.size() && _exports[ordinal].kind == ExternKind::Function
+                    && _exports[ordinal].signature.parameters.size() <= proto::MaxCallValues
+                    && _exports[ordinal].signature.results.size() <= proto::MaxCallValues;
+         };
+         if (!instantiated || instantiated->instanceId != instanceId
++            || (instantiated->error && !isHostRefusal(*instantiated->error))
+             || !std::ranges::all_of(instantiated->callableExports, callable))
+         {
+             host.markDead();
+             return std::unexpected(ExtensionError::HostUnavailable);
+         }
+         if (instantiated->error)
+             return std::unexpected(*instantiated->error);
+         return std::make_unique<RemoteInstance>(shared_from_this(),
+                                                 std::move(*incarnation),
+                                                 instanceId,
+@@ -514,57 +539,60 @@ namespace
+     std::expected<void, CallFailure> RemoteInstance::flushTo(PduStream& lane)
+     {
+         auto const writes = _memory.flush();
+         _memory.clear();
+         for (auto const& write: writes)
+             if (!lane.send(write))
+                 return crashed();
+         return {};
+     }
+ 
+-    std::optional<std::vector<std::byte>> RemoteInstance::fetch(uint32_t address, uint32_t size)
++    std::expected<std::vector<std::byte>, MemoryFailure> RemoteInstance::fetch(uint32_t address,
++                                                                               uint32_t size)
+     {
++        // A thread that cannot call cannot read either: as a call from it traps, its read is refused.
+         auto* const lane = laneOfCurrentThread();
+         if (!lane)
+-            return std::nullopt;
++            return std::unexpected(MemoryFailure::OutOfBounds);
+         if (!lane->send(proto::MemoryRead { .instanceId = _instanceId, .address = address, .size = size }))
+         {
+             _incarnation->markDead();
+-            return std::nullopt;
++            return std::unexpected(MemoryFailure::HostCrashed);
+         }
+         auto reply = lane->receive();
+         auto* const data = reply ? std::get_if<proto::MemoryData>(&*reply) : nullptr;
+         if (!data || (data->status == proto::MemoryStatus::Ok && data->bytes.size() != size))
+         {
+             _incarnation->markDead();
+-            return std::nullopt;
++            return std::unexpected(MemoryFailure::HostCrashed);
+         }
+         if (data->status != proto::MemoryStatus::Ok)
+-            return std::nullopt;
++            return std::unexpected(MemoryFailure::OutOfBounds);
+         return std::move(data->bytes);
+     }
+ 
+     /// Runs every module in hosts the connector starts.
+     class RemoteBackend final: public IWasmBackend
+     {
+       public:
+         RemoteBackend(std::shared_ptr<RemoteKindState> kind, BackendConfig config) noexcept:
+             _kind { std::move(kind) }, _config { std::move(config) }
+         {
+         }
+ 
+         [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
+             RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
+         {
+             // What no host accepts is refused here, as an in-process backend refuses it, rather than when the
+             // first module is loaded.
+-            if (limits.tableElements > MaxTableElements || hostFunctions.size() > proto::MaxHostFunctions
++            if (limits.stackBytes > proto::MaxRuntimeStackBytes || limits.tableElements > MaxTableElements
++                || hostFunctions.size() > proto::MaxHostFunctions
+                 || std::ranges::any_of(hostFunctions, [](HostFunction const& function) {
+                        return function.parameterCount > MaxHostParameters;
+                    }))
+                 return std::unexpected(ExtensionError::RuntimeUnavailable);
+             auto create = proto::CreateRuntime { .runtimeId = HelperIncarnation::RuntimeId,
+                                                  .memoryBytes = limits.memoryBytes,
+                                                  .stackBytes = limits.stackBytes,
+                                                  .tableElements = limits.tableElements,
+                                                  .functions = {} };
+             create.functions.reserve(hostFunctions.size());
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index 6e0a641e2..b9047a567 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -49,20 +49,21 @@ using vtextension::wasm::CallFailure;
+ using vtextension::wasm::ExportDescription;
+ using vtextension::wasm::ExternKind;
+ using vtextension::wasm::FunctionSignature;
+ using vtextension::wasm::IHostContext;
+ using vtextension::wasm::ImportDescription;
+ using vtextension::wasm::IWasmBackend;
+ using vtextension::wasm::IWasmInstance;
+ using vtextension::wasm::IWasmModule;
+ using vtextension::wasm::IWasmRuntime;
+ using vtextension::wasm::Linkage;
++using vtextension::wasm::MemoryFailure;
+ using vtextension::wasm::ModuleIdentity;
+ using vtextension::wasm::ValueType;
+ using vtextension::wasm::host::HostServerConfig;
+ using vtextension::wasm::host::InProcessHostConnector;
+ using vtextension::wasm::remote::HostConnection;
+ using vtextension::wasm::remote::IHostConnector;
+ using vtextension::wasm::remote::IHostHandle;
+ using vtextension::wasm::remote::makeRemoteBackend;
+ using vtextension::wasm::remote::makeRemoteKindState;
+ using vtextension::wasm::remote::MaxLaneChannels;
+@@ -519,21 +520,21 @@ struct ScriptedInstance
+ 
+ /// Plays a helper that serves up to instantiation, then writes @p bytes on every lane; checks that the
+ /// parent's call reading them fails `HostCrashed`, and that the host was terminated exactly once.
+ void checkLaneBytesKillTheHelper(std::span<uint8_t const> bytes)
+ {
+     auto scripted = ScriptedInstance { HelperScript { .laneBytes = { bytes.begin(), bytes.end() } } };
+     auto& instance = *scripted.instance;
+     CHECK(loadFailure(instance) == CallFailure::HostCrashed);
+     CHECK(scripted.rig.connector->terminations() == 1);
+     CHECK(loadFailure(instance) == CallFailure::HostCrashed);
+-    CHECK_FALSE(instance.memory(0, 4).has_value());
++    CHECK(instance.memory(0, 4).error() == MemoryFailure::HostCrashed);
+     CHECK(scripted.rig.connector->terminations() == 1);
+ }
+ 
+ } // namespace
+ 
+ CONTOUR_WASM_BACKEND_CONTRACT(RemoteTraits)
+ 
+ TEST_CASE("RemoteBackend.sameIdentitySharesAHelper", "[vtextension][remote]")
+ {
+     auto const connector = makeConnector();
+@@ -544,35 +545,54 @@ TEST_CASE("RemoteBackend.sameIdentitySharesAHelper", "[vtextension][remote]")
+     auto const second = loadAs(*runtime, "a", contract::InstanceModule);
+     CHECK(connector->connects() == 1);
+     auto const third = loadAs(*runtime, "b", contract::InstanceModule);
+     CHECK(connector->connects() == 2);
+     auto const fourth = loadAs(*runtime, "", contract::InstanceModule);
+     auto const fifth = loadAs(*runtime, "", contract::InstanceModule);
+     CHECK(connector->connects() == 4);
+     CHECK(connector->liveHosts() == 4);
+ }
+ 
++TEST_CASE("RemoteBackend.refusesAStackNoHostRuns", "[vtextension][remote]")
++{
++    // Refused before any host is started: a host would refuse it too, and be started and stopped for nothing
++    // on every load.
++    auto const connector = makeConnector();
++    auto const backend = makeBackend(connector);
++    auto limits = contract::Limits;
++    limits.stackBytes = proto::MaxRuntimeStackBytes + 1;
++    auto const refused = backend->createRuntime(limits, contract::HostFunctions);
++    REQUIRE_FALSE(refused.has_value());
++    CHECK(refused.error() == ExtensionError::RuntimeUnavailable);
++    CHECK(connector->connects() == 0);
++
++    limits.stackBytes = proto::MaxRuntimeStackBytes;
++    auto const runtime = contract::createRuntime(*backend, limits);
++    auto const module = loadAs(*runtime, "", contract::InstanceModule);
++    CHECK(connector->connects() == 1);
++}
++
+ TEST_CASE("RemoteBackend.helperDeathFailsCallsHostCrashed", "[vtextension][remote]")
+ {
+     auto const connector = makeConnector();
+     auto const backend = makeBackend(connector);
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+     auto const module = contract::load(*runtime, contract::InstanceModule);
+     auto context = contract::RecordingHostContext {};
+     auto const instance = contract::instantiate(*module, context);
+     REQUIRE(addFailure(*instance) == std::nullopt);
+ 
+     CHECK(connector->terminateAll() == 1);
+ 
+     CHECK(addFailure(*instance) == CallFailure::HostCrashed);
+-    CHECK_FALSE(instance->memory(0, 4).has_value());
++    CHECK(instance->memory(0, 4).error() == MemoryFailure::HostCrashed);
+     CHECK(addFailure(*instance) == CallFailure::HostCrashed);
+     CHECK(connector->connects() == 1);
+ }
+ 
+ TEST_CASE("RemoteBackend.instantiateRespawnsLazily", "[vtextension][remote]")
+ {
+     auto const connector = makeConnector();
+     auto const backend = makeBackend(connector);
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+@@ -697,20 +717,72 @@ TEST_CASE("RemoteBackend.overCapReplyIsTheHostsFault", "[vtextension][remote]")
+         ScriptedRig { .connector = scriptedConnector(HelperScript { .loaded = [](uint32_t /*moduleId*/) {
+                           return headerOf(proto::PduKind::Loaded,
+                                           (4 * proto::PduLimits {}.maxModuleBytes) + 1);
+                       } }) };
+     auto const loaded = rig.runtime->load(ModuleIdentity {}, toModule(PeekModule));
+     REQUIRE_FALSE(loaded.has_value());
+     CHECK(loaded.error() == ExtensionError::HostUnavailable);
+     CHECK(rig.connector->terminations() == 1);
+ }
+ 
++namespace
++{
++
++/// @return A Load answer refusing the module with @p error.
++[[nodiscard]] std::function<std::vector<uint8_t>(uint32_t)> loadedFailing(ExtensionError error)
++{
++    return [error](uint32_t moduleId) {
++        return frameOf(proto::Loaded { .moduleId = moduleId, .error = error, .imports = {}, .exports = {} });
++    };
++}
++
++/// @return An Instantiate answer refusing the instance with @p error.
++[[nodiscard]] std::function<std::vector<uint8_t>(uint32_t)> instantiatedFailing(ExtensionError error)
++{
++    return [error](uint32_t instanceId) {
++        return frameOf(
++            proto::Instantiated { .instanceId = instanceId, .error = error, .callableExports = {} });
++    };
++}
++
++} // namespace
++
++TEST_CASE("RemoteBackend.honestRefusalsPassThrough", "[vtextension][remote]")
++{
++    // What a host may refuse a module or an instance with reaches the caller as it said, and the host lives.
++    for (auto const error: { ExtensionError::InvalidComponent,
++                             ExtensionError::OutOfMemory,
++                             ExtensionError::RuntimeUnavailable,
++                             ExtensionError::ModuleTooLarge })
++    {
++        INFO(static_cast<int>(error));
++        {
++            auto rig = ScriptedRig { .connector =
++                                         scriptedConnector(HelperScript { .loaded = loadedFailing(error) }) };
++            auto const loaded = rig.runtime->load(ModuleIdentity {}, toModule(PeekModule));
++            REQUIRE_FALSE(loaded.has_value());
++            CHECK(loaded.error() == error);
++            CHECK(rig.connector->terminations() == 0);
++        }
++        {
++            auto rig = ScriptedRig { .connector = scriptedConnector(
++                                         HelperScript { .instantiated = instantiatedFailing(error) }) };
++            auto const module = contract::load(*rig.runtime, PeekModule);
++            auto context = contract::RecordingHostContext {};
++            auto const instance = module->instantiate(context);
++            REQUIRE_FALSE(instance.has_value());
++            CHECK(instance.error() == error);
++            CHECK(rig.connector->terminations() == 0);
++        }
++    }
++}
++
+ TEST_CASE("RemoteBackend.wrongRepliesKillTheHelper", "[vtextension][remote]")
+ {
+     struct Case
+     {
+         std::string_view what;
+         HelperScript script;
+     };
+     auto const instantiatedWith = [](std::vector<uint32_t> callable) {
+         return [callable = std::move(callable)](uint32_t instanceId) {
+             return frameOf(proto::Instantiated {
+@@ -728,20 +800,28 @@ TEST_CASE("RemoteBackend.wrongRepliesKillTheHelper", "[vtextension][remote]")
+                                  [](uint32_t instanceId) {
+                                      return frameOf(proto::Instantiated {
+                                          .instanceId = instanceId + 1,
+                                          .error = std::nullopt,
+                                          .callableExports = { PeekCallables.begin(), PeekCallables.end() } });
+                                  } } },
+         { .what = "a callable ordinal past the exports",
+           .script = HelperScript { .instantiated = instantiatedWith({ 1, 3 }) } },
+         { .what = "a callable memory export",
+           .script = HelperScript { .instantiated = instantiatedWith({ 0 }) } },
++        { .what = "Loaded failing with what no load fails with",
++          .script = HelperScript { .loaded = loadedFailing(ExtensionError::HostUnavailable) } },
++        { .what = "Loaded failing as a guest trap",
++          .script = HelperScript { .loaded = loadedFailing(ExtensionError::Trapped) } },
++        { .what = "Instantiated failing with what no instantiation fails with",
++          .script = HelperScript { .instantiated = instantiatedFailing(ExtensionError::HostUnavailable) } },
++        { .what = "Instantiated failing as a deadline",
++          .script = HelperScript { .instantiated = instantiatedFailing(ExtensionError::DeadlineExceeded) } },
+     };
+     for (auto const& [what, script]: cases)
+     {
+         INFO(what);
+         auto rig = ScriptedRig { .connector = scriptedConnector(script) };
+         auto const module = rig.runtime->load(ModuleIdentity {}, toModule(PeekModule));
+         auto context = contract::RecordingHostContext {};
+         auto const failure =
+             module ? module.value()->instantiate(context).error_or(ExtensionError::Trapped) : module.error();
+         CHECK(failure == ExtensionError::HostUnavailable);
+@@ -749,21 +829,21 @@ TEST_CASE("RemoteBackend.wrongRepliesKillTheHelper", "[vtextension][remote]")
+     }
+ }
+ 
+ TEST_CASE("RemoteBackend.memoryDataOfTheWrongSizeKillsTheHelper", "[vtextension][remote]")
+ {
+     // Three bytes, where four were asked for.
+     auto scripted = ScriptedInstance { HelperScript {
+         .laneBytes =
+             frameOf(proto::MemoryData { .status = proto::MemoryStatus::Ok,
+                                         .bytes = { std::byte { 1 }, std::byte { 2 }, std::byte { 3 } } }) } };
+-    CHECK_FALSE(scripted.instance->memory(0, 4).has_value());
++    CHECK(scripted.instance->memory(0, 4).error() == MemoryFailure::HostCrashed);
+     // Checked before calling: had the host survived, the call would wait for an answer it never sends.
+     REQUIRE(scripted.rig.connector->terminations() == 1);
+     CHECK(loadFailure(*scripted.instance) == CallFailure::HostCrashed);
+ }
+ 
+ TEST_CASE("RemoteBackend.wrongResultCountKillsTheHelper", "[vtextension][remote]")
+ {
+     // Two results, where `load` returns one.
+     auto scripted = ScriptedInstance { HelperScript {
+         .laneBytes = frameOf(proto::CallResult { .failure = std::nullopt, .argv = { 1, 2 } }) } };
+diff --git a/src/vtextension/wasm/remote/proto/Codec.cpp b/src/vtextension/wasm/remote/proto/Codec.cpp
+index ae5b9ca52..193dca681 100644
+--- a/src/vtextension/wasm/remote/proto/Codec.cpp
++++ b/src/vtextension/wasm/remote/proto/Codec.cpp
+@@ -477,59 +477,97 @@ std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu)
+     std::visit([&body](auto const& value) { write(body, value); }, pdu);
+     auto const bodyBytes = body.take();
+ 
+     auto frame = Writer {};
+     frame.varint(1 + bodyBytes.size());
+     frame.u8(std::to_underlying(kindOf(pdu)));
+     frame.bytes(std::as_bytes(std::span { bodyBytes }));
+     return frame.take();
+ }
+ 
++namespace
++{
++    /// A frame's header, read and checked.
++    struct FrameHeader
++    {
++        std::size_t frameStart; ///< Where the frame's length ends and its kind begins.
++        std::size_t length;     ///< How many bytes the kind and body span.
++        std::size_t kindBytes;  ///< How many bytes of them the kind spans.
++        PduRow const* row;      ///< The kind's row.
++    };
++
++    /// Reads and checks the header of the frame at the front of @p buffer. @see frameSizeOf
++    [[nodiscard]] std::expected<FrameHeader, DecodeError> readHeader(std::span<uint8_t const> buffer,
++                                                                     Direction arriving,
++                                                                     ChannelKind channel,
++                                                                     PduLimits const& limits)
++    {
++        auto header = Reader { buffer };
++        auto const length = header.varint64();
++        if (!length)
++            return std::unexpected(length.error() == DecodeError::Truncated ? DecodeError::NeedMoreData
++                                                                            : length.error());
++        // Refused before the kind is known, so that no header makes the reader wait for more than any kind
++        // holds.
++        if (*length > largestFrameLength(limits))
++            return std::unexpected(DecodeError::OverCap);
++        auto const frameStart = header.consumed();
++        auto const available = buffer.size() - frameStart;
++        auto const complete = available >= *length;
++
++        // The kind lies inside the frame: running past what arrived waits, running past the frame is a lie.
++        auto frame =
++            Reader { buffer.subspan(frameStart, complete ? static_cast<std::size_t>(*length) : available) };
++        auto const kind = frame.varint32();
++        if (!kind)
++            return std::unexpected(kind.error() == DecodeError::Truncated && !complete
++                                       ? DecodeError::NeedMoreData
++                                       : kind.error());
++        if (*kind == 0 || *kind > PduTable.size())
++            return std::unexpected(DecodeError::UnknownKind);
++        auto const& row = PduTable[*kind - 1];
++        if (row.direction != arriving)
++            return std::unexpected(DecodeError::WrongDirection);
++        if (row.channel != channel)
++            return std::unexpected(DecodeError::WrongChannel);
++        if (*length - frame.consumed() > row.sizeCap(limits))
++            return std::unexpected(DecodeError::OverCap);
++        return FrameHeader { .frameStart = frameStart,
++                             .length = static_cast<std::size_t>(*length),
++                             .kindBytes = frame.consumed(),
++                             .row = &row };
++    }
++} // namespace
++
++std::expected<std::size_t, DecodeError> frameSizeOf(std::span<uint8_t const> buffer,
++                                                    Direction arriving,
++                                                    ChannelKind channel,
++                                                    PduLimits const& limits)
++{
++    return readHeader(buffer, arriving, channel, limits).transform([](FrameHeader const& header) {
++        return header.frameStart + header.length;
++    });
++}
++
+ std::expected<DecodedFrame, DecodeError> decodeFrame(std::span<uint8_t const> buffer,
+                                                      Direction arriving,
+                                                      ChannelKind channel,
+                                                      PduLimits const& limits)
+ {
+-    auto header = Reader { buffer };
+-    auto const length = header.varint64();
+-    if (!length)
+-        return std::unexpected(length.error() == DecodeError::Truncated ? DecodeError::NeedMoreData
+-                                                                        : length.error());
+-    // Refused before the kind is known, so that no header makes the reader wait for more than any kind holds.
+-    if (*length > largestFrameLength(limits))
+-        return std::unexpected(DecodeError::OverCap);
+-    auto const frameStart = header.consumed();
+-    auto const available = buffer.size() - frameStart;
+-    auto const complete = available >= *length;
+-
+-    // The kind lies inside the frame: running past what arrived waits, running past the frame is a lie.
+-    auto frame =
+-        Reader { buffer.subspan(frameStart, complete ? static_cast<std::size_t>(*length) : available) };
+-    auto const kind = frame.varint32();
+-    if (!kind)
+-        return std::unexpected(kind.error() == DecodeError::Truncated && !complete ? DecodeError::NeedMoreData
+-                                                                                   : kind.error());
+-    if (*kind == 0 || *kind > PduTable.size())
+-        return std::unexpected(DecodeError::UnknownKind);
+-    auto const& row = PduTable[*kind - 1];
+-    if (row.direction != arriving)
+-        return std::unexpected(DecodeError::WrongDirection);
+-    if (row.channel != channel)
+-        return std::unexpected(DecodeError::WrongChannel);
+-    auto const bodySize = *length - frame.consumed();
+-    if (bodySize > row.sizeCap(limits))
+-        return std::unexpected(DecodeError::OverCap);
+-    if (!complete)
++    auto const header = readHeader(buffer, arriving, channel, limits);
++    if (!header)
++        return std::unexpected(header.error());
++    auto const consumed = header->frameStart + header->length;
++    if (buffer.size() < consumed)
+         return std::unexpected(DecodeError::NeedMoreData);
+-
+-    auto const consumed = frameStart + static_cast<std::size_t>(*length);
+-    return row.decode(buffer.subspan(frameStart + frame.consumed(), static_cast<std::size_t>(bodySize)))
++    return header->row
++        ->decode(buffer.subspan(header->frameStart + header->kindBytes, header->length - header->kindBytes))
+         .transform(
+             [consumed](Pdu&& pdu) { return DecodedFrame { .pdu = std::move(pdu), .consumed = consumed }; });
+ }
+ 
+ // The bodies the PduTable decodes, one per Pdu alternative; the table's static_assert names each.
+ template std::expected<Pdu, DecodeError> decodeBody<Hello>(std::span<uint8_t const>);
+ template std::expected<Pdu, DecodeError> decodeBody<CreateRuntime>(std::span<uint8_t const>);
+ template std::expected<Pdu, DecodeError> decodeBody<RuntimeCreated>(std::span<uint8_t const>);
+ template std::expected<Pdu, DecodeError> decodeBody<Load>(std::span<uint8_t const>);
+ template std::expected<Pdu, DecodeError> decodeBody<Loaded>(std::span<uint8_t const>);
+diff --git a/src/vtextension/wasm/remote/proto/Codec.hpp b/src/vtextension/wasm/remote/proto/Codec.hpp
+index e125e1f00..fc3421498 100644
+--- a/src/vtextension/wasm/remote/proto/Codec.hpp
++++ b/src/vtextension/wasm/remote/proto/Codec.hpp
+@@ -42,20 +42,34 @@ enum class EncodeError : uint8_t
+ /// @return The frame's bytes; `OverCap` if a list exceeds its cap (MaxImports, MaxCallValues, ...).
+ [[nodiscard]] std::expected<std::vector<uint8_t>, EncodeError> encodeFrame(Pdu const& pdu);
+ 
+ /// One frame read off the front of a buffer.
+ struct DecodedFrame
+ {
+     Pdu pdu;              ///< The PDU it carries.
+     std::size_t consumed; ///< How many bytes of the buffer the frame spans.
+ };
+ 
++/// Reads the header of the frame at the front of @p buffer, and checks it as decodeFrame() does: its length,
++/// and its kind's direction, channel and size cap. What a reader waiting for a frame's body allocates for it.
++/// @param buffer The bytes received so far; the frame starts at its first byte.
++/// @param arriving The way the frame travels: a PDU of the other direction is `WrongDirection`.
++/// @param channel The channel it arrived on: a PDU of the other channel is `WrongChannel`.
++/// @param limits The caps of the PDUs whose size follows the stream's limits.
++/// @return How many bytes the whole frame spans, header included, whether or not all of them arrived yet.
++///         `NeedMoreData` while its header is incomplete; any other error is a violation that ends the
++///         stream.
++[[nodiscard]] std::expected<std::size_t, DecodeError> frameSizeOf(std::span<uint8_t const> buffer,
++                                                                  Direction arriving,
++                                                                  ChannelKind channel,
++                                                                  PduLimits const& limits);
++
+ /// Decodes the frame at the front of @p buffer.
+ /// @param buffer The bytes received so far; the frame starts at its first byte.
+ /// @param arriving The way the frame travels: a PDU of the other direction is `WrongDirection`.
+ /// @param channel The channel it arrived on: a PDU of the other channel is `WrongChannel`.
+ /// @param limits The caps of the PDUs whose size follows the stream's limits.
+ /// @return The PDU and the frame's size. `NeedMoreData` while the frame is incomplete and nothing in it is
+ ///         wrong yet; any other error is a violation that ends the stream.
+ [[nodiscard]] std::expected<DecodedFrame, DecodeError> decodeFrame(std::span<uint8_t const> buffer,
+                                                                    Direction arriving,
+                                                                    ChannelKind channel,
+diff --git a/src/vtextension/wasm/remote/proto/Pdu.hpp b/src/vtextension/wasm/remote/proto/Pdu.hpp
+index 70a60085c..a83a1ec50 100644
+--- a/src/vtextension/wasm/remote/proto/Pdu.hpp
++++ b/src/vtextension/wasm/remote/proto/Pdu.hpp
+@@ -41,20 +41,33 @@ inline constexpr std::size_t MaxImports = 100'000;
+ 
+ /// The most exports a Loaded describes, and the most callable exports an Instantiated names.
+ inline constexpr std::size_t MaxExports = 100'000;
+ 
+ /// The most parameters, and separately the most results, a described function signature has.
+ inline constexpr std::size_t MaxSignatureValues = 1'000;
+ 
+ /// The most host functions a CreateRuntime provides.
+ inline constexpr std::size_t MaxHostFunctions = 1'024;
+ 
++/// The most guest calls one lane runs at once: its outermost call, and those the parent makes back in while
++/// host calls wait. A Call past it is a protocol violation.
++inline constexpr std::size_t MaxCallDepth = 8;
++
++/// The largest stack a runtime may give each instance's calls (RuntimeLimits::stackBytes); a CreateRuntime
++/// asking for more is refused (`RuntimeUnavailable`), by the parent before it is sent. Each guest call on a
++/// lane sets its own limit from where the lane's stack stands, so the lane's thread must hold MaxCallDepth of
++/// them.
++inline constexpr std::size_t MaxRuntimeStackBytes = std::size_t { 1024 } * 1024;
++
++static_assert(MaxRuntimeStackBytes >= ExtensionLimits {}.stackBytes,
++              "a host runs the stack the parent gives");
++
+ /// How the helper shares an instance's linear memory with the parent.
+ enum class MemoryMode : uint8_t
+ {
+     Copy,   ///< Memory is read and written through MemoryRead, MemoryData and MemoryWrite PDUs.
+     Shared, ///< Memory lives in an object both processes map.
+ };
+ 
+ /// How far the helper confined itself before it said Hello.
+ enum class LockdownState : uint8_t
+ {
+diff --git a/src/vtextension/wasm/remote/transport/PduStream.cpp b/src/vtextension/wasm/remote/transport/PduStream.cpp
+index f09bf0720..a998425eb 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream.cpp
+@@ -1,34 +1,38 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ #include <algorithm>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
++#include <memory>
+ #include <span>
+ #include <utility>
+-#include <vector>
+ 
+ #include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/PduTable.hpp>
+ #include <vtextension/wasm/remote/proto/Wire.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ namespace
+ {
+-    /// How many bytes a receive asks the channel for at least. A frame larger than this grows the buffer to
+-    /// hold it; the buffer drops back to this once it drains, so that one large module does not pin its size.
++    /// How many bytes a receive asks the channel for at least: the receive buffer's least size, which holds
++    /// many small frames at once.
+     constexpr auto ReceiveChunk = std::size_t { 64 } * 1024;
+ 
++    /// The largest receive buffer kept once it drains. One a larger frame grew is let go, so that one large
++    /// module does not pin its size; the frames of a busy instance's memory reads, up to this, reuse it.
++    constexpr auto RetainedBufferBytes = (std::size_t { 1024 } * 1024) + ReceiveChunk;
++
+     /// @return The stream's reason for a channel's failure.
+     [[nodiscard]] StreamError streamErrorOf(ChannelError error) noexcept
+     {
+         switch (error)
+         {
+             case ChannelError::Closed: return StreamError::Closed;
+             case ChannelError::Io: return StreamError::Io;
+         }
+         return StreamError::Io;
+     }
+@@ -65,39 +69,58 @@ std::expected<void, StreamError> PduStream::send(proto::Pdu const& pdu)
+     if (!frame
+         || bodySizeOf(*frame) > proto::PduTable[std::to_underlying(proto::kindOf(pdu)) - 1].sizeCap(_limits))
+         return std::unexpected(StreamError::OverCap);
+     return _channel.send(*frame).transform_error([](ChannelError error) { return streamErrorOf(error); });
+ }
+ 
+ std::expected<proto::Pdu, StreamError> PduStream::receive()
+ {
+     while (true)
+     {
+-        auto decoded = proto::decodeFrame(std::span { _buffer }.first(_buffered), _arriving, _kind, _limits);
++        auto const buffered = std::span<uint8_t const> { _buffer.get(), _buffered };
++        auto decoded = proto::decodeFrame(buffered, _arriving, _kind, _limits);
+         if (decoded)
+         {
+             // Moves what follows the frame to the front, and lets a buffer a large frame grew go.
+-            std::ranges::copy(std::span { _buffer }.subspan(decoded->consumed, _buffered - decoded->consumed),
+-                              _buffer.begin());
++            std::ranges::copy(buffered.subspan(decoded->consumed), _buffer.get());
+             _buffered -= decoded->consumed;
+-            if (_buffered == 0 && _buffer.size() > ReceiveChunk)
+-                _buffer = std::vector<uint8_t> {};
++            if (_buffered == 0 && _capacity > RetainedBufferBytes)
++                reallocate(0);
+             return std::move(decoded->pdu);
+         }
+         if (decoded.error() != proto::DecodeError::NeedMoreData)
+             return std::unexpected(streamErrorOf(decoded.error()));
+ 
+-        if (_buffer.size() - _buffered < ReceiveChunk)
+-            _buffer.resize(std::max(_buffered + ReceiveChunk, _buffer.size() * 2));
+-        auto const received = _channel.receiveSome(std::span { _buffer }.subspan(_buffered));
++        // Grown once to hold the whole frame as soon as its header tells its size, never past it: a frame's
++        // bytes arrive straight where it is decoded from, with no doubling and nothing zero-filled.
++        auto const frameBytes =
++            proto::frameSizeOf(buffered, _arriving, _kind, _limits).value_or(_buffered + 1);
++        if (_capacity < frameBytes || _capacity == _buffered)
++            reallocate(std::max({ frameBytes, _buffered + 1, ReceiveChunk }));
++        auto const received = _channel.receiveSome(std::span { _buffer.get(), _capacity }.subspan(_buffered));
+         if (!received)
+             return std::unexpected(streamErrorOf(received.error()));
+         _buffered += *received;
+     }
+ }
+ 
++void PduStream::reallocate(std::size_t capacity)
++{
++    // Default-initialized: only what is received is written, and the bytes buffered are copied over.
++    auto buffer =
++        capacity ? std::make_unique_for_overwrite<uint8_t[]>(capacity) : std::unique_ptr<uint8_t[]> {};
++    std::ranges::copy(std::span { _buffer.get(), _buffered }, buffer.get());
++    _buffer = std::move(buffer);
++    _capacity = capacity;
++    if (capacity)
++    {
++        ++_stats.allocations;
++        _stats.peakBytes = std::max(_stats.peakBytes, capacity);
++    }
++}
++
+ void PduStream::shutdown() noexcept
+ {
+     _channel.shutdown();
+ }
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/PduStream.hpp b/src/vtextension/wasm/remote/transport/PduStream.hpp
+index 439ff6633..09e9e4d8d 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream.hpp
++++ b/src/vtextension/wasm/remote/transport/PduStream.hpp
+@@ -1,39 +1,46 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// PDUs over a Channel: frames what it sends, and reads whole frames back, refusing any the codec refuses.
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+-#include <vector>
++#include <memory>
+ 
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ /// Why a stream could not send or receive a PDU. Every one ends the stream, except an OverCap from send(),
+ /// which sent nothing.
+ enum class StreamError : uint8_t
+ {
+     Closed,    ///< The channel closed, or was shut down.
+     Io,        ///< The channel failed.
+     Malformed, ///< The peer sent a frame the codec refuses: a malformed one, or one of the wrong kind,
+                ///< direction or channel.
+     OverCap,   ///< The peer sent a frame larger than its kind may be; or, from send(), the PDU holds a
+                ///< list over its cap or is larger than its kind may be, and was not sent.
+ };
+ 
++/// What a stream's receive buffer cost so far; a test hook.
++struct ReceiveBufferStats
++{
++    std::size_t allocations = 0; ///< How often the buffer was allocated anew.
++    std::size_t peakBytes = 0;   ///< The most bytes it held allocated at once.
++};
++
+ /// One channel's PDUs. Owns the channel and a receive buffer; used by one thread at a time, which may both
+ /// send and receive.
+ class PduStream
+ {
+   public:
+     /// @param channel The channel it reads and writes.
+     /// @param kind Which channel it is: a PDU of the other is refused.
+     /// @param arriving The way PDUs it receives travel: a PDU travelling the other way is refused.
+     /// @param limits The caps of the PDUs whose size follows the stream's limits.
+     PduStream(Channel channel, proto::ChannelKind kind, proto::Direction arriving, proto::PduLimits limits);
+@@ -46,20 +53,30 @@ class PduStream
+     [[nodiscard]] std::expected<void, StreamError> send(proto::Pdu const& pdu);
+ 
+     /// Receives the next PDU, blocking until all of it has arrived. A frame larger than its kind may be fails
+     /// as soon as its header arrives, without waiting for its body.
+     /// @return The PDU; why none could be received.
+     [[nodiscard]] std::expected<proto::Pdu, StreamError> receive();
+ 
+     /// Shuts the channel down: a receive blocked on it, from any thread, fails `Closed`.
+     void shutdown() noexcept;
+ 
++    /// Test hook.
++    /// @return What the receive buffer cost since the stream was made.
++    [[nodiscard]] ReceiveBufferStats receiveBufferStats() const noexcept { return _stats; }
++
+   private:
++    /// Replaces the receive buffer with one of @p capacity bytes, keeping the bytes buffered.
++    /// @param capacity At least _buffered; 0 lets the buffer go.
++    void reallocate(std::size_t capacity);
++
+     Channel _channel;
+     proto::ChannelKind _kind;
+     proto::Direction _arriving;
+     proto::PduLimits _limits;
+-    std::vector<uint8_t> _buffer; ///< Received bytes; the first _buffered of them are not consumed yet.
++    std::unique_ptr<uint8_t[]> _buffer; ///< Received bytes; the first _buffered of them are not consumed yet.
++    std::size_t _capacity = 0;          ///< How many bytes _buffer holds.
+     std::size_t _buffered = 0;
++    ReceiveBufferStats _stats;
+ };
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/PduStream_test.cpp b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+index fcafa255e..ee679d941 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream_test.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+@@ -1,36 +1,40 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // PDUs over a channel pair: whole frames arrive whole, and a peer that lies, floods or leaves ends the stream
+ // for the reason it gave.
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <future>
++#include <ranges>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/proto/Codec.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ using namespace vtextension::wasm::remote;
+ using transport::makeChannelPair;
+ using transport::PduStream;
+ using transport::StreamError;
+ 
+ namespace
+ {
+ 
++/// What a large frame's buffer may take beyond the frame itself.
++constexpr auto LargeFrameHeadroom = std::size_t { 64 };
++
+ /// The control channel's two ends, as Contour and the extension host process hold them.
+ struct ControlPair
+ {
+     PduStream parent;
+     PduStream helper;
+ };
+ 
+ /// @return A connected control channel.
+ [[nodiscard]] ControlPair makeControlPair()
+ {
+@@ -158,10 +162,44 @@ TEST_CASE("PduStream.garbageIsMalformed", "[vtextension]")
+     }
+     SECTION("a PDU travelling the other way")
+     {
+         auto const frame =
+             proto::encodeFrame(proto::Release { .target = proto::ReleaseTarget::Module, .id = 2 });
+         REQUIRE(frame.has_value());
+         REQUIRE(channels->helper.send(*frame).has_value());
+         CHECK(stream.receive() == std::unexpected(StreamError::Malformed));
+     }
+ }
++
++TEST_CASE("PduStream.largeFrameAllocatesItsSizeOnce", "[vtextension]")
++{
++    // A module near the largest a Load carries: the buffer grows once, to the frame's size, without doubling
++    // past it.
++    auto pair = makeControlPair();
++    auto const load = proto::Pdu { proto::Load {
++        .runtimeId = 1,
++        .moduleId = 2,
++        .bytes = std::vector<std::byte>(proto::PduLimits {}.maxModuleBytes - 64, std::byte { 7 }) } };
++    auto const frameBytes = proto::encodeFrame(load).value().size();
++    auto sent = std::async(std::launch::async, [&] { return pair.parent.send(load); });
++    CHECK(pair.helper.receive() == load);
++    REQUIRE(sent.get().has_value());
++    auto const stats = pair.helper.receiveBufferStats();
++    CHECK(stats.peakBytes <= frameBytes + LargeFrameHeadroom);
++    CHECK(stats.allocations <= 2); // the first chunk, then the frame
++}
++
++TEST_CASE("PduStream.keepsAModerateBufferBetweenFrames", "[vtextension]")
++{
++    // Frames of a few hundred KiB each, as memory reads of a busy instance are: the buffer grown for the
++    // first serves the rest.
++    auto pair = makeControlPair();
++    auto const load = proto::Pdu { proto::Load {
++        .runtimeId = 1, .moduleId = 2, .bytes = std::vector<std::byte>(std::size_t { 512 } * 1024) } };
++    for ([[maybe_unused]] auto const round: std::views::iota(0, 4))
++    {
++        auto sent = std::async(std::launch::async, [&] { return pair.parent.send(load); });
++        CHECK(pair.helper.receive() == load);
++        REQUIRE(sent.get().has_value());
++    }
++    CHECK(pair.helper.receiveBufferStats().allocations <= 2);
++}
+diff --git a/src/vtextension/wasm/testing/BackendContract.hpp b/src/vtextension/wasm/testing/BackendContract.hpp
+index bc33a3c22..b3aa29133 100644
+--- a/src/vtextension/wasm/testing/BackendContract.hpp
++++ b/src/vtextension/wasm/testing/BackendContract.hpp
+@@ -11,20 +11,21 @@
+ #include <catch2/catch_template_test_macros.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <future>
++#include <latch>
+ #include <limits>
+ #include <memory>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <vector>
+@@ -998,22 +999,22 @@ void memoryViewIsBoundsChecked()
+     auto const instance = instantiate(*module, context);
+ 
+     auto const whole = instance->memory(0, PageBytes);
+     REQUIRE(whole.has_value());
+     CHECK(whole->size() == PageBytes);
+     auto const hello = instance->memory(16, 5);
+     REQUIRE(hello.has_value());
+     CHECK(std::ranges::equal(*hello, std::string_view { "hello" }, [](std::byte byte, char c) {
+         return std::to_integer<char>(byte) == c;
+     }));
+-    CHECK_FALSE(instance->memory(PageBytes - 1, 2).has_value());
+-    CHECK_FALSE(instance->memory(0xFFFFFFF0, 32).has_value());
++    CHECK(instance->memory(PageBytes - 1, 2).error() == MemoryFailure::OutOfBounds);
++    CHECK(instance->memory(0xFFFFFFF0, 32).error() == MemoryFailure::OutOfBounds);
+     auto const empty = instance->memory(70000, 0);
+     REQUIRE(empty.has_value());
+     CHECK(empty->empty());
+ }
+ 
+ /// A host function call reaches the instance's context, with its index and arguments, synchronously
+ /// on the calling thread; the guest carries on after it.
+ template <typename T>
+ void hostCallbackReceivesArguments()
+ {
+@@ -1184,21 +1185,21 @@ void memoryCapRefusesGrowth()
+     auto const module = load(*runtime, InstanceModule);
+     auto context = RecordingHostContext {};
+     auto const instance = instantiate(*module, context);
+ 
+     auto const called = instance->call(functionOf(*instance, "grow"), {});
+     REQUIRE_FALSE(called.has_value());
+     auto const expected = backend->capabilities().memoryGrowth == MemoryGrowthReporting::Reported
+                               ? CallFailure::MemoryGrowthRefused
+                               : CallFailure::Trap;
+     CHECK(called.error() == expected);
+-    CHECK_FALSE(instance->memory(0, 2 * PageBytes).has_value());
++    CHECK(instance->memory(0, 2 * PageBytes).error() == MemoryFailure::OutOfBounds);
+ }
+ 
+ /// A call that trapped leaves its instance callable: the next call runs as if none had failed.
+ template <typename T>
+ void callAfterTrapRuns()
+ {
+     auto const backend = T::make();
+     auto const runtime = createRuntime(*backend,
+                                        RuntimeLimits { .memoryBytes = std::size_t { 2 } * PageBytes,
+                                                        .stackBytes = Limits.stackBytes,
+@@ -1435,20 +1436,84 @@ void instanceCrossesThreads()
+         auto const add = instance->function("add");
+         if (!add)
+             return std::unexpected(CallFailure::Trap);
+         auto argv = std::array<uint32_t, 2> { 2, 3 };
+         return instance->call(*add, argv).transform([&] { return argv[0]; });
+     });
+     REQUIRE(sum.has_value());
+     CHECK(*sum == std::expected<uint32_t, CallFailure> { 5 });
+ }
+ 
++/// One module is instantiated on two prepared threads at once, as the panes sharing a compiled extension do:
++/// every instance is whole and runs, and neither instantiation disturbs the other. So too for a module whose
++/// import is unsatisfied, which some runtimes try to link anew on each instantiation: each thread meets the
++/// outcome one instantiation alone has.
++template <typename T>
++void instantiatesConcurrently()
++{
++    /// What one thread achieved: how many instantiations went as the reference did, and how many of the
++    /// instances added right (none of a module without `add`).
++    struct Tally
++    {
++        int asReference = 0;
++        int added = 0;
++    };
++    constexpr auto Rounds = 25;
++
++    auto const backend = T::make();
++    auto const runtime = createRuntime(*backend);
++    auto const guard = enterThread(*backend);
++
++    // Each thread instantiates `module` Rounds times at once with the other, and adds with what it created.
++    auto const onTwoThreads = [&](IWasmModule& module) {
++        auto context = RecordingHostContext {};
++        auto const reference = module.instantiate(context).transform([](auto const&) { return 0; });
++        auto start = std::latch { 2 };
++        auto const instantiateMany = [&] {
++            auto tally = Tally {};
++            auto const threadGuard = backend->enterThread();
++            start.arrive_and_wait();
++            if (!threadGuard)
++                return tally;
++            for (auto const round: std::views::iota(uint32_t { 0 }, uint32_t { Rounds }))
++            {
++                auto ownContext = RecordingHostContext {};
++                auto const instance = module.instantiate(ownContext);
++                if (instance.has_value() != reference.has_value()
++                    || (!instance && instance.error() != reference.error()))
++                    continue;
++                ++tally.asReference;
++                if (!instance)
++                    continue;
++                auto const add = (*instance)->function("add");
++                auto argv = std::array<uint32_t, 2> { round, 3 };
++                if (add && (*instance)->call(*add, argv) && argv[0] == round + 3)
++                    ++tally.added;
++            }
++            return tally;
++        };
++        auto first = std::async(std::launch::async, instantiateMany);
++        auto second = std::async(std::launch::async, instantiateMany);
++        return std::array { first.get(), second.get() };
++    };
++
++    auto const module = load(*runtime, InstanceModule);
++    for (auto const tally: onTwoThreads(*module))
++    {
++        CHECK(tally.asReference == Rounds);
++        CHECK(tally.added == Rounds);
++    }
++    auto const unsatisfied = load(*runtime, UnknownImportModule);
++    for (auto const tally: onTwoThreads(*unsatisfied))
++        CHECK(tally.asReference == Rounds);
++}
++
+ /// What each export of EveryWasiFunctionModule, named after the WASI function it calls, ends with: the
+ /// errno it returns, or ShimOutcome::Exit for a call that ends as a trap.
+ inline constexpr auto EveryWasiFunctionOutcomes =
+     std::to_array<std::pair<std::string_view, wasi::ShimResult>>({
+         { "args_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+         { "args_sizes_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+         { "environ_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+         { "environ_sizes_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+         { "clock_time_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+         { "clock_res_get", { .outcome = wasi::ShimOutcome::Returned, .error = wasi::Errno::Success } },
+@@ -1569,20 +1634,27 @@ void wasiStdioGoesNowhere()
+ 
+ } // namespace vtextension::wasm::testing::contract
+ 
+ /// One contract case, run against the backend of @p Traits.
+ #define CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, Name)                 \
+     TEMPLATE_TEST_CASE("WasmContract." #Name, "[wasm-contract]", Traits) \
+     {                                                                    \
+         ::vtextension::wasm::testing::contract::Name<TestType>();        \
+     }
+ 
++/// One contract case that runs threads of its own, run against the backend of @p Traits.
++#define CONTOUR_WASM_BACKEND_CONTRACT_THREADING_CASE(Traits, Name)                  \
++    TEMPLATE_TEST_CASE("WasmContract." #Name, "[wasm-contract][threading]", Traits) \
++    {                                                                               \
++        ::vtextension::wasm::testing::contract::Name<TestType>();                   \
++    }
++
+ /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
+ #define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                          \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                   \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, refusesDisabledFeatures)                \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, acceptsEnabledFeatures)                 \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)             \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)      \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureWasiIsUnsatisfied)        \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)             \
+@@ -1609,11 +1681,12 @@ void wasiStdioGoesNowhere()
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableGrowthIsCapped)                    \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableInitialSizeIsCapped)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCountIsCapped)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableSectionWithTrailingBytesIsRefused) \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, tableCapAboveMaximumIsRefused)          \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, onlyI32ExportsAreOffered)               \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)                \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                     \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                       \
+     CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)                 \
++    CONTOUR_WASM_BACKEND_CONTRACT_THREADING_CASE(Traits, instantiatesConcurrently)     \
+     CONTOUR_WASM_BACKEND_CONTRACT_POSIX(Traits)
+diff --git a/src/vtextension/wasm/testing/DecoratedEngine.hpp b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+new file mode 100644
+index 000000000..4fd451d95
+--- /dev/null
++++ b/src/vtextension/wasm/testing/DecoratedEngine.hpp
+@@ -0,0 +1,158 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Test-only: a hosted engine whose instances a test decorates, to observe or disturb what a host does with
++// them while everything else is forwarded to the engine it wraps.
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <functional>
++#include <memory>
++#include <optional>
++#include <span>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include <vtextension/ExtensionError.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
++#include <vtextension/wasm/host/IHostedEngine.hpp>
++
++namespace vtextension::wasm::testing
++{
++
++/// An instance that forwards everything to the one it wraps; a decorator overrides what it observes.
++class ForwardingInstance: public IWasmInstance
++{
++  public:
++    /// @param inner The instance forwarded to.
++    explicit ForwardingInstance(std::unique_ptr<IWasmInstance> inner) noexcept: _inner { std::move(inner) } {}
++
++    [[nodiscard]] std::optional<ExportFunction> function(std::string_view name) const override
++    {
++        return _inner->function(name);
++    }
++
++    [[nodiscard]] std::expected<void, CallFailure> call(ExportFunction function,
++                                                        std::span<uint32_t> argv) override
++    {
++        return _inner->call(function, argv);
++    }
++
++    [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
++                                                                            uint32_t size) override
++    {
++        return _inner->memory(address, size);
++    }
++
++    void interrupt() noexcept override { _inner->interrupt(); }
++
++  private:
++    std::unique_ptr<IWasmInstance> _inner;
++};
++
++/// What wraps each instance a decorated engine creates.
++using InstanceDecorator = std::function<std::unique_ptr<IWasmInstance>(std::unique_ptr<IWasmInstance>)>;
++
++namespace detail
++{
++    /// A module of a decorated engine, whose instances are decorated.
++    class DecoratedModule final: public IWasmModule
++    {
++      public:
++        DecoratedModule(std::shared_ptr<IWasmModule> inner, InstanceDecorator decorate):
++            _inner { std::move(inner) }, _decorate { std::move(decorate) }
++        {
++        }
++
++        [[nodiscard]] std::span<ImportDescription const> imports() const noexcept override
++        {
++            return _inner->imports();
++        }
++
++        [[nodiscard]] std::span<ExportDescription const> exports() const noexcept override
++        {
++            return _inner->exports();
++        }
++
++        [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
++            IHostContext& context) override
++        {
++            return _inner->instantiate(context).transform(_decorate);
++        }
++
++      private:
++        std::shared_ptr<IWasmModule> _inner;
++        InstanceDecorator _decorate;
++    };
++
++    /// A runtime of a decorated engine, whose modules are decorated.
++    class DecoratedRuntime final: public IWasmRuntime
++    {
++      public:
++        DecoratedRuntime(std::shared_ptr<IWasmRuntime> inner, InstanceDecorator decorate):
++            _inner { std::move(inner) }, _decorate { std::move(decorate) }
++        {
++        }
++
++        [[nodiscard]] std::expected<std::shared_ptr<IWasmModule>, ExtensionError> load(
++            ModuleIdentity identity, std::vector<std::byte> bytes) override
++        {
++            return _inner->load(std::move(identity), std::move(bytes))
++                .transform([this](std::shared_ptr<IWasmModule> module) -> std::shared_ptr<IWasmModule> {
++                    return std::make_shared<DecoratedModule>(std::move(module), _decorate);
++                });
++        }
++
++      private:
++        std::shared_ptr<IWasmRuntime> _inner;
++        InstanceDecorator _decorate;
++    };
++} // namespace detail
++
++/// A hosted engine whose instances are wrapped by a decorator; everything else is the engine it wraps.
++class DecoratedEngine final: public host::IHostedEngine
++{
++  public:
++    /// @param inner The engine forwarded to.
++    /// @param decorate What wraps each instance it creates.
++    DecoratedEngine(std::unique_ptr<host::IHostedEngine> inner, InstanceDecorator decorate):
++        _inner { std::move(inner) }, _decorate { std::move(decorate) }
++    {
++    }
++
++    [[nodiscard]] std::expected<std::shared_ptr<IWasmRuntime>, ExtensionError> createRuntime(
++        RuntimeLimits limits, std::span<HostFunction const> hostFunctions) override
++    {
++        return _inner->createRuntime(limits, hostFunctions)
++            .transform([this](std::shared_ptr<IWasmRuntime> runtime) -> std::shared_ptr<IWasmRuntime> {
++                return std::make_shared<detail::DecoratedRuntime>(std::move(runtime), _decorate);
++            });
++    }
++
++    [[nodiscard]] std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread() override
++    {
++        return _inner->enterThread();
++    }
++
++    [[nodiscard]] bool isCurrentThreadPrepared() const override { return _inner->isCurrentThreadPrepared(); }
++
++    [[nodiscard]] uint64_t runtimeGeneration() const noexcept override { return _inner->runtimeGeneration(); }
++
++    [[nodiscard]] BackendCapabilities capabilities() const noexcept override
++    {
++        return _inner->capabilities();
++    }
++
++    [[nodiscard]] remote::proto::MemoryMode memoryMode() const noexcept override
++    {
++        return _inner->memoryMode();
++    }
++
++  private:
++    std::unique_ptr<host::IHostedEngine> _inner;
++    InstanceDecorator _decorate;
++};
++
++} // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/wamr/WamrInstance.cpp b/src/vtextension/wasm/wamr/WamrInstance.cpp
+index dd2424ab5..f52d034be 100644
+--- a/src/vtextension/wasm/wamr/WamrInstance.cpp
++++ b/src/vtextension/wasm/wamr/WamrInstance.cpp
+@@ -159,31 +159,32 @@ namespace
+             --_callDepth;
+             auto const failed = returned ? std::nullopt : std::optional { failure() };
+             if (_callDepth > 0)
+                 endNestedCall(failed.has_value() ? NestedCallOutcome::Failed : NestedCallOutcome::Returned,
+                               outerFault);
+             if (failed)
+                 return std::unexpected(*failed);
+             return {};
+         }
+ 
+-        [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
++        [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
++                                                                                uint32_t size) override
+         {
+             if (size == 0)
+                 return std::span<std::byte> {};
+             auto* const memory = wasm_runtime_get_default_memory(_instance.get());
+             if (!memory)
+-                return std::nullopt;
++                return std::unexpected(MemoryFailure::OutOfBounds);
+             auto const bytes =
+                 wasm_memory_get_cur_page_count(memory) * wasm_memory_get_bytes_per_page(memory);
+             if (uint64_t { address } + size > bytes)
+-                return std::nullopt;
++                return std::unexpected(MemoryFailure::OutOfBounds);
+             auto const whole =
+                 std::span<std::byte> { static_cast<std::byte*>(wasm_memory_get_base_address(memory)),
+                                        static_cast<std::size_t>(bytes) };
+             return whole.subspan(address, size);
+         }
+ 
+         void interrupt() noexcept override
+         {
+             _interruption.store(Interruption::Requested, std::memory_order_release);
+             wasm_runtime_terminate(_instance.get());
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+index fb7090ba3..0dff950e0 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine.cpp
+@@ -1,18 +1,19 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/wasmtime/WasmtimeEngine.hpp>
+ 
+ #include <core/Assert.hpp>
+ #include <core/Utils.hpp>
+ 
+ #include <algorithm>
+ #include <array>
++#include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <memory>
+ #include <mutex>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+@@ -30,62 +31,65 @@
+ // be told to refuse what the table forbids nor be trusted to accept what it allows. Generated from the
+ // list the configure-time probe checks too (cmake/ContourThirdParties.cmake).
+ #include <vtextension/wasm/wasmtime/WasmtimeRequiredFeatures.hpp>
+ #include <vtextension/wasm/wasmtime/WasmtimeRuntime.hpp>
+ 
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ namespace
+ {
++    /// The serial the next kind takes; 0 names none.
++    auto nextSerial = std::atomic<uint64_t> { 1 };
++
+     /// Which kind and generation the calling thread is prepared for; generation 0 for none.
+     struct ThreadStamp
+     {
+-        KindState const* kind = nullptr; ///< The kind whose guard prepared the thread.
+-        uint64_t generation = 0;         ///< The generation it was prepared for.
++        uint64_t kind = 0;       ///< The serial of the kind whose guard prepared the thread; 0 for none.
++        uint64_t generation = 0; ///< The generation it was prepared for.
+     };
+ 
+     thread_local auto threadStamp = ThreadStamp {};
+ 
+     /// Whether a guard is the one that prepared its thread, or nests inside that one.
+     enum class GuardRole : uint8_t
+     {
+         Nested,    ///< The thread was prepared already; ending the guard leaves it so.
+         Outermost, ///< The guard prepared the thread; ending it ends the preparation.
+     };
+ 
+     /// A thread's preparation: a stamp of the generation it was entered for.
+     class ThreadGuard final: public IThreadGuard
+     {
+       public:
+         ThreadGuard(KindState const& kind, uint64_t generation, GuardRole role) noexcept:
+-            _kind { &kind }, _generation { generation }, _role { role }
++            _kind { kind.serial() }, _generation { generation }, _role { role }
+         {
+         }
+ 
+         ThreadGuard(ThreadGuard const&) = delete;
+         ThreadGuard(ThreadGuard&&) = delete;
+         ThreadGuard& operator=(ThreadGuard const&) = delete;
+         ThreadGuard& operator=(ThreadGuard&&) = delete;
+ 
+         ~ThreadGuard() override
+         {
+             // A guard entered for an earlier generation leaves alone a later guard's stamp.
+             if (_role == GuardRole::Outermost && threadStamp.kind == _kind
+                 && threadStamp.generation == _generation)
+                 threadStamp = ThreadStamp {};
+         }
+ 
+         [[nodiscard]] uint64_t generation() const noexcept override { return _generation; }
+ 
+       private:
+-        KindState const* _kind;
++        uint64_t _kind; ///< The serial of the kind it was entered for, which it may outlive.
+         uint64_t _generation;
+         GuardRole _role;
+     };
+ 
+     /// A Wasmtime switch for one feature. The bool is Wasmtime's C signature.
+     using FeatureSetter = void (*)(wasm_config_t*, bool);
+ 
+     /// One row of the switch table: a feature and Wasmtime's switch for it.
+     struct FeatureSetterRow
+     {
+@@ -349,48 +353,52 @@ namespace
+         {
+             return remote::proto::MemoryMode::Copy;
+         }
+ 
+       private:
+         std::shared_ptr<KindState> _kind;
+         WasmtimeConfig _config;
+     };
+ } // namespace
+ 
++KindState::KindState() noexcept: _serial { nextSerial.fetch_add(1) }
++{
++}
++
+ void KindState::acquireRuntime() noexcept
+ {
+     auto const lock = std::scoped_lock { _mutex };
+     if (_liveRuntimes++ == 0)
+         ++_generation;
+ }
+ 
+ void KindState::releaseRuntime() noexcept
+ {
+     auto const lock = std::scoped_lock { _mutex };
+     --_liveRuntimes;
+ }
+ 
+ std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> KindState::enterThread()
+ {
+     auto const lock = std::scoped_lock { _mutex };
+     if (_liveRuntimes == 0)
+         return std::unexpected(ExtensionError::RuntimeUnavailable);
+     auto const current = _generation.load();
+-    if (threadStamp.kind == this && threadStamp.generation == current)
++    if (threadStamp.kind == _serial && threadStamp.generation == current)
+         return std::make_unique<ThreadGuard>(*this, current, GuardRole::Nested);
+-    threadStamp = ThreadStamp { .kind = this, .generation = current };
++    threadStamp = ThreadStamp { .kind = _serial, .generation = current };
+     return std::make_unique<ThreadGuard>(*this, current, GuardRole::Outermost);
+ }
+ 
+ bool KindState::isCurrentThreadPrepared() const noexcept
+ {
+-    return threadStamp.kind == this && threadStamp.generation != 0
++    return threadStamp.kind == _serial && threadStamp.generation != 0
+            && threadStamp.generation == _generation.load();
+ }
+ 
+ uint64_t KindState::preparedGeneration() noexcept
+ {
+     return threadStamp.generation;
+ }
+ 
+ std::expected<std::shared_ptr<WasmtimeRuntime>, ExtensionError> WasmtimeRuntime::create(
+     std::shared_ptr<KindState> kind,
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index 1118aa7f0..3a558b00c 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -209,20 +209,47 @@ class InterruptingHostContext final: public vtextension::wasm::IHostContext
+     }
+ 
+   private:
+     vtextension::wasm::IWasmInstance* _target;
+ };
+ 
+ } // namespace
+ 
+ CONTOUR_WASM_BACKEND_CONTRACT(WasmtimeTraits)
+ 
++TEST_CASE("WasmtimeEngine.kindStampsOutliveNoKind", "[wasmtime]")
++{
++    // A kind that comes after another, here at the very same address, is not prepared on a thread for having
++    // the generation its predecessor prepared it for: a thread's stamp names its kind by serial, not address.
++    auto kind = std::optional<KindState> {};
++    kind.emplace();
++    kind->acquireRuntime();
++    auto guard = kind->enterThread();
++    REQUIRE(guard.has_value());
++    REQUIRE(kind->isCurrentThreadPrepared());
++    auto const* const address = &*kind;
++    kind->releaseRuntime();
++    kind.reset();
++
++    kind.emplace();
++    REQUIRE(&*kind == address);
++    kind->acquireRuntime();
++    CHECK(kind->generation() == (*guard)->generation());
++    CHECK_FALSE(kind->isCurrentThreadPrepared());
++    auto const renewed = kind->enterThread();
++    REQUIRE(renewed.has_value());
++    CHECK(kind->isCurrentThreadPrepared());
++    guard->reset(); // the predecessor's guard leaves alone the stamp its successor holds
++    CHECK(kind->isCurrentThreadPrepared());
++    kind->releaseRuntime();
++}
++
+ TEST_CASE("WasmtimeEngine.hostFunctionArities", "[wasmtime]")
+ {
+     // A host function takes from none up to MaxHostParameters i32s, each reaching the host in order. One
+     // taking more cannot be provided, and the runtime is refused.
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::HostFunction;
+     using vtextension::wasm::MaxHostParameters;
+     auto const backend = WasmtimeTraits::make();
+ 
+     for (auto const arity: { uint32_t { 0 }, uint32_t { 1 }, MaxHostParameters })
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+index a2ad86777..f08c79cdd 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeInstance.cpp
+@@ -214,30 +214,31 @@ namespace
+                 return interrupted(context);
+             if (failed)
+                 return std::unexpected(*failed);
+ 
+             std::ranges::transform(results, argv.begin(), [](wasmtime_val_t const& result) {
+                 return static_cast<uint32_t>(result.of.i32);
+             });
+             return {};
+         }
+ 
+-        [[nodiscard]] std::optional<std::span<std::byte>> memory(uint32_t address, uint32_t size) override
++        [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> memory(uint32_t address,
++                                                                                uint32_t size) override
+         {
+             if (size == 0)
+                 return std::span<std::byte> {};
+             if (!_memory)
+-                return std::nullopt;
++                return std::unexpected(MemoryFailure::OutOfBounds);
+             auto* const context = storeContext();
+             auto const bytes = wasmtime_memory_data_size(context, &*_memory);
+             if (uint64_t { address } + size > bytes)
+-                return std::nullopt;
++                return std::unexpected(MemoryFailure::OutOfBounds);
+             auto const whole =
+                 std::span<std::byte> { reinterpret_cast<std::byte*>(wasmtime_memory_data(context, &*_memory)),
+                                        bytes };
+             return whole.subspan(address, size);
+         }
+ 
+         /// Wait-free, from any thread, before, during or after a call: stores the flag, then moves the
+         /// engine's epoch past the deadline of every guest of the runtime running now. Each of them wakes
+         /// once (onEpochDeadline); only this instance's stops. One landing just as this instance's guest
+         /// was woken by another instance's interrupt can be missed (the window documented at
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+index b01245380..8eef27f9b 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeRuntime.hpp
+@@ -23,20 +23,24 @@
+ #include <vtextension/wasm/wasmtime/WasmtimeHandles.hpp>
+ 
+ struct wasmtime_context;
+ 
+ namespace vtextension::wasm::wasmtime
+ {
+ 
+ class KindState
+ {
+   public:
++    /// Takes the next serial of the process: a thread's stamp names its kind by it, never by its address,
++    /// which a later kind may take.
++    KindState() noexcept;
++
+     /// Counts one more runtime alive, bringing the engine up anew if it is the first.
+     void acquireRuntime() noexcept;
+ 
+     /// Counts one runtime fewer alive.
+     void releaseRuntime() noexcept;
+ 
+     /// Prepares the calling thread for the current generation, unless it already is.
+     /// @return The guard; `RuntimeUnavailable` while no runtime is alive.
+     [[nodiscard]] std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread();
+ 
+@@ -53,21 +57,25 @@ class KindState
+     /// @return The count of epoch deadline callbacks of every instance of the kind so far.
+     [[nodiscard]] uint64_t epochCallbacks() const noexcept
+     {
+         return _epochCallbacks.load(std::memory_order_relaxed);
+     }
+ 
+     /// Test-only: what the calling thread was prepared for, of whichever kind.
+     /// @return The generation the calling thread's guard was entered for; 0 if none is held.
+     [[nodiscard]] static uint64_t preparedGeneration() noexcept;
+ 
++    /// @return The kind's serial, unique in the process.
++    [[nodiscard]] uint64_t serial() const noexcept { return _serial; }
++
+   private:
++    uint64_t _serial;                         ///< Names the kind in a thread's stamp.
+     std::mutex _mutex;                        ///< Guards _liveRuntimes and each bring-up.
+     std::size_t _liveRuntimes = 0;            ///< How many runtimes are alive.
+     std::atomic<uint64_t> _generation {};     ///< The current bring-up generation.
+     std::atomic<uint64_t> _epochCallbacks {}; ///< How often a running guest woke at its epoch deadline.
+ };
+ 
+ /// Whether an instance was interrupted (IWasmInstance::interrupt()).
+ enum class InterruptState : uint8_t
+ {
+     Running,     ///< Not interrupted: its calls run.

@@ -1,0 +1,1752 @@
+8484a0694 fix(vtextension): a host short of memory as it starts is retried, and a lacking sandbox is a warning
+598181d55 fix(vtextension): unlink a WAMR execution environment under its thread cluster's lock
+40efba3d7 feat(vtextension): the extension host on FreeBSD maps no memory both writable and executable
+
+ .gitattributes                                     |   4 +
+ cmake/ApplyPatchOnceTest.cmake                     |  40 ++++++-
+ src/vtextension/wasm/remote/CMakeLists.txt         |   4 +-
+ src/vtextension/wasm/remote/SharedGuestMemory.cpp  |   3 +-
+ .../wasm/remote/process/AppContainer_test.cpp      |  82 +++++++++++++-
+ .../wasm/remote/process/AppContainer_win32.cpp     |  35 +++---
+ .../wasm/remote/process/AppContainer_win32.hpp     |  15 ++-
+ .../wasm/remote/process/LaunchRefusal_win32.cpp    |  76 +++++++++++++
+ .../wasm/remote/process/LaunchRefusal_win32.hpp    | 119 ++++++++++++++++++++
+ .../wasm/remote/process/Process_win32.cpp          | 124 +++++++++++++++------
+ .../wasm/remote/process/Process_win32.hpp          |  27 +++++
+ .../remote/transport/GuestMemoryMapping_test.cpp   |  28 +++++
+ .../remote/transport/GuestMemoryMapping_win32.cpp  |   7 +-
+ .../wasm/wasmtime/WasmtimeEngine_test.cpp          |  93 ++++++++++------
+ 14 files changed, 553 insertions(+), 104 deletions(-)
+
+diff --git a/.gitattributes b/.gitattributes
+index c94c61b77..e0c63a692 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -15,10 +15,14 @@ src/contour/cli/shell-integration/shell-integration.* text eol=lf
+ wit/** text eol=lf
+ 
+ # The default-bindings goldens are compared line by line against generated text; keep them LF in every
+ # working tree so a Windows checkout does not read each line with a trailing CR.
+ src/contour/config/testdata/*.txt text eol=lf
+ 
+ # The terminal-state goldens: the stream is compared byte for byte, the text it restores to line by line. A
+ # CRLF checkout would change both, so the text stays LF and the stream is never converted.
+ src/vtbackend/state/golden/*.txt text eol=lf
+ src/vtbackend/state/golden/*.bin binary
++
++# The patches applied to fetched dependencies (cmake/ApplyPatchOnce.cmake) are `git apply`-ed to trees checked out
++# with LF: a CRLF checkout of a patch would match none of their lines.
++cmake/patches/*.patch -text
+diff --git a/cmake/ApplyPatchOnceTest.cmake b/cmake/ApplyPatchOnceTest.cmake
+index 11bbe8168..ac5c60c2d 100644
+--- a/cmake/ApplyPatchOnceTest.cmake
++++ b/cmake/ApplyPatchOnceTest.cmake
+@@ -1,13 +1,14 @@
+ # Self-test of ApplyPatchOnce.cmake, in a scratch tree under WORK_DIR: a tree without the patch is patched, a
+ # tree with it is left alone, and a tree holding part of it fails -- each through `git apply`, which asks no
+-# question, run without a terminal (stdin from the null device) as a build runs it.
++# question, run without a terminal (stdin from the null device) as a build runs it. Then the tree as a fetched
++# dependency is: a git clone of its own, which is patched alike.
+ #
+ #   ${CMAKE_COMMAND} -D GIT_EXECUTABLE=<git> -D WORK_DIR=<dir> -P ApplyPatchOnceTest.cmake
+ cmake_minimum_required(VERSION 3.25)
+ foreach(_required IN ITEMS GIT_EXECUTABLE WORK_DIR)
+     if(NOT ${_required})
+         message(FATAL_ERROR "ApplyPatchOnceTest.cmake needs -D ${_required}=...")
+     endif()
+ endforeach()
+ 
+ set(_script "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake")
+@@ -24,37 +25,55 @@ set(_original "")
+ foreach(_line RANGE 1 20)
+     string(APPEND _original "line ${_line}\n")
+ endforeach()
+ string(REPLACE "line 2\n" "line 2 patched\n" _first "${_original}")
+ string(REPLACE "line 19\n" "line 19 patched\n" _both "${_first}")
+ file(WRITE "${_patch}"
+      "--- a/file.txt\n+++ b/file.txt\n"
+      "@@ -1,5 +1,5 @@\n line 1\n-line 2\n+line 2 patched\n line 3\n line 4\n line 5\n"
+      "@@ -16,5 +16,5 @@\n line 16\n line 17\n line 18\n-line 19\n+line 19 patched\n line 20\n")
+ 
+-# Runs the script on the scratch tree holding @p content; @p status and @p output what it came to.
+-function(_run_on content status output)
+-    file(REMOVE_RECURSE "${_tree}")
+-    file(WRITE "${_tree}/file.txt" "${content}")
++# Runs the script on the scratch tree as it is; @p status and @p output what it came to.
++function(_apply status output)
+     execute_process(
+         COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}" -D "PATCH_FILE=${_patch}" -P "${_script}"
+         WORKING_DIRECTORY "${_tree}"
+         INPUT_FILE "${_null}"
+         RESULT_VARIABLE _status
+         OUTPUT_VARIABLE _output
+         ERROR_VARIABLE _output
+         TIMEOUT 60
+     )
+     set(${status} "${_status}" PARENT_SCOPE)
+     set(${output} "${_output}" PARENT_SCOPE)
+ endfunction()
+ 
++# Runs the script on a fresh scratch tree holding @p content; @p status and @p output what it came to. With a
++# fourth argument CLONE, the tree is a repository of its own, its content committed.
++function(_run_on content status output)
++    file(REMOVE_RECURSE "${_tree}")
++    file(WRITE "${_tree}/file.txt" "${content}")
++    if(ARGV3 STREQUAL "CLONE")
++        foreach(_git_step IN ITEMS "init;--quiet" "add;file.txt"
++                                   "-c;user.name=test;-c;user.email=test@invalid;-c;commit.gpgsign=false;commit;--quiet;-m;tree")
++            execute_process(COMMAND "${GIT_EXECUTABLE}" ${_git_step} WORKING_DIRECTORY "${_tree}"
++                            INPUT_FILE "${_null}" RESULT_VARIABLE _git_status OUTPUT_QUIET ERROR_QUIET)
++            if(NOT _git_status EQUAL 0)
++                message(FATAL_ERROR "apply-patch-once: could not make the clone (git ${_git_step}: ${_git_status})")
++            endif()
++        endforeach()
++    endif()
++    _apply(_status _output)
++    set(${status} "${_status}" PARENT_SCOPE)
++    set(${output} "${_output}" PARENT_SCOPE)
++endfunction()
++
+ # Fails the test, naming what was expected, unless the condition (given as if() takes it) holds.
+ macro(_expect description)
+     if(NOT (${ARGN}))
+         message(SEND_ERROR "apply-patch-once: FAILED: ${description}")
+     endif()
+ endmacro()
+ 
+ # Not applied: applied.
+ _run_on("${_original}" _status _output)
+ file(READ "${_tree}/file.txt" _after)
+@@ -67,12 +86,21 @@ file(READ "${_tree}/file.txt" _after)
+ _expect("a patched tree passes (exit ${_status}: ${_output})" _status EQUAL 0)
+ _expect("a patched tree is left as it was" _after STREQUAL _both)
+ _expect("a patched tree is said to be patched" _output MATCHES "Already applied")
+ 
+ # Half applied: fails, and changes nothing.
+ _run_on("${_first}" _status _output)
+ file(READ "${_tree}/file.txt" _after)
+ _expect("a half-patched tree fails" NOT _status EQUAL 0)
+ _expect("a half-patched tree is left as it was" _after STREQUAL _first)
+ 
++# A clone of its own, as CPM fetches a dependency: patched, and left alone once patched.
++_run_on("${_original}" _status _output CLONE)
++file(READ "${_tree}/file.txt" _after)
++_expect("an unpatched clone is patched (exit ${_status}: ${_output})" _status EQUAL 0)
++_expect("an unpatched clone ends up with both hunks" _after STREQUAL _both)
++_apply(_status _output)
++_expect("a patched clone passes (exit ${_status}: ${_output})" _status EQUAL 0)
++_expect("a patched clone is said to be patched" _output MATCHES "Already applied")
++
+ file(REMOVE_RECURSE "${WORK_DIR}")
+-message(STATUS "apply-patch-once: 3 states checked")
++message(STATUS "apply-patch-once: 4 states checked")
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index d347f5ba5..90cd06135 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -73,21 +73,23 @@ endif()
+ # caps, where its stderr goes and how its engine traps.
+ target_compile_definitions(vtextension_remote_wire PUBLIC
+     CONTOUR_BUILD_INSTRUMENTATION=$<IF:$<BOOL:${CONTOUR_SANITIZE}>,2,$<IF:$<BOOL:${CONTOUR_COVERAGE}>,1,0>>)
+ 
+ # vtextension_remote_process: starting extension host processes and knowing when they end, one source per
+ # operating system. It stays std-only -- the wire library and core-cpp, no engine and no vtbackend -- so that it,
+ # and its tests, cross-build for Windows and run under wine. Systems with none of the four have no launcher yet.
+ set(_process_sources_Linux process/Process_linux.cpp process/Process_linux.hpp)
+ set(_process_sources_FreeBSD process/Process_freebsd.cpp)
+ set(_process_sources_Darwin process/Process_macos.cpp)
+-set(_process_sources_Windows process/AppContainer_win32.cpp process/AppContainer_win32.hpp process/Process_win32.cpp)
++set(_process_sources_Windows
++    process/AppContainer_win32.cpp process/AppContainer_win32.hpp process/LaunchRefusal_win32.cpp
++    process/LaunchRefusal_win32.hpp process/Process_win32.cpp process/Process_win32.hpp)
+ set(_process_source "${_process_sources_${CMAKE_SYSTEM_NAME}}")
+ if(_process_source AND NOT WIN32)
+     # What the POSIX launchers share.
+     list(APPEND _process_source process/PosixLaunch.cpp process/PosixLaunch.hpp)
+ endif()
+ # What every system has of it: the lanes' watch, which the remote backend keeps and the supervisor reads, and the
+ # log of why no host serves, which the backend and the process connector both write to (through core::log).
+ add_library(vtextension_remote_process STATIC
+     HostRefusals.cpp
+     HostRefusals.hpp
+diff --git a/src/vtextension/wasm/remote/SharedGuestMemory.cpp b/src/vtextension/wasm/remote/SharedGuestMemory.cpp
+index 2ffc959db..06933cc74 100644
+--- a/src/vtextension/wasm/remote/SharedGuestMemory.cpp
++++ b/src/vtextension/wasm/remote/SharedGuestMemory.cpp
+@@ -100,21 +100,22 @@ std::expected<std::span<std::byte>, MemoryFailure> SharedGuestMemory::view(uint3
+ 
+ bool SharedGuestMemory::isAdmissible(uint64_t bytes) const noexcept
+ {
+     return isWholePages(bytes) && bytes > acknowledgedBytes() && bytes <= _capBytes && bytes <= objectBytes();
+ }
+ 
+ GrowVerdict SharedGuestMemory::grow(uint64_t bytes) noexcept
+ {
+     if (!isAdmissible(bytes))
+         return GrowVerdict::Violation;
+-    // Committed before it is acknowledged: no view reaches a page that is not.
++    // Committed before it is acknowledged: no view reaches a page that is not. And no further: on Windows a
++    // commit is the section's, so a page committed here is open in the helper's view too, closed or not.
+     if (!_mapping.commit(acknowledgedBytes(), bytes))
+         return GrowVerdict::Refused;
+     _acknowledged.store(bytes, std::memory_order_release);
+     return GrowVerdict::Granted;
+ }
+ 
+ GrowVerdict SharedGuestMemory::refuseGrowth(uint64_t bytes) const noexcept
+ {
+     return isAdmissible(bytes) ? GrowVerdict::Refused : GrowVerdict::Violation;
+ }
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_test.cpp b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+index 36c037570..84ea02778 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_test.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+@@ -30,20 +30,22 @@
+ 
+ #ifdef _WIN32
+     #include <algorithm>
+     #include <array>
+     #include <format>
+     #include <fstream>
+     #include <ranges>
+     #include <thread>
+ 
+     #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
++    #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
++    #include <vtextension/wasm/remote/process/Process_win32.hpp>
+ 
+     #define WIN32_LEAN_AND_MEAN
+     #include <AclAPI.h>
+     #include <WinSock2.h>
+     #include <Windows.h>
+     #include <sddl.h>
+ #endif
+ 
+ namespace process = vtextension::wasm::remote::process;
+ using process::ProcessIsolation;
+@@ -417,21 +419,24 @@ TEST_CASE("AppContainer.profileIsEnsuredOnce", "[vtextension][appcontainer]")
+             process::ensureAppContainer(fakeApi(calls, HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)));
+         CHECK(sid.has_value());
+         CHECK(calls->created == 1);
+         CHECK(calls->derived == 1);
+     }
+     SECTION("refused otherwise: the system lacks what it takes")
+     {
+         auto const calls = std::make_shared<ApiCalls>();
+         auto const sid = process::ensureAppContainer(fakeApi(calls, E_ACCESSDENIED));
+         REQUIRE_FALSE(sid.has_value());
+-        CHECK(sid.error() == process::LaunchError::Unsupported);
++        CHECK(sid.error()
++              == process::LaunchRefusal { .error = process::LaunchError::Unsupported,
++                                          .step = process::LaunchStep::Profile,
++                                          .code = static_cast<DWORD>(E_ACCESSDENIED) });
+         CHECK(calls->derived == 0);
+     }
+ }
+ 
+ TEST_CASE("AppContainer.packageGrantIsIdempotent", "[vtextension][appcontainer]")
+ {
+     auto const directory = ScratchDirectory { "package-grant" };
+     REQUIRE(protectDirectory(directory.path));
+     auto const before = packageEntriesOf(directory.path);
+     REQUIRE(before.has_value());
+@@ -452,21 +457,24 @@ TEST_CASE("AppContainer.packageGrantIsIdempotent", "[vtextension][appcontainer]"
+         auto const writes = std::make_shared<std::size_t>(0);
+         CHECK(process::ensurePackagesCanExecute(directory.path, apiThatMustNotWrite(writes)).has_value());
+         CHECK(*writes == 0);
+     }
+     SECTION("a directory this user may not change: not granted, and said with its fix")
+     {
+         auto const writes = std::make_shared<std::size_t>(0);
+         auto const api = apiThatMustNotWrite(writes);
+         auto const granted = process::ensurePackagesCanExecute(directory.path, api);
+         REQUIRE_FALSE(granted.has_value());
+-        CHECK(granted.error() == process::LaunchError::NotGranted);
++        CHECK(granted.error()
++              == process::LaunchRefusal { .error = process::LaunchError::NotGranted,
++                                          .step = process::LaunchStep::WriteGrant,
++                                          .code = ERROR_ACCESS_DENIED });
+         CHECK(*writes == 1);
+ 
+         auto lines = std::vector<std::string> {};
+         auto const calls = std::make_shared<ApiCalls>();
+         auto provisionApi = fakeApi(calls, S_OK);
+         provisionApi.readDacl = api.readDacl;
+         // Refused until an administrator grants it, as far as this test is concerned; then the system's own.
+         auto const refused = std::make_shared<bool>(true);
+         provisionApi.writeDacl = [writes, refused, system = process::systemAppContainerApi()](PCWSTR path,
+                                                                                               PACL dacl) {
+@@ -482,21 +490,21 @@ TEST_CASE("AppContainer.packageGrantIsIdempotent", "[vtextension][appcontainer]"
+         REQUIRE_FALSE(prepared.has_value());
+         REQUIRE(lines.size() == 1);
+         INFO(lines.front());
+         CHECK(lines.front().contains(directory.path.filename().string()));
+         CHECK(lines.front().contains("installer"));
+         CHECK(lines.front().contains("S-1-15-2-1"));
+ 
+         // The next launch asks again, and is refused alike without saying it a second time.
+         auto const again = provision.prepare(directory.path);
+         REQUIRE_FALSE(again.has_value());
+-        CHECK(again.error() == process::LaunchError::NotGranted);
++        CHECK(again.error().error == process::LaunchError::NotGranted);
+         CHECK(lines.size() == 1);
+         CHECK(*writes == 3);
+ 
+         // Once it may be granted, the next launch is: nothing is remembered against it.
+         *refused = false;
+         CHECK(provision.prepare(directory.path).has_value());
+         CHECK(*writes == 4);
+         CHECK(lines.size() == 1);
+         // And granted, it is not asked again.
+         CHECK(provision.prepare(directory.path).has_value());
+@@ -539,49 +547,59 @@ TEST_CASE("AppContainer.programFilesGrantIsSeen", "[vtextension][appcontainer]")
+         };
+         CHECK(process::ensurePackagesCanExecute(std::filesystem::temp_directory_path(), api).has_value()
+               == (row.writes == 0));
+         CHECK(*writes == row.writes);
+     }
+ }
+ 
+ namespace
+ {
+ 
++/// @return A launcher of this system's processes that records in @p lines what it would log.
++[[nodiscard]] std::shared_ptr<process::IProcessLauncher> recordingLauncher(std::vector<std::string>& lines)
++{
++    return process::makeWin32ProcessLauncher(process::systemAppContainerApi(),
++                                             [&lines](std::string_view line) { lines.emplace_back(line); });
++}
++
+ /// What the probe reported, by key.
+ using ProbeReport = std::vector<std::string>;
+ 
+ /// Starts the probe in @p isolation, asked to open @p profileFile and connect to 127.0.0.1:@p port, and reads
+ /// its report; fails the case, saying how the launch failed or how the probe ended, if there is none.
+ /// @return The report.
+ [[nodiscard]] ProbeReport probeReportIn(ProcessIsolation isolation,
+                                         std::filesystem::path const& profileFile,
+                                         uint16_t port)
+ {
+     auto standardError = process::testing::CapturedStandardError::create();
+     REQUIRE(standardError.has_value());
++    auto refusals = std::vector<std::string> {};
+     auto probe = process::testing::launchHelper(
+-        process::makeSystemProcessLauncher(),
++        recordingLauncher(refusals),
+         process::testing::HelperLaunch {
+             .executable = VTEXTENSION_PROBE_PATH,
+             .leading = { "--contained" },
+             .trailing =
+                 [&](std::span<vtextension::wasm::remote::transport::NativeHandle const> /*handles*/) {
+                     auto const utf8 = profileFile.u8string();
+                     return std::vector<std::string> { std::format("--profile-file={}",
+                                                                   std::string { utf8.begin(), utf8.end() }),
+                                                       std::format("--port={}", port) };
+                 },
+             .environment = process::defaultHelperEnvironment(),
+             .standardError = standardError->handle(),
+             .isolation = isolation });
+     INFO("launch: " << (probe ? std::string { "started" }
+                               : std::string { process::launchErrorText(probe.error()) }));
++    for (auto const& line: refusals)
++        UNSCOPED_INFO(line);
+     REQUIRE(probe.has_value());
+     auto report = process::testing::readReport(probe->control);
+     if (!report)
+         FAIL("no report: " << process::testing::endOf(
+                  *probe->launcher, *probe->process, [&] { return standardError->text(); }));
+     for (auto const& line: *report)
+         UNSCOPED_INFO(line);
+     probe->closeControl();
+     process::testing::checkEndedCleanly(
+         *probe->launcher, *probe->process, [&] { return standardError->text(); });
+@@ -629,30 +647,82 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
+         CHECK(valueOf(report, "profile-file") == "ok");
+         CHECK(valueOf(report, "connect") == "ok");
+         // Under wine the job's process count is not held: what it says is only recorded.
+         if (!process::testing::runsOnWine())
+             CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:1816");
+     }
+ 
+     if (process::testing::runsOnWine())
+     {
+         // What wine made of the contained launch, for the record; nothing it does proves a container.
++        auto refusals = std::vector<std::string> {};
+         auto const probe = process::testing::launchHelper(
+-            process::makeSystemProcessLauncher(),
++            recordingLauncher(refusals),
+             process::testing::HelperLaunch { .executable = VTEXTENSION_PROBE_PATH,
+                                              .leading = { "--contained" },
+                                              .environment = process::defaultHelperEnvironment(),
+                                              .isolation = ProcessIsolation::AppContainer });
+         auto const outcome = probe ? std::string { "it started" }
+-                                   : std::format("it failed: {}", process::launchErrorText(probe.error()));
++                                   : std::format("it failed: {}{}{}",
++                                                 process::launchErrorText(probe.error()),
++                                                 refusals.empty() ? "" : " -- ",
++                                                 refusals.empty() ? std::string {} : refusals.front());
+         SKIP(std::format("wine stubs AppContainers; the contained launch was asked for and {}", outcome));
+     }
+     INFO("contained");
+     auto const report = probeReportIn(ProcessIsolation::AppContainer, profileFile, *listener.port());
+     CHECK(valueOf(report, "container") == "yes");
+     CHECK(valueOf(report, "profile-file") == "refused:CreateFileW:5");
+     auto const connect = valueOf(report, "connect");
+     INFO("connect=" << connect);
+     CHECK(std::ranges::contains(ContainedConnectRefusals, std::string_view { connect }));
+     CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:5");
+ }
++TEST_CASE("LaunchRefusal.lineNamesTheStepAndTheCode", "[vtextension]")
++{
++    auto const win32 =
++        process::launchRefusalLine(process::LaunchRefusal { .error = process::LaunchError::Io,
++                                                            .step = process::LaunchStep::CreateProcess,
++                                                            .code = ERROR_INVALID_PARAMETER });
++    INFO(win32);
++    CHECK(win32.contains("Windows refused to create its process (error 87"));
++    CHECK(win32.contains(process::launchErrorText(process::LaunchError::Io)));
++    CHECK_FALSE(win32.contains('\n'));
++
++    auto const hresult =
++        process::launchRefusalLine(process::LaunchRefusal { .error = process::LaunchError::Unsupported,
++                                                            .step = process::LaunchStep::Profile,
++                                                            .code = static_cast<DWORD>(E_ACCESSDENIED) });
++    INFO(hresult);
++    CHECK(hresult.contains("app container profile (error 0x80070005"));
++}
++
++TEST_CASE("LaunchRefusal.refusalALaunchErrorLosesIsSaidOnce", "[vtextension]")
++{
++    // An argument that is not UTF-8 cannot be spelled for CreateProcessW(): `Io`, whose text cannot say so.
++    auto lines = std::vector<std::string> {};
++    auto const launcher = recordingLauncher(lines);
++    auto const spec = process::LaunchSpec {
++        .executable = VTEXTENSION_PROBE_PATH,
++        .arguments = [](auto /*handles*/) { return std::vector<std::string> { std::string { "\xFF" } }; },
++    };
++    for (auto const attempt: { 1, 2 })
++    {
++        INFO("attempt " << attempt);
++        auto const launched = launcher->launch(spec);
++        REQUIRE_FALSE(launched.has_value());
++        CHECK(launched.error() == process::LaunchError::Io);
++        REQUIRE(lines.size() == 1);
++        INFO(lines.front());
++        CHECK(lines.front().contains("spell its command line"));
++        CHECK(lines.front().contains("(error 1113"));
++    }
++
++    // One its text says all of is not logged.
++    auto const missing = launcher->launch(process::LaunchSpec {
++        .executable =
++            std::filesystem::path { VTEXTENSION_PROBE_PATH }.replace_filename("no-such-program.exe") });
++    REQUIRE_FALSE(missing.has_value());
++    CHECK(missing.error() == process::LaunchError::NotFound);
++    CHECK(lines.size() == 1);
++}
+ #endif
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+index 553b40b2c..e9ed995f0 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+@@ -97,25 +97,28 @@ namespace
+ 
+     /// @return The SID of ALL APPLICATION PACKAGES; nothing if the system cannot spell it.
+     [[nodiscard]] LocalMemory allApplicationPackages() noexcept
+     {
+         PSID sid = nullptr;
+         if (!::ConvertStringSidToSidW(std::wstring { AllApplicationPackagesSid }.c_str(), &sid))
+             return LocalMemory {};
+         return LocalMemory { sid };
+     }
+ 
+-    /// @return Why a DACL could not be read or written, as a launch failure: `NotGranted` where this user
+-    ///         may not change it.
+-    [[nodiscard]] LaunchError daclErrorOf(DWORD error) noexcept
++    /// @return Why a DACL could not be read or written at @p step, as a launch failure: `NotGranted` where
++    ///         this user may not change it.
++    [[nodiscard]] LaunchRefusal daclRefusalOf(LaunchStep step, DWORD error) noexcept
+     {
+-        return error == ERROR_ACCESS_DENIED ? LaunchError::NotGranted : LaunchError::Io;
++        return LaunchRefusal { .error =
++                                   error == ERROR_ACCESS_DENIED ? LaunchError::NotGranted : LaunchError::Io,
++                               .step = step,
++                               .code = error };
+     }
+ 
+     /// @return @p path in UTF-8, as every line Contour logs is; path::string() would spell it in the ANSI
+     ///         code page, and throw where that has no spelling.
+     [[nodiscard]] std::string utf8Of(std::filesystem::path const& path)
+     {
+         auto const utf8 = path.u8string();
+         return std::string { utf8.begin(), utf8.end() };
+     }
+ } // namespace
+@@ -146,87 +149,91 @@ AppContainerApi systemAppContainerApi()
+                                                SE_FILE_OBJECT,
+                                                DACL_SECURITY_INFORMATION,
+                                                nullptr,
+                                                nullptr,
+                                                dacl,
+                                                nullptr);
+             },
+     };
+ }
+ 
+-std::expected<OwnedSid, LaunchError> ensureAppContainer(AppContainerApi const& api)
++std::expected<OwnedSid, LaunchRefusal> ensureAppContainer(AppContainerApi const& api)
+ {
+     auto const name = std::wstring { AppContainerName };
+     PSID sid = nullptr;
+     auto result = api.createProfile(
+         name.c_str(), L"Contour extension host", L"Runs Contour's status-line extensions.", &sid);
+     if (result == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS))
+         result = api.deriveSid(name.c_str(), &sid);
+     if (FAILED(result) || sid == nullptr)
+-        return std::unexpected(LaunchError::Unsupported);
++        return std::unexpected(LaunchRefusal { .error = LaunchError::Unsupported,
++                                               .step = LaunchStep::Profile,
++                                               .code = static_cast<DWORD>(result) });
+     return OwnedSid { sid };
+ }
+ 
+-std::expected<void, LaunchError> ensurePackagesCanExecute(std::filesystem::path const& directory,
+-                                                          AppContainerApi const& api)
++std::expected<void, LaunchRefusal> ensurePackagesCanExecute(std::filesystem::path const& directory,
++                                                            AppContainerApi const& api)
+ {
+     auto const packages = allApplicationPackages();
+     if (!packages)
+-        return std::unexpected(LaunchError::Io);
++        return std::unexpected(LaunchRefusal {
++            .error = LaunchError::Io, .step = LaunchStep::PackagesSid, .code = ::GetLastError() });
+     PACL dacl = nullptr;
+     PSECURITY_DESCRIPTOR descriptor = nullptr;
+     if (auto const error = api.readDacl(directory.c_str(), &dacl, &descriptor); error != ERROR_SUCCESS)
+-        return std::unexpected(daclErrorOf(error));
++        return std::unexpected(daclRefusalOf(LaunchStep::ReadGrant, error));
+     auto const ownedDescriptor = LocalMemory { descriptor };
+     if (grantsReadAndExecute(dacl, packages.get()))
+         return {};
+ 
+     // One entry for the directory and the files directly in it -- the helper and the libraries beside it --
+     // and for nothing beneath: no propagation, so a subdirectory holds not even an inherit-only copy for its
+     // own files. Nothing a contained process loads lives deeper.
+     auto access = EXPLICIT_ACCESS_W {};
+     access.grfAccessPermissions = ReadAndExecute;
+     access.grfAccessMode = GRANT_ACCESS;
+     access.grfInheritance = OBJECT_INHERIT_ACE | NO_PROPAGATE_INHERIT_ACE;
+     access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+     access.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+     access.Trustee.ptstrName = static_cast<LPWSTR>(packages.get());
+     PACL granted = nullptr;
+     if (auto const error = ::SetEntriesInAclW(1, &access, dacl, &granted); error != ERROR_SUCCESS)
+-        return std::unexpected(LaunchError::Io);
++        return std::unexpected(
++            LaunchRefusal { .error = LaunchError::Io, .step = LaunchStep::Grant, .code = error });
+     auto const ownedGranted = LocalMemory { granted };
+     if (auto const error = api.writeDacl(directory.c_str(), granted); error != ERROR_SUCCESS)
+-        return std::unexpected(daclErrorOf(error));
++        return std::unexpected(daclRefusalOf(LaunchStep::WriteGrant, error));
+     return {};
+ }
+ 
+ AppContainerProvision::AppContainerProvision(AppContainerApi api,
+                                              std::function<void(std::string_view line)> diagnostics):
+     _api { std::move(api) }, _diagnostics { std::move(diagnostics) }
+ {
+ }
+ 
+-std::expected<PSID, LaunchError> AppContainerProvision::prepare(std::filesystem::path const& directory)
++std::expected<PSID, LaunchRefusal> AppContainerProvision::prepare(std::filesystem::path const& directory)
+ {
+     if (!_sid)
+     {
+         auto sid = ensureAppContainer(_api);
+         if (!sid)
+             return std::unexpected(sid.error());
+         _sid = *std::move(sid);
+     }
+     if (!std::ranges::contains(_grantedDirectories, directory))
+     {
+         // Asked at every launch, as an administrator may grant it meanwhile; said once, not at every launch.
+         if (auto const granted = ensurePackagesCanExecute(directory, _api); !granted)
+         {
+-            if (granted.error() == LaunchError::NotGranted
++            if (granted.error().error == LaunchError::NotGranted
+                 && !std::ranges::contains(_ungrantableDirectories, directory))
+             {
+                 _ungrantableDirectories.push_back(directory);
+                 _diagnostics(
+                     std::format("The extension host in {} cannot run contained: Windows app containers "
+                                 "may not read and execute that directory, and this user may not "
+                                 "grant it. The installer must grant ALL APPLICATION PACKAGES ({}) "
+                                 "read and execute access there.",
+                                 utf8Of(directory),
+                                 utf8Of(std::filesystem::path { AllApplicationPackagesSid })));
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.hpp b/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
+index 6535a8d65..f193cd569 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
+@@ -13,20 +13,21 @@
+ 
+ #include <expected>
+ #include <filesystem>
+ #include <functional>
+ #include <memory>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+ #include <vector>
+ 
++#include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ /// The name of the extension host's AppContainer profile.
+ inline constexpr auto AppContainerName = std::wstring_view { L"Contour.ExtensionHost" };
+@@ -54,48 +55,50 @@ struct AppContainerApi
+     std::function<DWORD(PCWSTR path, PACL* dacl, PSECURITY_DESCRIPTOR* descriptor)> readDacl;
+     /// SetNamedSecurityInfoW() of a file's DACL, which propagates its inheritable entries to the children.
+     std::function<DWORD(PCWSTR path, PACL dacl)> writeDacl;
+ };
+ 
+ /// @return The system's functions.
+ [[nodiscard]] AppContainerApi systemAppContainerApi();
+ 
+ /// Creates the extension host's profile (AppContainerName), with no capabilities, or finds it already there.
+ /// @param api What the system is asked through.
+-/// @return Its SID; `Unsupported` if the system neither created nor had it.
+-[[nodiscard]] std::expected<OwnedSid, LaunchError> ensureAppContainer(AppContainerApi const& api);
++/// @return Its SID; `Unsupported` if the system neither created nor had it, with the HRESULT it said.
++[[nodiscard]] std::expected<OwnedSid, LaunchRefusal> ensureAppContainer(AppContainerApi const& api);
+ 
+ /// Lets every AppContainer read and execute @p directory and the files in it, unless its DACL lets them
+ /// already -- whether by an entry of its own or an inherited one, as `Program Files` does. What it adds
+ /// reaches the files directly in @p directory, and nothing beneath it.
+ /// @param directory The helper's directory.
+ /// @param api What the system is asked through.
+ /// @return Nothing once they may; `NotGranted` if this user may not change the DACL (an installation it does
+-///         not own, whose installer must grant it), `Io` if the system refused otherwise.
+-[[nodiscard]] std::expected<void, LaunchError> ensurePackagesCanExecute(
++///         not own, whose installer must grant it), `Io` if the system refused otherwise; each with the step
++///         refused and its code.
++[[nodiscard]] std::expected<void, LaunchRefusal> ensurePackagesCanExecute(
+     std::filesystem::path const& directory, AppContainerApi const& api);
+ 
+ /// What a launcher starts contained processes with: the profile, ensured on first use, and each executable
+ /// directory's grant, ensured once. Used by one thread at a time (the supervisor's).
+ class AppContainerProvision
+ {
+   public:
+     /// @param api What the system is asked through.
+     /// @param diagnostics Where a grant this user may not make is said, with the directory and the fix:
+     ///        Contour's error log.
+     AppContainerProvision(AppContainerApi api, std::function<void(std::string_view line)> diagnostics);
+ 
+     /// Ensures the profile, once, and that executables in @p directory may run in it, once per directory. A
+     /// directory this user may not grant is asked of again at every launch, but said only once.
+     /// @param directory The directory of the executable about to be started.
+-    /// @return The container's SID, owned by this provision; why it cannot be used.
+-    [[nodiscard]] std::expected<PSID, LaunchError> prepare(std::filesystem::path const& directory);
++    /// @return The container's SID, owned by this provision; why it cannot be used, and where the system
++    ///         refused.
++    [[nodiscard]] std::expected<PSID, LaunchRefusal> prepare(std::filesystem::path const& directory);
+ 
+   private:
+     AppContainerApi _api;
+     std::function<void(std::string_view line)> _diagnostics;
+     std::optional<OwnedSid> _sid;                           ///< Once ensured.
+     std::vector<std::filesystem::path> _grantedDirectories; ///< Each directory ensured.
+     std::vector<std::filesystem::path>
+         _ungrantableDirectories; ///< Each directory refused `NotGranted`, said once.
+ };
+ 
+diff --git a/src/vtextension/wasm/remote/process/LaunchRefusal_win32.cpp b/src/vtextension/wasm/remote/process/LaunchRefusal_win32.cpp
+new file mode 100644
+index 000000000..841823d3d
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/LaunchRefusal_win32.cpp
+@@ -0,0 +1,76 @@
++// SPDX-License-Identifier: Apache-2.0
++#include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
++
++#include <algorithm>
++#include <cstddef>
++#include <format>
++#include <memory>
++#include <ranges>
++#include <string>
++#include <string_view>
++#include <utility>
++
++namespace vtextension::wasm::remote::process
++{
++
++namespace
++{
++    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, LaunchSteps.size()),
++                                      [](std::size_t index) {
++                                          return std::to_underlying(LaunchSteps[index].step) == index;
++                                      }),
++                  "LaunchSteps holds each step at its enumerator's index");
++    static_assert(LaunchSteps.back().step == LaunchStep::CreateProcess, "LaunchSteps holds every step");
++
++    /// Frees what FormatMessageW() allocated.
++    struct LocalMemoryFree
++    {
++        void operator()(wchar_t* memory) const noexcept { ::LocalFree(memory); }
++    };
++
++    /// @return What the system calls @p code, as UTF-8, without its line break; empty if it has no words.
++    [[nodiscard]] std::string systemWordsFor(DWORD code)
++    {
++        wchar_t* buffer = nullptr;
++        auto const length = ::FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
++                                                 | FORMAT_MESSAGE_IGNORE_INSERTS,
++                                             nullptr,
++                                             code,
++                                             0,
++                                             reinterpret_cast<wchar_t*>(&buffer),
++                                             0,
++                                             nullptr);
++        auto const owned = std::unique_ptr<wchar_t, LocalMemoryFree> { buffer };
++        if (length == 0 || buffer == nullptr)
++            return {};
++        auto words = std::wstring_view { buffer, length };
++        while (!words.empty() && (words.back() == L'\r' || words.back() == L'\n' || words.back() == L' '))
++            words.remove_suffix(1);
++        if (words.empty())
++            return {};
++        auto const size = ::WideCharToMultiByte(
++            CP_UTF8, 0, words.data(), static_cast<int>(words.size()), nullptr, 0, nullptr, nullptr);
++        if (size <= 0)
++            return {};
++        auto utf8 = std::string(static_cast<std::size_t>(size), '\0');
++        ::WideCharToMultiByte(
++            CP_UTF8, 0, words.data(), static_cast<int>(words.size()), utf8.data(), size, nullptr, nullptr);
++        return utf8;
++    }
++} // namespace
++
++std::string launchRefusalLine(LaunchRefusal const& refusal)
++{
++    auto const& row = LaunchSteps[std::to_underlying(refusal.step)];
++    auto const code = row.code == RefusalCode::HResult ? std::format("0x{:08X}", refusal.code)
++                                                       : std::format("{}", refusal.code);
++    auto const words = systemWordsFor(refusal.code);
++    return std::format("The extension host could not be started: Windows refused {} (error {}{}{}): {}.",
++                       row.text,
++                       code,
++                       words.empty() ? "" : ", ",
++                       words,
++                       launchErrorText(refusal.error));
++}
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/LaunchRefusal_win32.hpp b/src/vtextension/wasm/remote/process/LaunchRefusal_win32.hpp
+new file mode 100644
+index 000000000..601e2e7bf
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/LaunchRefusal_win32.hpp
+@@ -0,0 +1,119 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// Windows only: where the system refused to start a process, and with which code. A LaunchError says what a
++/// refusal means; for the ones that cannot say what was refused (DetailedLaunchErrors), the launcher logs
++/// this too, so that a refusal seen once -- on a user's machine, on a CI runner -- can be traced.
++
++#include <array>
++#include <cstdint>
++#include <string>
++#include <string_view>
++
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++
++#define WIN32_LEAN_AND_MEAN
++#include <Windows.h>
++
++namespace vtextension::wasm::remote::process
++{
++
++/// A step of starting a process that the system may refuse.
++enum class LaunchStep : uint8_t
++{
++    Executable,         ///< Looking the executable up.
++    Profile,            ///< Creating or finding the AppContainer profile.
++    PackagesSid,        ///< Spelling the SID of ALL APPLICATION PACKAGES.
++    ReadGrant,          ///< Reading the executable directory's DACL.
++    Grant,              ///< Adding the AppContainer grant to it.
++    WriteGrant,         ///< Writing it back.
++    CopyHandle,         ///< Duplicating a handle the child inherits.
++    NullDevice,         ///< Opening the null device.
++    Job,                ///< Making the child's job.
++    AttributeList,      ///< Making the attribute list.
++    HandleList,         ///< Setting the attribute of the handles it inherits.
++    JobList,            ///< Setting the attribute of its job.
++    Container,          ///< Setting the attribute of its AppContainer.
++    ChildProcessPolicy, ///< Setting the attribute that forbids it a child process.
++    Spelling,           ///< Spelling its command line or environment in UTF-16.
++    Inheritance,        ///< Making its handles inheritable.
++    CreateProcess,      ///< Creating the process.
++};
++
++/// How a step's code is to be read.
++enum class RefusalCode : uint8_t
++{
++    Win32,   ///< A Win32 error code (GetLastError()), said in decimal.
++    HResult, ///< An HRESULT, said in hexadecimal.
++};
++
++/// One step: what it is, in a line of Contour's log, and how its code reads.
++struct LaunchStepRow
++{
++    LaunchStep step;       ///< The step.
++    std::string_view text; ///< What Windows refused, completing "Windows refused ...".
++    RefusalCode code;      ///< How its code reads.
++};
++
++/// Every LaunchStep, one row each, at its enumerator's index.
++inline constexpr auto LaunchSteps = std::to_array<LaunchStepRow>({
++    { .step = LaunchStep::Executable, .text = "to find its executable", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::Profile,
++      .text = "to create or find its app container profile",
++      .code = RefusalCode::HResult },
++    { .step = LaunchStep::PackagesSid,
++      .text = "to name ALL APPLICATION PACKAGES",
++      .code = RefusalCode::Win32 },
++    { .step = LaunchStep::ReadGrant,
++      .text = "to read the access list of its directory",
++      .code = RefusalCode::Win32 },
++    { .step = LaunchStep::Grant,
++      .text = "to add app containers to the access list of its directory",
++      .code = RefusalCode::Win32 },
++    { .step = LaunchStep::WriteGrant,
++      .text = "to write the access list of its directory",
++      .code = RefusalCode::Win32 },
++    { .step = LaunchStep::CopyHandle, .text = "to copy a handle it inherits", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::NullDevice, .text = "to open the null device", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::Job, .text = "to make its job", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::AttributeList, .text = "to make its attribute list", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::HandleList, .text = "the handles it inherits", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::JobList, .text = "to start it in its job", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::Container, .text = "to start it in its app container", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::ChildProcessPolicy,
++      .text = "to forbid it child processes",
++      .code = RefusalCode::Win32 },
++    { .step = LaunchStep::Spelling,
++      .text = "to spell its command line or environment",
++      .code = RefusalCode::Win32 },
++    { .step = LaunchStep::Inheritance, .text = "to let it inherit its handles", .code = RefusalCode::Win32 },
++    { .step = LaunchStep::CreateProcess, .text = "to create its process", .code = RefusalCode::Win32 },
++});
++
++/// The launch errors whose text cannot say what the system refused: a refusal mapped to one of them is
++/// logged with its step and code. `NotFound`, `Resources` and `NotGranted` say enough; `Stopped` is no
++/// refusal.
++inline constexpr auto DetailedLaunchErrors = std::to_array<LaunchError>({
++    LaunchError::Unsupported,
++    LaunchError::Io,
++});
++
++/// Where and how the system refused a launch.
++struct LaunchRefusal
++{
++    LaunchError error; ///< What it means to the launch.
++    LaunchStep step;   ///< The step refused.
++    /// The system's code: GetLastError()'s, or the HRESULT where the step's row says so. An HRESULT is
++    /// carried bit for bit.
++    DWORD code;
++
++    bool operator==(LaunchRefusal const&) const = default;
++};
++
++/// @param refusal Where and how the system refused a launch.
++/// @return Its line in Contour's log: the step and the code, with the system's own words for it where it
++///         has some, as UTF-8.
++[[nodiscard]] std::string launchRefusalLine(LaunchRefusal const& refusal);
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.cpp b/src/vtextension/wasm/remote/process/Process_win32.cpp
+index 58b6287b8..c86d06375 100644
+--- a/src/vtextension/wasm/remote/process/Process_win32.cpp
++++ b/src/vtextension/wasm/remote/process/Process_win32.cpp
+@@ -21,41 +21,45 @@
+ // Ctrl+C events.
+ //
+ // The inheritance window. The handle list binds only this CreateProcessW(): while the duplicates are
+ // inheritable, any other CreateProcess() of this process that inherits handles without a list of its own
+ // (QProcess, a library's launcher) inherits them too -- a channel end, the interrupt page, the wake event --
+ // and that stranger's copy of a lane end keeps a dead helper's lane from ending (its parent end would never
+ // read Closed). So the duplicates are made uninheritable, the command line is built from their values, and
+ // only right before CreateProcessW() are they made inheritable; right after it they are closed, whatever it
+ // returned. The window is that one call. Helper launches never race one another in it: every one runs on the
+ // supervisor's thread. macOS has the like window, on its channel ends (Process_macos.cpp).
++#include <vtextension/wasm/remote/process/Process_win32.hpp>
++
+ #include <algorithm>
+ #include <array>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cwctype>
+ #include <expected>
+ #include <filesystem>
++#include <functional>
+ #include <memory>
+ #include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
+ #include <vtextension/wasm/remote/HostRefusals.hpp>
+ #include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
++#include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ namespace
+ {
+@@ -85,20 +89,26 @@ namespace
+             case ERROR_OUTOFMEMORY:
+             case ERROR_NO_SYSTEM_RESOURCES:
+             case ERROR_COMMITMENT_LIMIT:
+             case ERROR_TOO_MANY_OPEN_FILES: return LaunchError::Resources;
+             case ERROR_NOT_SUPPORTED:
+             case ERROR_CALL_NOT_IMPLEMENTED: return LaunchError::Unsupported;
+             default: return LaunchError::Io;
+         }
+     }
+ 
++    /// @return Why a call at @p step that set @p error failed to start a process, and where.
++    [[nodiscard]] LaunchRefusal refusalOf(LaunchStep step, DWORD error) noexcept
++    {
++        return LaunchRefusal { .error = launchErrorOf(error), .step = step, .code = error };
++    }
++
+     /// @return @p text, UTF-8, as UTF-16; nothing if it is not UTF-8.
+     [[nodiscard]] std::optional<std::wstring> wideOf(std::string_view text)
+     {
+         if (text.empty())
+             return std::wstring {};
+         auto const size = ::MultiByteToWideChar(
+             CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+         if (size == 0)
+             return std::nullopt;
+         auto wide = std::wstring(static_cast<std::size_t>(size), L'\0');
+@@ -192,34 +202,35 @@ namespace
+         }
+         AttributeList& operator=(AttributeList&&) = delete;
+         AttributeList(AttributeList const&) = delete;
+         AttributeList& operator=(AttributeList const&) = delete;
+         ~AttributeList()
+         {
+             if (_list != nullptr)
+                 ::DeleteProcThreadAttributeList(_list);
+         }
+ 
+-        /// Sets @p attribute to @p values, which must outlive the list's use.
++        /// Sets @p attribute, the launch's @p step, to @p values, which must outlive the list's use.
+         /// @return Nothing; or why the list refused it.
+         template <typename T, std::size_t Extent>
+-        [[nodiscard]] std::expected<void, LaunchError> set(DWORD_PTR attribute,
+-                                                           std::span<T, Extent> values) noexcept
++        [[nodiscard]] std::expected<void, LaunchRefusal> set(LaunchStep step,
++                                                             DWORD_PTR attribute,
++                                                             std::span<T, Extent> values) noexcept
+         {
+             if (!::UpdateProcThreadAttribute(_list,
+                                              0,
+                                              attribute,
+                                              static_cast<void*>(values.data()),
+                                              values.size_bytes(),
+                                              nullptr,
+                                              nullptr))
+-                return std::unexpected(launchErrorOf(::GetLastError()));
++                return std::unexpected(refusalOf(step, ::GetLastError()));
+             return {};
+         }
+ 
+         [[nodiscard]] LPPROC_THREAD_ATTRIBUTE_LIST get() const noexcept { return _list; }
+ 
+       private:
+         AttributeList(std::unique_ptr<std::byte[]> storage, LPPROC_THREAD_ATTRIBUTE_LIST list) noexcept:
+             _storage { std::move(storage) }, _list { list }
+         {
+         }
+@@ -233,25 +244,26 @@ namespace
+     {
+         auto copy = HANDLE { nullptr };
+         if (!::DuplicateHandle(
+                 ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
+             return OwnedHandle {};
+         return OwnedHandle { copy };
+     }
+ 
+     /// Makes each of @p handles inheritable.
+     /// @return Nothing; or why one could not be.
+-    [[nodiscard]] std::expected<void, LaunchError> allowInheritance(std::span<HANDLE const> handles) noexcept
++    [[nodiscard]] std::expected<void, LaunchRefusal> allowInheritance(
++        std::span<HANDLE const> handles) noexcept
+     {
+         for (auto* const handle: handles)
+             if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+-                return std::unexpected(launchErrorOf(::GetLastError()));
++                return std::unexpected(refusalOf(LaunchStep::Inheritance, ::GetLastError()));
+         return {};
+     }
+ 
+     /// @return A job that kills its process when closed, allows it no second one, caps its memory at
+     ///         @p dataBytes (0: no cap) and ends it on an unhandled exception; nothing if it could not be
+     ///         made.
+     [[nodiscard]] OwnedHandle makeJob(uint64_t dataBytes) noexcept
+     {
+         auto job = OwnedHandle { ::CreateJobObjectW(nullptr, nullptr) };
+         if (!job)
+@@ -401,55 +413,90 @@ namespace
+     /// What an isolated launch adds to the attribute list: the container and the child process policy.
+     struct ContainedAttributes
+     {
+         SECURITY_CAPABILITIES capabilities; ///< The container's SID, and no capability.
+         DWORD childProcessPolicy;           ///< PROCESS_CREATION_CHILD_PROCESS_RESTRICTED.
+     };
+ 
+     class Win32ProcessLauncher final: public IProcessLauncher
+     {
+       public:
+-        /// @param containers What isolated launches are prepared with.
+-        explicit Win32ProcessLauncher(AppContainerProvision containers): _containers { std::move(containers) }
++        /// @param api What isolated launches' containers are ensured through.
++        /// @param diagnostics Where a refusal its launch error cannot tell apart is said, once per step and
++        ///        code, and a grant this user may not make: Contour's error log.
++        Win32ProcessLauncher(AppContainerApi api, std::function<void(std::string_view line)> diagnostics):
++            _containers { std::move(api), diagnostics }, _diagnostics { std::move(diagnostics) }
+         {
+         }
+ 
+         [[nodiscard]] std::expected<std::unique_ptr<IProcessHandle>, LaunchError> launch(
+             LaunchSpec const& spec) override
++        {
++            return start(spec).transform_error([this](LaunchRefusal const& refusal) {
++                if (std::ranges::contains(DetailedLaunchErrors, refusal.error)
++                    && !std::ranges::contains(_saidRefusals, std::pair { refusal.step, refusal.code }))
++                {
++                    _saidRefusals.emplace_back(refusal.step, refusal.code);
++                    _diagnostics(launchRefusalLine(refusal));
++                }
++                return refusal.error;
++            });
++        }
++
++        [[nodiscard]] std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makeWaitSet(
++            core::IClock& clock) override
++        {
++            auto wake = OwnedHandle { ::CreateEventW(nullptr, FALSE, FALSE, nullptr) };
++            if (!wake)
++                return std::unexpected(launchErrorOf(::GetLastError()));
++            return std::make_unique<Win32ExitWaitSet>(clock, std::move(wake));
++        }
++
++      private:
++        /// Starts @p spec's process.
++        /// @return Its handle; or why and where the system refused.
++        [[nodiscard]] std::expected<std::unique_ptr<IProcessHandle>, LaunchRefusal> start(
++            LaunchSpec const& spec)
+         {
+             auto const executable = std::filesystem::absolute(spec.executable);
+             auto const attributes = ::GetFileAttributesW(executable.c_str());
+-            if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+-                return std::unexpected(LaunchError::NotFound);
++            if (attributes == INVALID_FILE_ATTRIBUTES)
++                return std::unexpected(LaunchRefusal { .error = LaunchError::NotFound,
++                                                       .step = LaunchStep::Executable,
++                                                       .code = ::GetLastError() });
++            if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
++                return std::unexpected(LaunchRefusal { .error = LaunchError::NotFound,
++                                                       .step = LaunchStep::Executable,
++                                                       .code = ERROR_DIRECTORY });
+ 
+             // The child's copies, uninheritable until right before CreateProcessW() (the file head's window).
+             auto owned = std::vector<OwnedHandle> {};
+             auto childHandles = std::vector<transport::NativeHandle> {};
+             for (auto const handle: spec.inherited)
+             {
+                 auto copy = copyOf(handle);
+                 if (!copy)
+-                    return std::unexpected(launchErrorOf(::GetLastError()));
++                    return std::unexpected(refusalOf(LaunchStep::CopyHandle, ::GetLastError()));
+                 childHandles.push_back(copy.get());
+                 owned.push_back(std::move(copy));
+             }
+             auto nullDevice = OwnedHandle { ::CreateFileW(L"NUL",
+                                                           GENERIC_READ | GENERIC_WRITE,
+                                                           FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                           nullptr,
+                                                           OPEN_EXISTING,
+                                                           0,
+                                                           nullptr) };
+             if (nullDevice.get() == INVALID_HANDLE_VALUE)
+             {
+                 std::ignore = nullDevice.release();
+-                return std::unexpected(launchErrorOf(::GetLastError()));
++                return std::unexpected(refusalOf(LaunchStep::NullDevice, ::GetLastError()));
+             }
+             // The stderr the spec names, if it is a handle; the null device if not.
+             auto errorOutput = OwnedHandle {};
+             if (spec.standardError && *spec.standardError != nullptr
+                 && *spec.standardError != INVALID_HANDLE_VALUE)
+                 errorOutput = copyOf(*spec.standardError);
+             auto* const childError = errorOutput ? errorOutput.get() : nullDevice.get();
+ 
+             auto handleList = childHandles;
+             handleList.push_back(nullDevice.get());
+@@ -466,56 +513,62 @@ namespace
+                     .capabilities = SECURITY_CAPABILITIES { .AppContainerSid = *container,
+                                                             .Capabilities = nullptr,
+                                                             .CapabilityCount = 0,
+                                                             .Reserved = 0 },
+                     .childProcessPolicy = PROCESS_CREATION_CHILD_PROCESS_RESTRICTED,
+                 };
+             }
+ 
+             auto job = makeJob(spec.caps.dataBytes);
+             if (!job)
+-                return std::unexpected(launchErrorOf(::GetLastError()));
++                return std::unexpected(refusalOf(LaunchStep::Job, ::GetLastError()));
+             auto jobList = std::array<HANDLE, 1> { job.get() };
+             auto list = AttributeList::create(contained ? 4 : 2);
+             if (!list)
+-                return std::unexpected(launchErrorOf(::GetLastError()));
++                return std::unexpected(refusalOf(LaunchStep::AttributeList, ::GetLastError()));
+             if (auto const set =
+-                    list->set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, std::span { handleList })
+-                        .and_then(
+-                            [&] { return list->set(PROC_THREAD_ATTRIBUTE_JOB_LIST, std::span { jobList }); })
+-                        .and_then([&]() -> std::expected<void, LaunchError> {
++                    list->set(LaunchStep::HandleList,
++                              PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
++                              std::span { handleList })
++                        .and_then([&] {
++                            return list->set(
++                                LaunchStep::JobList, PROC_THREAD_ATTRIBUTE_JOB_LIST, std::span { jobList });
++                        })
++                        .and_then([&]() -> std::expected<void, LaunchRefusal> {
+                             if (!contained)
+                                 return {};
+                             return list
+-                                ->set(PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
++                                ->set(LaunchStep::Container,
++                                      PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+                                       std::span { &contained->capabilities, 1 })
+                                 .and_then([&] {
+-                                    return list->set(PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY,
++                                    return list->set(LaunchStep::ChildProcessPolicy,
++                                                     PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY,
+                                                      std::span { &contained->childProcessPolicy, 1 });
+                                 });
+                         });
+                 !set)
+                 return std::unexpected(set.error());
+ 
+             auto commandLine = std::wstring {};
+             appendArgument(commandLine, executable.wstring());
+             for (auto const& argument:
+                  spec.arguments ? spec.arguments(childHandles) : std::vector<std::string> {})
+             {
+                 auto const wide = wideOf(argument);
+                 if (!wide)
+-                    return std::unexpected(LaunchError::Io);
++                    return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
+                 appendArgument(commandLine, *wide);
+             }
+             auto block = environmentBlock(spec.environment);
+             if (!block)
+-                return std::unexpected(LaunchError::Io);
++                return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
+             auto const workingDirectory =
+                 (contained ? executable.parent_path() : executable.root_path()).wstring();
+ 
+             auto startup = STARTUPINFOEXW {};
+             startup.StartupInfo.cb = sizeof(startup);
+             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+             startup.StartupInfo.hStdInput = nullDevice.get();
+             startup.StartupInfo.hStdOutput = nullDevice.get();
+             startup.StartupInfo.hStdError = childError;
+             startup.lpAttributeList = list->get();
+@@ -532,46 +585,43 @@ namespace
+                                  block->data(),
+                                  workingDirectory.c_str(),
+                                  &startup.StartupInfo,
+                                  &info);
+             auto const error = ::GetLastError();
+             // Closed at once: the child holds its own copies, and no other process may inherit these.
+             owned.clear();
+             nullDevice.reset();
+             errorOutput.reset();
+             if (!created)
+-                return std::unexpected(launchErrorOf(error));
++                return std::unexpected(refusalOf(LaunchStep::CreateProcess, error));
+             ::CloseHandle(info.hThread);
+             return std::make_unique<Win32ProcessHandle>(
+                 OwnedHandle { info.hProcess }, std::move(job), static_cast<ProcessId>(info.dwProcessId));
+         }
+ 
+-        [[nodiscard]] std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makeWaitSet(
+-            core::IClock& clock) override
+-        {
+-            auto wake = OwnedHandle { ::CreateEventW(nullptr, FALSE, FALSE, nullptr) };
+-            if (!wake)
+-                return std::unexpected(launchErrorOf(::GetLastError()));
+-            return std::make_unique<Win32ExitWaitSet>(clock, std::move(wake));
+-        }
+-
+-      private:
+         AppContainerProvision _containers; ///< Ensured on the first isolated launch; used on this one thread.
++        std::function<void(std::string_view line)> _diagnostics;
++        std::vector<std::pair<LaunchStep, DWORD>> _saidRefusals; ///< Each step and code said already.
+     };
+ } // namespace
+ 
++std::shared_ptr<IProcessLauncher> makeWin32ProcessLauncher(
++    AppContainerApi api, std::function<void(std::string_view line)> diagnostics)
++{
++    return std::make_shared<Win32ProcessLauncher>(std::move(api), std::move(diagnostics));
++}
++
+ std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
+ {
+-    return std::make_shared<Win32ProcessLauncher>(
+-        AppContainerProvision { systemAppContainerApi(), [writer = logWriter()](std::string_view line) {
+-                                   writer(LineSeverity::Error, line);
+-                               } });
++    return makeWin32ProcessLauncher(systemAppContainerApi(), [writer = logWriter()](std::string_view line) {
++        writer(LineSeverity::Error, line);
++    });
+ }
+ 
+ ProcessId currentProcessId() noexcept
+ {
+     return static_cast<ProcessId>(::GetCurrentProcessId());
+ }
+ 
+ std::optional<transport::NativeHandle> defaultHelperStandardError()
+ {
+     if constexpr (ThisBuildInstrumentation != BuildInstrumentation::None)
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.hpp b/src/vtextension/wasm/remote/process/Process_win32.hpp
+new file mode 100644
+index 000000000..4525acecd
+--- /dev/null
++++ b/src/vtextension/wasm/remote/process/Process_win32.hpp
+@@ -0,0 +1,27 @@
++// SPDX-License-Identifier: Apache-2.0
++#pragma once
++
++/// @file
++/// What only Windows' launcher has: the system functions its AppContainers are ensured through, and where it
++/// says what the system refused, handed in, so that a test reads the refusals a launch logs.
++
++#include <functional>
++#include <memory>
++#include <string_view>
++
++#include <vtextension/wasm/remote/process/AppContainer_win32.hpp>
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++
++namespace vtextension::wasm::remote::process
++{
++
++/// @param api What isolated launches' containers are ensured through.
++/// @param diagnostics Where a refusal whose launch error cannot say what the system refused
++///        (DetailedLaunchErrors) is said, with its step and code (launchRefusalLine()), once per step and
++///        code; and a directory this user may not grant (AppContainerProvision).
++/// @return The launcher of this system's processes. makeSystemProcessLauncher() makes it with
++///         systemAppContainerApi() and Contour's error log.
++[[nodiscard]] std::shared_ptr<IProcessLauncher> makeWin32ProcessLauncher(
++    AppContainerApi api, std::function<void(std::string_view line)> diagnostics);
++
++} // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
+index 1cb97a947..7589bdcec 100644
+--- a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_test.cpp
+@@ -154,20 +154,48 @@ TEST_CASE("GuestMemoryMapping.openedBytesAreTheParentsBytes", "[vtextension]")
+     CHECK(parent->bytes()[16] == std::byte { 42 });
+     parent->bytes()[Page - 1] = std::byte { 7 };
+     CHECK(helper->base()[Page - 1] == std::byte { 7 });
+ 
+     REQUIRE(helper->open(2 * Page).has_value());
+     CHECK(helper->accessibleBytes() == 2 * Page);
+     helper->base()[Page + 8] = std::byte { 9 };
+     CHECK(parent->bytes()[Page + 8] == std::byte { 9 });
+ }
+ 
++#ifdef _WIN32
++TEST_CASE("GuestMemoryMapping.closedPagesAreThoseNoViewCommitted", "[vtextension]")
++{
++    // Windows commits a reserved section's pages for the section: the helper's closed pages stay closed only
++    // while the parent commits no more than it granted, which is why SharedGuestMemory commits exactly that.
++    if (runsUnderWine())
++        SKIP("wine commits a reserved section per view, unlike Windows");
++    requireGuestMapping();
++    auto const object = createSharedObject(ObjectBytes, SharedObjectUse::GuestMemory);
++    REQUIRE(object.has_value());
++    auto parent = SharedMapping::map(object->get(), ObjectBytes, MapAccess::ReadWrite);
++    REQUIRE(parent.has_value());
++    REQUIRE(parent->commit(0, Page).has_value());
++    auto const helper = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, GuardBytes);
++    REQUIRE(helper.has_value());
++    auto const stateAt = [&](uint64_t offset) {
++        auto region = MEMORY_BASIC_INFORMATION {};
++        REQUIRE(::VirtualQuery(helper->base() + offset, &region, sizeof(region)) != 0);
++        return region.State;
++    };
++    CHECK(stateAt(Page) == MEM_RESERVE);
++
++    REQUIRE(parent->commit(Page, 2 * Page).has_value());
++    CHECK(stateAt(Page) == MEM_COMMIT);
++    CHECK(stateAt(2 * Page) == MEM_RESERVE);
++}
++#endif
++
+ TEST_CASE("GuestMemoryMapping.refusesAnObjectTooSmall", "[vtextension]")
+ {
+     requireGuestMapping();
+     auto const object = createSharedObject(ObjectBytes / 2, SharedObjectUse::GuestMemory);
+     REQUIRE(object.has_value());
+     auto const mapping = GuestMemoryMapping::map(object->get(), ObjectBytes, Page, GuardBytes);
+     REQUIRE_FALSE(mapping.has_value());
+ #ifndef _WIN32
+     // POSIX measures the object; Windows only fails to map a view larger than the section.
+     CHECK(mapping.error() == MappingError::WrongSize);
+diff --git a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_win32.cpp b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_win32.cpp
+index 0768a47a4..eb69abc78 100644
+--- a/src/vtextension/wasm/remote/transport/GuestMemoryMapping_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/GuestMemoryMapping_win32.cpp
+@@ -1,17 +1,20 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // Guest memory on Windows, through placeholders: a placeholder reservation of the object and its guard
+ // (VirtualAlloc2), split where the object ends, the section mapped over the object's placeholder
+ // (MapViewOfFile3, MEM_REPLACE_PLACEHOLDER) with write access, and the open pages committed through this view
+-// (VirtualAlloc, MEM_COMMIT): a reserved section's pages are committed by whoever touches them, so the helper
+-// commits what it opens itself, whether Windows commits for the section or for each view.
++// (VirtualAlloc, MEM_COMMIT). Windows commits a reserved section's pages for the section, not for a view
++// (wine commits them per view): the helper commits what it opens itself, so that it does not rely on that,
++// but it cannot close a page another view committed. The object's closed pages -- which, under signal traps,
++// are all that stops a guest access past its memory's size -- stay closed only because Contour commits no
++// more than it granted (SharedGuestMemory).
+ //
+ // The placeholder functions are Windows 10 1803's; they are looked up in kernelbase at run time, so that an
+ // older system says it cannot map guest memory (canMapGuestMemory()) rather than fail to load. A section too
+ // small for the view fails to map: that is the size check, as the placeholder's view cannot be measured the
+ // way SharedMapping measures a whole-section view.
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <optional>
+ 
+diff --git a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+index 47f083894..2b6c2c827 100644
+--- a/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
++++ b/src/vtextension/wasm/wasmtime/WasmtimeEngine_test.cpp
+@@ -20,21 +20,24 @@
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ #include <wasmtime.h>
+ 
+-#ifndef _WIN32
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#else
+     #include <csignal>
+ #endif
+ 
+ #include <vtextension/ExtensionError.hpp>
+ #include <vtextension/wasm/BuildInstrumentation.hpp>
+ #include <vtextension/wasm/EngineFeatures.hpp>
+ #include <vtextension/wasm/host/MemoryProvision.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/GuestMemoryMapping.hpp>
+ #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+@@ -283,84 +286,95 @@ class EngineSignalHandlers
+ constexpr auto ContractObjectBytes =
+     proto::memoryObjectBytes(vtextension::wasm::testing::contract::Limits.memoryBytes);
+ 
+ /// @return An engine whose instances run in memory they are provided, of the one kind state of this binary.
+ [[nodiscard]] std::unique_ptr<host::IHostedEngine> makeProvidedEngine(TrapMode trapMode = TrapMode::Software)
+ {
+     return makeWasmtimeEngine(WasmtimeTraits::kind(),
+                               WasmtimeConfig { .trapMode = trapMode, .memory = MemorySharing::Provided });
+ }
+ 
+-/// One instance's memory object as the parent holds it: made, and mapped whole, its pages committed.
++/// One instance's memory object as the parent holds it: made, and mapped whole, with only what it granted
++/// committed -- its initial bytes, then each growth it grants -- as Contour commits (SharedGuestMemory). On
++/// Windows a reserved section's pages are committed for the section, not for a view: a page the parent
++/// commits is open in the helper's view too, so committing more than is granted would open the guest's closed
++/// bytes. Pinned in place: its growth requests hold it.
+ class GrantedObject
+ {
+   public:
+     /// @param bytes The object's size.
+     explicit GrantedObject(uint64_t bytes): _handle { created(bytes) }, _parent { mapped(_handle, bytes) } {}
+ 
++    GrantedObject(GrantedObject&&) = delete;
++    GrantedObject& operator=(GrantedObject&&) = delete;
++    GrantedObject(GrantedObject const&) = delete;
++    GrantedObject& operator=(GrantedObject const&) = delete;
++    ~GrantedObject() = default;
++
+     /// @return The object's handle, still the parent's.
+     [[nodiscard]] transport::NativeHandle handle() const noexcept { return _handle.get(); }
+ 
+-    /// @return The 32-bit little-endian word at @p address, as the parent's mapping reads it.
++    /// @return The 32-bit little-endian word at @p address, as the parent's mapping reads it: committed
++    /// bytes.
+     [[nodiscard]] uint32_t wordAt(std::size_t address) const
+     {
+         auto word = uint32_t { 0 };
+         for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 4 }))
+             word |= std::to_integer<uint32_t>(_parent.bytes()[address + index]) << (index * 8);
+         return word;
+     }
+ 
++    /// Commits the object's first @p initialBytes, as Contour does before it grants them.
+     /// @return A provision of the object, mapped as the host maps it.
+     [[nodiscard]] host::MemoryProvision provision(uint64_t objectBytes,
+                                                   uint64_t initialBytes,
+                                                   uint64_t guardBytes,
+-                                                  host::GrowRequest grow) const
++                                                  host::GrowRequest grow)
+     {
++        REQUIRE(_parent.commit(0, initialBytes).has_value());
+         auto mapping =
+             transport::GuestMemoryMapping::map(_handle.get(), objectBytes, initialBytes, guardBytes);
+         REQUIRE(mapping.has_value());
+         return host::MemoryProvision { .memory = std::move(*mapping), .grow = std::move(grow) };
+     }
+ 
++    /// @return A growth request answering every growth with @p status, recording the size each asked for;
++    ///         one it grants is committed by the parent first, then opened, as Contour and the helper do.
++    [[nodiscard]] host::GrowRequest answering(proto::GrowStatus status, std::vector<uint64_t>& asked)
++    {
++        return [this, status, &asked](transport::GuestMemoryMapping& memory, uint64_t bytes) {
++            asked.push_back(bytes);
++            if (status == proto::GrowStatus::Granted && (!_parent.commit(0, bytes) || !memory.open(bytes)))
++                return proto::GrowStatus::Refused;
++            return status;
++        };
++    }
++
+   private:
+     [[nodiscard]] static transport::OwnedHandle created(uint64_t bytes)
+     {
+         auto object = transport::createSharedObject(bytes, transport::SharedObjectUse::GuestMemory);
+         REQUIRE(object.has_value());
+         return std::move(*object);
+     }
+ 
+     [[nodiscard]] static transport::SharedMapping mapped(transport::OwnedHandle const& handle, uint64_t bytes)
+     {
+         auto mapping = transport::SharedMapping::map(handle.get(), bytes, transport::MapAccess::ReadWrite);
+         REQUIRE(mapping.has_value());
+-        // Contour commits what it grants through its own view (Windows); the helper does through its own.
+-        REQUIRE(mapping->commit(0, bytes).has_value());
+         return std::move(*mapping);
+     }
+ 
+     transport::OwnedHandle _handle;
+     transport::SharedMapping _parent;
+ };
+ 
+-/// @return A growth request answering every growth with @p status, opening what it grants, and recording
+-///         the size each asked for.
+-[[nodiscard]] host::GrowRequest answering(proto::GrowStatus status, std::vector<uint64_t>& asked)
+-{
+-    return [status, &asked](transport::GuestMemoryMapping& memory, uint64_t bytes) {
+-        asked.push_back(bytes);
+-        if (status == proto::GrowStatus::Granted && !memory.open(bytes))
+-            return proto::GrowStatus::Refused;
+-        return status;
+-    };
+-}
+-
+ /// @return What instantiating @p module with @p provision offered is answered with.
+ [[nodiscard]] std::expected<std::unique_ptr<vtextension::wasm::IWasmInstance>, ExtensionError>
+ instantiateWith(vtextension::wasm::IWasmModule& module,
+                 vtextension::wasm::IHostContext& context,
+                 host::MemoryProvision provision)
+ {
+     auto const scope = host::ProvisionScope { std::move(provision) };
+     return module.instantiate(context);
+ }
+ 
+@@ -722,55 +736,56 @@ TEST_CASE("Wasmtime.interruptRacingACallStopsIt", "[wasmtime]")
+ }
+ 
+ TEST_CASE("WasmtimeEngine.providedMemoryBacksTheInstance", "[wasmtime]")
+ {
+     namespace contract = vtextension::wasm::testing::contract;
+     auto const engine = makeProvidedEngine();
+     CHECK(engine->memoryMode() == proto::MemoryMode::Shared);
+     auto const runtime = contract::createRuntime(*engine);
+     auto const guard = contract::enterThread(*engine);
+     auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+-    auto const object = GrantedObject { ContractObjectBytes };
++    auto object = GrantedObject { ContractObjectBytes };
+     auto asked = std::vector<uint64_t> {};
+     auto context = contract::RecordingHostContext {};
+     auto instance = instantiateWith(
+         *module,
+         context,
+-        object.provision(ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Granted, asked)));
++        object.provision(
++            ContractObjectBytes, GuestPage, 0, object.answering(proto::GrowStatus::Granted, asked)));
+     REQUIRE(instance.has_value());
+ 
+     auto argv = std::array<uint32_t, 2> { 16, 42 };
+     REQUIRE((*instance)->call(contract::functionOf(**instance, "store"), argv).has_value());
+     CHECK(object.wordAt(16) == 42);
+     CHECK(contract::wordAt(**instance, 16) == 42);
+     CHECK(asked.empty());
+ }
+ 
+ TEST_CASE("WasmtimeEngine.growthAsksAndOpens", "[wasmtime]")
+ {
+     namespace contract = vtextension::wasm::testing::contract;
+     auto const engine = makeProvidedEngine();
+     auto const runtime = contract::createRuntime(*engine);
+     auto const guard = contract::enterThread(*engine);
+     auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+-    auto const object = GrantedObject { ContractObjectBytes };
++    auto object = GrantedObject { ContractObjectBytes };
+     auto context = contract::RecordingHostContext {};
+     auto asked = std::vector<uint64_t> {};
+     constexpr auto Address = static_cast<uint32_t>(GuestPage + 8);
+ 
+     SECTION("granted")
+     {
+         auto instance = instantiateWith(
+             *module,
+             context,
+             object.provision(
+-                ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Granted, asked)));
++                ContractObjectBytes, GuestPage, 0, object.answering(proto::GrowStatus::Granted, asked)));
+         REQUIRE(instance.has_value());
+         auto grown = std::array<uint32_t, 1> { 1 };
+         REQUIRE((*instance)->call(contract::functionOf(**instance, "grow"), grown).has_value());
+         CHECK(grown[0] == 1);
+         CHECK(asked == std::vector<uint64_t> { 2 * GuestPage });
+ 
+         auto argv = std::array<uint32_t, 2> { Address, 7 };
+         REQUIRE((*instance)->call(contract::functionOf(**instance, "store"), argv).has_value());
+         CHECK(object.wordAt(Address) == 7);
+     }
+@@ -793,21 +808,21 @@ TEST_CASE("WasmtimeEngine.growthAsksAndOpens", "[wasmtime]")
+         REQUIRE_FALSE(beyond.has_value());
+         CHECK(beyond.error() == vtextension::wasm::MemoryFailure::OutOfBounds);
+     }
+ 
+     SECTION("refused")
+     {
+         auto instance = instantiateWith(
+             *module,
+             context,
+             object.provision(
+-                ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Refused, asked)));
++                ContractObjectBytes, GuestPage, 0, object.answering(proto::GrowStatus::Refused, asked)));
+         REQUIRE(instance.has_value());
+         auto grown = std::array<uint32_t, 1> { 1 };
+         REQUIRE((*instance)->call(contract::functionOf(**instance, "grow"), grown).has_value());
+         CHECK(grown[0] == 0xFFFF'FFFF);
+         CHECK(asked == std::vector<uint64_t> { 2 * GuestPage });
+         auto const beyond = (*instance)->memory(static_cast<uint32_t>(GuestPage), 1);
+         REQUIRE_FALSE(beyond.has_value());
+         CHECK(beyond.error() == vtextension::wasm::MemoryFailure::OutOfBounds);
+ 
+         // The store past the memory traps, rather than reach the closed page.
+@@ -849,56 +864,68 @@ TEST_CASE("WasmtimeEngine.provisionMismatchFails", "[wasmtime]")
+     for (auto const& [what, objectBytes, initialBytes]: {
+              Mismatch { .what = "more initial bytes than the module's minimum",
+                         .objectBytes = ContractObjectBytes,
+                         .initialBytes = 2 * GuestPage },
+              Mismatch { .what = "an object other than the runtime's reservation",
+                         .objectBytes = 2 * ContractObjectBytes,
+                         .initialBytes = GuestPage },
+          })
+     {
+         INFO(what);
+-        auto const object = GrantedObject { objectBytes };
++        auto object = GrantedObject { objectBytes };
+         auto const instance = instantiateWith(
+             *module,
+             context,
+-            object.provision(objectBytes, initialBytes, 0, answering(proto::GrowStatus::Granted, asked)));
++            object.provision(
++                objectBytes, initialBytes, 0, object.answering(proto::GrowStatus::Granted, asked)));
+         REQUIRE_FALSE(instance.has_value());
+         CHECK(instance.error() == ExtensionError::InvalidComponent);
+     }
+ }
+ 
+ TEST_CASE("WasmtimeEngine.reservationAndGuardAreExplicit", "[wasmtime]")
+ {
+     // Under software traps; the signalTraps* cases check what signal traps ask for.
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::wasmtime::testing::lastMemoryRequest;
+     using vtextension::wasm::wasmtime::testing::MemoryRequest;
+     auto const engine = makeProvidedEngine();
+     CHECK(engine->memoryGuardBytes() == 0);
+     auto const runtime = contract::createRuntime(*engine);
+     auto const guard = contract::enterThread(*engine);
+     auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+-    auto const object = GrantedObject { ContractObjectBytes };
++    auto object = GrantedObject { ContractObjectBytes };
+     auto context = contract::RecordingHostContext {};
+     auto asked = std::vector<uint64_t> {};
+     auto const instance = instantiateWith(
+         *module,
+         context,
+-        object.provision(ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Granted, asked)));
++        object.provision(
++            ContractObjectBytes, GuestPage, 0, object.answering(proto::GrowStatus::Granted, asked)));
+     CHECK(instance.has_value());
+     CHECK(lastMemoryRequest()
+           == MemoryRequest { .minimum = GuestPage, .reserved = ContractObjectBytes, .guard = 0 });
+ }
+ 
+ namespace
+ {
+ 
++#ifdef _WIN32
++/// Whether this runs under wine, which lets a store into a reserved page of a section's view through, as if
++/// it were committed, where Windows faults.
++[[nodiscard]] bool runsUnderWine() noexcept
++{
++    auto* const ntdll = ::GetModuleHandleW(L"ntdll.dll");
++    return ntdll != nullptr && ::GetProcAddress(ntdll, "wine_get_version") != nullptr;
++}
++#endif
++
+ /// A store that faults on provided memory under signal traps.
+ struct SignalFault
+ {
+     std::string_view what;
+     uint64_t initialPages; ///< The memory's initial size, all of it open.
+     uint32_t index;        ///< The store's dynamic address; its static offset is 8.
+ };
+ 
+ /// Checks that @p fault traps, on an engine trapping through signals, and that the instance and the process
+ /// survive it.
+@@ -919,29 +946,29 @@ void checkSignalTrap(SignalFault const& fault)
+ 
+     auto const module = runtime->load(ModuleIdentity {},
+                                       assemble(std::format(R"((module
+   (memory (export "memory") {} {})
+   (func (export "store") (param i32 i32) (i32.store (local.get 0) (local.get 1)))
+   (func (export "store-at") (param i32) (i32.store offset=8 (local.get 0) (i32.const 7))))
+ )",
+                                                            fault.initialPages,
+                                                            ObjectPages)));
+     REQUIRE(module.has_value());
+-    auto const object = GrantedObject { ContractObjectBytes };
++    auto object = GrantedObject { ContractObjectBytes };
+     auto context = contract::RecordingHostContext {};
+     auto asked = std::vector<uint64_t> {};
+     auto instance = instantiateWith(**module,
+                                     context,
+                                     object.provision(ContractObjectBytes,
+                                                      fault.initialPages * GuestPage,
+                                                      SignalsGuardBytes,
+-                                                     answering(proto::GrowStatus::Refused, asked)));
++                                                     object.answering(proto::GrowStatus::Refused, asked)));
+     REQUIRE(instance.has_value());
+     CHECK(vtextension::wasm::wasmtime::testing::lastMemoryRequest()
+           == vtextension::wasm::wasmtime::testing::MemoryRequest { .minimum = fault.initialPages * GuestPage,
+                                                                    .reserved = ContractObjectBytes,
+                                                                    .guard = SignalsGuardBytes });
+ #ifndef _WIN32
+     auto const handlers = EngineSignalHandlers {};
+ #endif
+ 
+     auto argv = std::array<uint32_t, 1> { fault.index };
+@@ -956,20 +983,24 @@ void checkSignalTrap(SignalFault const& fault)
+ 
+ } // namespace
+ 
+ // Two cases, each bringing up its own engine trapping through signals: the second proves that a case after
+ // the first still traps through Wasmtime's handlers (EngineSignalHandlers).
+ TEST_CASE("WasmtimeEngine.signalTrapsPastTheOpenBytes", "[wasmtime]")
+ {
+     if constexpr (vtextension::wasm::ThisBuildInstrumentation
+                   != vtextension::wasm::BuildInstrumentation::None)
+         SKIP("an instrumented build traps in software only");
++#ifdef _WIN32
++    if (runsUnderWine())
++        SKIP("wine lets a store into a reserved page of a section's view through, unlike Windows");
++#endif
+     checkSignalTrap(SignalFault {
+         .what = "past the open bytes", .initialPages = 1, .index = static_cast<uint32_t>(GuestPage) });
+ }
+ 
+ TEST_CASE("WasmtimeEngine.signalTrapsPastTheObject", "[wasmtime]")
+ {
+     if constexpr (vtextension::wasm::ThisBuildInstrumentation
+                   != vtextension::wasm::BuildInstrumentation::None)
+         SKIP("an instrumented build traps in software only");
+     checkSignalTrap(SignalFault { .what = "past the object",
+@@ -1076,28 +1107,28 @@ TEST_CASE("WasmtimeEngine.privateMemoryIsUnchanged", "[wasmtime]")
+ {
+     namespace contract = vtextension::wasm::testing::contract;
+     using vtextension::wasm::wasmtime::testing::lastMemoryRequest;
+     auto const engine =
+         makeWasmtimeEngine(WasmtimeTraits::kind(), WasmtimeConfig { .trapMode = TrapMode::Software });
+     CHECK(engine->memoryMode() == proto::MemoryMode::Copy);
+     CHECK(engine->memoryGuardBytes() == 0);
+     auto const runtime = contract::createRuntime(*engine);
+     auto const guard = contract::enterThread(*engine);
+     auto const module = contract::load(*runtime, vtextension::wasm::testing::GrowModule);
+-    auto const object = GrantedObject { ContractObjectBytes };
++    auto object = GrantedObject { ContractObjectBytes };
+     auto context = contract::RecordingHostContext {};
+     auto asked = std::vector<uint64_t> {};
+     auto const requestBefore = lastMemoryRequest();
+ 
+     // A provision offered to an engine that allocates its own memory is neither asked for nor taken.
+     auto const scope = host::ProvisionScope { object.provision(
+-        ContractObjectBytes, GuestPage, 0, answering(proto::GrowStatus::Refused, asked)) };
++        ContractObjectBytes, GuestPage, 0, object.answering(proto::GrowStatus::Refused, asked)) };
+     auto const instance = contract::instantiate(*module, context);
+     auto grown = std::array<uint32_t, 1> { 1 };
+     REQUIRE(instance->call(contract::functionOf(*instance, "grow"), grown).has_value());
+     CHECK(grown[0] == 1);
+     CHECK(asked.empty());
+     CHECK(lastMemoryRequest() == requestBefore);
+     CHECK(host::takeProvision().has_value());
+ }
+ 
+ TEST_CASE("Wasmtime.measureRender", "[.measure]")

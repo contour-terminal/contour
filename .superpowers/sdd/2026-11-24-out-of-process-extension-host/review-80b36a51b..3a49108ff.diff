@@ -1,0 +1,1878 @@
+# Review package: 80b36a51b..HEAD
+
+## Commits
+3a49108ff fix(vtextension): decode what an extension passes from one copy of its memory
+e4ffcfe5f fix(vtextension): read a module's memory, and refuse it past the cap, before asking a host
+
+## Files changed
+ src/vtextension/CanonicalAbi.cpp                   |   4 +-
+ src/vtextension/CanonicalAbi.hpp                   | 118 +++++---
+ src/vtextension/CanonicalAbi_test.cpp              | 204 +++++++++++++
+ src/vtextension/ControlImports_test.cpp            |   6 +-
+ src/vtextension/Instance.cpp                       |  26 +-
+ src/vtextension/testing/FakeGuestMemory.hpp        |  11 +-
+ src/vtextension/wasm/remote/CMakeLists.txt         |   1 +
+ src/vtextension/wasm/remote/HostileMemory_test.cpp | 325 +++++++++++++++++++++
+ src/vtextension/wasm/remote/RemoteBackend.cpp      |  25 +-
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp |  78 +++++
+ src/vtextension/wasm/remote/SharedGuestMemory.hpp  |   3 +-
+ src/vtextension/wasm/remote/Teardown_test.cpp      |  23 +-
+ .../wasm/remote/process/testing/LaunchProbe.cpp    | 106 ++++++-
+ 13 files changed, 857 insertions(+), 73 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/CanonicalAbi.cpp b/src/vtextension/CanonicalAbi.cpp
+index 66478547c..b6a453041 100644
+--- a/src/vtextension/CanonicalAbi.cpp
++++ b/src/vtextension/CanonicalAbi.cpp
+@@ -3,17 +3,15 @@
+ 
+ namespace vtextension::abi
+ {
+ 
+ Result<std::string> loadByteString(IGuestMemory& memory, Address address, std::size_t maxLength)
+ {
+     return detail::loadPointerAndLength(memory, address)
+         .and_then([&](detail::PointerAndLength list) -> Result<std::string> {
+             if (list.length > maxLength)
+                 return std::unexpected(ExtensionError::OutputTooLarge);
+-            return detail::viewElements(memory, list, 1).transform([](std::span<std::byte> bytes) {
+-                return detail::copyBytes<std::string>(bytes);
+-            });
++            return detail::readBytes<std::string>(memory, list, 1);
+         });
+ }
+ 
+ } // namespace vtextension::abi
+diff --git a/src/vtextension/CanonicalAbi.hpp b/src/vtextension/CanonicalAbi.hpp
+index f79fe9d4d..3406b4881 100644
+--- a/src/vtextension/CanonicalAbi.hpp
++++ b/src/vtextension/CanonicalAbi.hpp
+@@ -4,20 +4,25 @@
+ //
+ // One generic codec lifts and lowers every type: how a type is laid out in a guest's linear memory,
+ // and how it flattens into core-wasm parameters, is computed from a description of the type. This
+ // header knows no world: a world's records, enums and flags are described by RecordFields,
+ // EnumCaseCount and FlagsMemberCount rows (the statusline world's are in StatuslineWorld.hpp), so
+ // adding a record to a world is adding a row, not writing a codec.
+ //
+ // Every address and length a guest provides is checked against its linear memory before a byte is
+ // read or written, so a guest cannot make the host touch memory outside its own: a lift that would is
+ // ExtensionError::Trapped, as the Canonical ABI traps.
++//
++// Lifting reads guest memory only through IGuestMemory::read(), which copies: each value is decoded from a
++// copy taken once, never from the guest's memory itself. A guest's memory may be written while the host
++// lifts (by another process that maps it, or by another thread of the guest's), and a value decoded from
++// the memory itself could have one length when it is checked and another when it is used.
+ #pragma once
+ 
+ #include <core/Flags.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <bit>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+@@ -51,26 +56,35 @@ using Result = std::expected<T, ExtensionError>;
+ class IGuestMemory
+ {
+   public:
+     IGuestMemory() = default;
+     IGuestMemory(IGuestMemory const&) = delete;
+     IGuestMemory(IGuestMemory&&) = delete;
+     IGuestMemory& operator=(IGuestMemory const&) = delete;
+     IGuestMemory& operator=(IGuestMemory&&) = delete;
+     virtual ~IGuestMemory() = default;
+ 
+-    /// Views guest memory. The view is invalidated by the next allocate(), which may grow the memory.
+-    /// @param address Where the view starts.
++    /// Copies guest memory, once: lifting reads through nothing else. The copy is the host's, so whatever
++    /// the guest's memory holds afterwards, the bytes decoded are the bytes checked.
++    /// @param address Where the copy starts.
++    /// @param into Where it goes; its size is how many bytes are copied.
++    /// @return Nothing once copied; `Trapped` if any byte lies outside the memory.
++    [[nodiscard]] virtual Result<void> read(Address address, std::span<std::byte> into) = 0;
++
++    /// Guest memory to write: for lowering, and for proving a range inside the memory. Lifting never reads
++    /// through it (read() is for that). The span is invalidated by the next allocate(), which may grow the
++    /// memory.
++    /// @param address Where the span starts.
+     /// @param size How many bytes it spans.
+     /// @return The bytes at [@p address, @p address + @p size); `Trapped` if any lies outside the
+     ///         memory.
+-    [[nodiscard]] virtual Result<std::span<std::byte>> view(Address address, uint32_t size) = 0;
++    [[nodiscard]] virtual Result<std::span<std::byte>> writable(Address address, uint32_t size) = 0;
+ 
+     /// Allocates guest memory through the guest's `cabi_realloc`.
+     /// @param size How many bytes.
+     /// @param alignment Their alignment, a power of two.
+     /// @return The allocation's address, which lies in memory and is aligned; or why the guest could
+     ///         not allocate.
+     [[nodiscard]] virtual Result<Address> allocate(uint32_t size, uint32_t alignment) = 0;
+ 
+     /// Accounts for host memory a lift is about to spend: the bytes of a string or list it copies
+     /// out, and the host-side size of the elements of a list it builds. Charged before the
+@@ -143,38 +157,43 @@ namespace detail
+     /// The type a pointer to data member points to.
+     template <typename MemberPointer>
+     struct MemberType;
+ 
+     template <typename Class, typename Member>
+     struct MemberType<Member Class::*>
+     {
+         using Type = Member;
+     };
+ 
+-    /// Reads @p memory's bytes at @p address as a little-endian unsigned integer.
++    /// Decodes @p bytes as a little-endian unsigned integer.
+     template <typename U>
+-    [[nodiscard]] Result<U> loadInteger(IGuestMemory& memory, Address address)
++    [[nodiscard]] constexpr U decodeInteger(std::span<std::byte const, sizeof(U)> bytes) noexcept
+     {
+-        auto const bytes = memory.view(address, sizeof(U));
+-        if (!bytes)
+-            return std::unexpected(bytes.error());
+         auto value = U { 0 };
+         for (auto const index: std::views::iota(std::size_t { 0 }, sizeof(U)))
+-            value |= static_cast<U>(std::to_integer<U>((*bytes)[index]) << (8 * index));
++            value |= static_cast<U>(std::to_integer<U>(bytes[index]) << (8 * index));
+         return value;
+     }
+ 
++    /// Reads @p memory's bytes at @p address, copied once, as a little-endian unsigned integer.
++    template <typename U>
++    [[nodiscard]] Result<U> readInteger(IGuestMemory& memory, Address address)
++    {
++        auto bytes = std::array<std::byte, sizeof(U)> {};
++        return memory.read(address, bytes).transform([&] { return decodeInteger<U>(bytes); });
++    }
++
+     /// Writes @p value at @p address of @p memory as a little-endian unsigned integer.
+     template <typename U>
+     [[nodiscard]] Result<void> storeInteger(IGuestMemory& memory, Address address, U value)
+     {
+-        auto const bytes = memory.view(address, sizeof(U));
++        auto const bytes = memory.writable(address, sizeof(U));
+         if (!bytes)
+             return std::unexpected(bytes.error());
+         for (auto const index: std::views::iota(std::size_t { 0 }, sizeof(U)))
+             (*bytes)[index] = static_cast<std::byte>((value >> (8 * index)) & 0xFFU);
+         return {};
+     }
+ 
+     /// The unsigned integer a discriminant of @p count cases is stored in.
+     template <std::size_t Count>
+     using DiscriminantType = std::conditional_t<(Count <= 0x100), uint8_t, uint16_t>;
+@@ -184,51 +203,51 @@ namespace detail
+     {
+         return address + size <= uint64_t { std::numeric_limits<uint32_t>::max() } + 1;
+     }
+ 
+     /// Proves [@p address, @p address + @p size) inside @p memory before a value of that size is
+     /// stored or loaded there field by field, so that no field's address can wrap around.
+     [[nodiscard]] inline Result<void> checkRange(IGuestMemory& memory, Address address, uint32_t size)
+     {
+         if (!fitsAddressSpace(address, size))
+             return std::unexpected(ExtensionError::Trapped);
+-        return memory.view(address, size).transform([](std::span<std::byte>) {});
++        return memory.writable(address, size).transform([](std::span<std::byte>) {});
+     }
+ 
+     /// Lowers a (pointer, length) pair: the shape strings and lists share.
+     [[nodiscard]] inline Result<void> storePointerAndLength(IGuestMemory& memory,
+                                                             Address address,
+                                                             Address pointer,
+                                                             uint32_t length)
+     {
+         return checkRange(memory, address, 8)
+             .and_then([&] { return storeInteger<uint32_t>(memory, address, pointer); })
+             .and_then([&] { return storeInteger<uint32_t>(memory, address + 4, length); });
+     }
+ 
+     /// The lifted (pointer, length) pair of a string or list.
+     struct PointerAndLength
+     {
+         Address pointer;
+         uint32_t length;
+     };
+ 
+-    /// Lifts a (pointer, length) pair from memory.
++    /// Lifts a (pointer, length) pair from memory, both from one copy.
+     [[nodiscard]] inline Result<PointerAndLength> loadPointerAndLength(IGuestMemory& memory, Address address)
+     {
+-        if (auto const inRange = checkRange(memory, address, 8); !inRange)
+-            return std::unexpected(inRange.error());
+-        auto const pointer = loadInteger<uint32_t>(memory, address);
+-        if (!pointer)
+-            return std::unexpected(pointer.error());
+-        return loadInteger<uint32_t>(memory, address + 4).transform([&](uint32_t length) {
+-            return PointerAndLength { .pointer = *pointer, .length = length };
++        if (!fitsAddressSpace(address, 8))
++            return std::unexpected(ExtensionError::Trapped);
++        auto bytes = std::array<std::byte, 8> {};
++        return memory.read(address, bytes).transform([&] {
++            auto const pair = std::span<std::byte const, 8> { bytes };
++            return PointerAndLength { .pointer = decodeInteger<uint32_t>(pair.first<4>()),
++                                      .length = decodeInteger<uint32_t>(pair.last<4>()) };
+         });
+     }
+ 
+     /// Lifts a (pointer, length) pair from flat values.
+     [[nodiscard]] inline Result<PointerAndLength> liftPointerAndLength(FlatReader& reader)
+     {
+         auto const pointer = reader.next();
+         if (!pointer)
+             return std::unexpected(pointer.error());
+         return reader.next().transform(
+@@ -240,48 +259,58 @@ namespace detail
+     [[nodiscard]] inline Result<Address> storeBytes(IGuestMemory& memory,
+                                                     std::span<std::byte const> bytes,
+                                                     uint32_t alignment)
+     {
+         if (bytes.size() > std::numeric_limits<uint32_t>::max())
+             return std::unexpected(ExtensionError::OutOfMemory);
+         auto const size = static_cast<uint32_t>(bytes.size());
+         auto const address = memory.allocate(size, alignment);
+         if (!address || size == 0)
+             return address;
+-        return memory.view(*address, size).transform([&](std::span<std::byte> target) {
++        return memory.writable(*address, size).transform([&](std::span<std::byte> target) {
+             std::ranges::copy(bytes, target.begin());
+             return *address;
+         });
+     }
+ 
+-    /// Views the bytes a (pointer, length) pair of @p elementSize-byte elements spans.
+-    [[nodiscard]] inline Result<std::span<std::byte>> viewElements(IGuestMemory& memory,
+-                                                                   PointerAndLength list,
+-                                                                   uint32_t elementSize)
++    /// Proves the bytes a (pointer, length) pair of @p elementSize-byte elements spans inside @p memory,
++    /// reading none of them.
++    [[nodiscard]] inline Result<void> checkElements(IGuestMemory& memory,
++                                                    PointerAndLength list,
++                                                    uint32_t elementSize)
+     {
+         auto const bytes = uint64_t { list.length } * elementSize;
+         if (!fitsAddressSpace(list.pointer, bytes))
+             return std::unexpected(ExtensionError::Trapped);
+         if (bytes == 0)
+-            return std::span<std::byte> {};
+-        return memory.view(list.pointer, static_cast<uint32_t>(bytes));
++            return {};
++        return checkRange(memory, list.pointer, static_cast<uint32_t>(bytes));
+     }
+ 
+-    /// Copies a viewed run of guest bytes into a container of byte-sized values.
++    /// Copies the bytes a (pointer, length) pair of @p elementSize-byte elements spans, once, into a
++    /// container of byte-sized values. What the container takes on the host is the caller's to have charged
++    /// (IGuestMemory::chargeLift()) or bounded before.
+     template <typename Container>
+-    [[nodiscard]] Container copyBytes(std::span<std::byte const> bytes)
++        requires(sizeof(typename Container::value_type) == 1)
++    [[nodiscard]] Result<Container> readBytes(IGuestMemory& memory,
++                                              PointerAndLength list,
++                                              uint32_t elementSize)
+     {
+-        auto container = Container(bytes.size(), typename Container::value_type {});
+-        std::ranges::transform(bytes, container.begin(), [](std::byte byte) {
+-            return static_cast<Container::value_type>(byte);
++        auto const bytes = uint64_t { list.length } * elementSize;
++        if (!fitsAddressSpace(list.pointer, bytes))
++            return std::unexpected(ExtensionError::Trapped);
++        auto container = Container(static_cast<std::size_t>(bytes), typename Container::value_type {});
++        if (bytes == 0)
++            return container;
++        return memory.read(list.pointer, std::as_writable_bytes(std::span { container })).transform([&] {
++            return std::move(container);
+         });
+-        return container;
+     }
+ } // namespace detail
+ 
+ /// Unsigned and signed integers of 8 and 32 bits, and u64. A u64 travels only through memory in
+ /// this world, so it has no flat form.
+ template <typename I>
+     requires(std::is_integral_v<I> && !std::is_same_v<I, bool>)
+ struct Codec<I>
+ {
+     using Unsigned = std::make_unsigned_t<I>;
+@@ -289,21 +318,21 @@ struct Codec<I>
+     static constexpr uint32_t Alignment = sizeof(I);
+     static constexpr std::size_t FlatCount = 1;
+ 
+     [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, I value)
+     {
+         return detail::storeInteger<Unsigned>(memory, address, static_cast<Unsigned>(value));
+     }
+ 
+     [[nodiscard]] static Result<I> load(IGuestMemory& memory, Address address)
+     {
+-        return detail::loadInteger<Unsigned>(memory, address).transform([](Unsigned value) {
++        return detail::readInteger<Unsigned>(memory, address).transform([](Unsigned value) {
+             return static_cast<I>(value);
+         });
+     }
+ 
+     [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& /*memory*/, I value, FlatValues& out)
+         requires(sizeof(I) <= sizeof(uint32_t))
+     {
+         out.push_back(static_cast<uint32_t>(static_cast<Unsigned>(value)));
+         return {};
+     }
+@@ -325,21 +354,21 @@ struct Codec<bool>
+     static constexpr uint32_t Alignment = 1;
+     static constexpr std::size_t FlatCount = 1;
+ 
+     [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, bool value)
+     {
+         return detail::storeInteger<uint8_t>(memory, address, value ? 1 : 0);
+     }
+ 
+     [[nodiscard]] static Result<bool> load(IGuestMemory& memory, Address address)
+     {
+-        return detail::loadInteger<uint8_t>(memory, address).transform([](uint8_t byte) {
++        return detail::readInteger<uint8_t>(memory, address).transform([](uint8_t byte) {
+             return byte != 0;
+         });
+     }
+ 
+     [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& /*memory*/, bool value, FlatValues& out)
+     {
+         out.push_back(value ? 1 : 0);
+         return {};
+     }
+ 
+@@ -370,21 +399,21 @@ struct Codec<E>
+             return static_cast<E>(index);
+     }
+ 
+     [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, E value)
+     {
+         return detail::storeInteger<Discriminant>(memory, address, static_cast<Discriminant>(value));
+     }
+ 
+     [[nodiscard]] static Result<E> load(IGuestMemory& memory, Address address)
+     {
+-        return detail::loadInteger<Discriminant>(memory, address).and_then([](Discriminant index) {
++        return detail::readInteger<Discriminant>(memory, address).and_then([](Discriminant index) {
+             return fromIndex(index);
+         });
+     }
+ 
+     [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& /*memory*/, E value, FlatValues& out)
+     {
+         out.push_back(static_cast<uint32_t>(value));
+         return {};
+     }
+ 
+@@ -414,21 +443,21 @@ struct Codec<core::Flags<E>>
+         return core::Flags<E>::fromValue(static_cast<core::Flags<E>::value_type>(bits & Mask));
+     }
+ 
+     [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, core::Flags<E> value)
+     {
+         return detail::storeInteger<Bits>(memory, address, static_cast<Bits>(value.value() & Mask));
+     }
+ 
+     [[nodiscard]] static Result<core::Flags<E>> load(IGuestMemory& memory, Address address)
+     {
+-        return detail::loadInteger<Bits>(memory, address).transform([](Bits bits) { return fromBits(bits); });
++        return detail::readInteger<Bits>(memory, address).transform([](Bits bits) { return fromBits(bits); });
+     }
+ 
+     [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& /*memory*/,
+                                                 core::Flags<E> value,
+                                                 FlatValues& out)
+     {
+         out.push_back(static_cast<uint32_t>(value.value()) & Mask);
+         return {};
+     }
+ 
+@@ -538,23 +567,22 @@ struct Codec<std::string>
+             .transform([&](Address pointer) {
+                 return detail::PointerAndLength { .pointer = pointer,
+                                                   .length = static_cast<uint32_t>(value.size()) };
+             });
+     }
+ 
+     /// Copies the guest's string at @p list out, checking that it is UTF-8.
+     [[nodiscard]] static Result<std::string> liftContents(IGuestMemory& memory, detail::PointerAndLength list)
+     {
+         return memory.chargeLift(list.length)
+-            .and_then([&] { return detail::viewElements(memory, list, 1); })
+-            .and_then([](std::span<std::byte> bytes) -> Result<std::string> {
+-                auto text = detail::copyBytes<std::string>(bytes);
++            .and_then([&] { return detail::readBytes<std::string>(memory, list, 1); })
++            .and_then([](std::string text) -> Result<std::string> {
+                 if (!isValidUtf8(text))
+                     return std::unexpected(ExtensionError::Trapped);
+                 return text;
+             });
+     }
+ 
+     [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, std::string const& value)
+     {
+         return lowerContents(memory, value).and_then([&](detail::PointerAndLength list) {
+             return detail::storePointerAndLength(memory, address, list.pointer, list.length);
+@@ -624,28 +652,28 @@ struct Codec<std::vector<T>>
+             }
+             return detail::PointerAndLength { .pointer = *pointer,
+                                               .length = static_cast<uint32_t>(value.size()) };
+         }
+     }
+ 
+     /// Copies the guest's list at @p list out.
+     [[nodiscard]] static Result<std::vector<T>> liftContents(IGuestMemory& memory,
+                                                              detail::PointerAndLength list)
+     {
+-        // Proves the whole list in bounds before reading any of it, and bounds the reservation below.
+-        auto const bytes = detail::viewElements(memory, list, Codec<T>::Size);
+-        if (!bytes)
+-            return std::unexpected(bytes.error());
++        // Proves the whole list in bounds before reading any of it, and bounds the reservation below. The
++        // length is the one lifted with the pointer, once: every element read below lies in the range proven.
++        if (auto const inRange = detail::checkElements(memory, list, Codec<T>::Size); !inRange)
++            return std::unexpected(inRange.error());
+         if (auto charged = memory.chargeLift(uint64_t { list.length } * sizeof(T)); !charged)
+             return std::unexpected(charged.error());
+         if constexpr (IsByteList)
+-            return detail::copyBytes<std::vector<uint8_t>>(*bytes);
++            return detail::readBytes<std::vector<uint8_t>>(memory, list, 1);
+         else
+         {
+             auto elements = std::vector<T> {};
+             elements.reserve(list.length);
+             for (auto const index: std::views::iota(uint32_t { 0 }, list.length))
+             {
+                 auto element = Codec<T>::load(memory, list.pointer + (index * Codec<T>::Size));
+                 if (!element)
+                     return std::unexpected(element.error());
+                 elements.push_back(std::move(*element));
+@@ -872,21 +900,21 @@ struct Codec<std::variant<Ts...>>
+                         return Codec<Case>::store(memory, address + PayloadOffset, payload);
+                     },
+                     value);
+             });
+     }
+ 
+     [[nodiscard]] static Result<Variant> load(IGuestMemory& memory, Address address)
+     {
+         if (auto const inRange = detail::checkRange(memory, address, Size); !inRange)
+             return std::unexpected(inRange.error());
+-        return detail::loadInteger<Discriminant>(memory, address).and_then([&](Discriminant index) {
++        return detail::readInteger<Discriminant>(memory, address).and_then([&](Discriminant index) {
+             return liftIndexed(index, [&]<typename Case>(std::type_identity<Case>) {
+                 return Codec<Case>::load(memory, address + PayloadOffset);
+             });
+         });
+     }
+ 
+     [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& memory, Variant const& value, FlatValues& out)
+     {
+         out.push_back(static_cast<uint32_t>(value.index()));
+         auto const payloadStart = out.size();
+diff --git a/src/vtextension/CanonicalAbi_test.cpp b/src/vtextension/CanonicalAbi_test.cpp
+index ccb3b2f63..80d1e525d 100644
+--- a/src/vtextension/CanonicalAbi_test.cpp
++++ b/src/vtextension/CanonicalAbi_test.cpp
+@@ -1,33 +1,43 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The Canonical ABI codec: its layouts against what the Canonical ABI computes for the world's types,
+ // its round trips through a fake linear memory, its refusal of whatever a guest could forge, and its
+ // round trips through the echo and spawner guests, which wit-bindgen built from the world.
+ #include <catch2/catch_message.hpp>
++#include <catch2/catch_template_test_macros.hpp>
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <algorithm>
+ #include <array>
+ #include <chrono>
++#include <concepts>
+ #include <cstddef>
+ #include <cstdint>
+ #include <limits>
++#include <optional>
+ #include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
++#include <tuple>
++#include <type_traits>
+ #include <utility>
+ #include <vector>
+ 
++#include <vtcontrol/Catalog.hpp>
++#include <vtcontrol/Json.hpp>
+ #include <vtextension/CanonicalAbi.hpp>
++#include <vtextension/ControlCodec.hpp>
+ #include <vtextension/Event.hpp>
+ #include <vtextension/IHostServices.hpp>
++#include <vtextension/Instance.hpp>
+ #include <vtextension/StatuslineWorld.hpp>
+ #include <vtextension/testing/FakeGuestMemory.hpp>
+ #include <vtextension/testing/Harness.hpp>
+ 
+ #ifdef VTEXTENSION_TEST_MODULE_DIR
+     #include <vtextension/testing/TestModules.hpp>
+ #endif
+ 
+ using namespace std::string_view_literals;
+ using namespace vtextension;
+@@ -370,20 +380,214 @@ TEST_CASE("CanonicalAbi.wrappingRecord", "[vtextension]")
+ {
+     // A record near the end of the address space is refused whole: no field's address may wrap round
+     // to the start of memory.
+     auto memory = FakeMemory {};
+     CHECK(errorOf(abi::Codec<StateSnapshot>::store(memory, 0xFFFF'FFF0, StateSnapshot {}))
+           == ExtensionError::Trapped);
+     CHECK(errorOf(abi::Codec<StateSnapshot>::load(memory, 0xFFFF'FFF0)) == ExtensionError::Trapped);
+     CHECK(errorOf(abi::Codec<Event>::load(memory, 0xFFFF'FFF8)) == ExtensionError::Trapped);
+ }
+ 
++namespace
++{
++
++/// What a FetchCountingMemory does to guest bytes once read() copied them.
++enum class AfterRead : uint8_t
++{
++    Kept,      ///< Nothing.
++    Corrupted, ///< Flips every bit of them, as a guest scribbling its memory meanwhile would.
++};
++
++/// Whether a FetchCountingMemory is being written to or read from.
++enum class FetchPhase : uint8_t
++{
++    Storing, ///< writable() is the memory: a sample is being lowered.
++    Loading, ///< writable() is a decoy: only read() reaches the memory, and counts what it copies.
++};
++
++/// A guest memory that counts how often lifting reads each of its bytes. While loading, writable() -- which
++/// decoders may use to prove a range, but never to read -- hands out a decoy of other bytes, so a decoder
++/// that reads through it lifts something else.
++class FetchCountingMemory final: public abi::IGuestMemory
++{
++  public:
++    static constexpr uint32_t Size = 64 * 1024;
++
++    /// @param afterRead What read() does to the bytes it copied.
++    explicit FetchCountingMemory(AfterRead afterRead = AfterRead::Kept): _afterRead { afterRead } {}
++
++    /// From now on, writable() hands out the decoy and read() counts.
++    void startLoading() noexcept { _phase = FetchPhase::Loading; }
++
++    /// @return How often the most read byte was read.
++    [[nodiscard]] uint32_t mostReads() const { return std::ranges::max(_reads); }
++
++    /// @return How many bytes were read at all.
++    [[nodiscard]] std::size_t bytesRead() const
++    {
++        return static_cast<std::size_t>(
++            std::ranges::count_if(_reads, [](uint32_t reads) { return reads > 0; }));
++    }
++
++    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
++    {
++        if (uint64_t { address } + into.size() > Size)
++            return std::unexpected(ExtensionError::Trapped);
++        auto const source = std::span { _bytes }.subspan(address, into.size());
++        std::ranges::copy(source, into.begin());
++        for (auto& reads: std::span { _reads }.subspan(address, into.size()))
++            ++reads;
++        if (_afterRead == AfterRead::Corrupted)
++            for (auto& byte: source)
++                byte = ~byte;
++        return {};
++    }
++
++    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
++    {
++        if (uint64_t { address } + size > Size)
++            return std::unexpected(ExtensionError::Trapped);
++        auto& bytes = _phase == FetchPhase::Storing ? _bytes : _decoy;
++        return std::span { bytes }.subspan(address, size);
++    }
++
++    [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
++    {
++        auto const address = abi::alignTo(_next, alignment);
++        if (uint64_t { address } + size > Size)
++            return std::unexpected(ExtensionError::OutOfMemory);
++        _next = address + size;
++        return address;
++    }
++
++    [[nodiscard]] abi::Result<void> chargeLift(uint64_t /*bytes*/) override { return {}; }
++
++  private:
++    AfterRead _afterRead;
++    FetchPhase _phase = FetchPhase::Storing;
++    std::vector<std::byte> _bytes = std::vector<std::byte>(Size);
++    std::vector<std::byte> _decoy = std::vector<std::byte>(Size, std::byte { 0xA5 });
++    std::vector<uint32_t> _reads = std::vector<uint32_t>(Size);
++    abi::Address _next = 8; ///< Address 0 stays unused, as a guest's null.
++};
++
++/// The request type of each control method, in the catalog's order.
++using ControlRequests = decltype(std::apply(
++    [](auto const&... row) { return std::tuple<typename std::remove_cvref_t<decltype(row)>::Request...> {}; },
++    vtcontrol::Methods));
++
++/// Every type the host lifts out of a guest: what host functions take, what exports return, and the requests
++/// of the control verbs.
++using LiftedTypes = decltype(std::tuple_cat(
++    std::tuple<std::string, ByteList, ConfigMap, LogLevel, EventKinds, RenderRequest> {},
++    ControlRequests {}));
++
++/// @return A value of @p T that is not its default, where it has one: for a control request, the example
++///         of the first method taking it.
++template <typename T>
++[[nodiscard]] T sampleOf()
++{
++    if constexpr (std::is_same_v<T, std::string>)
++        return "grüße, ☃";
++    else if constexpr (std::is_same_v<T, ByteList>)
++        return ByteList { 0x00, 0x01, 0x7F, 0x80, 0xFF };
++    else if constexpr (std::is_same_v<T, ConfigMap>)
++        return ConfigMap { { "format", "{cwd}" }, { "größe", "" }, { "", "zwölf" } };
++    else if constexpr (std::is_same_v<T, LogLevel>)
++        return LogLevel::Warn;
++    else if constexpr (std::is_same_v<T, EventKinds>)
++        return EventKinds { EventKind::Title, EventKind::Focus, EventKind::Font };
++    else if constexpr (std::is_same_v<T, RenderRequest>)
++        return RenderRequest::Render;
++    else
++    {
++        auto sample = std::optional<T> {};
++        std::apply(
++            [&](auto const&... row) {
++                std::ignore =
++                    ((std::is_same_v<typename std::remove_cvref_t<decltype(row)>::Request, T>
++                      && (sample = vtcontrol::decodeJson<T>(row.requestExample).value()).has_value())
++                     || ...);
++            },
++            vtcontrol::Methods);
++        REQUIRE(sample.has_value());
++        return *std::move(sample);
++    }
++}
++
++/// @return Whether @p a and @p b are the same value: by `==` where @p T has it, else by their JSON.
++template <typename T>
++[[nodiscard]] bool sameValue(T const& a, T const& b)
++{
++    if constexpr (std::equality_comparable<T>)
++        return a == b;
++    else
++        return vtcontrol::encodeJson(a) == vtcontrol::encodeJson(b);
++}
++
++} // namespace
++
++TEMPLATE_LIST_TEST_CASE("GuestReader.fetchesEachByteOnce", "[vtextension]", LiftedTypes)
++{
++    // A lift reads guest memory only through read(), and no byte twice: what it decodes is one copy, whatever
++    // the guest's memory holds meanwhile.
++    auto const sample = sampleOf<TestType>();
++    auto memory = FetchCountingMemory {};
++    auto const address = abi::storeNew(memory, sample);
++    REQUIRE(address.has_value());
++
++    memory.startLoading();
++    auto const loaded = abi::Codec<TestType>::load(memory, *address);
++    REQUIRE(loaded.has_value());
++    CHECK(sameValue(*loaded, sample));
++    CHECK(memory.mostReads() <= 1);
++    // Something was read, unless there is nothing to: a request without fields.
++    CHECK((memory.bytesRead() > 0 || abi::Codec<TestType>::Size == 0));
++}
++
++TEST_CASE("GuestReader.mutationAfterReadChangesNothing", "[vtextension]")
++{
++    // Every byte is flipped once read() copied it: a lift that read any byte again would see the flip.
++    SECTION("a string stays the first copy")
++    {
++        auto const sample = std::string { "the first copy" };
++        auto memory = FetchCountingMemory { AfterRead::Corrupted };
++        auto const address = abi::storeNew(memory, sample);
++        REQUIRE(address.has_value());
++        memory.startLoading();
++        CHECK(abi::Codec<std::string>::load(memory, *address).value() == sample);
++    }
++
++    SECTION("a list keeps its first length")
++    {
++        auto const sample = sampleOf<ConfigMap>();
++        auto memory = FetchCountingMemory { AfterRead::Corrupted };
++        auto const address = abi::storeNew(memory, sample);
++        REQUIRE(address.has_value());
++        memory.startLoading();
++        auto const loaded = abi::Codec<ConfigMap>::load(memory, *address);
++        REQUIRE(loaded.has_value());
++        CHECK(loaded->size() == sample.size());
++        CHECK(*loaded == sample);
++    }
++
++    SECTION("an extension's output stays the first copy")
++    {
++        auto const sample = ByteList { 'o', 'u', 't' };
++        auto memory = FetchCountingMemory { AfterRead::Corrupted };
++        auto const address = abi::storeNew(memory, sample);
++        REQUIRE(address.has_value());
++        memory.startLoading();
++        CHECK(abi::loadByteString(memory, *address, sample.size()).value() == "out");
++    }
++}
++
+ #ifdef VTEXTENSION_TEST_MODULE_DIR
+ using vtextension::testing::readTestModule;
+ using vtextension::testing::RunningGuest;
+ using vtextension::testing::surface;
+ 
+ TEST_CASE("CanonicalAbi.echo.config", "[vtextension][guest]")
+ {
+     // list<tuple<string, string>> in, list<u8> out.
+     auto guest = RunningGuest(readTestModule("echo.wasm"));
+     CHECK(guest.loadAndRender({ { "color", "red" }, { "text", "hello" } }) == "hello");
+diff --git a/src/vtextension/ControlImports_test.cpp b/src/vtextension/ControlImports_test.cpp
+index 972a71e92..a2a904f5c 100644
+--- a/src/vtextension/ControlImports_test.cpp
++++ b/src/vtextension/ControlImports_test.cpp
+@@ -99,23 +99,23 @@ struct GuestCall
+     [[nodiscard]] std::expected<Reply, vtcontrol::ControlError> result()
+     {
+         auto loaded = abi::Codec<std::expected<Reply, vtcontrol::ControlError>>::load(memory, resultAddress);
+         REQUIRE(loaded.has_value());
+         return std::move(*loaded);
+     }
+ 
+     /// @return Whether the result slot is untouched: all zeros, as it was allocated.
+     [[nodiscard]] bool resultUntouched()
+     {
+-        auto const bytes = memory.view(resultAddress, ResultSlotBytes);
+-        REQUIRE(bytes.has_value());
+-        return std::ranges::all_of(*bytes, [](std::byte byte) { return byte == std::byte { 0 }; });
++        auto bytes = std::vector<std::byte>(ResultSlotBytes);
++        REQUIRE(memory.read(resultAddress, bytes).has_value());
++        return std::ranges::all_of(bytes, [](std::byte byte) { return byte == std::byte { 0 }; });
+     }
+ 
+     FakeMemory memory;
+     abi::FlatValues arguments;
+     abi::Address resultAddress = 0;
+     std::atomic<DeadlineState> deadline = DeadlineState::Running;
+ };
+ 
+ [[nodiscard]] vtcontrol::SplitRequest splitRequest()
+ {
+diff --git a/src/vtextension/Instance.cpp b/src/vtextension/Instance.cpp
+index 90692ec1e..47eef1d5a 100644
+--- a/src/vtextension/Instance.cpp
++++ b/src/vtextension/Instance.cpp
+@@ -1,19 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/Instance.hpp>
+ 
+ #include <core/Assert.hpp>
+ #include <core/platform/Clock.hpp>
+ 
+ #include <algorithm>
+ #include <array>
++#include <cstddef>
+ #include <cstdint>
++#include <cstring>
++#include <limits>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <type_traits>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/CanonicalAbi.hpp>
+ #include <vtextension/ControlImports.hpp>
+ #include <vtextension/HostBindings.hpp>
+@@ -70,32 +73,45 @@ namespace
+ } // namespace
+ 
+ namespace detail
+ {
+     std::span<wasm::HostFunction const> hostFunctions() noexcept
+     {
+         return hostFunctionTable();
+     }
+ } // namespace detail
+ 
+-/// The guest's linear memory as the codec reaches it: every view is bounds-checked by the runtime,
+-/// allocations go through the guest's `cabi_realloc` and are checked as well, and what lifting may
+-/// spend on the host is bounded per host call.
++/// The guest's linear memory as the codec reaches it: every access is bounds-checked by the runtime, what
++/// lifting reads is copied out once, allocations go through the guest's `cabi_realloc` and are checked as
++/// well, and what lifting may spend on the host is bounded per host call.
+ class Instance::GuestMemory final: public abi::IGuestMemory
+ {
+   public:
+     explicit GuestMemory(Instance& instance) noexcept: _instance { instance } {}
+ 
+     /// Gives the next lift the full budget of one host call.
+     void resetLiftBudget() noexcept { _liftBudget = _instance._limits.maxHostCallBytes; }
+ 
+-    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
++    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
++    {
++        if (into.size() > std::numeric_limits<uint32_t>::max())
++            return std::unexpected(ExtensionError::Trapped);
++        // One copy, of a range the runtime bounds: by the size the memory has when it is taken (a shared
++        // memory's acknowledged size), however the guest's side writes or grows it meanwhile.
++        return writable(address, static_cast<uint32_t>(into.size()))
++            .transform([&](std::span<std::byte> bytes) {
++                if (!bytes.empty())
++                    std::memcpy(into.data(), bytes.data(), bytes.size());
++            });
++    }
++
++    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
+     {
+         // A guest that names memory it does not have traps; a host that died meanwhile is the host's fault,
+         // and counts as such.
+         return _instance._instance->memory(address, size).transform_error([](wasm::MemoryFailure failure) {
+             switch (failure)
+             {
+                 case wasm::MemoryFailure::OutOfBounds: return ExtensionError::Trapped;
+                 case wasm::MemoryFailure::HostCrashed: return ExtensionError::HostUnavailable;
+             }
+             return ExtensionError::Trapped;
+@@ -104,21 +120,21 @@ class Instance::GuestMemory final: public abi::IGuestMemory
+ 
+     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
+     {
+         auto argv = std::array<uint32_t, 4> { 0, 0, alignment, size }; // old pointer, old size, align, size
+         if (auto called = _instance.callExport(_instance._exports.realloc, argv); !called)
+             return std::unexpected(called.error());
+         // The guest's allocator is the guest's: what it answers is checked like any other address.
+         auto const address = argv[0];
+         if (alignment == 0 || address % alignment != 0)
+             return std::unexpected(ExtensionError::Trapped);
+-        return view(address, size).transform([&](std::span<std::byte>) { return address; });
++        return writable(address, size).transform([&](std::span<std::byte>) { return address; });
+     }
+ 
+     [[nodiscard]] abi::Result<void> chargeLift(uint64_t bytes) override
+     {
+         if (bytes > _liftBudget)
+             return std::unexpected(ExtensionError::Trapped);
+         _liftBudget -= bytes;
+         return {};
+     }
+ 
+diff --git a/src/vtextension/testing/FakeGuestMemory.hpp b/src/vtextension/testing/FakeGuestMemory.hpp
+index 87d29480b..327b40e3e 100644
+--- a/src/vtextension/testing/FakeGuestMemory.hpp
++++ b/src/vtextension/testing/FakeGuestMemory.hpp
+@@ -1,17 +1,18 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // Test-only: a guest's linear memory without a guest, for driving the Canonical ABI codec directly.
+ #pragma once
+ 
+ #include <catch2/catch_test_macros.hpp>
+ 
++#include <algorithm>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <limits>
+ #include <span>
+ #include <vector>
+ 
+ #include <vtextension/CanonicalAbi.hpp>
+ #include <vtextension/ExtensionError.hpp>
+ 
+@@ -31,21 +32,29 @@ class FakeGuestMemory final: public abi::IGuestMemory
+     }
+ 
+     [[nodiscard]] abi::Result<void> chargeLift(uint64_t bytes) override
+     {
+         if (bytes > _liftBudget)
+             return std::unexpected(ExtensionError::Trapped);
+         _liftBudget -= bytes;
+         return {};
+     }
+ 
+-    [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
++    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
++    {
++        if (uint64_t { address } + into.size() > _bytes.size())
++            return std::unexpected(ExtensionError::Trapped);
++        std::ranges::copy(std::span { _bytes }.subspan(address, into.size()), into.begin());
++        return {};
++    }
++
++    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
+     {
+         if (uint64_t { address } + size > _bytes.size())
+             return std::unexpected(ExtensionError::Trapped);
+         return std::span { _bytes }.subspan(address, size);
+     }
+ 
+     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
+     {
+         auto const address = abi::alignTo(_next, alignment);
+         if (uint64_t { address } + size > _bytes.size())
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 1e84547bf..caa0e55a3 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -242,20 +242,21 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND _process_source)
+     # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
+     # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host
+     # only for the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
+     #
+     # Beside them, the contract and the suites vtextension_test runs on the default backend, here composed by
+     # testing/ProcessDefaultBackend.cpp as the remote backend over real helper processes: their real guests
+     # run through a process boundary.
+     add_executable(vtextension_helper_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         Helper_test.cpp
++        HostileMemory_test.cpp
+         ProcessBackend_test.cpp
+         Hostility_test.cpp
+         ProcessMeasure_test.cpp
+         ReviewFocusProcess_test.cpp
+         Teardown_test.cpp
+         process/testing/HelperComposition.cpp
+         process/testing/HelperComposition.hpp
+         process/testing/LaunchedHelper.cpp
+         process/testing/LaunchedHelper.hpp
+         testing/ProcessDefaultBackend.cpp
+diff --git a/src/vtextension/wasm/remote/HostileMemory_test.cpp b/src/vtextension/wasm/remote/HostileMemory_test.cpp
+new file mode 100644
+index 000000000..fbfc23c34
+--- /dev/null
++++ b/src/vtextension/wasm/remote/HostileMemory_test.cpp
+@@ -0,0 +1,325 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// Decoding what an extension passes while its host scribbles the memory: an instance's memory object, laid
++// out with values of every kind the host lifts, is granted to a probe that flips its bytes at random for as
++// long as Contour decodes them. Each decode fails as a guest that broke the ABI fails, or yields a value that
++// obeys every rule a lift checks; none sees a length it did not check, or bytes it did not validate.
++#include <catch2/catch_message.hpp>
++#include <catch2/catch_test_macros.hpp>
++
++#include <array>
++#include <charconv>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <expected>
++#include <format>
++#include <limits>
++#include <optional>
++#include <ranges>
++#include <span>
++#include <string>
++#include <string_view>
++#include <system_error>
++#include <utility>
++#include <vector>
++
++#include <vtcontrol/Api.hpp>
++#include <vtcontrol/Json.hpp>
++#include <vtextension/CanonicalAbi.hpp>
++#include <vtextension/ControlCodec.hpp>
++#include <vtextension/Event.hpp>
++#include <vtextension/ExtensionError.hpp>
++#include <vtextension/IHostServices.hpp>
++#include <vtextension/Instance.hpp>
++#include <vtextension/StatuslineWorld.hpp>
++#include <vtextension/Utf8.hpp>
++#include <vtextension/wasm/remote/SharedGuestMemory.hpp>
++#include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
++#include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
++#include <vtextension/wasm/remote/proto/Pdu.hpp>
++#include <vtextension/wasm/remote/transport/HandleGrant.hpp>
++#include <vtextension/wasm/remote/transport/PduStream.hpp>
++
++using namespace vtextension;
++using namespace vtextension::wasm::remote;
++namespace abi = vtextension::abi;
++
++namespace
++{
++
++/// The size of the object granted, and of the memory it holds.
++constexpr auto ObjectBytes = uint64_t { 1024 } * 1024;
++
++/// What the probe seeds its random flips with: the same every run.
++constexpr auto MutationSeed = 0x5eed;
++
++/// How many decodes run while the probe scribbles.
++constexpr auto Decodes = 100'000;
++
++/// What one decode may spend on the host: what it lifts is charged against it.
++constexpr auto LiftBudget = uint64_t { 64 } * 1024;
++
++/// The most bytes an extension's output may hold.
++constexpr auto MaxOutputBytes = std::size_t { 4096 };
++
++/// An instance's shared memory as the codec reaches it, as Instance's own does: what lifting reads is one
++/// copy of a range bounded by the acknowledged size; allocation bumps through the memory, for laying it out.
++class ScribbledMemory final: public abi::IGuestMemory
++{
++  public:
++    /// @param memory The memory, which outlives this.
++    explicit ScribbledMemory(SharedGuestMemory& memory) noexcept: _memory { memory } {}
++
++    /// Gives the next decode the full budget.
++    void resetLiftBudget() noexcept { _liftBudget = LiftBudget; }
++
++    [[nodiscard]] abi::Result<void> read(abi::Address address, std::span<std::byte> into) override
++    {
++        if (into.size() > std::numeric_limits<uint32_t>::max())
++            return std::unexpected(ExtensionError::Trapped);
++        return writable(address, static_cast<uint32_t>(into.size()))
++            .transform([&](std::span<std::byte> bytes) {
++                if (!bytes.empty())
++                    std::memcpy(into.data(), bytes.data(), bytes.size());
++            });
++    }
++
++    [[nodiscard]] abi::Result<std::span<std::byte>> writable(abi::Address address, uint32_t size) override
++    {
++        return _memory.view(address, size).transform_error([](vtextension::wasm::MemoryFailure) {
++            return ExtensionError::Trapped;
++        });
++    }
++
++    [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
++    {
++        auto const address = abi::alignTo(_next, alignment);
++        if (uint64_t { address } + size > _memory.acknowledgedBytes())
++            return std::unexpected(ExtensionError::OutOfMemory);
++        _next = address + size;
++        return address;
++    }
++
++    [[nodiscard]] abi::Result<void> chargeLift(uint64_t bytes) override
++    {
++        if (bytes > _liftBudget)
++            return std::unexpected(ExtensionError::Trapped);
++        _liftBudget -= bytes;
++        return {};
++    }
++
++  private:
++    SharedGuestMemory& _memory;
++    abi::Address _next = 8; ///< Address 0 stays unused, as a guest's null.
++    uint64_t _liftBudget = LiftBudget;
++};
++
++/// How a decode came out.
++enum class Decoded : uint8_t
++{
++    Inadmissible, ///< A value that breaks a rule a lift checks, or a failure no guest can cause.
++    Refused,      ///< Refused as a guest that broke the ABI is: `Trapped`, or `OutOfMemory`.
++    Admissible,   ///< A value that obeys every rule a lift checks.
++};
++
++/// @return How @p lifted came out, @p obeys judging a value.
++template <typename T, typename Obeys>
++[[nodiscard]] Decoded judge(abi::Result<T> const& lifted, Obeys const& obeys)
++{
++    if (!lifted)
++        return lifted.error() == ExtensionError::Trapped || lifted.error() == ExtensionError::OutOfMemory
++                   ? Decoded::Refused
++                   : Decoded::Inadmissible;
++    return obeys(*lifted) ? Decoded::Admissible : Decoded::Inadmissible;
++}
++
++/// @return Whether @p text is UTF-8 that a lift could have charged.
++[[nodiscard]] bool isLiftable(std::string_view text)
++{
++    return isValidUtf8(text) && text.size() <= LiftBudget;
++}
++
++/// One kind of value laid out in the object: how one is stored, and how a decode of one is judged.
++struct SampleKind
++{
++    std::string_view name;
++    abi::Result<abi::Address> (*store)(abi::IGuestMemory& memory);
++    Decoded (*decode)(abi::IGuestMemory& memory, abi::Address address);
++};
++
++/// Every kind of value the probe's object is laid out with, in the order it is.
++constexpr auto SampleKinds = std::to_array<SampleKind>({
++    { .name = "string",
++      .store = [](abi::IGuestMemory& memory) { return abi::storeNew(memory, std::string { "grüße, ☃" }); },
++      .decode =
++          [](abi::IGuestMemory& memory, abi::Address address) {
++              return judge(abi::Codec<std::string>::load(memory, address), isLiftable);
++          } },
++    { .name = "output",
++      .store =
++          [](abi::IGuestMemory& memory) { return abi::storeNew(memory, ByteList { 'o', 'u', 't', 0xFF }); },
++      .decode =
++          [](abi::IGuestMemory& memory, abi::Address address) {
++              // Output past its limit is refused as such, before a byte of it is read.
++              auto const lifted = abi::loadByteString(memory, address, MaxOutputBytes);
++              if (!lifted && lifted.error() == ExtensionError::OutputTooLarge)
++                  return Decoded::Refused;
++              return judge(lifted, [](std::string const& bytes) { return bytes.size() <= MaxOutputBytes; });
++          } },
++    { .name = "config map",
++      .store =
++          [](abi::IGuestMemory& memory) {
++              return abi::storeNew(memory, ConfigMap { { "format", "{cwd}" }, { "größe", "zwölf" } });
++          },
++      .decode =
++          [](abi::IGuestMemory& memory, abi::Address address) {
++              return judge(abi::Codec<ConfigMap>::load(memory, address), [](ConfigMap const& map) {
++                  auto bytes = uint64_t { 0 };
++                  for (auto const& [key, value]: map)
++                  {
++                      if (!isLiftable(key) || !isLiftable(value))
++                          return false;
++                      bytes += key.size() + value.size();
++                  }
++                  return bytes + (map.size() * sizeof(ConfigMap::value_type)) <= LiftBudget;
++              });
++          } },
++    { .name = "log level",
++      .store = [](abi::IGuestMemory& memory) { return abi::storeNew(memory, LogLevel::Warn); },
++      .decode =
++          [](abi::IGuestMemory& memory, abi::Address address) {
++              return judge(abi::Codec<LogLevel>::load(memory, address), [](LogLevel level) {
++                  return std::to_underlying(level) < abi::EnumCaseCount<LogLevel>;
++              });
++          } },
++    { .name = "event kinds",
++      .store =
++          [](abi::IGuestMemory& memory) {
++              return abi::storeNew(memory, EventKinds { EventKind::Title, EventKind::Font });
++          },
++      .decode =
++          [](abi::IGuestMemory& memory, abi::Address address) {
++              return judge(abi::Codec<EventKinds>::load(memory, address), [](EventKinds kinds) {
++                  return (kinds.value() >> abi::FlagsMemberCount<EventKind>) == 0;
++              });
++          } },
++    { .name = "control request",
++      .store =
++          [](abi::IGuestMemory& memory) {
++              return abi::storeNew(memory,
++                                   vtcontrol::SplitRequest { .pane = "pane:x",
++                                                             .direction = vtcontrol::SplitDirection::Below,
++                                                             .ratioPercent = 30,
++                                                             .cwd = "/tmp",
++                                                             .command = { "a", "b" },
++                                                             .name = "tail",
++                                                             .focus = vtcontrol::FocusPolicy::Keep });
++          },
++      .decode =
++          [](abi::IGuestMemory& memory, abi::Address address) {
++              return judge(abi::Codec<vtcontrol::SplitRequest>::load(memory, address),
++                           [](vtcontrol::SplitRequest const& request) {
++                               // UTF-8 throughout, and enums the vocabulary names: its JSON reads back.
++                               auto const json = vtcontrol::encodeJson(request);
++                               return isValidUtf8(json)
++                                      && vtcontrol::decodeJson<vtcontrol::SplitRequest>(json).has_value();
++                           });
++          } },
++});
++
++/// A value laid out in the object: its kind, and where its root is.
++struct Sample
++{
++    std::size_t kind;
++    abi::Address address;
++};
++
++/// Lays @p memory out with values of every kind, in turn, until it is full.
++/// @return Where each one is.
++[[nodiscard]] std::vector<Sample> layOut(abi::IGuestMemory& memory)
++{
++    auto samples = std::vector<Sample> {};
++    while (true)
++    {
++        auto const kind = samples.size() % SampleKinds.size();
++        auto const stored = SampleKinds.at(kind).store(memory);
++        if (!stored)
++            return samples;
++        samples.push_back(Sample { .kind = kind, .address = *stored });
++    }
++}
++
++/// @return The count a `mutations=N` line names; nothing for another line.
++[[nodiscard]] std::optional<uint64_t> mutationsIn(std::string_view line)
++{
++    constexpr auto Prefix = std::string_view { "mutations=" };
++    if (!line.starts_with(Prefix))
++        return std::nullopt;
++    auto count = uint64_t { 0 };
++    auto const digits = line.substr(Prefix.size());
++    if (std::from_chars(digits.data(), digits.data() + digits.size(), count).ec != std::errc {})
++        return std::nullopt;
++    return count;
++}
++
++} // namespace
++
++TEST_CASE("hostile memory does not break decoding", "[vtextension][hostility]")
++{
++    auto memory = SharedGuestMemory::create(ObjectBytes, ObjectBytes);
++    REQUIRE(memory.has_value());
++    auto guest = ScribbledMemory { *memory };
++    auto const samples = layOut(guest);
++    REQUIRE(samples.size() > SampleKinds.size());
++
++    // The probe inherits the object as an extension host does: granted with an Instantiate.
++    auto probe = process::testing::launchHelper(
++        process::makeSystemProcessLauncher(),
++        process::testing::HelperLaunch { .executable = VTEXTENSION_PROBE_PATH,
++                                         .leading = { "--mutate", std::format("--seed={}", MutationSeed) } });
++    REQUIRE(probe.has_value());
++    auto control = transport::PduStream { std::move(probe->control),
++                                          proto::ChannelKind::Control,
++                                          proto::Direction::ToParent,
++                                          proto::PduLimits {} };
++    auto const target = probe->process->handleTarget();
++    REQUIRE(target.has_value());
++    auto const grant = transport::grantHandle(*target, memory->object());
++    REQUIRE(grant.has_value());
++    REQUIRE(control
++                .send(proto::Instantiate { .moduleId = 1,
++                                           .instanceId = 1,
++                                           .interruptSlot = 0,
++                                           .memory = memory->grant(grant->wireValue) },
++                      *grant)
++                .has_value());
++    memory->closeObject();
++    REQUIRE(process::testing::readReport(probe->lanes.front())
++            == std::optional { std::vector<std::string> { "mutating", "end" } });
++
++    auto outcomes = std::array<std::size_t, 3> {};
++    for (auto const index: std::views::iota(0, Decodes))
++    {
++        auto const& sample = samples.at(static_cast<std::size_t>(index) % samples.size());
++        guest.resetLiftBudget();
++        auto const outcome = SampleKinds.at(sample.kind).decode(guest, sample.address);
++        ++outcomes.at(std::to_underlying(outcome));
++        if (outcome == Decoded::Inadmissible)
++            FAIL_CHECK("an inadmissible " << SampleKinds.at(sample.kind).name << " at " << sample.address);
++    }
++    INFO("refused " << outcomes[std::to_underlying(Decoded::Refused)] << ", admissible "
++                    << outcomes[std::to_underlying(Decoded::Admissible)]);
++    CHECK(outcomes[std::to_underlying(Decoded::Inadmissible)] == 0);
++
++    // The control channel's end ends the scribbling; the probe says how much it did, and exits.
++    control.shutdown();
++    auto const report = process::testing::readReport(probe->lanes.front());
++    REQUIRE(report.has_value());
++    REQUIRE(report->size() == 2);
++    auto const mutations = mutationsIn(report->front());
++    REQUIRE(mutations.has_value());
++    CHECK(*mutations > 0);
++    CHECK(process::testing::awaitReap(*probe->launcher, *probe->process)
++          == process::ExitStatus { .kind = process::ExitKind::Exited, .value = 0 });
++}
+diff --git a/src/vtextension/wasm/remote/RemoteBackend.cpp b/src/vtextension/wasm/remote/RemoteBackend.cpp
+index 0ec7dbc18..fa44be1fa 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend.cpp
+@@ -601,48 +601,55 @@ namespace
+             case CallFailure::HostFailure: return failure;
+             case CallFailure::MemoryGrowthRefused:
+             case CallFailure::HostCrashed: return CallFailure::Trap;
+         }
+         return CallFailure::Trap;
+     }
+ 
+     std::expected<std::shared_ptr<IWasmModule>, ExtensionError> RemoteRuntime::load(
+         ModuleIdentity identity, std::vector<std::byte> bytes)
+     {
++        // The parent's own reading of the module's memory, before any host is asked: a module the parent
++        // cannot read is refused without being loaded anywhere, so no host holds a module nobody releases.
++        auto const initialPages = binary::largestInitialMemoryPages(bytes);
++        if (!initialPages)
++            return std::unexpected(ExtensionError::InvalidComponent);
+         auto slot = slotFor(identity.key);
+         auto incarnation = slot->live();
+         if (!incarnation)
+             return std::unexpected(incarnation.error());
+         auto loaded = loadInto(**incarnation, bytes);
+         if (!loaded)
+             return std::unexpected(loaded.error());
+-        // The parent's own reading of the module's memory: a host loaded it, so it is well-formed.
+-        auto const initialPages = binary::largestInitialMemoryPages(bytes);
+-        if (!initialPages)
+-            return std::unexpected(ExtensionError::InvalidComponent);
+         auto const memory = ModuleMemory {
+             .initialBytes = uint64_t { *initialPages } * proto::WasmPageBytes,
+             .exported = std::ranges::contains(loaded->exports, ExternKind::Memory, &ExportDescription::kind)
+                             ? MemoryExport::Exported
+                             : MemoryExport::None,
+         };
+         return std::make_shared<RemoteModule>(shared_from_this(),
+                                               std::move(slot),
+                                               std::move(bytes),
+                                               memory,
+                                               std::move(*incarnation),
+                                               std::move(*loaded));
+     }
+ 
+     std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> RemoteModule::instantiate(
+         IHostContext& context)
+     {
++        // A memory past the cap is refused here, before anything is made or sent, and before a dead host is
++        // replaced: by the parent's own reading of the module, whatever a host would make of it.
++        auto const capBytes = uint64_t { _runtime->limits().memoryBytes };
++        if (_memory.initialBytes > capBytes)
++            return std::unexpected(ExtensionError::OutOfMemory);
++
+         auto const lock = std::scoped_lock { _mutex };
+         auto incarnation = _slot->live();
+         if (!incarnation)
+             return std::unexpected(incarnation.error());
+         auto& host = **incarnation;
+         if (*incarnation != _loadedIn)
+         {
+             // The host it was loaded in died: loaded again in the new one, it must be the module it was. An
+             // honest host describes the same bytes alike every time, so one that does not is not trusted, and
+             // the module is adopted there only once it matched.
+@@ -652,26 +659,20 @@ namespace
+             if (reloaded->imports != _imports || reloaded->exports != _exports)
+             {
+                 host.markDead();
+                 return std::unexpected(ExtensionError::InvalidComponent);
+             }
+             _loadedIn->release(proto::Release { .target = proto::ReleaseTarget::Module, .id = _moduleId });
+             _loadedIn = *incarnation;
+             _moduleId = reloaded->moduleId;
+         }
+ 
+-        // A memory past the cap is refused here, before anything is made or sent: by the parent's own reading
+-        // of the module, whatever a host would make of it.
+-        auto const capBytes = uint64_t { _runtime->limits().memoryBytes };
+-        if (_memory.initialBytes > capBytes)
+-            return std::unexpected(ExtensionError::OutOfMemory);
+-
+         // Every live instance holds a slot of the host's interrupt page; with none left, the host takes no
+         // more instances, which is no fault of the host's.
+         auto const interruptSlot = host.interruptSlots().acquire();
+         if (!interruptSlot)
+             return std::unexpected(ExtensionError::RuntimeUnavailable);
+         auto const refused = [&](ExtensionError error) {
+             host.interruptSlots().release(*interruptSlot);
+             return std::unexpected(error);
+         };
+ 
+@@ -682,20 +683,24 @@ namespace
+         auto grant = transport::HandleGrant {};
+         auto wire = proto::MemoryGrant {};
+         if (host.memoryMode() == proto::MemoryMode::Shared)
+         {
+             auto lease = host.leaseObjectBytes(proto::memoryObjectBytes(capBytes));
+             if (!lease)
+                 return refused(ExtensionError::OutOfMemory);
+             auto made = SharedGuestMemory::create(capBytes, _memory.initialBytes);
+             if (!made)
+                 return refused(made.error());
++            // Production hosts are children: a grant is a duplicate in the child, and dies with it. A host in
++            // this process (the in-process host, Windows) is granted a duplicate in this process, which leaks
++            // when the request fails before that host claims it -- one handle per such failure, which kills
++            // the incarnation.
+             auto granted = transport::grantHandle(host.handleTarget(), made->object());
+             if (!granted)
+                 return refused(ExtensionError::RuntimeUnavailable);
+             grant = *granted;
+             wire = made->grant(granted->wireValue);
+             shared.emplace(SharedInstanceMemory { .memory = *std::move(made), .lease = *std::move(lease) });
+         }
+         // A start function growing the memory asks on the control channel, before the reply.
+         auto const answer = GrowAnswer { [&](proto::Grow const& grow) {
+             if (!shared || grow.instanceId != instanceId)
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index f738e0aa1..43e151a04 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -1876,20 +1876,37 @@ constexpr auto TwoPageModule = std::to_array<uint8_t>({
+ {
+     return proto::Loaded {
+         .moduleId = moduleId,
+         .error = std::nullopt,
+         .imports = {},
+         .exports = { ExportDescription {
+             .name = "memory", .kind = ExternKind::Memory, .signature = {}, .initialPages = 2 } },
+     };
+ }
+ 
++/// One page of memory, exported, and nothing else.
++///
++///     (module (memory (export "memory") 1))
++constexpr auto OnePageModule = std::to_array<uint8_t>({
++    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                       // magic, version 1
++    0x05, 0x03, 0x01, 0x00, 0x01,                                         // memory section: min 1
++    0x07, 0x0a, 0x01, 0x06, 'm',  'e',  'm',  'o',  'r', 'y', 0x02, 0x00, // export section: memory 0
++});
++
++/// OnePageModule's description, as a host describes it.
++[[nodiscard]] proto::Loaded onePageDescription(uint32_t moduleId)
++{
++    auto loaded = twoPageDescription(moduleId);
++    loaded.exports.front().initialPages = 1;
++    return loaded;
++}
++
+ /// A bump allocator that grows its memory for every allocation: `cabi_realloc` returns the end of the memory
+ /// and grows it by the pages the allocation takes (trapping if it cannot); `load8` reads a byte.
+ ///
+ ///     (module
+ ///       (memory (export "memory") 1)
+ ///       (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) (local $p i32)
+ ///         (local.set $p (i32.mul (memory.size) (i32.const 65536)))
+ ///         (if (i32.eq (memory.grow (i32.shr_u (i32.add (local.get 3) (i32.const 65535)) (i32.const 16)))
+ ///                     (i32.const -1))
+ ///           (then unreachable))
+@@ -2157,20 +2174,81 @@ TEST_CASE("RemoteBackend.initialSizeComesFromTheModule", "[vtextension][remote]"
+         auto const module = contract::load(*runtime, TwoPageModule);
+         auto const instance = module->instantiate(context);
+         REQUIRE_FALSE(instance.has_value());
+         CHECK(instance == std::unexpected(ExtensionError::OutOfMemory));
+         // The Load, and nothing after it.
+         CHECK(instantiatesAmong(transcript->awaitAtLeast(1)).empty());
+     }
+     CHECK(connector->terminations() == 0);
+ }
+ 
++TEST_CASE("RemoteBackend.unreadableModuleIsNeverLoaded", "[vtextension][remote]")
++{
++    // The parent reads a module's memory before asking a host to load it: bytes it cannot read are refused
++    // without a Load, so no host is left holding a module the parent never releases.
++    auto const transcript = std::make_shared<Transcript>();
++    auto const connector =
++        honestConnector(HonestScript { .describe = &twoPageDescription, .callables = {} }, transcript);
++    auto const backend = makeBackend(connector);
++    auto const runtime = contract::createRuntime(*backend);
++    // Cut inside the memory section: the module's initial memory cannot be read.
++    auto truncated = toModule(TwoPageModule);
++    truncated.resize(11);
++    auto const refused = runtime->load(ModuleIdentity {}, std::move(truncated));
++    CHECK(refused == std::unexpected(ExtensionError::InvalidComponent));
++
++    // A module that reads is loaded as ever: its Load is the first and only one the host received.
++    auto const module = contract::load(*runtime, TwoPageModule);
++    auto const pdus = transcript->awaitAtLeast(1);
++    REQUIRE(pdus.size() == 1);
++    auto const* const load = std::get_if<proto::Load>(&pdus.front());
++    REQUIRE(load != nullptr);
++    CHECK(load->bytes == toModule(TwoPageModule));
++}
++
++TEST_CASE("RemoteBackend.overCapModuleStartsNoHost", "[vtextension][remote]")
++{
++    // A one-page runtime: one module fits, the two-page one does not. The first host answers the first
++    // Instantiate for another instance, which kills it; instantiating the module past the cap then fails
++    // before a host is started in its place.
++    auto const transcript = std::make_shared<Transcript>();
++    auto const connector =
++        std::make_shared<ScriptedConnector>([transcript](HelperEnds& ends, std::size_t connection) {
++            auto loads = std::make_shared<std::size_t>(0);
++            auto script = HonestScript { .describe =
++                                             [loads](uint32_t moduleId) {
++                                                 return (*loads)++ == 0 ? onePageDescription(moduleId)
++                                                                        : twoPageDescription(moduleId);
++                                             },
++                                         .callables = {} };
++            if (connection == 0)
++                script.beforeInstantiated = [](HelperEnds& host, proto::Instantiate const& request) {
++                    std::ignore = host.send(proto::Instantiated {
++                        .instanceId = request.instanceId + 1, .error = std::nullopt, .callableExports = {} });
++                    return false;
++                };
++            serveHonestly(ends, script, *transcript);
++        });
++    auto const backend = makeBackend(connector);
++    auto const runtime = contract::createRuntime(*backend, OnePageLimits);
++    // Under one identity, so that both are the same host's.
++    auto const fits = loadAs(*runtime, "extension", OnePageModule);
++    auto const overCap = loadAs(*runtime, "extension", TwoPageModule);
++    auto context = contract::RecordingHostContext {};
++    REQUIRE(fits->instantiate(context) == std::unexpected(ExtensionError::HostUnavailable));
++    REQUIRE(connector->connections() == 1);
++
++    auto const refused = overCap->instantiate(context);
++    CHECK(refused == std::unexpected(ExtensionError::OutOfMemory));
++    CHECK(connector->connections() == 1);
++}
++
+ TEST_CASE("RemoteBackend.unexportedMemoryIsOutOfBounds", "[vtextension][remote]")
+ {
+     // The host maps the memory whether it is exported or not; the parent reaches it only if it is.
+     auto const backend = makeBackend(makeConnector());
+     auto const runtime = contract::createRuntime(*backend);
+     auto const guard = contract::enterThread(*backend);
+     auto const module = contract::load(*runtime, contract::UnexportedMemoryModule);
+     auto context = contract::RecordingHostContext {};
+     auto const instance = contract::instantiate(*module, context);
+     CHECK(instance->memory(0, 4) == std::unexpected(MemoryFailure::OutOfBounds));
+diff --git a/src/vtextension/wasm/remote/SharedGuestMemory.hpp b/src/vtextension/wasm/remote/SharedGuestMemory.hpp
+index e3a708ab0..f26a98d1c 100644
+--- a/src/vtextension/wasm/remote/SharedGuestMemory.hpp
++++ b/src/vtextension/wasm/remote/SharedGuestMemory.hpp
+@@ -69,21 +69,22 @@ class SharedGuestMemory
+ 
+     /// Closes the object's handle, once the Instantiate that grants it was sent (or never will be). The
+     /// mapping, and so the object, lives on.
+     void closeObject() noexcept;
+ 
+     /// @param wireValue What the grant names the object by (transport::HandleGrant::wireValue).
+     /// @return What the Instantiate that hands the object over carries.
+     [[nodiscard]] proto::MemoryGrant grant(uint64_t wireValue) const noexcept;
+ 
+     /// A view of [@p address, @p address + @p size) of the memory, bounded by the acknowledged size, never by
+-    /// what the host reports. Valid as long as the memory: growth moves nothing.
++    /// what the host reports. Valid as long as the memory: growth moves nothing. The host may write it at any
++    /// time, so what is decoded from it is copied out once (abi::IGuestMemory::read()), never read twice.
+     /// @param address The guest address the view starts at.
+     /// @param size The view's size in bytes.
+     /// @return The view; `OutOfBounds` if any of it lies past the acknowledged size.
+     [[nodiscard]] std::expected<std::span<std::byte>, MemoryFailure> view(uint32_t address,
+                                                                           uint32_t size) const noexcept;
+ 
+     /// Answers a host that asks to grow the memory to @p bytes: a violation unless that is whole guest pages,
+     /// more than acknowledged, and within both the cap and the object. Otherwise the new pages are committed
+     /// (Windows), the size is acknowledged, and it is granted; it is refused if they cannot be committed.
+     /// @param bytes The size the host asks for.
+diff --git a/src/vtextension/wasm/remote/Teardown_test.cpp b/src/vtextension/wasm/remote/Teardown_test.cpp
+index 96c8275bc..c22f97d07 100644
+--- a/src/vtextension/wasm/remote/Teardown_test.cpp
++++ b/src/vtextension/wasm/remote/Teardown_test.cpp
+@@ -13,20 +13,21 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <expected>
+ #include <format>
+ #include <future>
+ #include <memory>
+ #include <optional>
+ #include <print>
++#include <ranges>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <system_error>
+ #include <thread>
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionError.hpp>
+@@ -80,20 +81,40 @@ constexpr auto Patience = std::chrono::seconds { 5 };
+ /// How long the owner thread may take to drop what it holds: a drop that waited for a helper would not make
+ /// it, as a helper that stops reading never answers.
+ constexpr auto DropBound = std::chrono::seconds { 1 };
+ 
+ /// How long a helper whose parent was killed may outlive it.
+ constexpr auto OrphanBound = std::chrono::seconds { 2 };
+ 
+ /// The module a load that a host stops reading blocks on: larger than any channel's buffer.
+ constexpr auto LargeModuleBytes = std::size_t { 16 } * 1024 * 1024;
+ 
++/// @return A module of LargeModuleBytes that the parent reads before sending it: the header, then one custom
++///         section of no name, filled with zeros, that pads it out.
++[[nodiscard]] std::vector<std::byte> largeModule()
++{
++    constexpr auto Header = std::to_array<uint8_t>({ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
++    constexpr auto SizeBytes = std::size_t { 4 }; // the section's size, as LEB128
++    constexpr auto Content = LargeModuleBytes - Header.size() - 1 - SizeBytes;
++    static_assert(Content >= (std::size_t { 1 } << 21) && Content < (std::size_t { 1 } << 28));
++    auto module = std::vector<std::byte>(LargeModuleBytes);
++    std::ranges::transform(Header, module.begin(), [](uint8_t byte) { return std::byte { byte }; });
++    // module[Header.size()] is the custom section's id, 0; its content begins with a name length of 0.
++    for (auto const index: std::views::iota(std::size_t { 0 }, SizeBytes))
++    {
++        auto const group = (Content >> (7 * index)) & 0x7FU;
++        auto const more = index + 1 < SizeBytes ? 0x80U : 0x00U;
++        module[Header.size() + 1 + index] = static_cast<std::byte>(group | more);
++    }
++    return module;
++}
++
+ /// Ends the test run, rather than wait forever on a thread or a future that a regression keeps from
+ /// finishing: their destructors would join or wait.
+ [[noreturn]] void abandon(char const* what)
+ {
+     FAIL_CHECK(what);
+     std::println(stderr, "Teardown: {}", what);
+     std::abort();
+ }
+ 
+ /// @return @p future's value, once ready within @p bound; else the run ends (abandon()).
+@@ -247,21 +268,21 @@ TEST_CASE("teardown never blocks the owner thread", "[vtextension][process][thre
+             auto loaded = runtime->load(ModuleIdentity { "same" }, toModule(contract::InstanceModule));
+             REQUIRE(loaded.has_value());
+             return *std::move(loaded);
+         }();
+         auto context = contract::RecordingHostContext {};
+         auto instances = std::vector<std::unique_ptr<IWasmInstance>> {};
+         for ([[maybe_unused]] auto const index: { 0, 1, 2 })
+             instances.push_back(contract::instantiate(*module, context));
+ 
+         auto loading = std::async(std::launch::async, [worker = runtime] {
+-            return worker->load(ModuleIdentity { "same" }, std::vector<std::byte>(LargeModuleBytes));
++            return worker->load(ModuleIdentity { "same" }, largeModule());
+         });
+         // Still blocked a while later: the host reads none of the module.
+         REQUIRE(loading.wait_for(200ms) == std::future_status::timeout);
+ 
+         auto dropping = std::async(std::launch::async, [&] {
+             instances.clear();
+             module.reset();
+             runtime.reset();
+             backend.reset();
+         });
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index 4280f4708..110e08e22 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -1,54 +1,64 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // extension_host_probe: started by the launcher's tests in the place of the extension host process, it
+ // reports what it was started with, on the control channel it was handed, and exits once that channel ends.
+ //
+ //   extension_host_probe --report <helper arguments> [--check-handle=H]…
+ //   extension_host_probe --parent <helper arguments> <helper executable> [its extra arguments]…
+ //   extension_host_probe --receive-grant <helper arguments>
++//   extension_host_probe --mutate <helper arguments> --seed=N
+ //
+ // Before it reports, it does to itself what the extension host does: it binds itself to its parent (exiting
+ // as the host does if that is not the process named), and caps its resources to its `--data-bytes`.
+ //
+ // With --parent, it is a hosting process of its own instead: bound to its parent likewise, it starts a
+ // supervisor and has it start the helper executable, as Contour does, and once the helper said Hello sends
+ // `helper=<pid>` and `end` lines on its control channel, and then waits for that channel to end -- or to be
+ // killed, which is what the tests of a helper outliving its parent do.
+ //
+ // With --receive-grant, it is the helper side of a handle grant: bound to its parent likewise, it reads one
+ // Instantiate off its control channel, claims the handle it names, maps it as the object it promises, and
+ // writes `probe` at its start. It reports `granted=ok`, or `granted=refused` if any of that failed, and `end`
+ // on its first lane; then `heard` and `end` there once another PDU arrives on control, and waits for its
+ // control channel to end.
+ //
++// With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
++// --receive-grant does, and flips bytes of the whole object at random (a Mersenne twister seeded with
++// `--seed`, so that a run is repeated by its seed) on a thread of its own while Contour reads it. It reports
++// `mutating` and `end` on its first lane once the thread runs, or `granted=refused` and `end`; then, once its
++// control channel ended, `mutations=N` (how many bytes it flipped) and `end`, and exits.
++//
+ // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
+ // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
+ // `other`; (POSIX) `pid=` its process id and `sid=` its session's; `caps=` `apply` or `skip` as
+ // the build caps, and (POSIX) `nproc=` and `data=` its limits, a number or `unlimited`; and `fd=N` per open
+ // descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+ #include <core/Clock.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <bit>
+ #include <charconv>
+ #include <cstdint>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <format>
+ #include <iterator>
+ #include <memory>
+ #include <optional>
++#include <random>
+ #include <span>
+ #include <string>
+ #include <string_view>
++#include <system_error>
++#include <thread>
+ #include <tuple>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/wasm/host/HostBootstrap.hpp>
+ #include <vtextension/wasm/host/HostProcess.hpp>
+ #include <vtextension/wasm/remote/process/ExtensionHostSupervisor.hpp>
+ #include <vtextension/wasm/remote/process/ProcessHostConnector.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+@@ -301,45 +311,56 @@ enum class StandardStream : uint8_t
+     auto buffer = std::array<uint8_t, 64> {};
+     while (control->receiveSome(buffer))
+     {
+     }
+     return ProbeExit::Reported;
+ }
+ 
+ /// What the probe writes at the start of a granted object.
+ constexpr auto GrantMark = std::string_view { "probe" };
+ 
+-/// Claims the handle @p request names off @p control, maps it as the object @p request promises, and marks
+-/// it.
++/// Claims the handle @p request names off @p control, and maps it as the object @p request promises.
+ /// @return The mapping, which keeps the object; nothing if the grant is refused.
+-[[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> takeGrant(
++[[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> claimGrant(
+     vtextension::wasm::remote::transport::PduStream& control,
+     vtextension::wasm::remote::proto::Instantiate const& request)
+ {
+     namespace transport = vtextension::wasm::remote::transport;
+     auto handle = transport::claimGrantedHandle(control, request.memory.handle);
+     if (!handle)
+         return std::nullopt;
+     auto mapping = transport::SharedMapping::map(
+         handle->get(), request.memory.objectBytes, transport::MapAccess::ReadWrite);
+     // A claim that is not the object is let go as the claim lets go: on Windows never closed, as it may name
+     // a handle of this process's own.
+     if (!mapping)
+         return std::nullopt;
+     // The object, proved: the mapping keeps it, and the handle is closed.
+     std::ignore = std::move(*handle).adopt();
++    return *std::move(mapping);
++}
++
++/// Claims and maps the object @p request grants (claimGrant()), and marks it.
++/// @return The mapping, which keeps the object; nothing if the grant is refused.
++[[nodiscard]] std::optional<vtextension::wasm::remote::transport::SharedMapping> takeGrant(
++    vtextension::wasm::remote::transport::PduStream& control,
++    vtextension::wasm::remote::proto::Instantiate const& request)
++{
++    auto mapping = claimGrant(control, request);
++    if (!mapping)
++        return std::nullopt;
+     auto const first =
+         std::min<uint64_t>(request.memory.objectBytes, vtextension::wasm::remote::proto::WasmPageBytes);
+     if (GrantMark.size() > first || !mapping->commit(0, first))
+         return std::nullopt;
+     std::ranges::copy(std::as_bytes(std::span { GrantMark }), mapping->bytes().begin());
+-    return *std::move(mapping);
++    return mapping;
+ }
+ 
+ /// Takes one grant, reports how it went on the first lane, then waits for its control channel to end.
+ [[nodiscard]] ProbeExit receiveGrant(std::span<std::string_view const> arguments)
+ {
+     namespace remote = vtextension::wasm::remote;
+     auto const parsed = parseHelperArguments(arguments);
+     if (!parsed)
+         return ProbeExit::Usage;
+     if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
+@@ -369,33 +390,110 @@ constexpr auto GrantMark = std::string_view { "probe" };
+         constexpr auto Heard = std::string_view { "heard\nend\n" };
+         if (!lane->send(std::span { reinterpret_cast<uint8_t const*>(Heard.data()), Heard.size() }))
+             return ProbeExit::ReportFailed;
+         while (control.receive())
+         {
+         }
+     }
+     return ProbeExit::Reported;
+ }
+ 
++/// Sends @p text on @p channel.
++/// @return Whether it was sent.
++[[nodiscard]] bool sendText(Channel& channel, std::string_view text)
++{
++    return channel.send(std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() }).has_value();
++}
++
++/// The prefix of the option naming what --mutate seeds its random flips with.
++constexpr auto Seed = std::string_view { "--seed=" };
++
++/// Takes one grant, flips bytes of it at random until its control channel ends, then reports how many.
++[[nodiscard]] ProbeExit mutate(std::span<std::string_view const> arguments)
++{
++    namespace remote = vtextension::wasm::remote;
++    auto helperArguments = std::vector<std::string_view> {};
++    auto seed = std::optional<std::mt19937::result_type> {};
++    for (auto const argument: arguments)
++    {
++        if (!argument.starts_with(Seed))
++        {
++            helperArguments.push_back(argument);
++            continue;
++        }
++        auto const digits = argument.substr(Seed.size());
++        auto value = std::mt19937::result_type {};
++        if (std::from_chars(digits.data(), digits.data() + digits.size(), value).ec != std::errc {})
++            return ProbeExit::Usage;
++        seed = value;
++    }
++    auto const parsed = parseHelperArguments(helperArguments);
++    if (!parsed || !seed)
++        return ProbeExit::Usage;
++    if (!vtextension::wasm::host::bindToParent(parsed->parentProcessId))
++        return ProbeExit::ParentGone;
++    auto controlEnd = Channel::adopt(parsed->control);
++    if (!controlEnd)
++        return ProbeExit::NoControl;
++    auto lane = Channel::adopt(parsed->lanes.front());
++    if (!lane)
++        return ProbeExit::NoControl;
++    auto control = remote::transport::PduStream { *std::move(controlEnd),
++                                                  remote::proto::ChannelKind::Control,
++                                                  remote::proto::Direction::ToHelper,
++                                                  remote::proto::PduLimits {} };
++
++    auto const request = control.receive();
++    auto const* const instantiate = request ? std::get_if<remote::proto::Instantiate>(&*request) : nullptr;
++    auto mapping =
++        instantiate ? claimGrant(control, *instantiate) : std::optional<remote::transport::SharedMapping> {};
++    if (!mapping || mapping->bytes().empty() || !mapping->commit(0, mapping->bytes().size()))
++        return sendText(*lane, "granted=refused\nend\n") ? ProbeExit::Reported : ProbeExit::ReportFailed;
++
++    auto mutations = uint64_t { 0 };
++    {
++        auto const bytes = mapping->bytes();
++        auto mutator = std::jthread { [bytes, seed = *seed, &mutations](std::stop_token const& stop) {
++            auto random = std::mt19937 { seed };
++            auto offsets = std::uniform_int_distribution<std::size_t> { 0, bytes.size() - 1 };
++            auto masks = std::uniform_int_distribution<unsigned> { 1, 0xFF };
++            while (!stop.stop_requested())
++            {
++                bytes[offsets(random)] ^= std::byte { static_cast<uint8_t>(masks(random)) };
++                ++mutations;
++            }
++        } };
++        if (!sendText(*lane, "mutating\nend\n"))
++            return ProbeExit::ReportFailed;
++        while (control.receive())
++        {
++        }
++    }
++    return sendText(*lane, std::format("mutations={}\nend\n", mutations)) ? ProbeExit::Reported
++                                                                          : ProbeExit::ReportFailed;
++}
++
+ } // namespace
+ 
+ // The third parameter is what POSIX systems pass and Windows' C runtime passes too: the environment, read
+ // without a global.
+ int main(int argc, char const* argv[], char const* envp[])
+ {
+     auto const arguments = std::vector<std::string_view>(argv + 1, argv + argc);
+     if (arguments.empty())
+         return static_cast<int>(ProbeExit::Usage);
+     auto const rest = std::span { arguments }.subspan(1);
+     auto const exit = [&] {
+         if (arguments.front() == "--report")
+             return report(rest, envp);
+         if (arguments.front() == "--parent")
+             return parent(rest);
+         if (arguments.front() == "--receive-grant")
+             return receiveGrant(rest);
++        if (arguments.front() == "--mutate")
++            return mutate(rest);
+         return ProbeExit::Usage;
+     }();
+     if (exit == ProbeExit::ParentGone)
+         return vtextension::wasm::host::exitCodeOf(vtextension::wasm::host::HostProcessExit::ParentGone);
+     return static_cast<int>(exit);
+ }

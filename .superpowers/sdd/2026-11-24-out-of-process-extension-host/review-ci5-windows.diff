@@ -1,0 +1,1458 @@
+# review package ci5-windows: net change c66b53a20 -> c47cf3330 (history rewritten by autosquash; diff is tree-to-tree)
+c47cf3330 fix(vtextension): a channel end on Windows waits on events of its own, made once
+a2ee08834 test(vtextension): the macOS sandbox probe expects what Seatbelt refuses
+efedce59e fix(vtextension): the macOS sandbox lets the extension host learn its page size
+74d28e0d7 fix(vtextension): WAMR maps memory MAP_JIT only where it is to run code
+b3b0f2c9e fix(vtextension): a descriptor that comes unasked is closed on macOS
+b686d67c4 fix(vtextension): an extension host's channel never waits to send on macOS
+c15434c2a fix(vtextension): an extension host is started with no console, and the loader probe says what it may load
+205c4c1b7 feat(vtextension): an extension host the loader ends is logged with why
+590423f86 fix(vtextension): an instance refused for its answer's size is gone before the refusal is sent
+ca215d8f8 fix(vtextension): a contained extension host's environment names its container's own folders
+5b47f21a2 test(vtextension): one wine check for every test binary
+70a52980b fix(vtextension): a host short of memory as it starts is retried, and a lacking sandbox is a warning
+ee12485e8 fix(vtextension): unlink a WAMR execution environment under its thread cluster's lock
+4c2604ce7 feat(vtextension): the extension host on FreeBSD maps no memory both writable and executable
+5631c5bda feat(vtextension): Contour says what an extension host's confinement failed with, and went without
+d2cad3a61 fix(vtextension): lock WAMR's process-wide state around every call that changes it
+a6c44e06b ci: run the arm legs on pull requests labelled for them
+d21722d73 fix(vtextension): register no native unwind tables for guest code on Wasmtime
+fa4105c8c test(vtextension): measure the extension host on WAMR's engine too
+a404c49b1 test(vtextension): run the extension host's engine-free tests wherever the host is built
+216acaa00 build: the containment gate refuses an executable that links two WebAssembly runtimes
+382ae7175 feat(vtextension): the extension host runs in an AppContainer on Windows
+45d96c801 feat(vtextension): grant app containers read access to the extension host once
+a01f2190e build: sign the macOS extension host with the one entitlement its compiler needs
+1657fca8e feat(vtextension): the extension host runs in a deny-by-default sandbox on macOS
+f18f63969 build: pick wamr by default where the extension host's sandbox cannot run wasmtime
+d634f2cd0 ci: run the FreeBSD job on pull requests labelled for it
+8e7d479ce feat(vtextension): the extension host enters capability mode on FreeBSD
+73d8a659c refactor(vtextension): the extension host names every descriptor it keeps, and what for
+fda37d5da build: select where extensions run and which engine the extension host uses
+4f0dc037d feat(vtextension): run extensions in a sandboxed extension host process by default on Linux
+87a47eee6 refactor(vtextension): small cleanups in the extension host and its engines
+ab189a8fa test(vtextension): the sandbox probe locks down with either engine's system call rows
+b42c608c5 fix(vtextension): a host refused for a lasting reason is the last its connector starts
+0f5f1e42d build: package the extension host in the Fedora RPM
+e9666c4e9 build: refuse an installed WAMR that compiles to native code
+5c4bd157a fix(vtextension): every engine withholds the CPU-time clocks alike
+585fb27bc build: build the extension host with whichever engine the build selected
+ff21700ae feat(vtextension): the extension host can run its modules interpreted
+1b1de445f fix(vtextension): a sanitizer build's extension host reads only its own process entries
+ src/vtextension/wasm/host/DescriptorRights.cpp     |  5 +-
+ src/vtextension/wasm/host/DescriptorRights.hpp     |  2 +
+ src/vtextension/wasm/host/HostProcess.cpp          | 10 +++-
+ src/vtextension/wasm/host/HostProcess_test.cpp     | 33 ++++++++---
+ src/vtextension/wasm/host/Sandbox_test.cpp         |  6 +-
+ src/vtextension/wasm/remote/RemoteBackend_test.cpp |  3 +
+ .../wasm/remote/process/AppContainer_test.cpp      | 69 ++++++++++++++--------
+ .../wasm/remote/process/AppContainer_win32.cpp     | 12 ++--
+ .../wasm/remote/process/AppContainer_win32.hpp     | 11 ++--
+ .../wasm/remote/process/LaunchSpelling_test.cpp    | 54 +++++++++++++----
+ .../wasm/remote/process/LaunchSpelling_win32.cpp   | 32 ++++++++--
+ .../wasm/remote/process/LaunchSpelling_win32.hpp   | 53 +++++++++++++----
+ .../wasm/remote/process/Process_win32.cpp          |  6 +-
+ .../wasm/remote/process/testing/LaunchProbe.cpp    | 53 +++++++++++++----
+ .../wasm/remote/transport/Channel_test.cpp         | 32 ++++++++++
+ .../wasm/remote/transport/Channel_win32.cpp        | 33 +++++++++--
+ 16 files changed, 322 insertions(+), 92 deletions(-)
+diff --git a/src/vtextension/wasm/host/DescriptorRights.cpp b/src/vtextension/wasm/host/DescriptorRights.cpp
+index e150dc734..8e717510c 100644
+--- a/src/vtextension/wasm/host/DescriptorRights.cpp
++++ b/src/vtextension/wasm/host/DescriptorRights.cpp
+@@ -23,42 +23,45 @@ namespace
+     constexpr auto PageRights = std::array { MapRead, Fstat, GetStatusFlags };
+     constexpr auto WakeRights = std::array { Read, Event, GetStatusFlags };
+     constexpr auto StandardErrorRights = std::array { Write, Fstat, GetStatusFlags };
+     // WAMR's WASI stats the device and reads its flags as it instantiates a module; a guest writes to it,
+     // seeks it (fd_seek) and reads its flags (fd_fdstat_get), each of which the backend contract asserts.
+     constexpr auto EngineDeviceRights = std::array { Write, Fstat, Seek, GetStatusFlags };
+     // Nothing reads or writes them; C's stdio may still ask what they are.
+     constexpr auto IdleStreamRights = std::array { Fstat };
+     constexpr auto StopReceiverRights = std::array { Read, Event };
+     constexpr auto StopSenderRights = std::array { Write };
++    // One handle in both roles: what each of them may.
++    constexpr auto StopEventRights = std::array { Read, Write, Event };
+ 
+     /// Every role, at its enumerator's index.
+     constexpr auto RoleRightsTable = std::array {
+         DescriptorRoleRights { .role = DescriptorRole::Control, .rights = ControlRights },
+         DescriptorRoleRights { .role = DescriptorRole::Lane, .rights = LaneRights },
+         DescriptorRoleRights { .role = DescriptorRole::Page, .rights = PageRights },
+         DescriptorRoleRights { .role = DescriptorRole::Wake, .rights = WakeRights },
+         DescriptorRoleRights { .role = DescriptorRole::StandardError, .rights = StandardErrorRights },
+         DescriptorRoleRights { .role = DescriptorRole::EngineDevice, .rights = EngineDeviceRights },
+         DescriptorRoleRights { .role = DescriptorRole::IdleStream, .rights = IdleStreamRights },
+         DescriptorRoleRights { .role = DescriptorRole::StopReceiver, .rights = StopReceiverRights },
+         DescriptorRoleRights { .role = DescriptorRole::StopSender, .rights = StopSenderRights },
++        DescriptorRoleRights { .role = DescriptorRole::StopEvent, .rights = StopEventRights },
+     };
+ 
+     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, RoleRightsTable.size()),
+                                       [](std::size_t index) {
+                                           return std::size_t {
+                                               std::to_underlying(RoleRightsTable[index].role)
+                                           } == index;
+                                       }),
+                   "RoleRightsTable lists every DescriptorRole at its own index");
+-    static_assert(RoleRightsTable.back().role == DescriptorRole::StopSender,
++    static_assert(RoleRightsTable.back().role == DescriptorRole::StopEvent,
+                   "RoleRightsTable ends at the last DescriptorRole");
+ } // namespace
+ 
+ std::span<DescriptorRoleRights const> descriptorRoleRights() noexcept
+ {
+     return RoleRightsTable;
+ }
+ 
+ std::span<DescriptorRight const> rightsOf(DescriptorRole role) noexcept
+ {
+diff --git a/src/vtextension/wasm/host/DescriptorRights.hpp b/src/vtextension/wasm/host/DescriptorRights.hpp
+index b831caeaf..7d09cc9ea 100644
+--- a/src/vtextension/wasm/host/DescriptorRights.hpp
++++ b/src/vtextension/wasm/host/DescriptorRights.hpp
+@@ -18,20 +18,22 @@ enum class DescriptorRole : uint8_t
+ {
+     Control,       ///< The control channel: requests in, replies and granted handles over it.
+     Lane,          ///< A lane channel, which carries the calls of one executor.
+     Page,          ///< The interrupt page, mapped read-only before the lockdown.
+     Wake,          ///< The wake signal's receiving end, which the interrupt listener waits on.
+     StandardError, ///< Standard error, which the host tells why it fails on.
+     EngineDevice,  ///< A device the engine opened before the lockdown: WAMR's null device, its guests' stdio.
+     IdleStream,    ///< Standard input or output, which the host neither reads nor writes.
+     StopReceiver,  ///< The wake receiver's stop pipe, the end its wait polls.
+     StopSender,    ///< The wake receiver's stop pipe, the end stop() writes to.
++    StopEvent, ///< The wake receiver's stop event, where one handle is both what its wait waits on and what
++               ///< stop() signals (Windows).
+ };
+ 
+ /// One thing a descriptor may be used for. There is deliberately none for an ioctl: no descriptor needs one.
+ enum class DescriptorRight : uint8_t
+ {
+     Read,           ///< read(2) and its kin.
+     Write,          ///< write(2), writev(2) and their kin.
+     Receive,        ///< recv(2), recvmsg(2): taking in what a socket carries, descriptors included.
+     Send,           ///< send(2), sendmsg(2).
+     Event,          ///< Waiting on it: poll(2), kevent(2).
+diff --git a/src/vtextension/wasm/host/HostProcess.cpp b/src/vtextension/wasm/host/HostProcess.cpp
+index 4f8ff4cd5..3b3b200b3 100644
+--- a/src/vtextension/wasm/host/HostProcess.cpp
++++ b/src/vtextension/wasm/host/HostProcess.cpp
+@@ -194,23 +194,29 @@ SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints, IHostedE
+ 
+ SandboxDescriptors sandboxDescriptorsOf(HostEndpoints const& endpoints,
+                                         std::span<transport::NativeHandle const> engineDevices)
+ {
+     auto held = std::vector<HeldDescriptor> {};
+     for (auto const& lane: endpoints.lanes)
+         held.push_back(HeldDescriptor { .role = DescriptorRole::Lane, .handle = lane.nativeHandle() });
+     held.push_back(
+         HeldDescriptor { .role = DescriptorRole::Page, .handle = endpoints.controlPage.nativeHandle() });
+     held.push_back(HeldDescriptor { .role = DescriptorRole::Wake, .handle = endpoints.wake.nativeHandle() });
++    // Two ends of a pipe on POSIX; on Windows one event in both roles, held once.
+     auto const stop = endpoints.wake.stopHandles();
+-    held.push_back(HeldDescriptor { .role = DescriptorRole::StopReceiver, .handle = stop.waitedOn });
+-    held.push_back(HeldDescriptor { .role = DescriptorRole::StopSender, .handle = stop.signalled });
++    if (stop.waitedOn == stop.signalled)
++        held.push_back(HeldDescriptor { .role = DescriptorRole::StopEvent, .handle = stop.waitedOn });
++    else
++    {
++        held.push_back(HeldDescriptor { .role = DescriptorRole::StopReceiver, .handle = stop.waitedOn });
++        held.push_back(HeldDescriptor { .role = DescriptorRole::StopSender, .handle = stop.signalled });
++    }
+     std::ranges::copy(standardStreams(), std::back_inserter(held));
+     for (auto const device: engineDevices)
+         held.push_back(HeldDescriptor { .role = DescriptorRole::EngineDevice, .handle = device });
+     return SandboxDescriptors { .control = endpoints.control.nativeHandle(), .held = std::move(held) };
+ }
+ 
+ int runExtensionHost(std::span<std::string_view const> arguments,
+                      EngineFactory const& engines,
+                      HostConfinement const& confinement)
+ {
+diff --git a/src/vtextension/wasm/host/HostProcess_test.cpp b/src/vtextension/wasm/host/HostProcess_test.cpp
+index b0f04bc20..2a0931734 100644
+--- a/src/vtextension/wasm/host/HostProcess_test.cpp
++++ b/src/vtextension/wasm/host/HostProcess_test.cpp
+@@ -1,11 +1,13 @@
+ // SPDX-License-Identifier: Apache-2.0
++#include <core/Utils.hpp>
++
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -91,20 +93,33 @@ using vtextension::wasm::remote::transport::ControlPage;
+ using vtextension::wasm::remote::transport::formatHelperArguments;
+ using vtextension::wasm::remote::transport::HelperArguments;
+ using vtextension::wasm::remote::transport::makeChannelPair;
+ using vtextension::wasm::remote::transport::makeWakePair;
+ using vtextension::wasm::remote::transport::NativeHandle;
+ using vtextension::wasm::remote::transport::PduStream;
+ using vtextension::wasm::remote::transport::StreamError;
+ using vtextension::wasm::remote::transport::WakeSender;
+ using vtextension::wasm::remote::transport::testing::closeHandle;
+ using vtextension::wasm::remote::transport::testing::duplicate;
++
++namespace
++{
++
++/// The roles the wake receiver's stop handles are held in: a pipe's two ends on POSIX, one event in both
++/// roles on Windows (WakeStopHandles).
++#ifdef _WIN32
++constexpr auto WakeStopRoles = std::array { DescriptorRole::StopEvent };
++#else
++constexpr auto WakeStopRoles = std::array { DescriptorRole::StopReceiver, DescriptorRole::StopSender };
++#endif
++
++} // namespace
+ using vtextension::wasm::testing::makeHostedEngine;
+ using vtextension::wasm::testing::PreparationHookEngine;
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace contract = vtextension::wasm::testing::contract;
+ 
+ namespace
+ {
+ 
+ /// How long a test waits for the host to end.
+@@ -576,36 +591,38 @@ namespace
+     auto exitCode = task.get_future();
+     auto host = std::jthread { std::move(task) };
+ 
+     auto const hello = parent.control.receive();
+     confined->record("hello");
+     // The sandbox, if the test's, was made for the control end the host adopted: the one it was handed.
+     if (auto const sandboxed = confined->sandboxedControl.load(); sandboxed != NativeHandle {})
+     {
+         CHECK(sandboxed == parent.arguments.control);
+         // ... and for every other handle it keeps, each with its role: the engine, Wasmtime's, holds none.
+-        // The wake receiver's stop pipe is its own, which the host made as it adopted the wake end.
++        // The wake receiver's stop handles are its own, which the host made as it adopted the wake end.
+         auto expected = std::vector<HeldDescriptor> {};
+         for (auto const lane: parent.arguments.lanes)
+             expected.push_back(HeldDescriptor { .role = DescriptorRole::Lane, .handle = lane });
+         expected.push_back(
+             HeldDescriptor { .role = DescriptorRole::Page, .handle = parent.arguments.controlPage });
+         expected.push_back(HeldDescriptor { .role = DescriptorRole::Wake, .handle = parent.arguments.wake });
+         auto const lock = std::scoped_lock { confined->sandboxedLock };
+         auto const& held = confined->sandboxedHeld;
+-        REQUIRE(held.size() == expected.size() + 2 + standardStreams().size());
+-        auto const stop = std::span { held }.subspan(expected.size(), 2);
+-        CHECK(stop[0].role == DescriptorRole::StopReceiver);
+-        CHECK(stop[1].role == DescriptorRole::StopSender);
+-        CHECK(stop[0].handle != stop[1].handle);
+-        expected.push_back(stop[0]);
+-        expected.push_back(stop[1]);
++        REQUIRE(held.size() == expected.size() + WakeStopRoles.size() + standardStreams().size());
++        auto const stop = std::span { held }.subspan(expected.size(), WakeStopRoles.size());
++        for (auto const [index, role]: core::views::enumerate(WakeStopRoles))
++        {
++            CHECK(stop[index].role == role);
++            expected.push_back(stop[index]);
++        }
++        // Each a handle of its own: none is held twice.
++        CHECK(std::ranges::adjacent_find(stop, {}, &HeldDescriptor::handle) == stop.end());
+         std::ranges::copy(standardStreams(), std::back_inserter(expected));
+         CHECK(confined->sandboxedHeld == expected);
+     }
+     {
+         auto const closed = std::move(parent.control);
+     }
+     REQUIRE(exitCode.wait_for(HostPatience) == std::future_status::ready);
+     CHECK(exitCode.get() == exitCodeOf(HostProcessExit::Served));
+     REQUIRE(hello.has_value());
+     REQUIRE(std::holds_alternative<proto::Hello>(*hello));
+diff --git a/src/vtextension/wasm/host/Sandbox_test.cpp b/src/vtextension/wasm/host/Sandbox_test.cpp
+index 18d5886ad..912832b5f 100644
+--- a/src/vtextension/wasm/host/Sandbox_test.cpp
++++ b/src/vtextension/wasm/host/Sandbox_test.cpp
+@@ -210,21 +210,21 @@ TEST_CASE("Sandbox.containerDecidesUnsandboxedFailedOrLockedDown", "[vtextension
+         auto const [lockedDown, state] = containerLockdown(answers);
+         REQUIRE_FALSE(lockedDown.has_value());
+         CHECK(lockedDown.error() == ConfinementFailure { .step = proto::LockdownStep::Job, .code = Refused });
+     }
+ }
+ 
+ TEST_CASE("Sandbox.rightsTableCoversEveryRole", "[vtextension][host]")
+ {
+     // One row per role, at its index, up to the last; each names what its role is used for, once each.
+     auto const rows = descriptorRoleRights();
+-    REQUIRE(rows.size() == std::to_underlying(DescriptorRole::StopSender) + std::size_t { 1 });
++    REQUIRE(rows.size() == std::to_underlying(DescriptorRole::StopEvent) + std::size_t { 1 });
+     for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
+     {
+         auto const& row = rows[index];
+         INFO("role " << index);
+         auto const roleIndex = std::size_t { std::to_underlying(row.role) };
+         CHECK(roleIndex == index);
+         CHECK_FALSE(row.rights.empty());
+         CHECK(std::set<DescriptorRight>(row.rights.begin(), row.rights.end()).size() == row.rights.size());
+         CHECK(std::ranges::equal(rightsOf(row.role), row.rights));
+     }
+@@ -242,20 +242,24 @@ TEST_CASE("Sandbox.rightsTableCoversEveryRole", "[vtextension][host]")
+     CHECK_FALSE(has(DescriptorRole::Page, DescriptorRight::Write));
+     CHECK_FALSE(has(DescriptorRole::StandardError, DescriptorRight::Read));
+     for (auto const right: { DescriptorRight::Write, DescriptorRight::Seek, DescriptorRight::GetStatusFlags })
+         CHECK(has(DescriptorRole::EngineDevice, right));
+     // Standard input and output are only asked what they are; the stop pipe is waited on at one end and
+     // written to at the other.
+     CHECK(std::ranges::equal(rightsOf(DescriptorRole::IdleStream), std::array { DescriptorRight::Fstat }));
+     CHECK(has(DescriptorRole::StopReceiver, DescriptorRight::Event));
+     CHECK_FALSE(has(DescriptorRole::StopReceiver, DescriptorRight::Write));
+     CHECK(std::ranges::equal(rightsOf(DescriptorRole::StopSender), std::array { DescriptorRight::Write }));
++    // The stop event is both ends at once: what each of them may, and no more.
++    CHECK(std::ranges::equal(
++        rightsOf(DescriptorRole::StopEvent),
++        std::array { DescriptorRight::Read, DescriptorRight::Write, DescriptorRight::Event }));
+ }
+ 
+ namespace
+ {
+ 
+ /// One top-level form of a profile: `(<head> <body>)`.
+ struct ProfileForm
+ {
+     std::string head; ///< The word the form starts with, after any space.
+     std::string body; ///< What follows the head, up to the form's closing parenthesis, comments removed.
+diff --git a/src/vtextension/wasm/remote/RemoteBackend_test.cpp b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+index f39eadfb6..e07700cf7 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend_test.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend_test.cpp
+@@ -48,20 +48,21 @@
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ #include <vtextension/wasm/testing/BackendContract.hpp>
+ #ifndef _WIN32
+     #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
+ #endif
+ #include <vtextension/wasm/testing/HostedEngine.hpp>
+ #include <vtextension/wasm/testing/PreparationHookEngine.hpp>
+ #include <vtextension/wasm/testing/RenderMeasurement.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #endif
+ 
+ using vtextension::ExtensionError;
+ using vtextension::testing::toModule;
+ using vtextension::wasm::BackendConfig;
+ using vtextension::wasm::CallFailure;
+@@ -2371,20 +2372,22 @@ TEST_CASE("RemoteBackend.unexportedMemoryIsOutOfBounds", "[vtextension][remote]"
+     auto const module = contract::load(*runtime, contract::UnexportedMemoryModule);
+     auto context = contract::RecordingHostContext {};
+     auto const instance = contract::instantiate(*module, context);
+     CHECK(instance->memory(0, 4) == std::unexpected(MemoryFailure::OutOfBounds));
+ }
+ 
+ TEST_CASE("RemoteBackend.instancesHoldNoDescriptor", "[vtextension][remote]")
+ {
+     // Every object's handle is closed once granted, by the parent and by a host in this process alike: a
+     // thousand live instances hold no handle, and once let go leave as many open as before.
++    if (vtextension::wasm::testing::runsOnWine())
++        SKIP("wine's GetProcessHandleCount() reads 0, whatever the process holds");
+     constexpr auto Instances = 1000;
+     auto const backend = makeBackend(makeConnector());
+     auto const runtime = contract::createRuntime(*backend, OnePageLimits);
+     auto const guard = contract::enterThread(*backend);
+     auto const module = contract::load(*runtime, contract::InstanceModule);
+     auto context = contract::RecordingHostContext {};
+     // One instance first: whatever a host opens once, it opens before the count.
+     std::ignore = contract::instantiate(*module, context);
+     auto const before = openHandleCount();
+     auto instances = std::vector<std::unique_ptr<IWasmInstance>> {};
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_test.cpp b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+index e508ca36a..a8e499df7 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_test.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_test.cpp
+@@ -413,21 +413,22 @@ TEST_CASE("AppContainer.profileIsEnsuredOnce", "[vtextension][appcontainer]")
+ {
+     SECTION("created once, for every launch after")
+     {
+         auto const calls = std::make_shared<ApiCalls>();
+         auto provision = process::AppContainerProvision { fakeApi(calls, S_OK), [](std::string_view) {} };
+         auto const first = provision.prepare(std::filesystem::temp_directory_path());
+         auto const second = provision.prepare(std::filesystem::temp_directory_path());
+         REQUIRE(first.has_value());
+         REQUIRE(second.has_value());
+         CHECK(*first == *second);
+-        CHECK(first->folder == std::filesystem::path { FakeContainerFolder });
++        CHECK(first->folders.container == std::filesystem::path { FakeContainerFolder });
++        CHECK(first->folders.profile == std::filesystem::path { L"C:\\fake" });
+         CHECK(calls->created == 1);
+         CHECK(calls->derived == 0);
+         CHECK(calls->folders == 1);
+     }
+     SECTION("its folder refused: a refusal of its own, with the HRESULT")
+     {
+         auto const calls = std::make_shared<ApiCalls>();
+         auto api = fakeApi(calls, S_OK);
+         api.folderPath = [](PSID /*sid*/) -> std::expected<std::filesystem::path, HRESULT> {
+             return std::unexpected(E_ACCESSDENIED);
+@@ -436,35 +437,49 @@ TEST_CASE("AppContainer.profileIsEnsuredOnce", "[vtextension][appcontainer]")
+         auto const prepared = provision.prepare(std::filesystem::temp_directory_path());
+         REQUIRE_FALSE(prepared.has_value());
+         CHECK(prepared.error()
+               == process::LaunchRefusal { .error = process::LaunchError::Io,
+                                           .step = process::LaunchStep::ContainerFolder,
+                                           .code = static_cast<DWORD>(E_ACCESSDENIED) });
+         auto const line = process::launchRefusalLine(prepared.error());
+         INFO(line);
+         CHECK(line.contains("app container's folder (error 0x80070005"));
+     }
+-    SECTION("its folder named empty: refused alike")
++    SECTION("its folder named empty, or not a container's: refused alike")
+     {
+-        auto const calls = std::make_shared<ApiCalls>();
+-        auto api = fakeApi(calls, S_OK);
+-        api.folderPath = [](PSID /*sid*/) -> std::expected<std::filesystem::path, HRESULT> {
+-            return std::filesystem::path {};
++        struct Row
++        {
++            std::wstring_view folder;
++            DWORD error;
+         };
+-        auto provision = process::AppContainerProvision { std::move(api), [](std::string_view) {} };
+-        auto const prepared = provision.prepare(std::filesystem::temp_directory_path());
+-        REQUIRE_FALSE(prepared.has_value());
+-        CHECK(prepared.error()
+-              == process::LaunchRefusal { .error = process::LaunchError::Io,
+-                                          .step = process::LaunchStep::ContainerFolder,
+-                                          .code =
+-                                              static_cast<DWORD>(HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)) });
++        auto const rows = std::to_array<Row>({
++            { .folder = L"", .error = ERROR_PATH_NOT_FOUND },
++            { .folder = LR"(C:\fake\AC)", .error = ERROR_BAD_PATHNAME },
++            { .folder = LR"(C:\fake\Elsewhere\Contour.ExtensionHost\AC)", .error = ERROR_BAD_PATHNAME },
++        });
++        for (auto const& row: rows)
++        {
++            INFO(std::filesystem::path { row.folder }.string());
++            auto const calls = std::make_shared<ApiCalls>();
++            auto api = fakeApi(calls, S_OK);
++            api.folderPath = [folder =
++                                  row.folder](PSID /*sid*/) -> std::expected<std::filesystem::path, HRESULT> {
++                return std::filesystem::path { folder };
++            };
++            auto provision = process::AppContainerProvision { std::move(api), [](std::string_view) {} };
++            auto const prepared = provision.prepare(std::filesystem::temp_directory_path());
++            REQUIRE_FALSE(prepared.has_value());
++            CHECK(prepared.error()
++                  == process::LaunchRefusal { .error = process::LaunchError::Io,
++                                              .step = process::LaunchStep::ContainerFolder,
++                                              .code = static_cast<DWORD>(HRESULT_FROM_WIN32(row.error)) });
++        }
+     }
+     SECTION("already there: derived")
+     {
+         auto const calls = std::make_shared<ApiCalls>();
+         auto const sid =
+             process::ensureAppContainer(fakeApi(calls, HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)));
+         CHECK(sid.has_value());
+         CHECK(calls->created == 1);
+         CHECK(calls->derived == 1);
+     }
+@@ -662,26 +677,29 @@ using ProbeReport = std::vector<std::string>;
+     if (line == report.end())
+         return std::nullopt;
+     return line->substr(prefix.size());
+ }
+ 
+ /// What a loopback connection from an AppContainer without a network capability may fail with. Windows
+ /// documents only that the Windows Filtering Platform's default block filter drops it, not the error a
+ /// caller sees: WSAEACCES (10013) where the connect is refused at authorization, WSAECONNREFUSED (10061),
+ /// which is what UWP apps are widely reported to see (0x8007274D), WSAETIMEDOUT (10060) where the packet is
+ /// dropped silently, and WSAENETUNREACH (10051) or WSAEHOSTUNREACH (10065) where no route is offered. Each is
+-/// the container's refusal: the listener accepts every connection, and the uncontained run proves it.
+-constexpr auto ContainedConnectRefusals = std::array<std::string_view, 5> { "refused:connect:10013",
++/// the container's refusal: the listener accepts every connection, and the uncontained run proves it. And the
++/// probe's own `refused:connect:timeout`, for a dropped connection it gave up on before the system did -- as
++/// on a GitHub Windows runner, where the system's WSAETIMEDOUT took twenty seconds.
++constexpr auto ContainedConnectRefusals = std::to_array<std::string_view>({ "refused:connect:10013",
+                                                                             "refused:connect:10061",
+                                                                             "refused:connect:10060",
+                                                                             "refused:connect:10051",
+-                                                                            "refused:connect:10065" };
++                                                                            "refused:connect:10065",
++                                                                            "refused:connect:timeout" });
+ 
+ /// @return The extension host's container's folder, as this process asks the system for it, independent of
+ ///         the launcher's provision.
+ [[nodiscard]] std::filesystem::path expectedContainerFolder()
+ {
+     auto const api = process::systemAppContainerApi();
+     auto const name = std::wstring { process::AppContainerName };
+     PSID sid = nullptr;
+     REQUIRE(SUCCEEDED(api.deriveSid(name.c_str(), &sid)));
+     auto const ownedSid = process::OwnedSid { sid };
+@@ -730,36 +748,37 @@ void checkContainerVariables(ProbeReport const& report,
+         CHECK(isSamePath(std::filesystem::path { utf8 }.native(), folder.native()));
+     }
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
+ {
+     // A file of the user's, and a loopback port that listens: both open to the probe uncontained, both shut
+     // to it contained, as is starting a process -- refused by the container's child process policy
+-    // (ERROR_ACCESS_DENIED), not only by the job's process count (ERROR_NOT_ENOUGH_QUOTA, 1816).
++    // (ERROR_CHILD_PROCESS_BLOCKED, 367, as a GitHub Windows runner showed), not only by the job's process
++    // count (ERROR_NOT_ENOUGH_QUOTA, 1816).
+     auto const directory = ScratchDirectory { "contained-probe" };
+     auto const profileFile = directory.path / "secret.txt";
+     std::ofstream { profileFile } << "not the extension host's\n";
+     auto const listener = LoopbackListener {};
+     REQUIRE(listener.port().has_value());
+ 
+     {
+         INFO("uncontained");
+         auto const report = probeReportIn(ProcessIsolation::None, profileFile, *listener.port());
+-        CHECK(valueOf(report, "container") == "no");
+-        CHECK(valueOf(report, "profile-file") == "ok");
+-        CHECK(valueOf(report, "connect") == "ok");
++        CHECK(valueOf(report, "container").value_or("(no line)") == "no");
++        CHECK(valueOf(report, "profile-file").value_or("(no line)") == "ok");
++        CHECK(valueOf(report, "connect").value_or("(no line)") == "ok");
+         // Under wine the job's process count is not held: what it says is only recorded.
+         if (!vtextension::wasm::testing::runsOnWine())
+-            CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:1816");
++            CHECK(valueOf(report, "spawn").value_or("(no line)") == "refused:CreateProcessW:1816");
+         // Uncontained, it is started with the environment it is given: SystemRoot, and none of these.
+         checkContainerVariables(report, std::nullopt);
+         // Said on every run, passed or failed: a service's window station admits no app container, and a
+         // contained process loading user32 then dies in the loader (STATUS_DLL_INIT_FAILED).
+         auto const station = valueOf(report, "window-station");
+         REQUIRE(station.has_value());
+         WARN("the probe's window station, uncontained: " << *station);
+     }
+ 
+     if (vtextension::wasm::testing::runsOnWine())
+@@ -774,26 +793,26 @@ TEST_CASE("Sandbox.windowsHelperRunsContained", "[vtextension][appcontainer]")
+                                              .isolation = ProcessIsolation::AppContainer });
+         auto const outcome = probe ? std::string { "it started" }
+                                    : std::format("it failed: {}{}{}",
+                                                  process::launchErrorText(probe.error()),
+                                                  refusals.empty() ? "" : " -- ",
+                                                  refusals.empty() ? std::string {} : refusals.front());
+         SKIP(std::format("wine stubs AppContainers; the contained launch was asked for and {}", outcome));
+     }
+     INFO("contained");
+     auto const report = probeReportIn(ProcessIsolation::AppContainer, profileFile, *listener.port());
+-    CHECK(valueOf(report, "container") == "yes");
+-    CHECK(valueOf(report, "profile-file") == "refused:CreateFileW:5");
++    CHECK(valueOf(report, "container").value_or("(no line)") == "yes");
++    CHECK(valueOf(report, "profile-file").value_or("(no line)") == "refused:CreateFileW:5");
+     auto const connect = valueOf(report, "connect").value_or("(no line)");
+     INFO("connect=" << connect);
+     CHECK(std::ranges::contains(ContainedConnectRefusals, std::string_view { connect }));
+-    CHECK(valueOf(report, "spawn") == "refused:CreateProcessW:5");
++    CHECK(valueOf(report, "spawn").value_or("(no line)") == "refused:CreateProcessW:367");
+     // Each names exactly the container's own folder, as this process asks the system for it.
+     checkContainerVariables(report, expectedContainerFolder());
+ }
+ TEST_CASE("LaunchRefusal.lineNamesTheStepAndTheCode", "[vtextension]")
+ {
+     auto const win32 =
+         process::launchRefusalLine(process::LaunchRefusal { .error = process::LaunchError::Io,
+                                                             .step = process::LaunchStep::CreateProcess,
+                                                             .code = ERROR_INVALID_PARAMETER });
+     INFO(win32);
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+index fde4c5997..e8edf835b 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.cpp
+@@ -304,27 +304,31 @@ std::expected<PreparedContainer, LaunchRefusal> AppContainerProvision::prepare(
+ {
+     if (!_sid)
+     {
+         auto sid = ensureAppContainer(_api);
+         if (!sid)
+             return std::unexpected(sid.error());
+         _sid = *std::move(sid);
+     }
+     if (!_folder)
+     {
+-        // A folder named empty names none: the variables it would set must still name a folder.
++        // A folder named empty names none, and one not shaped <profile>\Packages\<name>\AC yields no
++        // profile folder for CreateProcessW() to extend (ContainerVariables): either is refused.
+         auto folder =
+             _api.folderPath(_sid->get())
+-                .and_then([](std::filesystem::path named) -> std::expected<std::filesystem::path, HRESULT> {
++                .and_then([](std::filesystem::path const& named) -> std::expected<ContainerFolders, HRESULT> {
+                     if (named.empty())
+                         return std::unexpected(HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND));
+-                    return named;
++                    auto folders = containerFoldersOf(named);
++                    if (!folders)
++                        return std::unexpected(HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME));
++                    return *std::move(folders);
+                 });
+         if (!folder)
+             return std::unexpected(LaunchRefusal { .error = LaunchError::Io,
+                                                    .step = LaunchStep::ContainerFolder,
+                                                    .code = static_cast<DWORD>(folder.error()) });
+         _folder = *std::move(folder);
+     }
+     if (!std::ranges::contains(_grantedDirectories, directory))
+     {
+         // Asked at every launch, as an administrator may grant it meanwhile; said once, not at every launch.
+@@ -339,14 +343,14 @@ std::expected<PreparedContainer, LaunchRefusal> AppContainerProvision::prepare(
+                                 "may not read and execute that directory, and this user may not "
+                                 "grant it. The installer must grant ALL APPLICATION PACKAGES ({}) "
+                                 "read and execute access there.",
+                                 utf8Of(directory),
+                                 utf8Of(std::filesystem::path { AllApplicationPackagesSid })));
+             }
+             return std::unexpected(granted.error());
+         }
+         _grantedDirectories.push_back(directory);
+     }
+-    return PreparedContainer { .sid = _sid->get(), .folder = *_folder };
++    return PreparedContainer { .sid = _sid->get(), .folders = *_folder };
+ }
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/AppContainer_win32.hpp b/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
+index 1d4404824..72c439553 100644
+--- a/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
++++ b/src/vtextension/wasm/remote/process/AppContainer_win32.hpp
+@@ -14,20 +14,21 @@
+ #include <expected>
+ #include <filesystem>
+ #include <functional>
+ #include <memory>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/process/LaunchRefusal_win32.hpp>
++#include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ /// The name of the extension host's AppContainer profile.
+ inline constexpr auto AppContainerName = std::wstring_view { L"Contour.ExtensionHost" };
+@@ -56,22 +57,22 @@ struct AppContainerApi
+     /// SetNamedSecurityInfoW() of a file's DACL, which propagates its inheritable entries to the children.
+     std::function<DWORD(PCWSTR path, PACL dacl)> writeDacl;
+     /// GetAppContainerFolderPath() of the container @p sid, spelled as ConvertSidToStringSidW() spells it:
+     /// the folder it keeps its local data in; or the HRESULT the system refused with.
+     std::function<std::expected<std::filesystem::path, HRESULT>(PSID sid)> folderPath;
+ };
+ 
+ /// The extension host's AppContainer, as a launch into it needs it.
+ struct PreparedContainer
+ {
+-    PSID sid;                     ///< Its SID, owned by the provision that prepared it.
+-    std::filesystem::path folder; ///< Its own folder (AppContainerApi::folderPath).
++    PSID sid;                 ///< Its SID, owned by the provision that prepared it.
++    ContainerFolders folders; ///< Its own folder (AppContainerApi::folderPath), and the profile's it lies in.
+ 
+     bool operator==(PreparedContainer const&) const = default;
+ };
+ 
+ /// @return The system's functions.
+ [[nodiscard]] AppContainerApi systemAppContainerApi();
+ 
+ /// Creates the extension host's profile (AppContainerName), with no capabilities, or finds it already there.
+ /// @param api What the system is asked through.
+ /// @return Its SID; `Unsupported` if the system neither created nor had it, with the HRESULT it said.
+@@ -96,26 +97,26 @@ class AppContainerProvision
+     /// @param api What the system is asked through.
+     /// @param diagnostics Where a grant this user may not make is said, with the directory and the fix:
+     ///        Contour's error log.
+     AppContainerProvision(AppContainerApi api, std::function<void(std::string_view line)> diagnostics);
+ 
+     /// Ensures the profile and asks for its folder, once, and that executables in @p directory may run in
+     /// it, once per directory. A directory this user may not grant is asked of again at every launch, but
+     /// said only once.
+     /// @param directory The directory of the executable about to be started.
+     /// @return The container; why it cannot be used, and where the system refused: a folder it was refused,
+-    ///         or named empty (ERROR_PATH_NOT_FOUND), is `Io` at LaunchStep::ContainerFolder, with the
+-    ///         HRESULT.
++    ///         named empty (ERROR_PATH_NOT_FOUND), or not shaped as a container's (ERROR_BAD_PATHNAME), is
++    ///         `Io` at LaunchStep::ContainerFolder, with the HRESULT.
+     [[nodiscard]] std::expected<PreparedContainer, LaunchRefusal> prepare(
+         std::filesystem::path const& directory);
+ 
+   private:
+     AppContainerApi _api;
+     std::function<void(std::string_view line)> _diagnostics;
+     std::optional<OwnedSid> _sid;                           ///< Once ensured.
+-    std::optional<std::filesystem::path> _folder;           ///< Once the system named it.
++    std::optional<ContainerFolders> _folder;                ///< Once the system named it.
+     std::vector<std::filesystem::path> _grantedDirectories; ///< Each directory ensured.
+     std::vector<std::filesystem::path>
+         _ungrantableDirectories; ///< Each directory refused `NotGranted`, said once.
+ };
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/LaunchSpelling_test.cpp b/src/vtextension/wasm/remote/process/LaunchSpelling_test.cpp
+index 00de0e41f..ef80dba07 100644
+--- a/src/vtextension/wasm/remote/process/LaunchSpelling_test.cpp
++++ b/src/vtextension/wasm/remote/process/LaunchSpelling_test.cpp
+@@ -8,20 +8,22 @@
+ #include <filesystem>
+ #include <string>
+ #include <string_view>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/process/LaunchSpelling_win32.hpp>
+ 
+ using namespace std::string_view_literals;
+ using vtextension::wasm::remote::process::appendArgument;
+ using vtextension::wasm::remote::process::containedEnvironment;
++using vtextension::wasm::remote::process::ContainerFolders;
++using vtextension::wasm::remote::process::containerFoldersOf;
+ using vtextension::wasm::remote::process::ContainerVariables;
+ using vtextension::wasm::remote::process::environmentBlock;
+ using vtextension::wasm::remote::process::EnvironmentEntry;
+ 
+ TEST_CASE("LaunchSpelling.emptyEnvironmentIsTwoTerminators", "[vtextension][process]")
+ {
+     // An empty block is still a block: one empty string's terminator, then the block's.
+     auto const block = environmentBlock({});
+     REQUIRE(block.has_value());
+     CHECK(*block == std::wstring(2, L'\0'));
+@@ -67,49 +69,79 @@ TEST_CASE("LaunchSpelling.environmentNotUtf8IsRefused", "[vtextension][process]"
+     auto const environment = std::vector<EnvironmentEntry> { { "NAME", "\xFF" } };
+     CHECK_FALSE(environmentBlock(environment).has_value());
+ }
+ 
+ namespace
+ {
+ 
+ /// A container's folder, as GetAppContainerFolderPath() names one.
+ constexpr auto ContainerFolder = std::wstring_view { LR"(C:\Users\u\AppData\Local\Packages\c\AC)" };
+ 
++/// @return The folders of ContainerFolder, which must read as a container's.
++[[nodiscard]] ContainerFolders containerFolders()
++{
++    auto folders = containerFoldersOf(std::filesystem::path { ContainerFolder });
++    REQUIRE(folders.has_value());
++    return *std::move(folders);
++}
++
+ } // namespace
+ 
++TEST_CASE("LaunchSpelling.containerFoldersAreReadFromTheContainersFolder", "[vtextension][process]")
++{
++    CHECK(containerFolders()
++          == ContainerFolders { .container = std::filesystem::path { ContainerFolder },
++                                .profile = std::filesystem::path { LR"(C:\Users\u\AppData\Local)" } });
++    // A trailing separator names the same folder; the names are the system's, in whatever case.
++    CHECK(containerFoldersOf(std::filesystem::path { LR"(C:\Local\packages\c\ac\)" })
++          == ContainerFolders { .container = std::filesystem::path { LR"(C:\Local\packages\c\ac)" },
++                                .profile = std::filesystem::path { LR"(C:\Local)" } });
++    // Anything else yields no profile folder for CreateProcessW() to extend.
++    for (auto const folder: { LR"(C:\AC)",
++                              LR"(C:\Local\Packages\AC)",
++                              LR"(C:\Local\Other\c\AC)",
++                              LR"(C:\Local\Packages\c\Temp)",
++                              LR"(Packages\c\AC)" })
++    {
++        INFO(std::filesystem::path { folder }.string());
++        CHECK_FALSE(containerFoldersOf(std::filesystem::path { folder }).has_value());
++    }
++}
++
+ TEST_CASE("LaunchSpelling.containedEnvironmentNamesTheContainersFolders", "[vtextension][process]")
+ {
+     // What it was asked for of these is replaced, whatever the case of its name; the rest stays as asked.
+-    auto const environment =
+-        std::vector<EnvironmentEntry> { { "SystemRoot", "C:\\Windows" },
+-                                        { "temp", "asked" },
+-                                        { "LocalAppData", R"(C:\Users\u\AppData\Local)" } };
+-    CHECK(containedEnvironment(environment, std::filesystem::path { ContainerFolder })
++    // LOCALAPPDATA is handed the profile's folder, which CreateProcessW() extends to the container's; TEMP
++    // and TMP what the child is to see.
++    auto const environment = std::vector<EnvironmentEntry> { { "SystemRoot", "C:\\Windows" },
++                                                             { "temp", "asked" },
++                                                             { "LocalAppData", R"(C:\Elsewhere)" } };
++    CHECK(containedEnvironment(environment, containerFolders())
+           == std::vector<EnvironmentEntry> { { "SystemRoot", "C:\\Windows" },
+-                                             { "LOCALAPPDATA", R"(C:\Users\u\AppData\Local\Packages\c\AC)" },
++                                             { "LOCALAPPDATA", R"(C:\Users\u\AppData\Local)" },
+                                              { "TEMP", R"(C:\Users\u\AppData\Local\Packages\c\AC\Temp)" },
+                                              { "TMP", R"(C:\Users\u\AppData\Local\Packages\c\AC\Temp)" } });
+ 
+     // Asked for none of them, it still names every one: the system refuses a contained launch without them.
+-    CHECK(containedEnvironment({}, std::filesystem::path { ContainerFolder }).size()
+-          == ContainerVariables.size());
++    CHECK(containedEnvironment({}, containerFolders()).size() == ContainerVariables.size());
+ }
+ 
+ TEST_CASE("LaunchSpelling.helperEnvironmentContainedIsOneBlock", "[vtextension][process]")
+ {
+     // The block a contained launch hands CreateProcessW(): SystemRoot and every container variable, sorted.
+     auto const environment = std::vector<EnvironmentEntry> { { "SystemRoot", "C:\\Windows" } };
+-    auto const block =
+-        environmentBlock(containedEnvironment(environment, std::filesystem::path { L"C:\\AC" }));
++    auto const block = environmentBlock(containedEnvironment(environment, containerFolders()));
+     REQUIRE(block.has_value());
+     CHECK(*block
+-          == L"LOCALAPPDATA=C:\\AC\0SystemRoot=C:\\Windows\0TEMP=C:\\AC\\Temp\0TMP=C:\\AC\\Temp\0\0"sv);
++          == L"LOCALAPPDATA=C:\\Users\\u\\AppData\\Local\0SystemRoot=C:\\Windows\0"
++             L"TEMP=C:\\Users\\u\\AppData\\Local\\Packages\\c\\AC\\Temp\0"
++             L"TMP=C:\\Users\\u\\AppData\\Local\\Packages\\c\\AC\\Temp\0\0"sv);
+ }
+ 
+ TEST_CASE("LaunchSpelling.argumentsAreQuotedAsTheRuntimeSplits", "[vtextension][process]")
+ {
+     struct Row
+     {
+         std::wstring_view argument;
+         std::wstring_view spelled;
+     };
+     auto const rows = std::to_array<Row>({
+diff --git a/src/vtextension/wasm/remote/process/LaunchSpelling_win32.cpp b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.cpp
+index 1e35594cf..4610d70ec 100644
+--- a/src/vtextension/wasm/remote/process/LaunchSpelling_win32.cpp
++++ b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.cpp
+@@ -92,32 +92,56 @@ std::optional<std::wstring> environmentBlock(std::span<EnvironmentEntry const> e
+         block += value;
+         block += L'\0';
+     }
+     // An empty block still needs two terminators.
+     if (entries.empty())
+         block += L'\0';
+     block += L'\0';
+     return block;
+ }
+ 
++std::optional<ContainerFolders> containerFoldersOf(std::filesystem::path const& containerFolder)
++{
++    // <profile>\Packages\<name>\AC: two names fixed, one the container's. A trailing separator names
++    // the same folder.
++    auto const folder = containerFolder.has_filename() ? containerFolder : containerFolder.parent_path();
++    auto const named = folder.filename();
++    auto const packages = folder.parent_path().parent_path();
++    auto const profile = packages.parent_path();
++    auto const utf8 = [](std::filesystem::path const& path) {
++        auto const text = path.u8string();
++        return std::string { text.begin(), text.end() };
++    };
++    if (!isSameName(utf8(named), "AC") || !isSameName(utf8(packages.filename()), "Packages")
++        || !folder.parent_path().has_filename() || !profile.has_relative_path())
++        return std::nullopt;
++    return ContainerFolders { .container = folder, .profile = profile };
++}
++
+ std::vector<EnvironmentEntry> containedEnvironment(std::span<EnvironmentEntry const> environment,
+-                                                   std::filesystem::path const& containerFolder)
++                                                   ContainerFolders const& folders)
+ {
+     auto contained = std::vector<EnvironmentEntry> {};
+     for (auto const& entry: environment)
+         if (std::ranges::none_of(ContainerVariables, [&](auto const& variable) {
+                 return isSameName(entry.first, variable.name);
+             }))
+             contained.push_back(entry);
+     for (auto const& variable: ContainerVariables)
+     {
+-        auto const folder = variable.subfolder.empty()
+-                                ? containerFolder
+-                                : containerFolder / std::wstring { variable.subfolder };
++        auto const folder = [&] {
++            switch (variable.source)
++            {
++                case ContainerVariableSource::ProfileFolder: return folders.profile;
++                case ContainerVariableSource::ContainerFolder: break;
++            }
++            return variable.subfolder.empty() ? folders.container
++                                              : folders.container / std::wstring { variable.subfolder };
++        }();
+         // UTF-8, as every string of the launcher's is; path::string() would spell it in the ANSI code page.
+         auto const utf8 = folder.u8string();
+         contained.emplace_back(std::string { variable.name }, std::string { utf8.begin(), utf8.end() });
+     }
+     return contained;
+ }
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/LaunchSpelling_win32.hpp b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.hpp
+index 692b777f8..927ce9dfb 100644
+--- a/src/vtextension/wasm/remote/process/LaunchSpelling_win32.hpp
++++ b/src/vtextension/wasm/remote/process/LaunchSpelling_win32.hpp
+@@ -1,61 +1,90 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #pragma once
+ 
+ /// @file
+ /// Windows only: how a launch is spelled for CreateProcessW() -- its command line and its environment block,
+ /// in UTF-16 -- and the variables a launch into an AppContainer cannot go without. Pure, so that what the
+ /// system parses is tested apart from starting anything.
+ 
+ #include <array>
++#include <cstdint>
+ #include <filesystem>
+ #include <optional>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ /// One environment variable: its name and its value, in UTF-8.
+ using EnvironmentEntry = std::pair<std::string, std::string>;
+ 
+-/// One variable a contained process is started with that names a folder of its AppContainer's own: its name,
+-/// and the folder beneath the container's (GetAppContainerFolderPath()) it names.
++/// What a contained launch hands CreateProcessW() for one of ContainerVariables.
++enum class ContainerVariableSource : uint8_t
++{
++    /// The folder the child is to see, beneath the container's own.
++    ContainerFolder,
++    /// The profile's local folder (`...\AppData\Local`) the container's lies in: CreateProcessW() extends
++    /// what it is given to `<given>\Packages\<name>\AC`, which a GitHub Windows runner showed by doubling a
++    /// container folder handed to it.
++    ProfileFolder,
++};
++
++/// One variable a contained process is started with that names a folder of its AppContainer's own.
+ struct ContainerVariable
+ {
+-    std::string_view name;       ///< The variable.
+-    std::wstring_view subfolder; ///< Beneath the container's folder; empty for the folder itself.
++    std::string_view name;          ///< The variable.
++    std::wstring_view subfolder;    ///< What the child sees: beneath the container's folder; empty for it.
++    ContainerVariableSource source; ///< What CreateProcessW() is handed for it.
+ };
+ 
+ /// What a contained process's environment says of where it keeps its data, as Microsoft's "Launch an
+ /// AppContainer" spells it: LOCALAPPDATA the container's folder (`...\Packages\<name>\AC`), TEMP and TMP its
+ /// `Temp` beneath. CreateProcessW() refuses a contained launch whose block lacks them, with
+-/// ERROR_ENVVAR_NOT_FOUND (203), as a GitHub Windows runner showed.
++/// ERROR_ENVVAR_NOT_FOUND (203), and derives each from the LOCALAPPDATA it is given, as a GitHub Windows
++/// runner showed: so LOCALAPPDATA is handed the profile's folder, and TEMP and TMP what the child is to see.
+ inline constexpr auto ContainerVariables = std::to_array<ContainerVariable>({
+-    { .name = "LOCALAPPDATA", .subfolder = L"" },
+-    { .name = "TEMP", .subfolder = L"Temp" },
+-    { .name = "TMP", .subfolder = L"Temp" },
++    { .name = "LOCALAPPDATA", .subfolder = L"", .source = ContainerVariableSource::ProfileFolder },
++    { .name = "TEMP", .subfolder = L"Temp", .source = ContainerVariableSource::ContainerFolder },
++    { .name = "TMP", .subfolder = L"Temp", .source = ContainerVariableSource::ContainerFolder },
+ });
+ 
++/// An AppContainer's own folder, and the profile's local folder it lies in.
++struct ContainerFolders
++{
++    std::filesystem::path
++        container;                 ///< Its own (GetAppContainerFolderPath()): `<profile>\Packages\<name>\AC`.
++    std::filesystem::path profile; ///< The profile's local folder, `<profile>`.
++
++    bool operator==(ContainerFolders const&) const = default;
++};
++
++/// @return @p containerFolder and the profile's local folder it lies in; nothing unless it reads
++///         `<profile>\Packages\<name>\AC` (names compared ignoring ASCII case), which is how CreateProcessW()
++///         makes it from the profile's.
++[[nodiscard]] std::optional<ContainerFolders> containerFoldersOf(
++    std::filesystem::path const& containerFolder);
++
+ /// @return @p text, UTF-8, as UTF-16; nothing if it is not UTF-8.
+ [[nodiscard]] std::optional<std::wstring> wideOf(std::string_view text);
+ 
+ /// Appends @p argument to @p commandLine, quoted as the C runtime's argv parser reads it back.
+ void appendArgument(std::wstring& commandLine, std::wstring_view argument);
+ 
+ /// @return The environment block of @p environment: `NAME=value` entries sorted by name as Windows wants
+ ///         them (ordinal, ignoring case), each NUL-terminated, then one NUL more -- two NULs for an empty
+ ///         one; nothing if an entry is not UTF-8.
+ [[nodiscard]] std::optional<std::wstring> environmentBlock(std::span<EnvironmentEntry const> environment);
+ 
+ /// @param environment The environment a launch was asked for.
+-/// @param containerFolder The AppContainer's own folder, as the parent asked the system for it.
++/// @param folders The AppContainer's folders, as the parent asked the system for them.
+ /// @return @p environment, with every entry named as one of ContainerVariables (names compare ignoring case)
+-///         replaced by that variable naming its folder beneath @p containerFolder, in UTF-8: nothing of this
+-///         process's environment, or of what a caller asked for, says where a contained process keeps data.
++///         replaced by what that variable's row hands CreateProcessW(), in UTF-8: nothing of this process's
++///         environment, or of what a caller asked for, says where a contained process keeps data.
+ [[nodiscard]] std::vector<EnvironmentEntry> containedEnvironment(
+-    std::span<EnvironmentEntry const> environment, std::filesystem::path const& containerFolder);
++    std::span<EnvironmentEntry const> environment, ContainerFolders const& folders);
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.cpp b/src/vtextension/wasm/remote/process/Process_win32.cpp
+index 2dd4c2eb3..980ee5678 100644
+--- a/src/vtextension/wasm/remote/process/Process_win32.cpp
++++ b/src/vtextension/wasm/remote/process/Process_win32.cpp
+@@ -361,21 +361,21 @@ namespace
+         OwnedHandle _wake;
+         std::vector<std::pair<uint64_t, HANDLE>> _watched; ///< Each key's process, owned by its handle.
+     };
+ 
+     /// What an isolated launch adds: to the attribute list the container and the child process policy, to
+     /// the environment the container's folders.
+     struct ContainedAttributes
+     {
+         SECURITY_CAPABILITIES capabilities; ///< The container's SID, and no capability.
+         DWORD childProcessPolicy;           ///< PROCESS_CREATION_CHILD_PROCESS_RESTRICTED.
+-        std::filesystem::path folder;       ///< The container's own folder (ContainerVariables).
++        ContainerFolders folders; ///< The container's own folder, and the profile's (ContainerVariables).
+     };
+ 
+     class Win32ProcessLauncher final: public IProcessLauncher
+     {
+       public:
+         /// @param api What isolated launches' containers are ensured through.
+         /// @param diagnostics Where a refusal its launch error cannot tell apart is said, once per step and
+         ///        code, and a grant this user may not make: Contour's error log.
+         Win32ProcessLauncher(AppContainerApi api, std::function<void(std::string_view line)> diagnostics):
+             _containers { std::move(api), diagnostics }, _diagnostics { std::move(diagnostics) }
+@@ -462,21 +462,21 @@ namespace
+             {
+                 auto const container = _containers.prepare(executable.parent_path());
+                 if (!container)
+                     return std::unexpected(container.error());
+                 contained = ContainedAttributes {
+                     .capabilities = SECURITY_CAPABILITIES { .AppContainerSid = container->sid,
+                                                             .Capabilities = nullptr,
+                                                             .CapabilityCount = 0,
+                                                             .Reserved = 0 },
+                     .childProcessPolicy = PROCESS_CREATION_CHILD_PROCESS_RESTRICTED,
+-                    .folder = container->folder,
++                    .folders = container->folders,
+                 };
+             }
+ 
+             auto job = makeJob(spec.caps.dataBytes);
+             if (!job)
+                 return std::unexpected(job.error());
+             auto jobList = std::array<HANDLE, 1> { job->get() };
+             auto list = AttributeList::create(contained ? 4 : 2);
+             if (!list)
+                 return std::unexpected(refusalOf(LaunchStep::AttributeList, ::GetLastError()));
+@@ -510,21 +510,21 @@ namespace
+                  spec.arguments ? spec.arguments(childHandles) : std::vector<std::string> {})
+             {
+                 auto const wide = wideOf(argument);
+                 if (!wide)
+                     return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
+                 appendArgument(commandLine, *wide);
+             }
+             // Contained, the container's folders are named by what the parent asked the system for, never by
+             // this process's environment (ContainerVariables).
+             auto const environment =
+-                contained ? containedEnvironment(spec.environment, contained->folder) : spec.environment;
++                contained ? containedEnvironment(spec.environment, contained->folders) : spec.environment;
+             auto block = environmentBlock(environment);
+             if (!block)
+                 return std::unexpected(refusalOf(LaunchStep::Spelling, ERROR_NO_UNICODE_TRANSLATION));
+             auto const workingDirectory =
+                 (contained ? executable.parent_path() : executable.root_path()).wstring();
+ 
+             auto startup = STARTUPINFOEXW {};
+             startup.StartupInfo.cb = sizeof(startup);
+             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+             startup.StartupInfo.hStdInput = nullDevice.get();
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index 649e85156..6bb90d611 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -23,22 +23,23 @@
+ // writes `probe` at its start. It reports `granted=ok`, or `granted=refused` if any of that failed, and `end`
+ // on its first lane; then `heard` and `end` there once another PDU arrives on control, and waits for its
+ // control channel to end.
+ //
+ // With any of --sandboxed, --outer-filter or --sandbox-op (Linux), it locks itself down as the host does and
+ // tries one operation from a thread started before: SandboxProbe.hpp says what it reports.
+ //
+ // With --contained (Windows), it tries what the extension host's AppContainer must refuse it, bound to its
+ // parent likewise, and reports on its control channel: `container=` `yes` or `no` (its token's word) or
+ // `unknown`; `profile-file=`, opening PATH (a file of the user's that the parent made) for reading;
+-// `connect=`, a TCP connection to 127.0.0.1:N (where the parent listens); `spawn=`, starting the system's
+-// cmd.exe. Each is `ok`, or `refused:<what>:<error>` naming the call that failed and its Win32 error. Then,
++// `connect=`, a TCP connection to 127.0.0.1:N (where the parent listens), given up on as
++// `refused:connect:timeout` after two seconds unanswered; `spawn=`, starting the system's cmd.exe. Each is
++// `ok`, or `refused:<what>:<error>` naming the call that failed and its Win32 error. Then,
+ // for each variable that names a container folder (ContainerVariables), `value-NAME=` its value; and
+ // `window-station=` the name of its window station, asked only uncontained (`not-asked` contained). Then
+ // `end`, and it waits for its control channel to end.
+ //
+ // With --mutate, it is a hostile extension host's memory: it takes the grant of one Instantiate as
+ // --receive-grant does, and flips bytes of the whole object at random on a thread of its own while Contour
+ // reads it. A Mersenne twister seeded with `--seed` picks each flip from its raw output, so a seed names the
+ // same flips on every standard library; how they interleave with Contour's reads is the scheduler's. It
+ // reports `mutating` and `end` on its first lane once the thread runs, or `granted=refused` and `end`; then,
+ // once its control channel ended, `mutations=N` (how many bytes it flipped) and `end`, and exits.
+@@ -47,20 +48,21 @@
+ // `stdin=`, `stdout=` and `stderr=` each `null` if it is the null device, `terminal` if a terminal, else
+ // `other`; (POSIX) `pid=` its process id and `sid=` its session's; `caps=` `apply` or `skip` as
+ // the build caps, and (POSIX) `nproc=`, `data=` and `as=` its limits, a number or `unlimited`; and `fd=N` per
+ // open descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+ #include <core/Clock.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <bit>
+ #include <charconv>
++#include <chrono>
+ #include <cstdint>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <format>
+ #include <iterator>
+ #include <memory>
+ #include <optional>
+ #include <random>
+ #include <span>
+ #include <string>
+@@ -497,20 +499,27 @@ constexpr auto Seed = std::string_view { "--seed=" };
+                                                                           : ProbeExit::ReportFailed;
+ }
+ 
+ #ifdef _WIN32
+ /// The prefix of the option naming the user's file --contained tries to open.
+ constexpr auto ProfileFile = std::string_view { "--profile-file=" };
+ 
+ /// The prefix of the option naming the loopback port --contained tries to connect to.
+ constexpr auto Port = std::string_view { "--port=" };
+ 
++/// How long --contained waits for its loopback connection: one the container's filter drops is never
++/// answered.
++constexpr auto ConnectPatience = std::chrono::seconds { 2 };
++
++/// What --contained reports for a connection still unanswered after ConnectPatience.
++constexpr auto ConnectTimedOut = std::string_view { "refused:connect:timeout" };
++
+ /// @return `refused:<what>:<error>`: the call @p what failed with the Win32 error @p error.
+ [[nodiscard]] std::string refusedBy(std::string_view what, DWORD error)
+ {
+     return std::format("refused:{}:{}", what, error);
+ }
+ 
+ /// @return Whether this process's token is an AppContainer's: `yes`, `no`, or `unknown`.
+ [[nodiscard]] std::string_view containerOf()
+ {
+     auto isAppContainer = DWORD { 0 };
+@@ -539,28 +548,52 @@ constexpr auto Port = std::string_view { "--port=" };
+ /// @return What connecting to 127.0.0.1:@p port came to.
+ [[nodiscard]] std::string connectLoopback(uint16_t port)
+ {
+     auto data = WSADATA {};
+     if (auto const error = ::WSAStartup(MAKEWORD(2, 2), &data); error != 0)
+         return refusedBy("WSAStartup", static_cast<DWORD>(error));
+     auto const result = [port] {
+         auto const socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+         if (std::cmp_equal(socket, INVALID_SOCKET))
+             return refusedBy("socket", static_cast<DWORD>(::WSAGetLastError()));
+-        auto address = sockaddr_in {};
+-        address.sin_family = AF_INET;
+-        address.sin_port = ::htons(port);
+-        address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+-        auto const connected =
+-            ::connect(socket, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0
+-                ? std::string { "ok" }
+-                : refusedBy("connect", static_cast<DWORD>(::WSAGetLastError()));
++        auto const connected = [&] {
++            // Not blocking, so that a connection the container's filter drops silently -- which a blocking
++            // connect waits out for some twenty seconds before WSAETIMEDOUT -- is given up on after
++            // ConnectPatience, and every row after it is still reported.
++            auto nonBlocking = u_long { 1 };
++            if (::ioctlsocket(socket, FIONBIO, &nonBlocking) != 0)
++                return refusedBy("ioctlsocket", static_cast<DWORD>(::WSAGetLastError()));
++            auto address = sockaddr_in {};
++            address.sin_family = AF_INET;
++            address.sin_port = ::htons(port);
++            address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
++            if (::connect(socket, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) == 0)
++                return std::string { "ok" };
++            if (auto const error = ::WSAGetLastError(); error != WSAEWOULDBLOCK)
++                return refusedBy("connect", static_cast<DWORD>(error));
++            auto writable = fd_set {};
++            FD_ZERO(&writable);
++            FD_SET(socket, &writable);
++            auto failed = writable;
++            auto timeout = timeval { .tv_sec = static_cast<long>(ConnectPatience.count()), .tv_usec = 0 };
++            auto const ready = ::select(0, nullptr, &writable, &failed, &timeout);
++            if (ready == SOCKET_ERROR)
++                return refusedBy("select", static_cast<DWORD>(::WSAGetLastError()));
++            if (ready == 0)
++                return std::string { ConnectTimedOut };
++            if (FD_ISSET(socket, &writable))
++                return std::string { "ok" };
++            auto error = 0;
++            auto length = static_cast<int>(sizeof(error));
++            ::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &length);
++            return refusedBy("connect", static_cast<DWORD>(error));
++        }();
+         ::closesocket(socket);
+         return connected;
+     }();
+     ::WSACleanup();
+     return result;
+ }
+ 
+ /// @return What starting the system's cmd.exe came to; a child that started is ended at once.
+ [[nodiscard]] std::string spawnProcess()
+ {
+diff --git a/src/vtextension/wasm/remote/transport/Channel_test.cpp b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+index 11aecf45e..5a5b74885 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_test.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_test.cpp
+@@ -22,20 +22,21 @@
+ #include <string>
+ #include <string_view>
+ #include <thread>
+ #include <utility>
+ #include <variant>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/testing/ClosingReceive.hpp>
+ #include <vtextension/wasm/remote/transport/testing/HandleCopies.hpp>
++#include <vtextension/wasm/testing/Wine.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <sys/socket.h>
+ 
+     #include <csignal>
+ 
+     #include <fcntl.h>
+@@ -183,20 +184,51 @@ TEST_CASE("Channel.endsAreNotInheritable", "[vtextension]")
+ {
+     auto pair = makeChannelPair();
+     REQUIRE(pair.has_value());
+     for (auto const* channel: { &pair->parent, &pair->helper })
+     {
+         auto flags = DWORD { 0 };
+         REQUIRE(::GetHandleInformation(channel->nativeHandle(), &flags));
+         CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
+     }
+ }
++
++TEST_CASE("Channel.transferInFlightOpensNoHandle", "[vtextension]")
++{
++    // An end holds the same handles whether a receive waits on it or not: what a process holds must not
++    // depend on what its threads happen to be waiting for, or a count of its handles races them.
++    if (vtextension::wasm::testing::runsOnWine())
++        SKIP("wine's GetProcessHandleCount() reads 0, whatever the process holds");
++    auto pair = makeChannelPair();
++    REQUIRE(pair.has_value());
++    auto const handleCount = [] {
++        auto count = DWORD { 0 };
++        REQUIRE(::GetProcessHandleCount(::GetCurrentProcess(), &count));
++        return count;
++    };
++    auto const before = handleCount();
++    auto received = std::async(std::launch::async, [&] {
++        auto buffer = std::array<uint8_t, 1> {};
++        return pair->helper.receiveSome(buffer);
++    });
++    // Looked at while the receive waits: long enough for it to have started, the bytes not sent yet.
++    auto most = before;
++    for ([[maybe_unused]] auto const look: std::views::iota(0, 200))
++    {
++        most = std::max(most, handleCount());
++        std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
++    }
++    REQUIRE(pair->parent.send(std::array<uint8_t, 1> { 7 }).has_value());
++    auto const got = received.get();
++    CHECK(got == std::size_t { 1 });
++    CHECK(most == before);
++}
+ #endif
+ 
+ TEST_CASE("Channel.adoptTakesAnInheritedEnd", "[vtextension]")
+ {
+     auto pair = makeChannelPair();
+     REQUIRE(pair.has_value());
+     auto const copy = duplicate(pair->helper.nativeHandle());
+     REQUIRE(copy.has_value());
+     auto adopted = Channel::adopt(*copy);
+     REQUIRE(adopted.has_value());
+diff --git a/src/vtextension/wasm/remote/transport/Channel_win32.cpp b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+index 99c60ecb2..fb7d520c0 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_win32.cpp
+@@ -47,20 +47,28 @@ namespace
+     };
+ 
+     /// Where an end is in its life.
+     enum class EndState : uint8_t
+     {
+         Open,     ///< Transfers run.
+         ShutDown, ///< Transfers fail `Closed`; the handle is closed once none is in flight.
+         Closed,   ///< The handle is closed.
+     };
+ 
++    /// Which way a transfer moves bytes: each end has an event per direction, since one send and one receive
++    /// may run at once (Channel.hpp).
++    enum class TransferDirection : uint8_t
++    {
++        Send,    ///< WriteFile().
++        Receive, ///< ReadFile().
++    };
++
+     /// An event an overlapped operation signals, closed with it.
+     class OverlappedEvent
+     {
+       public:
+         OverlappedEvent() noexcept: _event { ::CreateEventW(nullptr, TRUE, FALSE, nullptr) } {}
+         ~OverlappedEvent()
+         {
+             if (_event)
+                 ::CloseHandle(_event);
+         }
+@@ -174,20 +182,25 @@ namespace
+         std::vector<uint64_t> _acl;
+         SECURITY_DESCRIPTOR _descriptor {};
+         SECURITY_ATTRIBUTES _attributes {};
+     };
+ } // namespace
+ 
+ /// One end of the pipe: closed by shutdown() once it drained, or else when it is destroyed.
+ struct Channel::Native
+ {
+     HANDLE pipe;
++    /// The events this end's sends and receives wait on, one per direction, made once with the end: no
++    /// transfer makes or closes a handle, so an end holds the same handles whether a transfer is in flight
++    /// or not. ReadFile() and WriteFile() reset an event as they start.
++    OverlappedEvent sendEvent;
++    OverlappedEvent receiveEvent; ///< See sendEvent.
+     std::atomic<EndState> state { EndState::Open };
+     /// Who may touch the handle: every transfer in flight, and every shutdown() from before its state change
+     /// until after its cancel, so that no close slips in ahead of that cancel.
+     std::atomic<uint32_t> inFlight { 0 };
+ 
+     explicit Native(HANDLE pipe) noexcept: pipe { pipe } {}
+     ~Native()
+     {
+         if (state.load() != EndState::Closed)
+             ::CloseHandle(pipe);
+@@ -202,47 +215,52 @@ struct Channel::Native
+     {
+         if (inFlight.load() != 0)
+             return;
+         auto expected = EndState::ShutDown;
+         if (state.compare_exchange_strong(expected, EndState::Closed))
+             ::CloseHandle(pipe);
+     }
+ 
+     /// Runs one overlapped transfer to completion, or until the end is shut down; or, polled, only as far as
+     /// it completes at once.
++    /// @param direction Which way it moves bytes: whose event it waits on.
+     /// @param start Starts it: ReadFile or WriteFile on the pipe with the given OVERLAPPED.
+     /// @param completion Whether to wait for it.
+     /// @return How many bytes it moved.
+     template <typename Start>
+-    [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(Start start, Completion completion)
++    [[nodiscard]] std::expected<std::size_t, ChannelError> transfer(TransferDirection direction,
++                                                                    Start start,
++                                                                    Completion completion)
+     {
+         // Counted before the state is read, and shutdown() stores the state before it reads the count: either
+         // this sees the end shut down, or shutdown() sees this in flight and leaves the handle to it.
+         inFlight.fetch_add(1);
+-        auto const result = transferCounted(start, completion);
++        auto const result = transferCounted(direction, start, completion);
+         inFlight.fetch_sub(1);
+         if (state.load() != EndState::Open)
+             closeIfDrained();
+         return result;
+     }
+ 
+   private:
+     template <typename Start>
+-    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(Start start, Completion completion)
++    [[nodiscard]] std::expected<std::size_t, ChannelError> transferCounted(TransferDirection direction,
++                                                                           Start start,
++                                                                           Completion completion)
+     {
+         if (state.load() != EndState::Open)
+             return std::unexpected(ChannelError::Closed);
+-        auto const event = OverlappedEvent {};
+-        if (!event.handle())
++        auto* const event = direction == TransferDirection::Send ? sendEvent.handle() : receiveEvent.handle();
++        if (event == nullptr)
+             return std::unexpected(ChannelError::Io);
+         auto overlapped = OVERLAPPED {};
+-        overlapped.hEvent = event.handle();
++        overlapped.hEvent = event;
+         if (!start(overlapped))
+         {
+             auto const error = ::GetLastError();
+             if (error != ERROR_IO_PENDING)
+                 return std::unexpected(channelErrorOf(error));
+         }
+         // shutdown() sets the state before it cancels: a transfer started before the cancel is cancelled by
+         // it, and one started after sees the state here and cancels itself.
+         if (state.load() != EndState::Open)
+             ::CancelIoEx(pipe, &overlapped);
+@@ -285,49 +303,52 @@ std::expected<Channel, ChannelError> Channel::adopt(NativeHandle handle)
+ Channel::~Channel() = default;
+ Channel::Channel(Channel&&) noexcept = default;
+ Channel& Channel::operator=(Channel&&) noexcept = default;
+ 
+ std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
+ {
+     while (!bytes.empty())
+     {
+         auto const chunk = bytes.first(std::min(bytes.size(), MaxTransferBytes));
+         auto const sent = _native->transfer(
++            TransferDirection::Send,
+             [&](OVERLAPPED& overlapped) {
+                 return ::WriteFile(
+                     _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
+             },
+             Completion::Wait);
+         if (!sent)
+             return std::unexpected(sent.error());
+         bytes = bytes.subspan(*sent);
+     }
+     return {};
+ }
+ 
+ std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t const> bytes)
+ {
+     if (bytes.empty())
+         return 0;
+     auto const chunk = bytes.first(std::min(bytes.size(), MaxTransferBytes));
+     return _native->transfer(
++        TransferDirection::Send,
+         [&](OVERLAPPED& overlapped) {
+             return ::WriteFile(
+                 _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
+         },
+         Completion::Poll);
+ }
+ 
+ std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)
+ {
+     auto const chunk = buffer.first(std::min(buffer.size(), MaxTransferBytes));
+     auto const received = _native->transfer(
++        TransferDirection::Receive,
+         [&](OVERLAPPED& overlapped) {
+             return ::ReadFile(
+                 _native->pipe, chunk.data(), static_cast<DWORD>(chunk.size()), nullptr, &overlapped);
+         },
+         Completion::Wait);
+     if (received && *received == 0)
+         return std::unexpected(ChannelError::Closed);
+     return received;
+ }
+ 

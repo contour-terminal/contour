@@ -1,0 +1,1404 @@
+# Review package: 7e77b3019..HEAD
+
+## Commits
+f6230198e refactor: configure the extension runtime at every composition root
+6f68f2cb7 fix(vtextension): reuse a held memory copy unless another one wrote into it
+
+## Files changed
+ src/contour/ContourGuiApp.cpp                      |  7 +-
+ src/contour/cli/ContourApp.cpp                     | 11 +++-
+ src/vtbackend/bench-headless.cpp                   |  3 +-
+ src/vtextension/Bundled_test.cpp                   |  4 +-
+ src/vtextension/ControlImports_test.cpp            |  3 +-
+ src/vtextension/Engine_test.cpp                    |  5 +-
+ src/vtextension/ExtensionHost_test.cpp             |  6 +-
+ src/vtextension/ExtensionWorkerPool_test.cpp       | 12 ++--
+ src/vtextension/Instance_test.cpp                  | 74 ++++++++++++++--------
+ src/vtextension/testing/Harness.hpp                | 20 +++++-
+ src/vtextension/testing/ManualScheduler.hpp        | 21 +++++-
+ src/vtextension/testing/RunnerHarness.hpp          |  4 +-
+ src/vtextension/wasm/DefaultBackend.hpp            |  5 +-
+ src/vtextension/wasm/remote/CMakeLists.txt         | 25 +++++++-
+ src/vtextension/wasm/remote/CopyPathMemory.cpp     | 62 +++++++++++-------
+ src/vtextension/wasm/remote/CopyPathMemory.hpp     | 14 ++--
+ .../wasm/remote/CopyPathMemory_test.cpp            | 51 +++++++++++++++
+ src/vtextension/wasm/remote/RemoteBackend.cpp      | 10 +++
+ .../wasm/remote/testing/RemoteDefaultBackend.cpp   | 42 ++++++++++++
+ src/vtextension/wasm/wamr/DefaultBackend.cpp       |  7 +-
+ src/vthost/SessionHost_test.cpp                    |  3 +-
+ 21 files changed, 308 insertions(+), 81 deletions(-)
+
+## Diff
+diff --git a/src/contour/ContourGuiApp.cpp b/src/contour/ContourGuiApp.cpp
+index bd24e2e7c..8a99d0b4e 100644
+--- a/src/contour/ContourGuiApp.cpp
++++ b/src/contour/ContourGuiApp.cpp
+@@ -93,20 +93,21 @@
+ #include <vtpty/ExecutablePath.hpp>
+ #include <vtpty/Process.hpp>
+ #include <vtpty/ProgramLookup.hpp>
+ #include <vtpty/SandboxInfo.hpp>
+ #include <vtpty/SshTerminfoInstall.hpp>
+ 
+ #ifdef CONTOUR_EXTENSIONS
+     #include <vtextension/BundledExtensions.hpp>
+     #include <vtextension/ExtensionConsent.hpp>
+     #include <vtextension/SessionExtensions.hpp>
++    #include <vtextension/wasm/BackendConfig.hpp>
+     #include <vtextension/wasm/DefaultBackend.hpp>
+     #include <vtextension/wasm/WasmRuntime.hpp>
+     #include <vthost/client/DaemonGrantReplies.hpp>
+ #endif
+ 
+ #include <text_shaper/BundledEmojiFontLocator.hpp>
+ #include <text_shaper/BundledFonts.hpp>
+ #include <text_shaper/EmojiSpan.hpp>
+ #include <text_shaper/FontLocator.hpp>
+ #include <text_shaper/LastResortFontLocator.hpp>
+@@ -716,24 +717,28 @@ ContourGuiApp::~ContourGuiApp()
+     for (auto const& link: _daemonLinks)
+         link->stop();
+ }
+ 
+ #ifdef CONTOUR_EXTENSIONS
+ vtextension::ExtensionRuntime& ContourGuiApp::extensionRuntime()
+ {
+     if (!_extensionRuntime)
+     {
+         if (!_extensionBackend)
+-            _extensionBackend = { vtextension::wasm::makeDefaultBackend().release(),
++        {
++            // How the extensions' host processes are started: the one place the GUI configures it.
++            auto backendConfig = vtextension::wasm::BackendConfig {};
++            _extensionBackend = { vtextension::wasm::makeDefaultBackend(std::move(backendConfig)).release(),
+                                   [](vtextension::wasm::IWasmBackend* made) {
+                                       std::default_delete<vtextension::wasm::IWasmBackend> {}(made);
+                                   } };
++        }
+         auto const executableDirectory =
+             std::filesystem::path { QCoreApplication::applicationDirPath().toStdU16String() };
+         auto runtime = std::make_unique<vtextension::ExtensionRuntime>(
+             vtextension::ExtensionRuntimeConfig {
+                 .grantsFile = _config.configFile.parent_path() / vtextension::ExtensionGrantsFileName,
+                 .bundledDirectories = vtextension::bundledExtensionDirectories(
+                     vtextension::nativeBundledExtensionPlatform(), processEnvironment(), executableDirectory),
+                 .workerCount = vtextension::extensionWorkerCount(std::thread::hardware_concurrency()),
+                 .limits = {} },
+             vtextension::ExtensionRuntimeServices { .backend = *_extensionBackend,
+diff --git a/src/contour/cli/ContourApp.cpp b/src/contour/cli/ContourApp.cpp
+index 11c027a2e..4f2205932 100644
+--- a/src/contour/cli/ContourApp.cpp
++++ b/src/contour/cli/ContourApp.cpp
+@@ -73,20 +73,21 @@
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ #ifdef CONTOUR_EXTENSIONS
+     #include <contour/config/ExtensionDeclarations.hpp>
+ 
+     #include <vtextension/BundledExtensions.hpp>
+     #include <vtextension/ExtensionGrantStore.hpp>
+     #include <vtextension/ExtensionWorkerPool.hpp>
++    #include <vtextension/wasm/BackendConfig.hpp>
+     #include <vtextension/wasm/DefaultBackend.hpp>
+     #include <vtextension/wasm/WasmRuntime.hpp>
+     #include <vthost/DaemonExtensions.hpp>
+ #endif
+ #include <vthost/AccessFile.hpp>
+ #include <vthost/AuthorizedKeys.hpp>
+ #include <vthost/CommandRunner.hpp>
+ #include <vthost/Daemon.hpp>
+ #include <vthost/DaemonBinary.hpp>
+ #include <vthost/DaemonIdentity.hpp>
+@@ -1057,36 +1058,44 @@ namespace
+                 flush();
+         }
+         core::base64::finish(encoderState, writer);
+         flush();
+ 
+         cout << ST;
+         cout.flush();
+     }
+ 
+ #ifdef CONTOUR_EXTENSIONS
++    /// @return The backend a daemon's status-line extensions run on.
++    [[nodiscard]] std::unique_ptr<vtextension::wasm::IWasmBackend> makeDaemonExtensionBackend()
++    {
++        // How the extensions' host processes are started: the one place the daemon configures it.
++        auto backendConfig = vtextension::wasm::BackendConfig {};
++        return vtextension::wasm::makeDefaultBackend(std::move(backendConfig));
++    }
++
+     /// What a daemon's status-line extensions borrow. Made before the daemon runs, so that it outlives the
+     /// extensions the daemon's session host owns.
+     struct DaemonExtensionResources
+     {
+         /// @param childDescriptorLimit The descriptor limit each command runs under: the one the daemon's
+         ///        keeper started with; nullopt for the daemon's own.
+         explicit DaemonExtensionResources(std::optional<uint64_t> childDescriptorLimit):
+             capture { vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()),
+                       commandShutdown.get_token(),
+                       childDescriptorLimit }
+         {
+         }
+ 
+         /// What the extensions' engines are created from. First: it outlives everything made from it, and
+         /// only a reference to it travels with the services.
+-        std::unique_ptr<vtextension::wasm::IWasmBackend> backend = vtextension::wasm::makeDefaultBackend();
++        std::unique_ptr<vtextension::wasm::IWasmBackend> backend = makeDaemonExtensionBackend();
+         core::async::StopSource commandShutdown;
+         vtpty::SystemCommandCapture capture;
+         core::platform::SystemWallClock wallClock;
+         vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
+     };
+ 
+     /// @param resolved The daemon's profile, resolved.
+     /// @param daemon The socket the daemon serves, which names its grants file.
+     /// @param executableDirectory Where the running executable is, beside which bundled extensions may be.
+     /// @param services What the extensions borrow.
+diff --git a/src/vtbackend/bench-headless.cpp b/src/vtbackend/bench-headless.cpp
+index 58169cddd..d5dac347d 100644
+--- a/src/vtbackend/bench-headless.cpp
++++ b/src/vtbackend/bench-headless.cpp
+@@ -1571,21 +1571,22 @@ class ExtensionRig
+     }
+ 
+   private:
+     std::vector<RigModule> _modules;
+     vtextension::ConfigMap _config;
+     core::Environment const& _environment;
+     vtbackend::LocalTimeConverter _localTime { &vtbackend::systemLocalTime };
+     NoGrants _grants;
+     NoCommands _commands;
+     /// What the engines are created from and the lanes prepared with; outlives both.
+-    std::unique_ptr<vtextension::wasm::IWasmBackend> _backend = vtextension::wasm::makeDefaultBackend();
++    std::unique_ptr<vtextension::wasm::IWasmBackend> _backend =
++        vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
+     vtextension::EngineProvider _engines { *_backend, rigLimits() };
+     /// Last: destroyed first, running each runner's last job before what those jobs reach goes.
+     vtextension::ExtensionWorkerPool _pool {
+         *_backend, vtextension::extensionWorkerCount(std::thread::hardware_concurrency())
+     };
+ };
+ 
+ PaneExtensions::PaneExtensions(ExtensionRig& rig): _hosted { rig.prepare(), rig.services(_published) }
+ {
+ }
+diff --git a/src/vtextension/Bundled_test.cpp b/src/vtextension/Bundled_test.cpp
+index 2112720bc..adbb28171 100644
+--- a/src/vtextension/Bundled_test.cpp
++++ b/src/vtextension/Bundled_test.cpp
+@@ -181,41 +181,41 @@ constexpr auto DaylightSavingEnds =
+ 
+ /// What `git status --porcelain=v2 --branch` prints in a repository on `main` with one change.
+ constexpr auto DirtyMain = std::string_view { "# branch.oid 0123456789abcdef\n"
+                                               "# branch.head main\n"
+                                               "1 .M N... 100644 100644 100644 0123456 0123456 README.md\n" };
+ 
+ } // namespace
+ 
+ TEST_CASE("Bundled: every module declares what it is", "[vtextension][bundled][guest]")
+ {
+-    auto const backend = vtextension::wasm::makeDefaultBackend();
++    auto const backend = vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
+     for (auto const& extension: bundledExtensions())
+     {
+         INFO(extension.name);
+         auto const module = loadModule(*backend, readTestModule(extension.artifact));
+         auto const& manifest = module.compiled->manifest();
+         REQUIRE(manifest.has_value());
+         CHECK(manifest->name == extension.name);
+         auto names = std::vector<std::string_view> {};
+         for (auto const& command: manifest->commands)
+             names.emplace_back(command.name);
+         CHECK(names == extension.commands);
+     }
+ }
+ 
+ TEST_CASE("Bundled: every declared command can be written for both shells", "[vtextension][bundled][guest]")
+ {
+     // A command runs through the platform shell (CommandCapture takes one command line), and an argument the
+     // shell would interpret is refused rather than quoted: cmd.exe's metacharacters cannot be. So a declared
+     // argv must survive both dialects, or the command can never run on that platform.
+-    auto const backend = vtextension::wasm::makeDefaultBackend();
++    auto const backend = vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
+     for (auto const& extension: bundledExtensions())
+     {
+         auto const module = loadModule(*backend, readTestModule(extension.artifact));
+         auto const& manifest = module.compiled->manifest();
+         REQUIRE(manifest.has_value());
+         for (auto const& command: manifest->commands)
+         {
+             INFO(extension.name << ": " << command.name);
+             auto argv = std::vector<std::string> {};
+             for (auto const& element: command.argvTemplate)
+diff --git a/src/vtextension/ControlImports_test.cpp b/src/vtextension/ControlImports_test.cpp
+index 719c9e1ea..d5f693098 100644
+--- a/src/vtextension/ControlImports_test.cpp
++++ b/src/vtextension/ControlImports_test.cpp
+@@ -407,23 +407,24 @@ TEST_CASE("a control import the guest calls wrongly traps", "[vtextension][contr
+                                         services,
+                                         write,
+                                         ControlCallBudget { .remaining = 40ms, .deadline = deadline }))
+               == ExtensionError::Trapped);
+     }
+     CHECK(services.controlCalls.empty());
+ }
+ 
+ TEST_CASE("a module importing the control interface instantiates", "[vtextension][control]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
++    auto const threadGuard = vtextension::testing::preparedThread(*backend);
+     auto const compiled = CompiledExtension::load(
+         **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::ControlImportingModule));
+     REQUIRE(compiled.has_value());
+     auto services = FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     auto const instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+     REQUIRE(instance.has_value());
+     CHECK((*instance)->render(surface(80, 1)).has_value());
+     CHECK(services.controlCalls.empty());
+ }
+diff --git a/src/vtextension/Engine_test.cpp b/src/vtextension/Engine_test.cpp
+index 7925e88bd..d80c5346f 100644
+--- a/src/vtextension/Engine_test.cpp
++++ b/src/vtextension/Engine_test.cpp
+@@ -218,24 +218,27 @@ TEST_CASE("Engine.armWhileWatching")
+         engine->disarm(tokenOf(index));
+ 
+     CHECK(std::ranges::all_of(
+         instances, [](FakeWasmInstance const& instance) { return instance.interrupts.load() == 0; }));
+ }
+ 
+ TEST_CASE("Engine.deadline.endToEnd")
+ {
+     // End to end on the default backend: the deadline stops a guest spinning in an endless loop, and a call
+     // that finished in time leaves its instance usable once its deadline is disarmed.
+-    auto const backend = vtextension::wasm::makeDefaultBackend();
++    auto const backend = vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
+     auto limits = ExtensionLimits {};
+     limits.callDeadline = std::chrono::milliseconds { 50 };
+     auto const engine = createEngine(*backend, limits);
++    // The calls below come from this thread: prepared once the engine's runtime is up.
++    auto const threadGuard = backend->enterThread();
++    REQUIRE(threadGuard.has_value());
+     auto module = engine->runtime().load(vtextension::wasm::ModuleIdentity {}, hostOnlyModule());
+     REQUIRE(module.has_value());
+ 
+     auto const callUnderDeadline = [&](vtextension::wasm::IWasmInstance& instance, std::string_view name) {
+         auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+         auto const token = WatchToken { .instance = &instance, .state = &state };
+         auto const function = instance.function(name);
+         REQUIRE(function.has_value());
+         engine->armDeadline(token, limits.callDeadline);
+         auto const called = instance.call(*function, {});
+diff --git a/src/vtextension/ExtensionHost_test.cpp b/src/vtextension/ExtensionHost_test.cpp
+index 24ca4ca34..c26619756 100644
+--- a/src/vtextension/ExtensionHost_test.cpp
++++ b/src/vtextension/ExtensionHost_test.cpp
+@@ -199,59 +199,59 @@ TEST_CASE("ExtensionHost.preparedElsewhere", "[vtextension]")
+         CHECK(harness.scheduler.lanesAssigned == 1);
+         REQUIRE(host.snapshot("huge") != nullptr);
+         CHECK(host.snapshot("huge")->sgrText == "\u26A0 huge disabled: extension module too large");
+     }
+     harness.scheduler.runPending();
+ }
+ 
+ TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
+ {
+     // Loaded but never started: retired, and released by the owner.
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto engines = CountingEngineProvider { *backend };
+     auto engine = engines.acquire();
+     REQUIRE(engine.has_value());
+     auto prepared = preparedOnAnotherThread(*engine);
+     auto const weak = std::weak_ptr<Engine>(*engine);
+     engine->reset();
+     auto retired = retirementOf(std::move(prepared));
+     REQUIRE(retired != nullptr);
+     CHECK_FALSE(weak.expired());
+     engines.retire(std::move(retired));
+     engines.releaseRetired();
+     CHECK(weak.expired());
+ }
+ 
+ TEST_CASE("EngineProvider.shares", "[vtextension]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto provider = EngineProvider { *backend, ExtensionLimits {} };
+     auto first = provider.acquire();
+     auto second = provider.acquire();
+     REQUIRE(first.has_value());
+     REQUIRE(second.has_value());
+     CHECK(first->get() == second->get());
+ 
+     // Held weakly: with its last user gone, the engine goes, and the next user gets a new one.
+     auto const old = std::weak_ptr<Engine>(*first);
+     first->reset();
+     second->reset();
+     CHECK(old.expired());
+     auto third = provider.acquire();
+     REQUIRE(third.has_value());
+     CHECK(*third != nullptr);
+ }
+ 
+ TEST_CASE("EngineProvider.retirement", "[vtextension]")
+ {
+     // What a runner retires lives in the provider until an owner thread releases it.
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto provider = EngineProvider { *backend, ExtensionLimits {} };
+     auto engine = provider.acquire();
+     REQUIRE(engine.has_value());
+     auto const weak = std::weak_ptr<Engine>(*engine);
+     provider.retire(retiredEngine(std::move(*engine)));
+     CHECK_FALSE(weak.expired());
+     // An acquire meanwhile reuses it rather than creating a second runtime.
+     auto again = provider.acquire();
+     REQUIRE(again.has_value());
+     CHECK(again->get() == weak.lock().get());
+diff --git a/src/vtextension/ExtensionWorkerPool_test.cpp b/src/vtextension/ExtensionWorkerPool_test.cpp
+index 1414a1d40..b39421cae 100644
+--- a/src/vtextension/ExtensionWorkerPool_test.cpp
++++ b/src/vtextension/ExtensionWorkerPool_test.cpp
+@@ -27,31 +27,31 @@ using vtextension::testing::reportFromLane;
+ TEST_CASE("ExtensionWorkerPool.workerCount", "[vtextension]")
+ {
+     CHECK(extensionWorkerCount(0) == 1);
+     CHECK(extensionWorkerCount(1) == 1);
+     CHECK(extensionWorkerCount(3) == 3);
+     CHECK(extensionWorkerCount(64) == MaxExtensionWorkers);
+ }
+ 
+ TEST_CASE("ExtensionWorkerPool.lazy", "[vtextension][threading]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto pool = ExtensionWorkerPool(*backend, 2);
+     CHECK(pool.runningWorkers() == 0);
+     [[maybe_unused]] auto const lane = pool.assignLane();
+     CHECK(pool.runningWorkers() == 2);
+ }
+ 
+ TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
+ {
+     // A lane is prepared for the runtime an engine keeps up, as a runner's engine does while its jobs run.
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
+     auto pool = ExtensionWorkerPool(*backend, 2);
+     auto const first = pool.assignLane();
+     auto const second = pool.assignLane();
+     CHECK(first != second);
+     CHECK(pool.assignLane() == first); // round-robin
+ 
+     // Every job of one lane runs on one thread, prepared to call into instances.
+     auto mutex = std::mutex {};
+@@ -69,21 +69,21 @@ TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
+         });
+     REQUIRE(done.get_future().wait_for(Eventually) == std::future_status::ready);
+     auto const lock = std::scoped_lock { mutex };
+     CHECK(threads.size() == 1);
+     CHECK(prepared == Jobs);
+     CHECK_FALSE(threads.contains(std::this_thread::get_id()));
+ }
+ 
+ TEST_CASE("ExtensionWorkerPool.timers", "[vtextension][threading]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto pool = ExtensionWorkerPool(*backend, 1);
+     auto const lane = pool.assignLane();
+     auto mutex = std::mutex {};
+     auto fired = std::vector<int> {};
+     auto done = std::promise<void> {};
+ 
+     auto const cancelled = pool.schedule(lane, 1ms, [&] {
+         auto const lock = std::scoped_lock { mutex };
+         fired.push_back(0);
+     });
+@@ -96,21 +96,21 @@ TEST_CASE("ExtensionWorkerPool.timers", "[vtextension][threading]")
+     REQUIRE(done.get_future().wait_for(Eventually) == std::future_status::ready);
+     auto const lock = std::scoped_lock { mutex };
+     CHECK(fired == std::vector { 1 });
+ }
+ 
+ TEST_CASE("ExtensionWorkerPool.scheduleWhileWaiting", "[vtextension][threading]")
+ {
+     // The worker sleeps towards its earliest timer while another thread schedules more: scheduling may move
+     // the timers in memory, and the worker must not be left holding on to where the earliest one was
+     // (ASan checks that it is not).
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto pool = ExtensionWorkerPool(*backend, 1);
+     auto const lane = pool.assignLane();
+     auto timers = std::vector<TimerId> {};
+     timers.push_back(pool.schedule(lane, std::chrono::hours { 1 }, [] {}));
+ 
+     constexpr auto Timers = 256;
+     auto scheduler = std::thread([&] {
+         for (auto const index: std::views::iota(1, Timers))
+             timers.push_back(pool.schedule(lane, std::chrono::hours { 1 + index }, [] {}));
+     });
+@@ -122,41 +122,41 @@ TEST_CASE("ExtensionWorkerPool.scheduleWhileWaiting", "[vtextension][threading]"
+     auto ran = std::promise<void> {};
+     pool.post(lane, [&ran] { ran.set_value(); });
+     CHECK(ran.get_future().wait_for(Eventually) == std::future_status::ready);
+ }
+ 
+ TEST_CASE("ExtensionWorkerPool.destructionRunsPostedJobs", "[vtextension][threading]")
+ {
+     auto ran = std::vector<int> {};
+     auto timerRan = false;
+     auto blocker = std::promise<void> {};
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     {
+         auto pool = ExtensionWorkerPool(*backend, 1);
+         auto const lane = pool.assignLane();
+         // The worker is held up, so that the jobs below are still queued when the pool is destroyed.
+         pool.post(lane, [future = blocker.get_future().share()] { future.wait(); });
+         pool.post(lane, [&] { ran.push_back(1); });
+         pool.post(lane, [&] { ran.push_back(2); });
+         [[maybe_unused]] auto const timer =
+             pool.schedule(lane, std::chrono::hours { 1 }, [&] { timerRan = true; });
+         blocker.set_value();
+     }
+     CHECK(ran == std::vector { 1, 2 });
+     CHECK_FALSE(timerRan);
+ }
+ 
+ TEST_CASE("ExtensionWorkerPool.reprepareForNewRuntime", "[vtextension][threading]")
+ {
+     // A lane prepared for one runtime is prepared again once the last engine went and a new one brought
+     // the runtime up anew: on Windows the old preparation would have no state under the new runtime.
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto pool = ExtensionWorkerPool(*backend, 1);
+     auto const lane = pool.assignLane();
+ 
+     auto first = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(first.has_value());
+     auto const firstGeneration = backend->runtimeGeneration();
+     auto const before = reportFromLane(pool, lane, *backend);
+     CHECK(before.prepared == firstGeneration);
+     CHECK(before.ready);
+ 
+diff --git a/src/vtextension/Instance_test.cpp b/src/vtextension/Instance_test.cpp
+index 3b00f1ca5..ab05b16b6 100644
+--- a/src/vtextension/Instance_test.cpp
++++ b/src/vtextension/Instance_test.cpp
+@@ -50,54 +50,55 @@ namespace
+     REQUIRE(engine.has_value());
+     return CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
+ }
+ 
+ /// Loads @p module on a fresh engine under @p limits and, if that succeeds, creates an instance of it, which
+ /// is discarded.
+ /// @return The error loading or creating it failed with; nothing if both succeeded.
+ [[nodiscard]] std::optional<ExtensionError> outcomeOf(std::vector<std::byte> module,
+                                                       ExtensionLimits limits = {})
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, limits);
+     REQUIRE(engine.has_value());
++    auto const threadGuard = vtextension::testing::preparedThread(*backend);
+     auto const compiled = CompiledExtension::load(**engine, wasm::ModuleIdentity {}, std::move(module));
+     if (!compiled)
+         return compiled.error();
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     return errorOf(Instance::create(**engine, **compiled, services, clock, limits));
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("CompiledExtension.load", "[vtextension]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const compiled = loadModule(*backend, toModule(vtextension::testing::MinimalModule));
+     REQUIRE(compiled.has_value());
+     // A module without a manifest loads; it declares no commands.
+     CHECK_FALSE((*compiled)->manifest().has_value());
+ }
+ 
+ TEST_CASE("CompiledExtension.invalid", "[vtextension]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     CHECK(errorOf(loadModule(*backend, {})) == ExtensionError::InvalidComponent);
+     auto truncated = toModule(vtextension::testing::MinimalModule);
+     truncated.resize(truncated.size() / 2);
+     CHECK(errorOf(loadModule(*backend, truncated)) == ExtensionError::InvalidComponent);
+ }
+ 
+ TEST_CASE("CompiledExtension.worldMismatch", "[vtextension]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     // The runtime links imports lazily, so each of these would load and fail only when called.
+     SECTION("an unknown host function")
+     {
+         CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::UnknownImportModule)))
+               == ExtensionError::WorldMismatch);
+     }
+     SECTION("a host function with the wrong signature")
+     {
+         CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WrongImportSignatureModule)))
+               == ExtensionError::WorldMismatch);
+@@ -199,23 +200,24 @@ TEST_CASE("Instance.minimal", "[vtextension]")
+     CHECK(guest.loadAndRender({}).empty());
+     CHECK(guest.instance().update(TimerFired {}).value() == RenderRequest::None);
+     CHECK_FALSE(guest.instance().fault().has_value());
+ }
+ 
+ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
+ {
+     // The minimal module asks for one 64 KiB page up front; a cap below that refuses it.
+     auto limits = ExtensionLimits {};
+     limits.memoryBytes = std::size_t { 32 } * 1024;
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, limits);
+     REQUIRE(engine.has_value());
++    auto const threadGuard = vtextension::testing::preparedThread(*backend);
+     auto const compiled = CompiledExtension::load(
+         **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MinimalModule));
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     auto clock = core::platform::ManualClock {};
+     CHECK(errorOf(Instance::create(**engine, **compiled, services, clock, limits))
+           == ExtensionError::OutOfMemory);
+ }
+ 
+ TEST_CASE("Instance.malicious", "[vtextension]")
+@@ -315,23 +317,24 @@ class HastyClock final: public core::platform::IClock
+     mutable std::mutex _mutex;
+     mutable core::platform::SteadyTimePoint _now;
+ };
+ 
+ } // namespace
+ 
+ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
+ {
+     // When the call's deadline is spent by the time the guest asks for a command, the command does
+     // not run, and the call fails as overrun.
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     auto const engine = Engine::create(*backend, ExtensionLimits {});
+     REQUIRE(engine.has_value());
++    auto const threadGuard = vtextension::testing::preparedThread(*backend);
+     auto const compiled = CompiledExtension::load(
+         **engine, wasm::ModuleIdentity {}, toModule(vtextension::testing::MaliciousModule));
+     REQUIRE(compiled.has_value());
+     auto services = vtextension::testing::FakeHostServices {};
+     services.commandAnswer = "";
+     auto clock = HastyClock {};
+     auto instance = Instance::create(**engine, **compiled, services, clock, ExtensionLimits {});
+     REQUIRE(instance.has_value());
+ 
+     CHECK(errorOf((*instance)->render(surface(80, 10))) == ExtensionError::DeadlineExceeded);
+@@ -479,21 +482,21 @@ TEST_CASE("Instance.reentrantHostCall", "[vtextension]")
+ TEST_CASE("Instance.stackOverflow", "[vtextension]")
+ {
+     // Unbounded recursion runs into the instance's stack limit, checked in software: a trap, not a crash.
+     auto guest = RunningGuest(toModule(vtextension::testing::UnboundedRecursionModule));
+     CHECK(errorOf(guest.instance().render(surface(80, 1))) == ExtensionError::Trapped);
+     CHECK(guest.instance().fault() == ExtensionError::Trapped);
+ }
+ 
+ TEST_CASE("CompiledExtension.wasi", "[vtextension]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     // Only WASI functions that return at once and reach nothing outside the module are provided.
+     CHECK(loadModule(*backend, toModule(vtextension::testing::WasiAllowedModule)).has_value());
+     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiPollOneoffModule)))
+           == ExtensionError::WorldMismatch);
+     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiSockOpenModule)))
+           == ExtensionError::WorldMismatch);
+     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiPathOpenModule)))
+           == ExtensionError::WorldMismatch);
+     // A WASI reactor's `_initialize` must take and return nothing, as the world says.
+     CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiReactorInitializerSignatureModule)))
+@@ -536,49 +539,70 @@ TEST_CASE("Instance.wasiReactor", "[vtextension]")
+         auto const limits = ExtensionLimits {};
+         auto const start = std::chrono::steady_clock::now();
+         auto const error = outcomeOf(toModule(vtextension::testing::WasiReactorSpinningModule), limits);
+         auto const elapsed = std::chrono::steady_clock::now() - start;
+         CHECK(error == ExtensionError::DeadlineExceeded);
+         // The bound only proves that termination happened at all; how soon is the scheduler's business.
+         CHECK(elapsed < 10 * limits.loadDeadline);
+     }
+ }
+ 
++namespace
++{
++
++/// A module the runtime would run code of by itself while instantiating it.
++struct InstantiationHookCase
++{
++    std::string_view description;
++    std::vector<std::byte> module;
++};
++
++/// Checks that none of @p cases is instantiated, and that each is refused promptly.
++void checkRefusedPromptly(std::span<InstantiationHookCase const> cases)
++{
++    auto const limits = ExtensionLimits {};
++    for (auto const& [description, module]: cases)
++    {
++        INFO(description);
++        auto const start = std::chrono::steady_clock::now();
++        CHECK(outcomeOf(module, limits) == ExtensionError::InvalidComponent);
++        CHECK(std::chrono::steady_clock::now() - start < 10 * limits.loadDeadline);
++    }
++}
++
++} // namespace
++
+ TEST_CASE("CompiledExtension.instantiationHooks", "[vtextension]")
+ {
+     // What the runtime would run by itself while instantiating -- where no deadline stops it and host
+     // functions fail -- refuses the module before it can run, and promptly: none of these is instantiated.
+-    struct Case
+-    {
+-        std::string_view description;
+-        std::vector<std::byte> module;
+-    };
+-    auto const cases = std::vector<Case> {
++    checkRefusedPromptly(std::vector<InstantiationHookCase> {
++        { .description = "two export sections",
++          .module = toModule(vtextension::testing::TwoExportSectionsModule) },
++    });
++}
++
++// In-process only: the hooks the in-process engine runs by itself while instantiating, and the export names
++// it would take for one. An engine that runs none, as an extension host's does, has nothing to refuse, and
++// instantiates these modules.
++TEST_CASE("CompiledExtension.instantiationHooks.engineRun", "[vtextension][in-process]")
++{
++    checkRefusedPromptly(std::vector<InstantiationHookCase> {
+         { .description = "__post_instantiate",
+           .module = toModule(vtextension::testing::PostInstantiateSpinningModule) },
+         { .description = "__wasm_call_ctors without WASI",
+           .module = toModule(vtextension::testing::CallCtorsSpinningModule) },
+         { .description = "_initialize followed by a NUL",
+           .module = toModule(vtextension::testing::NulInitializerModule) },
+-        { .description = "two export sections",
+-          .module = toModule(vtextension::testing::TwoExportSectionsModule) },
+         { .description = "the backend's alias of _initialize",
+           .module = toModule(vtextension::testing::AliasExportingModule) },
+-    };
+-    auto const limits = ExtensionLimits {};
+-    for (auto const& [description, module]: cases)
+-    {
+-        INFO(description);
+-        auto const start = std::chrono::steady_clock::now();
+-        CHECK(outcomeOf(module, limits) == ExtensionError::InvalidComponent);
+-        CHECK(std::chrono::steady_clock::now() - start < 10 * limits.loadDeadline);
+-    }
++    });
+ }
+ 
+ TEST_CASE("Instance.realloc", "[vtextension]")
+ {
+     // What the guest's allocator answers is checked before the host writes there.
+     for (auto const& module: { toModule(vtextension::testing::OutOfBoundsReallocModule),
+                                toModule(vtextension::testing::MisalignedReallocModule) })
+     {
+         auto guest = RunningGuest(module);
+         CHECK(errorOf(guest.instance().load({ { "text", "hi" } })) == ExtensionError::Trapped);
+@@ -632,21 +656,21 @@ namespace
+ {
+     auto guest = std::make_unique<RunningGuest>(readTestModule("hostile.wasm"), limits);
+     REQUIRE(guest->instance().load({ { "mode", std::string(mode) } }).has_value());
+     return guest;
+ }
+ 
+ } // namespace
+ 
+ TEST_CASE("CompiledExtension.sleeper", "[vtextension][guest]")
+ {
+-    auto const backend = wasm::makeDefaultBackend();
++    auto const backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
+     // A Rust guest that sleeps imports WASI's poll_oneoff, a wait no deadline can interrupt.
+     CHECK(errorOf(loadModule(*backend, readTestModule("sleeper.wasm"))) == ExtensionError::WorldMismatch);
+ }
+ 
+ TEST_CASE("Instance.echo.render", "[vtextension][guest]")
+ {
+     auto bytes = readTestModule("echo.wasm");
+     auto const start = std::chrono::steady_clock::now();
+     auto guest = RunningGuest(std::move(bytes));
+     INFO("load + check + instantiate: " << toMilliseconds(std::chrono::steady_clock::now() - start) << " ms");
+diff --git a/src/vtextension/testing/Harness.hpp b/src/vtextension/testing/Harness.hpp
+index 636272347..2fe8c302a 100644
+--- a/src/vtextension/testing/Harness.hpp
++++ b/src/vtextension/testing/Harness.hpp
+@@ -127,32 +127,45 @@ class FakeHostServices final: public IHostServices
+     std::expected<std::string, vtcontrol::ControlError> controlAnswer; ///< What callControl() answers.
+     std::function<void()> beforeControlAnswer; ///< Runs inside callControl, before it answers.
+ };
+ 
+ /// @return A surface of @p columns by @p lines cells.
+ [[nodiscard]] inline vtpty::PageSize surface(int columns, int lines)
+ {
+     return vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(columns) };
+ }
+ 
++/// Prepares the calling thread to call into @p backend's instances, as a caller must before it creates or
++/// calls one; the thread a backend brought its engine up on is not prepared by that.
++/// @return The guard, to drop on the calling thread once it is done calling in.
++[[nodiscard]] inline std::unique_ptr<wasm::IThreadGuard> preparedThread(wasm::IWasmBackend& backend)
++{
++    auto guard = backend.enterThread();
++    REQUIRE(guard.has_value());
++    return std::move(*guard);
++}
++
+ /// A guest module loaded on its own engine, of its own default backend, with one instance of it running
+-/// on a FakeHostServices.
++/// on a FakeHostServices. The thread that creates it is prepared to call into the instance while it lives,
++/// and must be the one that drops it.
+ class RunningGuest
+ {
+   public:
+     /// Loads @p module and instantiates it under @p limits.
+     explicit RunningGuest(std::vector<std::byte> module, ExtensionLimits limits = {}):
+-        _backend { wasm::makeDefaultBackend() }, _limits { limits }
++        _backend { wasm::makeDefaultBackend(wasm::BackendConfig {}) }, _limits { limits }
+     {
+         auto engine = Engine::create(*_backend, limits);
+         REQUIRE(engine.has_value());
+         _engine = std::move(*engine);
++        // Prepared once the engine's runtime is up: a backend prepares no thread before it has one.
++        _threadGuard = preparedThread(*_backend);
+         auto compiled = CompiledExtension::load(*_engine, wasm::ModuleIdentity {}, std::move(module));
+         REQUIRE(compiled.has_value());
+         _compiled = std::move(*compiled);
+         restart();
+     }
+ 
+     /// Replaces the instance with a fresh one of the same module.
+     void restart()
+     {
+         _instance.reset();
+@@ -182,15 +195,18 @@ class RunningGuest
+         return std::move(*rendered);
+     }
+ 
+     FakeHostServices services;         ///< Declared first: outlives the instance that calls it.
+     core::platform::ManualClock clock; ///< What the instance measures its deadlines' use by.
+ 
+   private:
+     std::unique_ptr<wasm::IWasmBackend> _backend; ///< Outlives the engine created from it.
+     ExtensionLimits _limits;
+     std::shared_ptr<Engine> _engine;
++    /// Prepares the creating thread; after the engine, whose runtime it is entered for, and before the module
++    /// and instance, so that they are dropped on a prepared thread.
++    std::unique_ptr<wasm::IThreadGuard> _threadGuard;
+     std::shared_ptr<CompiledExtension> _compiled;
+     std::unique_ptr<Instance> _instance;
+ };
+ 
+ } // namespace vtextension::testing
+diff --git a/src/vtextension/testing/ManualScheduler.hpp b/src/vtextension/testing/ManualScheduler.hpp
+index cb7cfcf8b..d3431d1f4 100644
+--- a/src/vtextension/testing/ManualScheduler.hpp
++++ b/src/vtextension/testing/ManualScheduler.hpp
+@@ -11,29 +11,35 @@
+ #include <algorithm>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <deque>
+ #include <functional>
+ #include <utility>
+ #include <vector>
+ 
+ #include <vtextension/ExtensionScheduler.hpp>
++#include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension::testing
+ {
+ 
+ /// Runs posted jobs when the test says so, and fires timers as the test advances the clock. Every lane
+-/// is the test's thread, so this is deterministic and needs no thread guard.
++/// is the test's thread, so this is deterministic; as a worker pool's lane would be, the thread is prepared
++/// to call into instances while a job runs.
+ class ManualScheduler final: public IExtensionScheduler
+ {
+   public:
++    /// @param backend What the jobs' instances run on: the thread is prepared for it while each job runs,
++    ///        when it has a runtime up. Must outlive the scheduler.
++    explicit ManualScheduler(wasm::IWasmBackend& backend): _backend { backend } {}
++
+     [[nodiscard]] LaneId assignLane() override
+     {
+         ++lanesAssigned;
+         return LaneId { 0 };
+     }
+ 
+     void post(LaneId /*lane*/, std::function<void()> job) override { _jobs.push_back(std::move(job)); }
+ 
+     [[nodiscard]] TimerId schedule(LaneId /*lane*/,
+                                    std::chrono::milliseconds after,
+@@ -53,42 +59,42 @@ class ManualScheduler final: public IExtensionScheduler
+ 
+     /// Runs posted jobs, and the jobs they post, until none is left. Timers do not fire.
+     void runPending()
+     {
+         auto ran = std::size_t { 0 };
+         while (!_jobs.empty())
+         {
+             REQUIRE(ran++ < MaxJobs);
+             auto job = std::move(_jobs.front());
+             _jobs.pop_front();
+-            job();
++            run(job);
+         }
+     }
+ 
+     /// Moves the clock forward by @p delta. Every timer that falls due on the way fires at its due time,
+     /// earliest first, followed by the jobs it posted.
+     void advance(core::platform::SteadyDuration delta)
+     {
+         runPending();
+         auto const end = _clock.now() + delta;
+         auto fired = std::size_t { 0 };
+         while (true)
+         {
+             // Timers that keep re-arming at the same instant would never let time pass.
+             REQUIRE(fired++ < MaxJobs);
+             auto const next = std::ranges::min_element(_timers, {}, [](auto const& t) { return t.due; });
+             if (next == _timers.end() || next->due > end)
+                 break;
+             _clock.setNow(std::max(_clock.now(), next->due));
+             auto job = std::move(next->job);
+             _timers.erase(next);
+-            job();
++            run(job);
+             runPending();
+         }
+         _clock.setNow(end);
+     }
+ 
+     /// @return How many timers are waiting.
+     [[nodiscard]] std::size_t pendingTimers() const noexcept { return _timers.size(); }
+ 
+     std::size_t lanesAssigned = 0; ///< How many runners asked for a lane.
+ 
+@@ -97,17 +103,26 @@ class ManualScheduler final: public IExtensionScheduler
+     /// and this bound is far above any real pump.
+     static constexpr auto MaxJobs = std::size_t { 100'000 };
+ 
+     struct Timer
+     {
+         core::platform::SteadyTimePoint due;
+         TimerId id {};
+         std::function<void()> job;
+     };
+ 
++    /// Runs @p job with the thread prepared, if the backend can prepare it: a thread it cannot prepare still
++    /// runs the job, and a runner finds out that it cannot instantiate, as on a pool's worker.
++    void run(std::function<void()> const& job)
++    {
++        auto const guard = _backend.enterThread();
++        job();
++    }
++
++    wasm::IWasmBackend& _backend;
+     core::platform::ManualClock _clock;
+     std::deque<std::function<void()>> _jobs;
+     std::vector<Timer> _timers;
+     uint64_t _nextTimer = 1;
+ };
+ 
+ } // namespace vtextension::testing
+diff --git a/src/vtextension/testing/RunnerHarness.hpp b/src/vtextension/testing/RunnerHarness.hpp
+index aa603895a..81d71cd9d 100644
+--- a/src/vtextension/testing/RunnerHarness.hpp
++++ b/src/vtextension/testing/RunnerHarness.hpp
+@@ -213,22 +213,22 @@ class RunnerHarness
+                        std::string_view /*params*/,
+                        vtcontrol::ControlGrants /*granted*/,
+                        std::chrono::milliseconds /*timeout*/) {
+                     controlMethods.emplace_back(method);
+                     return controlAnswer;
+                 },
+         };
+     }
+ 
+     /// What the harness's engines are created from. First: it outlives every engine its tests retire here.
+-    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend();
+-    ManualScheduler scheduler;
++    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend(wasm::BackendConfig {});
++    ManualScheduler scheduler { *backend };
+     RetirementCollector retirement;
+     InMemoryGrantStore grants;
+     RecordingCommandCapture capture;
+     ShellDialect shellDialect = ShellDialect::Posix; ///< The dialect commands are recorded in, on every host.
+     core::platform::ManualWallClock wallClock;
+     vtbackend::LocalTimeConverter localTime = &utcLocalTime; ///< The time zone; UTC unless a test sets one.
+     core::testing::FakeEnvironment environment;
+     core::platform::testing::InMemoryFileSystem fileSystem;
+     std::size_t published = 0; ///< How often onSnapshotPublished was called.
+     std::vector<PermissionRequest> permissionRequests;
+diff --git a/src/vtextension/wasm/DefaultBackend.hpp b/src/vtextension/wasm/DefaultBackend.hpp
+index 4aaa34ae7..6e524ebe1 100644
+--- a/src/vtextension/wasm/DefaultBackend.hpp
++++ b/src/vtextension/wasm/DefaultBackend.hpp
+@@ -1,21 +1,24 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The WebAssembly runtime a build was configured with (CONTOUR_WASM_RUNTIME), named without naming it.
+ #pragma once
+ 
+ #include <memory>
+ 
++#include <vtextension/wasm/BackendConfig.hpp>
+ #include <vtextension/wasm/WasmRuntime.hpp>
+ 
+ namespace vtextension::wasm
+ {
+ 
+ /// Creates a backend of the WebAssembly runtime this build selected.
+ ///
+ /// Declared here and defined by the selected backend's target (vtextension_wamr for wamr), which a program
+ /// links through vtextension_runtime. A composition root calls this rather than naming a backend, so that
+ /// it compiles against whichever runtime the build was configured with.
++/// @param config How the backend is set up: where an extension host process comes from, and how long it may
++///        take. A backend running extensions in this process ignores it.
+ /// @return The backend.
+-[[nodiscard]] std::unique_ptr<IWasmBackend> makeDefaultBackend();
++[[nodiscard]] std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config);
+ 
+ } // namespace vtextension::wasm
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 0033271f8..564271fe0 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -70,25 +70,46 @@ if(VTEXTENSION_FUZZING)
+     add_executable(vtextension_remote_fuzz proto/Codec_fuzz.cpp ${_codec_sources})
+     target_include_directories(vtextension_remote_fuzz PRIVATE ${PROJECT_SOURCE_DIR}/src)
+     target_compile_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+     target_link_options(vtextension_remote_fuzz PRIVATE -fsanitize=fuzzer)
+ endif()
+ 
+ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+     # The host's server, and the backend that reaches it, driven over real channels on a real engine:
+     # Wasmtime's, the engine a host process runs, reached through its directory's neutral test probe
+     # (vtextension_wasmtime_hosted_engine).
++    #
++    # Beside them, the suites vtextension_test runs on the default backend, here composed by
++    # testing/RemoteDefaultBackend.cpp as the remote backend over hosts in this process: their real guests
++    # run through the protocol. A case that depends on an in-process engine is tagged [in-process] and
++    # excluded from this binary's run.
+     add_executable(vtextension_remote_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         ../host/ExecutorThread_test.cpp
+         ../host/HostServer_test.cpp
+         RemoteBackend_test.cpp
++        testing/RemoteDefaultBackend.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/Bundled_test.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/ControlImports_test.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/Engine_test.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionHost_test.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/ExtensionWorkerPool_test.cpp
++        ${PROJECT_SOURCE_DIR}/src/vtextension/Instance_test.cpp
+     )
+     target_link_libraries(vtextension_remote_test PRIVATE
+         vtextension vtextension_remote vtextension_remote_wire vtextension_host vtextension_wasmtime vtextension_wasmtime_hosted_engine
+-        contour::wasmtime core::testing Catch2::Catch2 contour_test_trace)
+-    add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
++        contour::wasmtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
++    if(CONTOUR_WASM_GUESTS)
++        # The guests vtextension_test reads, from where it reads them (../../CMakeLists.txt).
++        foreach(_guest IN ITEMS echo hostile sleeper spawner)
++            add_dependencies(vtextension_remote_test ${_guest}_wasm)
++        endforeach()
++        add_dependencies(vtextension_remote_test contour_bundled_extensions)
++        target_compile_definitions(vtextension_remote_test PRIVATE
++            VTEXTENSION_TEST_MODULE_DIR="${VTEXTENSION_TEST_MODULE_DIR}")
++    endif()
++    add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test "~[in-process]")
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory.cpp b/src/vtextension/wasm/remote/CopyPathMemory.cpp
+index f4cb518cd..aeba4c969 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory.cpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory.cpp
+@@ -20,58 +20,72 @@ CopyPathMemory::CopyPathMemory(uint32_t instanceId, std::size_t capBytes, Memory
+ 
+ std::optional<std::span<std::byte>> CopyPathMemory::view(uint32_t address, uint32_t size)
+ {
+     if (size == 0)
+         return std::span<std::byte> {};
+     auto const begin = uint64_t { address };
+     auto const end = begin + size;
+     if (end > uint64_t { 1 } << 32)
+         return std::nullopt;
+ 
+-    // Served from the latest range overlapping it, if that one holds all of it: it carries every earlier
+-    // range's bytes it overlaps. A range holding it all but overlapped by a later one may hold bytes the
+-    // later one changed since; a range fetched anew overlays them.
+-    auto const latest = std::ranges::find_if(_ranges | std::views::reverse, [&](Range const& range) {
+-        return range.address < end && begin < range.address + uint64_t { range.bytes.size() };
+-    });
+-    if (latest != (_ranges | std::views::reverse).end() && latest->address <= begin
+-        && end <= latest->address + uint64_t { latest->bytes.size() })
+-        return std::span { latest->bytes }.subspan(address - latest->address, size);
++    // Served from the latest range holding all of it whose bytes there are what flush() would leave: no other
++    // range wrote there since it was fetched. Else fetched anew, with what flush() would leave overlaid.
++    auto const settled = settledBytes(begin, end);
++    auto const fresh = [&](Range const& range) {
++        auto const rangeBegin = uint64_t { range.address };
++        if (begin < rangeBegin || rangeBegin + range.bytes.size() < end)
++            return false;
++        auto const held = std::span { range.bytes }.subspan(begin - rangeBegin, size);
++        return std::ranges::equal(
++            held, settled, [](std::byte heldByte, std::optional<std::byte> settledByte) {
++                return settledByte == heldByte;
++            });
++    };
++    auto const served = std::ranges::find_if(_ranges | std::views::reverse, fresh);
++    if (served != (_ranges | std::views::reverse).end())
++        return std::span { served->bytes }.subspan(address - served->address, size);
+ 
+     if (_heldBytes + size > _capBytes)
+         return std::nullopt;
+     auto fetched = _fetch(address, size);
+     if (!fetched || fetched->size() != size)
+         return std::nullopt;
+-
+-    // Earlier ranges' bytes, as written, overlaid in fetch order: what was written since they were fetched
+-    // is what the instance would hold now, had it been written there.
+-    for (auto const& earlier: _ranges)
+-    {
+-        auto const earlierBegin = uint64_t { earlier.address };
+-        auto const earlierEnd = earlierBegin + earlier.bytes.size();
+-        auto const overlapBegin = std::max(begin, earlierBegin);
+-        auto const overlapEnd = std::min(end, earlierEnd);
+-        if (overlapBegin >= overlapEnd)
+-            continue;
+-        auto const source =
+-            std::span { earlier.bytes }.subspan(overlapBegin - earlierBegin, overlapEnd - overlapBegin);
+-        std::ranges::copy(source, fetched->begin() + static_cast<std::ptrdiff_t>(overlapBegin - begin));
+-    }
++    for (auto const [fetchedByte, settledByte]: std::views::zip(*fetched, settled))
++        fetchedByte = settledByte.value_or(fetchedByte);
+ 
+     auto snapshot = *fetched;
+     _heldBytes += size;
+     auto& added = _ranges.emplace_back(
+         Range { .address = address, .bytes = std::move(*fetched), .snapshot = std::move(snapshot) });
+     return std::span { added.bytes };
+ }
+ 
++std::vector<std::optional<std::byte>> CopyPathMemory::settledBytes(uint64_t begin, uint64_t end) const
++{
++    // A byte's first holder fetched it unchanged; each later holder that changed it overrides it.
++    auto settled = std::vector<std::optional<std::byte>>(end - begin);
++    for (auto const& range: _ranges)
++    {
++        auto const rangeBegin = uint64_t { range.address };
++        auto const overlapBegin = std::max(begin, rangeBegin);
++        auto const overlapEnd = std::min(end, rangeBegin + range.bytes.size());
++        for (auto const at: std::views::iota(overlapBegin, std::max(overlapBegin, overlapEnd)))
++        {
++            auto const index = at - rangeBegin;
++            auto& byte = settled[at - begin];
++            if (!byte || range.bytes[index] != range.snapshot[index])
++                byte = range.bytes[index];
++        }
++    }
++    return settled;
++}
++
+ std::vector<proto::MemoryWrite> CopyPathMemory::flush() const
+ {
+     auto writes = std::vector<proto::MemoryWrite> {};
+     for (auto const& range: _ranges)
+     {
+         auto const emit = [&](std::size_t begin, std::size_t end) {
+             auto const run = std::span { range.bytes }.subspan(begin, end - begin);
+             writes.push_back(proto::MemoryWrite { .instanceId = _instanceId,
+                                                   .address = range.address + static_cast<uint32_t>(begin),
+                                                   .bytes = { run.begin(), run.end() } });
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory.hpp b/src/vtextension/wasm/remote/CopyPathMemory.hpp
+index 98b690645..c2618ce40 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory.hpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory.hpp
+@@ -16,24 +16,25 @@
+ 
+ namespace vtextension::wasm::remote
+ {
+ 
+ /// Reads a range of an instance's memory from its host.
+ /// @return The range's bytes, exactly as many as asked for; nothing if the range lies outside the memory or
+ ///         the host could not be reached.
+ using MemoryFetch = std::function<std::optional<std::vector<std::byte>>(uint32_t address, uint32_t size)>;
+ 
+ /// The ranges of one instance's memory the parent read since the instance last ran, as local copies it may
+-/// write to. A range is fetched once, and a view inside it is served from the copy. A range fetched while an
+-/// earlier one overlaps it starts out with the earlier one's bytes, written ones included, so that two views
+-/// of the same bytes agree when they are taken. What was written goes back to the instance (flush()) before
+-/// it next runs, after which the copies are dropped (clear()).
++/// write to. A view is served from a copy holding all of it as long as no other copy wrote into those bytes
++/// since that copy was fetched, so that views alternating between overlapping ranges fetch each range once.
++/// Otherwise the view's range is fetched anew, starting out with what flush() would leave there, so that two
++/// views of the same bytes agree when they are taken. What was written goes back to the instance (flush())
++/// before it next runs, after which the copies are dropped (clear()).
+ ///
+ /// Not thread-safe: used by the thread calling into its instance.
+ class CopyPathMemory
+ {
+   public:
+     /// @param instanceId The instance the writes flush() returns are addressed to.
+     /// @param capBytes The most bytes the copies may hold at once; a view that would take more is refused.
+     /// @param fetch Where ranges not held yet are read from.
+     CopyPathMemory(uint32_t instanceId, std::size_t capBytes, MemoryFetch fetch);
+ 
+@@ -47,20 +48,25 @@ class CopyPathMemory
+ 
+     /// @return One write per maximal run of bytes changed since its range was fetched, range by range in the
+     ///         order they were fetched: where two ranges overlap and both were written to, the later fetched
+     ///         one's bytes land last.
+     [[nodiscard]] std::vector<proto::MemoryWrite> flush() const;
+ 
+     /// Drops every copy, and with them every view handed out.
+     void clear() noexcept;
+ 
+   private:
++    /// @return Per byte of [@p begin, @p end), what flush() would leave there: the latest fetched range's
++    /// write
++    ///         to it, else what its first holder fetched; nothing where no range holds it.
++    [[nodiscard]] std::vector<std::optional<std::byte>> settledBytes(uint64_t begin, uint64_t end) const;
++
+     /// One fetched range: what the parent sees and writes, and what it held when it was fetched.
+     struct Range
+     {
+         uint32_t address = 0;            ///< Where it starts.
+         std::vector<std::byte> bytes;    ///< Its bytes, as written since.
+         std::vector<std::byte> snapshot; ///< Its bytes when fetched, earlier ranges' overlaid.
+     };
+ 
+     uint32_t _instanceId;
+     std::size_t _capBytes;
+diff --git a/src/vtextension/wasm/remote/CopyPathMemory_test.cpp b/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
+index 88a86e2ce..7ed072888 100644
+--- a/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
++++ b/src/vtextension/wasm/remote/CopyPathMemory_test.cpp
+@@ -173,10 +173,61 @@ TEST_CASE("CopyPathMemory.overlappedRangeIsNotServedStale", "[vtextension][remot
+     CHECK((*again)[4] == std::byte { 0xB4 });
+     CHECK((*again)[7] == std::byte { 0xB7 });
+ 
+     // A view inside the latest range overlapping it is served from that range, fetching nothing.
+     auto const fetches = memory.fetches;
+     auto const inner = copies.view(4, 4);
+     REQUIRE(inner.has_value());
+     CHECK((*inner)[0] == std::byte { 0xB4 });
+     CHECK(memory.fetches == fetches);
+ }
++
++TEST_CASE("CopyPathMemory.alternatingOverlappingViewsFetchEachRangeOnce", "[vtextension][remote]")
++{
++    // Room for A = [0, 8) and B = [4, 12) once each, and no more.
++    auto memory = FakeMemory { 256 };
++    auto copies = memory.copies(16);
++
++    for (auto const round: std::views::iota(0, 64))
++    {
++        // Each writes where the other does not reach: neither's copy of the bytes they share goes stale.
++        auto const a = copies.view(0, 8);
++        REQUIRE(a.has_value());
++        (*a)[round % 4] = static_cast<std::byte>(round);
++        auto const b = copies.view(4, 8);
++        REQUIRE(b.has_value());
++        (*b)[4 + (round % 4)] = static_cast<std::byte>(round);
++    }
++    CHECK(memory.fetches == 2);
++
++    memory.apply(copies.flush());
++    CHECK(memory.at(3) == std::byte { 63 });
++    CHECK(memory.at(5) == std::byte { 5 });
++    CHECK(memory.at(11) == std::byte { 63 });
++}
++
++TEST_CASE("CopyPathMemory.earlierRangeWrittenAfterALaterFetchIsSeen", "[vtextension][remote]")
++{
++    auto memory = FakeMemory { 256 };
++    auto copies = memory.copies(1024);
++
++    // A = [0, 8), then B = [4, 12), then A written where it overlaps B: B's copy of [4, 8) is stale now,
++    // and A, which holds it all, serves the view instead, fetching nothing.
++    auto const a = copies.view(0, 8);
++    REQUIRE(a.has_value());
++    REQUIRE(copies.view(4, 8).has_value());
++    (*a)[5] = std::byte { 0xA5 };
++
++    auto const inner = copies.view(4, 4);
++    REQUIRE(inner.has_value());
++    CHECK((*inner)[1] == std::byte { 0xA5 });
++    CHECK(memory.fetches == 2);
++
++    // A range fetched over both carries A's write, which B, not having written there, does not undo.
++    auto const both = copies.view(2, 8);
++    REQUIRE(both.has_value());
++    CHECK((*both)[3] == std::byte { 0xA5 });
++    CHECK(memory.fetches == 3);
++
++    memory.apply(copies.flush());
++    CHECK(memory.at(5) == std::byte { 0xA5 });
++}
+diff --git a/src/vtextension/wasm/remote/RemoteBackend.cpp b/src/vtextension/wasm/remote/RemoteBackend.cpp
+index 2c5b3f2ba..c12789ed2 100644
+--- a/src/vtextension/wasm/remote/RemoteBackend.cpp
++++ b/src/vtextension/wasm/remote/RemoteBackend.cpp
+@@ -232,20 +232,30 @@ namespace
+ 
+         [[nodiscard]] std::span<ImportDescription const> imports() const noexcept override
+         {
+             return _imports;
+         }
+         [[nodiscard]] std::span<ExportDescription const> exports() const noexcept override
+         {
+             return _exports;
+         }
+ 
++        /// Instantiates the module in its host, loading it again first if the host it was loaded in died.
++        ///
++        /// A respawned host that describes the module's bytes otherwise than its predecessor did fails
++        /// `InvalidComponent`, not `HostUnavailable`, although the host is the one at fault and is
++        /// terminated: `HostUnavailable` says the host could not be reached, which a caller may meet by
++        /// trying again in a new one, whereas this module's imports and exports were checked against its
++        /// world as first described, and what a host would run now is not that module. Refusing the module is
++        /// what keeps it from running unchecked; the next instantiation respawns a host and checks again.
++        /// @return The instance; `InvalidComponent` if a respawned host describes the module differently,
++        ///         `HostUnavailable` if the host died or broke the protocol, else the host's own error.
+         [[nodiscard]] std::expected<std::unique_ptr<IWasmInstance>, ExtensionError> instantiate(
+             IHostContext& context) override;
+ 
+         /// @return The runtime it was loaded on.
+         [[nodiscard]] RemoteRuntime const& runtime() const noexcept { return *_runtime; }
+ 
+       private:
+         std::shared_ptr<RemoteRuntime> _runtime; // First, so that it goes last.
+         std::shared_ptr<HelperSlot> _slot;
+         std::vector<std::byte> _bytes;
+diff --git a/src/vtextension/wasm/remote/testing/RemoteDefaultBackend.cpp b/src/vtextension/wasm/remote/testing/RemoteDefaultBackend.cpp
+new file mode 100644
+index 000000000..6677601d4
+--- /dev/null
++++ b/src/vtextension/wasm/remote/testing/RemoteDefaultBackend.cpp
+@@ -0,0 +1,42 @@
++// SPDX-License-Identifier: Apache-2.0
++//
++// The default backend of the extension host's test binary: the remote backend, over hosts serving in this
++// process on the engine the binary links. Compiled into vtextension_remote_test only, so that the suites
++// written against the default backend run their real guests through the protocol, unchanged.
++#include <cstdint>
++#include <memory>
++#include <utility>
++
++#include <vtextension/wasm/BackendConfig.hpp>
++#include <vtextension/wasm/DefaultBackend.hpp>
++#include <vtextension/wasm/host/HostServer.hpp>
++#include <vtextension/wasm/host/InProcessHost.hpp>
++#include <vtextension/wasm/remote/RemoteBackend.hpp>
++#include <vtextension/wasm/testing/HostedEngine.hpp>
++#include <vtextension/wasm/testing/PreparedGeneration.hpp>
++
++namespace vtextension::wasm
++{
++
++std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
++{
++    // One kind for the binary, as a program composes one: every backend made here behaves as one.
++    static auto const kind = remote::makeRemoteKindState();
++    // No connector configured: this composition runs its hosts in this process.
++    if (!config.connector)
++        config.connector = std::make_shared<host::InProcessHostConnector>(
++            [] { return testing::makeHostedEngine(); }, host::HostServerConfig {});
++    return remote::makeRemoteBackend(kind, std::move(config));
++}
++
++} // namespace vtextension::wasm
++
++namespace vtextension::wasm::testing
++{
++
++uint64_t preparedGeneration() noexcept
++{
++    return remote::preparedGeneration();
++}
++
++} // namespace vtextension::wasm::testing
+diff --git a/src/vtextension/wasm/wamr/DefaultBackend.cpp b/src/vtextension/wasm/wamr/DefaultBackend.cpp
+index 6cf50ddf7..5724e5d1a 100644
+--- a/src/vtextension/wasm/wamr/DefaultBackend.cpp
++++ b/src/vtextension/wasm/wamr/DefaultBackend.cpp
+@@ -1,16 +1,21 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The default backend when CONTOUR_WASM_RUNTIME is wamr: this file is compiled into vtextension_wamr only.
+ #include <vtextension/wasm/DefaultBackend.hpp>
+ 
+ #include <vtextension/wasm/wamr/WamrBackend.hpp>
+ 
++#include <utility>
++
+ namespace vtextension::wasm
+ {
+ 
+-std::unique_ptr<IWasmBackend> makeDefaultBackend()
++std::unique_ptr<IWasmBackend> makeDefaultBackend(BackendConfig config)
+ {
++    // WAMR runs extensions in this process: there is no host process for the config to describe, and it is
++    // dropped here.
++    auto const dropped = std::move(config);
+     return wamr::makeWamrBackend();
+ }
+ 
+ } // namespace vtextension::wasm
+diff --git a/src/vthost/SessionHost_test.cpp b/src/vthost/SessionHost_test.cpp
+index 6c14b134b..3e0df2a65 100644
+--- a/src/vthost/SessionHost_test.cpp
++++ b/src/vthost/SessionHost_test.cpp
+@@ -3244,21 +3244,22 @@ struct DaemonExtensionsHarness
+     /// Turns the loop until @p done holds, or for @p bound at most.
+     void turnUntil(std::function<bool()> const& done,
+                    std::chrono::milliseconds bound = std::chrono::seconds { 20 })
+     {
+         auto const deadline = std::chrono::steady_clock::now() + bound;
+         loop.blockOn(core::net::pollUntil(
+             &loop, [&] { return done() || std::chrono::steady_clock::now() > deadline; }));
+     }
+ 
+     /// What the extensions' engines are created from; first, so that it outlives them.
+-    std::unique_ptr<vtextension::wasm::IWasmBackend> wasmBackend = vtextension::wasm::makeDefaultBackend();
++    std::unique_ptr<vtextension::wasm::IWasmBackend> wasmBackend =
++        vtextension::wasm::makeDefaultBackend(vtextension::wasm::BackendConfig {});
+     std::filesystem::path modulePath { "/extensions/spawner.wasm" };
+     vthost::testing::GatedFileSystem fileSystem;
+     core::async::StopSource commandShutdown;
+     HoldingCapture capture { commandShutdown.get_token() };
+     core::platform::SystemWallClock wallClock;
+     vtbackend::LocalTimeConverter localTime { &vtbackend::fixedOffsetLocalTime<> };
+     vtextension::ExtensionLimits limits {};
+     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+     core::net::EventLoop loop { *source };
+     vthost::DaemonExtensions* extensions = nullptr; ///< Owned by the host.

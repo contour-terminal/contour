@@ -1,0 +1,543 @@
+# Review package: 588d234cc..HEAD
+
+## Commits
+c67eb8637 fix(vtextension): prove the extension host caps itself, and bundle it from contour
+
+## Files changed
+ src/CMakeLists.txt                                 |  1 +
+ src/contour-extension-host/CMakeLists.txt          | 13 +---
+ src/contour/CMakeLists.txt                         | 15 +++-
+ src/vtextension/wasm/host/HostProcess.cpp          | 19 ++++--
+ src/vtextension/wasm/remote/CMakeLists.txt         |  5 +-
+ src/vtextension/wasm/remote/Helper_test.cpp        | 79 ++++++++++++++++++++--
+ .../wasm/remote/process/ProcessLauncher_test.cpp   | 42 +++++++++---
+ .../wasm/remote/transport/testing/HandleCopies.hpp |  3 +-
+ 8 files changed, 142 insertions(+), 35 deletions(-)
+
+## Diff
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index a15a49bdb..3329c1aa0 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -31,20 +31,21 @@ add_subdirectory(crispy)
+ add_subdirectory(text_shaper)
+ add_subdirectory(vtpty)
+ add_subdirectory(vtcontrol)
+ add_subdirectory(vtparser)
+ add_subdirectory(vtbackend)
+ if(CONTOUR_EXTENSIONS)
+     # Where contour-extension-host is installed on Unix, a private executable of Contour's, and the way there
+     # from the directory contour is installed in: how contour finds it (vtextension_remote_process).
+     include(GNUInstallDirs)
+     set(CONTOUR_EXTENSION_HOST_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}/contour")
++    # contour installs to CMAKE_INSTALL_BINDIR (../contour/CMakeLists.txt).
+     file(RELATIVE_PATH CONTOUR_EXTENSION_HOST_RELATIVE_DIR
+         "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBEXECDIR}/contour")
+     add_subdirectory(vtextension)
+     add_subdirectory(contour-extension-host)
+ endif()
+ add_subdirectory(vtconformance)
+ add_subdirectory(vtworkspace)
+ add_subdirectory(vthost)
+ add_subdirectory(vtrasterizer)
+ 
+diff --git a/src/contour-extension-host/CMakeLists.txt b/src/contour-extension-host/CMakeLists.txt
+index d4c4f1729..16f1d0f29 100644
+--- a/src/contour-extension-host/CMakeLists.txt
++++ b/src/contour-extension-host/CMakeLists.txt
+@@ -1,26 +1,19 @@
+ # contour-extension-host: the process Contour runs extensions in, apart from itself. Its body is
+ # vtextension_host's runExtensionHost(); main.cpp only hands it the command line and the engine.
+ if(TARGET vtextension_wasmtime)
+     add_executable(contour-extension-host main.cpp)
+     target_link_libraries(contour-extension-host PRIVATE vtextension_host vtextension_wasmtime_helper_engine contour::wasmtime)
+     # A console program, so that it opens no window; Contour starts it without a console (CREATE_NO_WINDOW).
+     set_target_properties(contour-extension-host PROPERTIES WIN32_EXECUTABLE OFF)
+ 
+     # Installed where contour finds it (vtextension_remote_process's locateExtensionHost()): beside contour.exe
+-    # on Windows; inside the app bundle on macOS, where the bundle's install carries it; elsewhere among the
+-    # private executables, CONTOUR_EXTENSION_HOST_INSTALL_DIR (../CMakeLists.txt), as no user runs it.
++    # on Windows; elsewhere among the private executables, CONTOUR_EXTENSION_HOST_INSTALL_DIR (../CMakeLists.txt),
++    # as no user runs it. A macOS app bundle carries it instead: contour copies it in (../contour/CMakeLists.txt).
+     if(WIN32)
+         install(TARGETS contour-extension-host RUNTIME DESTINATION bin)
+-    elseif(CONTOUR_MACOS_APP_BUNDLE)
+-        add_custom_command(TARGET contour-extension-host POST_BUILD
+-            COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers"
+-            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>"
+-                "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers/"
+-            VERBATIM
+-        )
+-    else()
++    elseif(NOT CONTOUR_MACOS_APP_BUNDLE)
+         install(TARGETS contour-extension-host RUNTIME DESTINATION "${CONTOUR_EXTENSION_HOST_INSTALL_DIR}")
+     endif()
+ else()
+     message(STATUS "contour-extension-host is not built: it needs Wasmtime until its WAMR engine lands")
+ endif()
+diff --git a/src/contour/CMakeLists.txt b/src/contour/CMakeLists.txt
+index c7d51dedd..7a1206199 100644
+--- a/src/contour/CMakeLists.txt
++++ b/src/contour/CMakeLists.txt
+@@ -886,20 +886,32 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
+         MACOSX_BUNDLE_BUNDLE_NAME "Contour"
+         MACOSX_BUNDLE_GUI_IDENTIFIER "${AppId}"
+         MACOSX_BUNDLE_SHORT_VERSION_STRING "${CONTOUR_VERSION}"
+         MACOSX_BUNDLE_BUNDLE_VERSION "${CONTOUR_VERSION}"
+         XCODE_ATTRIBUTE_PRODUCT_NAME "Contour Terminal Emulator"
+         # Names the icon the install rules already place at Contents/Resources/contour.icns.
+         # Without it CFBundleIconFile renders empty and both the app and the disk image
+         # show the generic executable icon.
+         MACOSX_BUNDLE_ICON_FILE "contour.icns"
+     )
++    # The extension host travels inside the bundle, in Contents/Helpers, where contour looks for it first
++    # (locateExtensionHost()): copied in after each build of contour, which so builds it first. The copy is
++    # contour's, so that the helper never depends on the GUI.
++    if(TARGET contour-extension-host)
++        add_dependencies(contour contour-extension-host)
++        add_custom_command(TARGET contour POST_BUILD
++            COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers"
++            COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:contour-extension-host>"
++                "$<TARGET_BUNDLE_CONTENT_DIR:contour>/Helpers/"
++            VERBATIM
++        )
++    endif()
+ endif()
+ # }}}
+ 
+ if(FREEBSD)
+     # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
+     target_link_directories(contour_core PUBLIC "/usr/local/lib")
+ endif()
+ 
+ # Link dependencies go on contour_core as PUBLIC so they propagate to the `contour` executable and
+ # the `contour_gui_test` target through the object library's usage requirements.
+@@ -2460,21 +2472,22 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
+                     --entitlements \"${_entitlements}\"
+             COMMAND_ERROR_IS_FATAL ANY
+         )
+     ")
+     endif()
+ else()
+     # Any other Unix -- and, since the branch above now takes only bundle builds, a GUI-less macOS
+     # build too. That one produces a plain command-line binary, so it installs like any other Unix
+     # CLI tool: the executable and the data every platform wants, first.
+     include(GNUInstallDirs)
+-    install(TARGETS contour DESTINATION bin)
++    # CMAKE_INSTALL_BINDIR: where contour finds contour-extension-host is relative to it (../CMakeLists.txt).
++    install(TARGETS contour DESTINATION "${CMAKE_INSTALL_BINDIR}")
+     install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+     install(DIRECTORY "res/fonts/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts" PATTERN "README.md" EXCLUDE)
+     if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
+         install(DIRECTORY "${CONTOUR_NERD_FONT_SYMBOLS_DIR}/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts")
+     endif()
+     if(CONTOUR_EMOJI_FONT_DIR)
+         install(DIRECTORY "${CONTOUR_EMOJI_FONT_DIR}/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/emoji-font")
+     endif()
+     contour_install_bundled_extensions("${CMAKE_INSTALL_DATADIR}/contour/extensions")
+     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+diff --git a/src/vtextension/wasm/host/HostProcess.cpp b/src/vtextension/wasm/host/HostProcess.cpp
+index d642775be..d5f66dd20 100644
+--- a/src/vtextension/wasm/host/HostProcess.cpp
++++ b/src/vtextension/wasm/host/HostProcess.cpp
+@@ -1,21 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/host/HostProcess.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
+ #include <expected>
+-#include <print>
+ #include <ranges>
++#include <string_view>
++#include <tuple>
+ #include <utility>
+ #include <vector>
+ 
+ namespace vtextension::wasm::host
+ {
+ 
+ namespace transport = remote::transport;
+ 
+ namespace
+ {
+@@ -50,27 +51,37 @@ namespace
+         // Every enumerator has its row, at its own index.
+         return ExitTable[static_cast<std::size_t>(exit)];
+     }
+ 
+     static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, ExitTable.size()),
+                                       [](std::size_t index) {
+                                           return static_cast<std::size_t>(ExitTable[index].exit) == index;
+                                       }),
+                   "ExitTable lists every HostProcessExit at its own index");
+ 
++    /// Writes `contour-extension-host: <text>` to stderr. Never throws: a failed write is no reason to end
++    /// otherwise than the exit table says.
++    void tell(std::string_view text) noexcept
++    {
++        constexpr auto Prefix = std::string_view { "contour-extension-host: " };
++        std::ignore = std::fwrite(Prefix.data(), 1, Prefix.size(), stderr);
++        std::ignore = std::fwrite(text.data(), 1, text.size(), stderr);
++        std::ignore = std::fputc('\n', stderr);
++    }
++
+     /// Writes why the host ends to stderr, unless it served.
+     /// @return @p exit's code.
+-    [[nodiscard]] int endWith(HostProcessExit exit)
++    [[nodiscard]] int endWith(HostProcessExit exit) noexcept
+     {
+         auto const& row = rowOf(exit);
+         if (exit != HostProcessExit::Served)
+-            std::println(stderr, "contour-extension-host: {}", row.text);
++            tell(row.text);
+         return row.code;
+     }
+ } // namespace
+ 
+ std::span<HostProcessExitRow const> hostProcessExits() noexcept
+ {
+     return ExitTable;
+ }
+ 
+ int exitCodeOf(HostProcessExit exit) noexcept
+@@ -138,21 +149,21 @@ void HostProcess::stop() noexcept
+     _server.stop();
+ }
+ 
+ HostConfinement systemConfinement()
+ {
+     return HostConfinement {
+         .bindToParent = &bindToParent,
+         .confine =
+             [](uint64_t dataBytes) {
+                 if constexpr (BuildCapPolicy == CapPolicy::Skip)
+-                    std::println(stderr, "contour-extension-host: resource caps are off in this build");
++                    tell("resource caps are off in this build");
+                 return capResources(dataBytes, BuildCapPolicy);
+             },
+     };
+ }
+ 
+ int runExtensionHost(std::span<std::string_view const> arguments,
+                      EngineFactory const& engines,
+                      HostConfinement const& confinement)
+ {
+     auto const parsed = transport::parseHelperArguments(arguments);
+diff --git a/src/vtextension/wasm/remote/CMakeLists.txt b/src/vtextension/wasm/remote/CMakeLists.txt
+index 073c659fb..7d040bd32 100644
+--- a/src/vtextension/wasm/remote/CMakeLists.txt
++++ b/src/vtextension/wasm/remote/CMakeLists.txt
+@@ -183,29 +183,30 @@ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime_hosted_engine)
+     endif()
+     add_test(NAME vtextension_remote_test COMMAND vtextension_remote_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_remote_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+ 
+ if(VTEXTENSION_TESTING AND TARGET vtextension_wasmtime AND TARGET vtextension_remote_process)
+     # The extension host executable itself (../../../contour-extension-host, built where Wasmtime is, as
+-    # here), started as Contour starts it. Links no engine: the engine runs in the helper.
++    # here), started as Contour starts it. Links no engine: the engine runs in the helper. vtextension_host
++    # only for the build's cap policy (HostBootstrap.hpp), which tells what the helper caps.
+     add_executable(vtextension_helper_test
+         ${PROJECT_SOURCE_DIR}/src/vtextension/test_main.cpp
+         Helper_test.cpp
+         process/testing/LaunchedHelper.cpp
+         process/testing/LaunchedHelper.hpp
+     )
+     target_link_libraries(vtextension_helper_test PRIVATE
+-        vtextension vtextension_remote vtextension_remote_process vtextension_remote_wire
++        vtextension vtextension_host vtextension_remote vtextension_remote_process vtextension_remote_wire
+         glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+     add_dependencies(vtextension_helper_test contour-extension-host)
+     target_compile_definitions(vtextension_helper_test PRIVATE
+         VTEXTENSION_HELPER_PATH="$<TARGET_FILE:contour-extension-host>")
+     add_test(NAME vtextension_helper_test COMMAND vtextension_helper_test)
+     if(NOT WIN32)
+         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
+         target_compile_options(vtextension_helper_test PRIVATE -Wno-c2y-extensions)
+     endif()
+ endif()
+diff --git a/src/vtextension/wasm/remote/Helper_test.cpp b/src/vtextension/wasm/remote/Helper_test.cpp
+index ae6b87c38..b09b2cdfd 100644
+--- a/src/vtextension/wasm/remote/Helper_test.cpp
++++ b/src/vtextension/wasm/remote/Helper_test.cpp
+@@ -1,25 +1,31 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The extension host executable itself, started as Contour starts it.
+ #include <core/Environment.hpp>
+ 
+ #include <catch2/catch_test_macros.hpp>
+ 
+ #include <array>
++#include <cstdint>
+ #include <expected>
++#include <format>
++#include <fstream>
+ #include <memory>
++#include <optional>
++#include <sstream>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
++#include <vtextension/wasm/host/HostBootstrap.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ #include <vtextension/wasm/remote/process/testing/LaunchedHelper.hpp>
+ #include <vtextension/wasm/remote/proto/Pdu.hpp>
+ #include <vtextension/wasm/remote/transport/PduStream.hpp>
+ 
+ namespace proto = vtextension::wasm::remote::proto;
+ namespace process = vtextension::wasm::remote::process;
+ using process::ExitKind;
+ using process::ExitStatus;
+ using process::testing::awaitReap;
+@@ -51,36 +57,73 @@ constexpr auto SanitizerVariables =
+                                         process::ProcessId parentProcessId = ownProcessId())
+ {
+     return HelperLaunch { .executable = VTEXTENSION_HELPER_PATH,
+                           .leading = std::move(leading),
+                           .trailing = {},
+                           .parentProcessId = parentProcessId,
+                           .dataBytes = process::DefaultDataBytes,
+                           .environment = helperEnvironment() };
+ }
+ 
+-} // namespace
++#ifdef __linux__
++/// A limit's soft and hard value, as /proc/<pid>/limits states them.
++struct LimitValues
++{
++    std::string soft;
++    std::string hard;
+ 
+-TEST_CASE("Helper.saysHelloOverInheritedChannels", "[vtextension]")
++    bool operator==(LimitValues const&) const = default;
++};
++
++/// @return The soft and hard value of limit @p name (as `Max processes`) of process @p processId; nothing if
++///         it is not listed.
++[[nodiscard]] std::optional<LimitValues> limitOf(process::ProcessId processId, std::string_view name)
+ {
+-    auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch());
+-    REQUIRE(helper.has_value());
+-    auto control = PduStream { std::move(helper->control),
++    auto limits = std::ifstream { std::format("/proc/{}/limits", processId) };
++    auto line = std::string {};
++    while (std::getline(limits, line))
++    {
++        if (!line.starts_with(name))
++            continue;
++        auto values = std::istringstream { line.substr(name.size()) };
++        auto result = LimitValues {};
++        values >> result.soft >> result.hard;
++        return result;
++    }
++    return std::nullopt;
++}
++#endif
++
++/// Receives the Hello on the parent end of @p helper's control channel, which must arrive.
++/// @return The control stream, still open.
++[[nodiscard]] PduStream receiveHello(process::testing::LaunchedHelper& helper)
++{
++    auto control = PduStream { std::move(helper.control),
+                                proto::ChannelKind::Control,
+                                proto::Direction::ToParent,
+                                proto::PduLimits {} };
+     auto const hello = control.receive();
+     REQUIRE(hello.has_value());
+     CHECK(*hello
+           == proto::Pdu { proto::Hello { .version = proto::ProtocolVersion,
+                                          .memoryMode = proto::MemoryMode::Copy,
+                                          .lockdown = proto::LockdownState::Unsandboxed } });
++    return control;
++}
++
++} // namespace
++
++TEST_CASE("Helper.saysHelloOverInheritedChannels", "[vtextension]")
++{
++    auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch());
++    REQUIRE(helper.has_value());
++    auto control = receiveHello(*helper);
+ 
+     // Contour closes the connection: the helper exits cleanly, its sanitizers' reports included.
+     {
+         auto const closed = std::move(control);
+     }
+     CHECK(awaitReap(*helper->launcher, *helper->process)
+           == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
+ }
+ 
+ TEST_CASE("Helper.exitsOnBadArguments", "[vtextension]")
+@@ -93,10 +136,36 @@ TEST_CASE("Helper.exitsOnBadArguments", "[vtextension]")
+ 
+ #ifndef _WIN32
+ TEST_CASE("Helper.exitsWhenItsParentIsAnother", "[vtextension]")
+ {
+     auto helper = launchHelper(process::makeSystemProcessLauncher(), helperLaunch({}, 1));
+     REQUIRE(helper.has_value());
+     CHECK(awaitReap(*helper->launcher, *helper->process)
+           == ExitStatus { .kind = ExitKind::Exited, .value = 72 });
+ }
+ #endif
++
++#ifdef __linux__
++TEST_CASE("Helper.capsItselfBeforeHello", "[vtextension]")
++{
++    if constexpr (vtextension::wasm::host::BuildCapPolicy == vtextension::wasm::host::CapPolicy::Skip)
++        SKIP("sanitizer builds apply no caps");
++    constexpr auto DataBytes = uint64_t { 768 } * 1024 * 1024;
++    auto launch = helperLaunch();
++    launch.dataBytes = DataBytes;
++    auto helper = launchHelper(process::makeSystemProcessLauncher(), std::move(launch));
++    REQUIRE(helper.has_value());
++    auto control = receiveHello(*helper);
++
++    // Capped before Hello, soft and hard alike: no further thread, and the data bytes it was told of.
++    auto const processId = helper->process->id();
++    CHECK(limitOf(processId, "Max processes") == LimitValues { .soft = "0", .hard = "0" });
++    CHECK(limitOf(processId, "Max data size")
++          == LimitValues { .soft = std::to_string(DataBytes), .hard = std::to_string(DataBytes) });
++
++    {
++        auto const closed = std::move(control);
++    }
++    CHECK(awaitReap(*helper->launcher, *helper->process)
++          == ExitStatus { .kind = ExitKind::Exited, .value = 0 });
++}
++#endif
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 12e9d6267..356e974a4 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -46,20 +46,21 @@
+ #else
+     #include <csignal>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using namespace vtextension::wasm::remote;
+ using process::ExitKind;
+ using process::ExitStatus;
++using process::IProcessHandle;
+ using process::IProcessLauncher;
+ using process::LaunchError;
+ using process::LaunchSpec;
+ using transport::Channel;
+ using transport::ChannelError;
+ using transport::NativeHandle;
+ 
+ namespace
+ {
+ 
+@@ -351,40 +352,59 @@ TEST_CASE("ExitWaitSet.deadlineEndsAWait", "[vtextension]")
+     auto const launcher = process::makeSystemProcessLauncher();
+     auto clock = core::SteadyClock {};
+     auto set = launcher->makeWaitSet(clock);
+     REQUIRE(set.has_value());
+     auto const start = clock.now();
+     CHECK((*set)->wait(start + std::chrono::milliseconds { 20 }) == std::vector<uint64_t> {});
+     CHECK(clock.now() - start >= std::chrono::milliseconds { 20 });
+ }
+ 
+ #if defined(__linux__) || defined(__FreeBSD__)
++namespace
++{
++
++/// A process handle whose exit is waited on by a descriptor of the test's own: a copy of the process's,
++/// which the test may close without touching the handle the process is owned by.
++class CopiedWaitable final: public IProcessHandle
++{
++  public:
++    CopiedWaitable(IProcessHandle& process, int copy) noexcept: _process { process }, _copy { copy } {}
++    [[nodiscard]] process::ProcessId id() const noexcept override { return _process.id(); }
++    void kill() noexcept override { _process.kill(); }
++    [[nodiscard]] std::optional<ExitStatus> tryReap() noexcept override { return _process.tryReap(); }
++    [[nodiscard]] process::Waitable waitable() const noexcept override { return _copy; }
++
++  private:
++    IProcessHandle& _process;
++    int _copy;
++};
++
++} // namespace
++
+ TEST_CASE("ExitWaitSet.closedWatchedHandleIsAnError", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+     auto clock = core::SteadyClock {};
+     auto set = probe->launcher->makeWaitSet(clock);
+     REQUIRE(set.has_value());
+-    REQUIRE((*set)->watch(5, *probe->process).has_value());
+-
+-    // The process descriptor closes out from under the set; a copy keeps the process's own handle restorable.
+-    auto const descriptor = probe->process->waitable();
+-    auto const saved = ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+-    REQUIRE(saved >= 0);
+-    REQUIRE(::close(descriptor) == 0);
++    auto const copy = ::fcntl(probe->process->waitable(), F_DUPFD_CLOEXEC, 0);
++    REQUIRE(copy >= 0);
++    auto watched = CopiedWaitable { *probe->process, copy };
++    REQUIRE((*set)->watch(5, watched).has_value());
++
++    // The watched descriptor closes out from under the set. It is the test's copy, so the process's own
++    // handle stays whole, and nothing ever closes the number again.
++    REQUIRE(::close(copy) == 0);
+     auto const waited = (*set)->wait(clock.now() + ChildPatience);
+-    REQUIRE(::dup3(saved, descriptor, O_CLOEXEC) == descriptor);
+-    ::close(saved);
+-
+-    CHECK_FALSE(waited.has_value());
+     (*set)->unwatch(5);
++    CHECK_FALSE(waited.has_value());
+ }
+ #endif
+ 
+ TEST_CASE("Channel.peerProcessExitIsClosed", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+     REQUIRE(readReport(probe->control).has_value());
+     // The lanes' other ends exist only in the probe: its exit ends their streams.
+     probe->closeControl();
+diff --git a/src/vtextension/wasm/remote/transport/testing/HandleCopies.hpp b/src/vtextension/wasm/remote/transport/testing/HandleCopies.hpp
+index 827bccd7f..8fcfcf83f 100644
+--- a/src/vtextension/wasm/remote/transport/testing/HandleCopies.hpp
++++ b/src/vtextension/wasm/remote/transport/testing/HandleCopies.hpp
+@@ -11,22 +11,21 @@
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <unistd.h>
+ #endif
+ 
+ namespace vtextension::wasm::remote::transport::testing
+ {
+ 
+ /// @return A second handle on what @p handle names, as an inherited one is: not close-on-exec (POSIX);
+-/// nothing
+-///         if it failed.
++///         nothing if it failed.
+ [[nodiscard]] inline std::optional<NativeHandle> duplicate(NativeHandle handle) noexcept
+ {
+ #ifdef _WIN32
+     auto copy = HANDLE { nullptr };
+     if (!::DuplicateHandle(
+             ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
+         return std::nullopt;
+     return copy;
+ #else
+     auto const copy = ::dup(handle);

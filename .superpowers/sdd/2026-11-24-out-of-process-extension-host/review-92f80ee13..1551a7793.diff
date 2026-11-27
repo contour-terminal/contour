@@ -1,0 +1,1470 @@
+# Review package: 92f80ee13..HEAD
+
+## Commits
+1551a7793 fix(vtextension): narrow what a helper process inherits and can write
+
+## Files changed
+ .../wasm/remote/process/PosixLaunch.cpp            |  13 ++-
+ .../wasm/remote/process/ProcessLauncher.hpp        |   7 +-
+ .../wasm/remote/process/ProcessLauncher_test.cpp   |  18 ++--
+ .../wasm/remote/process/Process_freebsd.cpp        |  17 +++-
+ .../wasm/remote/process/Process_macos.cpp          |  20 +++-
+ .../wasm/remote/process/Process_win32.cpp          | 112 +++++++++++++--------
+ .../remote/process/testing/FakeProcessLauncher.cpp |   3 +-
+ .../wasm/remote/process/testing/LaunchProbe.cpp    |  37 ++++++-
+ .../wasm/remote/transport/ControlPage.hpp          |  14 +--
+ .../wasm/remote/transport/ControlPage_posix.cpp    |  50 +++++++--
+ .../wasm/remote/transport/ControlPage_test.cpp     |  58 +++++++++++
+ .../wasm/remote/transport/ControlPage_win32.cpp    |  27 +++--
+ .../wasm/remote/transport/HelperArguments.cpp      |  13 ++-
+ .../wasm/remote/transport/HelperArguments.hpp      |   3 +-
+ .../wasm/remote/transport/HelperArguments_test.cpp |   8 ++
+ .../wasm/remote/transport/WakeSignal_test.cpp      |  25 ++++-
+ 16 files changed, 340 insertions(+), 85 deletions(-)
+
+## Diff
+diff --git a/src/vtextension/wasm/remote/process/PosixLaunch.cpp b/src/vtextension/wasm/remote/process/PosixLaunch.cpp
+index 2f5efc1ec..4dcf602ac 100644
+--- a/src/vtextension/wasm/remote/process/PosixLaunch.cpp
++++ b/src/vtextension/wasm/remote/process/PosixLaunch.cpp
+@@ -145,37 +145,44 @@ namespace
+ 
+         [[nodiscard]] std::expected<void, LaunchError> watch(uint64_t key,
+                                                              IProcessHandle const& process) override
+         {
+             _watched.insert_or_assign(key, process.waitable());
+             return {};
+         }
+ 
+         void unwatch(uint64_t key) noexcept override { _watched.erase(key); }
+ 
+-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
++        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
++            std::optional<core::SteadyTimePoint> deadline) override
+         {
+             auto descriptors = std::vector<pollfd> {};
+             descriptors.reserve(_watched.size() + 1);
+             descriptors.push_back(pollfd { .fd = _wakeRead.get(), .events = POLLIN, .revents = 0 });
+             for (auto const& [key, descriptor]: _watched)
+                 descriptors.push_back(pollfd { .fd = descriptor, .events = POLLIN, .revents = 0 });
+ 
+             while (true)
+             {
+                 auto const ready = ::poll(descriptors.data(), descriptors.size(), timeoutOf(deadline));
+                 if (ready == -1 && errno == EINTR)
+                     continue;
+-                if (ready <= 0)
+-                    return {};
++                if (ready == -1)
++                    return std::unexpected(launchErrorOf(errno));
++                if (ready == 0)
++                    return std::vector<uint64_t> {};
+                 break;
+             }
++            // A descriptor closed while watched: its number may name anything by now.
++            if (std::ranges::any_of(descriptors,
++                                    [](pollfd const& polled) { return (polled.revents & POLLNVAL) != 0; }))
++                return std::unexpected(LaunchError::Io);
+             if (descriptors.front().revents != 0)
+                 drainWakes();
+             // A process descriptor polls readable (Linux) or hung up (FreeBSD) once its process exited.
+             auto ended = std::vector<uint64_t> {};
+             for (auto const& [watch, descriptor]:
+                  std::views::zip(_watched, std::span { descriptors }.subspan(1)))
+                 if (descriptor.revents != 0)
+                     ended.push_back(watch.first);
+             return ended;
+         }
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+index 9f3baa6af..ed8ae109f 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher.hpp
+@@ -137,22 +137,25 @@ class IExitWaitSet
+     /// @return Nothing; or why it cannot be watched.
+     [[nodiscard]] virtual std::expected<void, LaunchError> watch(uint64_t key,
+                                                                  IProcessHandle const& process) = 0;
+ 
+     /// Stops watching @p key; a key not watched is ignored.
+     virtual void unwatch(uint64_t key) noexcept = 0;
+ 
+     /// Blocks until a watched process exits, wake() is called, or @p deadline passes (by the clock the set
+     /// was made with).
+     /// @return The keys whose process may have exited -- each is reported for as long as it is watched and
+-    ///         has ended; empty on a wake or the deadline.
+-    [[nodiscard]] virtual std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) = 0;
++    ///         has ended; empty on a wake or the deadline. `Io` if the system cannot wait at all -- a watched
++    ///         process's handle closed while watched, which breaks watch()'s contract: a caller that waits
++    ///         again at once would spin, so it must stop waiting on this set.
++    [[nodiscard]] virtual std::expected<std::vector<uint64_t>, LaunchError> wait(
++        std::optional<core::SteadyTimePoint> deadline) = 0;
+ 
+     /// Ends a wait() blocked now, or else the next one. Wait-free, any thread.
+     virtual void wake() noexcept = 0;
+ };
+ 
+ /// Starts processes, and makes the sets their exits are waited on with: a handle and the set that waits on it
+ /// are one platform's.
+ class IProcessLauncher
+ {
+   public:
+diff --git a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+index 0efc4d50d..bb00a5ba6 100644
+--- a/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
++++ b/src/vtextension/wasm/remote/process/ProcessLauncher_test.cpp
+@@ -92,21 +92,22 @@ constexpr auto ChildPatience = std::chrono::seconds { 5 };
+     auto const deadline = clock.now() + ChildPatience;
+     auto set = launcher.makeWaitSet(clock);
+     if (!set || !(*set)->watch(0, process))
+         return std::nullopt;
+     while (true)
+     {
+         if (auto const status = process.tryReap())
+             return status;
+         if (clock.now() >= deadline)
+             return std::nullopt;
+-        std::ignore = (*set)->wait(deadline);
++        if (!(*set)->wait(deadline))
++            return std::nullopt;
+     }
+ }
+ 
+ /// Kills @p process if it still runs, and reaps it.
+ /// @return Whether it is reaped: whether it is gone for good.
+ [[nodiscard]] bool endAndReap(IProcessLauncher& launcher, IProcessHandle& process)
+ {
+     process.kill();
+     return awaitReap(launcher, process).has_value();
+ }
+@@ -277,32 +278,34 @@ TEST_CASE("ProcessLauncher.childGetsACleanEnvironment", "[vtextension]")
+     if (::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr)
+         std::erase_if(names, [](std::string const& name) {
+             return name.starts_with("WINE") || name == "SystemDrive" || name == "SystemRoot"
+                    || name == "PROCESSOR_ARCHITECTURE";
+         });
+ #endif
+     CHECK(names == std::vector<std::string> { "A" });
+     CHECK(endAndReap(*probe->launcher, *probe->process));
+ }
+ 
+-TEST_CASE("ProcessLauncher.childRunsAtTheRoot", "[vtextension]")
++TEST_CASE("ProcessLauncher.childRunsAtTheRootOnTheNullDevice", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+     auto const report = probe->report();
+     REQUIRE(report.has_value());
+ #ifdef _WIN32
+     auto const root = std::filesystem::absolute(VTEXTENSION_PROBE_PATH).root_path().string();
+ #else
+     auto const root = std::string { "/" };
+ #endif
+     CHECK(valuesOf(*report, "cwd=") == std::vector<std::string> { root });
++    CHECK(valuesOf(*report, "stdin=") == std::vector<std::string> { "null" });
++    CHECK(valuesOf(*report, "stdout=") == std::vector<std::string> { "null" });
+     CHECK(endAndReap(*probe->launcher, *probe->process));
+ }
+ 
+ TEST_CASE("ProcessLauncher.childInheritsExactlyItsHandles", "[vtextension]")
+ {
+ #ifdef _WIN32
+     // Inheritable, but not handed over: the handle list keeps it out of the child. Made after many others, so
+     // that its value is above any the child opens of its own, which would answer for it.
+     constexpr auto Fillers = 512;
+     auto fillers = std::vector<HANDLE> {};
+@@ -442,37 +445,38 @@ TEST_CASE("ProcessLauncher.childIsInAKillOnCloseJob", "[vtextension]")
+     ::CloseHandle(watcher);
+ }
+ #endif
+ 
+ TEST_CASE("ExitWaitSet.wakeEndsAWait", "[vtextension]")
+ {
+     auto const launcher = process::makeSystemProcessLauncher();
+     auto clock = core::SteadyClock {};
+     auto set = launcher->makeWaitSet(clock);
+     REQUIRE(set.has_value());
+-    auto result = std::promise<std::vector<uint64_t>> {};
++    using WaitResult = std::expected<std::vector<uint64_t>, LaunchError>;
++    auto result = std::promise<WaitResult> {};
+     auto ended = result.get_future();
+     auto waiter = std::jthread { [&] { result.set_value((*set)->wait(std::nullopt)); } };
+     std::this_thread::sleep_for(std::chrono::milliseconds { 20 });
+     (*set)->wake();
+     REQUIRE(ended.wait_for(ChildPatience) == std::future_status::ready);
+-    CHECK(ended.get().empty());
++    CHECK(ended.get() == std::vector<uint64_t> {});
+ }
+ 
+ TEST_CASE("ExitWaitSet.deadlineEndsAWait", "[vtextension]")
+ {
+     auto const launcher = process::makeSystemProcessLauncher();
+     auto clock = core::SteadyClock {};
+     auto set = launcher->makeWaitSet(clock);
+     REQUIRE(set.has_value());
+     auto const start = clock.now();
+-    CHECK((*set)->wait(start + std::chrono::milliseconds { 20 }).empty());
++    CHECK((*set)->wait(start + std::chrono::milliseconds { 20 }) == std::vector<uint64_t> {});
+     CHECK(clock.now() - start >= std::chrono::milliseconds { 20 });
+ }
+ 
+ TEST_CASE("Channel.peerProcessExitIsClosed", "[vtextension]")
+ {
+     auto probe = launchProbe(process::makeSystemProcessLauncher());
+     REQUIRE(probe.has_value());
+     REQUIRE(probe->report().has_value());
+     // The lanes' other ends exist only in the probe: its exit ends their streams.
+     probe->closeControl();
+@@ -500,21 +504,21 @@ TEST_CASE("FakeProcessLauncher.recordsAndExits", "[vtextension]")
+     CHECK((*first)->id() != (*second)->id());
+     REQUIRE(launcher->launches().size() == 2);
+     CHECK(launcher->launches()[1].executable == "helper");
+     CHECK(launcher->launchThreads()
+           == std::vector { std::this_thread::get_id(), std::this_thread::get_id() });
+     REQUIRE((*set)->watch(10, **first).has_value());
+     REQUIRE((*set)->watch(20, **second).has_value());
+ 
+     SECTION("an exit wakes the set and is reaped")
+     {
+-        auto result = std::promise<std::vector<uint64_t>> {};
++        auto result = std::promise<std::expected<std::vector<uint64_t>, LaunchError>> {};
+         auto woken = result.get_future();
+         auto const deadline = clock.now() + std::chrono::seconds { 1 };
+         auto waiter = std::jthread { [&] { result.set_value((*set)->wait(deadline)); } };
+         // Real time does not end its wait, and neither does the deadline: only an exit or a wake does.
+         CHECK(woken.wait_for(std::chrono::milliseconds { 50 }) == std::future_status::timeout);
+         launcher->exit(1, ExitStatus { .kind = ExitKind::Exited, .value = 3 });
+         CHECK(woken.get() == std::vector<uint64_t> { 20 });
+         CHECK(launcher->lastDeadline() == deadline);
+         CHECK_FALSE((*first)->tryReap().has_value());
+         CHECK((*second)->tryReap() == ExitStatus { .kind = ExitKind::Exited, .value = 3 });
+@@ -523,21 +527,21 @@ TEST_CASE("FakeProcessLauncher.recordsAndExits", "[vtextension]")
+     {
+         (*first)->kill();
+         (*first)->kill();
+         CHECK(launcher->kills() == std::vector<std::size_t> { 0, 0 });
+         CHECK((*set)->wait(std::nullopt) == std::vector<uint64_t> { 10 });
+         CHECK((*first)->tryReap() == process::testing::FakeKilledStatus);
+     }
+     SECTION("a wake ends a wait with nothing")
+     {
+         (*set)->wake();
+-        CHECK((*set)->wait(std::nullopt).empty());
++        CHECK((*set)->wait(std::nullopt) == std::vector<uint64_t> {});
+     }
+ }
+ 
+ TEST_CASE("RecordingLauncher.recordsAndRewritesLaterLaunches", "[vtextension]")
+ {
+     auto const inner = std::make_shared<process::testing::FakeProcessLauncher>();
+     auto const recording =
+         std::make_shared<process::testing::RecordingLauncher>(inner, [](std::vector<std::string> arguments) {
+             arguments.emplace_back("--later");
+             return arguments;
+diff --git a/src/vtextension/wasm/remote/process/Process_freebsd.cpp b/src/vtextension/wasm/remote/process/Process_freebsd.cpp
+index bb3e618ca..49ae509f9 100644
+--- a/src/vtextension/wasm/remote/process/Process_freebsd.cpp
++++ b/src/vtextension/wasm/remote/process/Process_freebsd.cpp
+@@ -13,20 +13,21 @@
+ #include <cerrno>
+ #include <csignal>
+ #include <expected>
+ #include <memory>
+ #include <optional>
+ #include <ranges>
+ #include <string>
+ #include <utility>
+ #include <vector>
+ 
++#include <fcntl.h>
+ #include <unistd.h>
+ 
+ #include <vtextension/wasm/remote/process/PosixLaunch.hpp>
+ #include <vtextension/wasm/remote/process/ProcessLauncher.hpp>
+ 
+ namespace vtextension::wasm::remote::process
+ {
+ 
+ namespace
+ {
+@@ -74,40 +75,50 @@ namespace
+         }
+ 
+         [[nodiscard]] Waitable waitable() const noexcept override { return _descriptor.get(); }
+ 
+       private:
+         pid_t _pid;
+         UniqueFd _descriptor;
+         std::optional<ExitStatus> _status; ///< Set once reaped.
+     };
+ 
++    /// Makes @p source the child's descriptor @p target, kept across exec. dup2() onto itself would keep the
++    /// descriptor's close-on-exec flag, so that case clears it instead. Async-signal-safe.
++    /// @return Whether it worked.
++    [[nodiscard]] bool inheritAs(int source, int target) noexcept
++    {
++        if (source == target)
++            return ::fcntl(target, F_SETFD, 0) != -1;
++        return ::dup2(source, target) != -1;
++    }
++
+     /// Becomes @p prepared's program, in the child of pdfork(). Async-signal-safe throughout; never returns.
+     [[noreturn]] void becomeChild(posix::PreparedLaunch& prepared,
+                                   char* const* argv,
+                                   char* const* envp) noexcept
+     {
+         struct sigaction byDefault {};
+         byDefault.sa_handler = SIG_DFL;
+         for (auto const signal: std::views::iota(1, NSIG))
+             if (signal != SIGKILL && signal != SIGSTOP)
+                 ::sigaction(signal, &byDefault, nullptr);
+         auto empty = sigset_t {};
+         sigemptyset(&empty);
+         ::sigprocmask(SIG_SETMASK, &empty, nullptr);
+ 
+-        if (::dup2(prepared.nullDevice.get(), STDIN_FILENO) == -1
+-            || ::dup2(prepared.nullDevice.get(), STDOUT_FILENO) == -1)
++        if (!inheritAs(prepared.nullDevice.get(), STDIN_FILENO)
++            || !inheritAs(prepared.nullDevice.get(), STDOUT_FILENO))
+             ::_exit(ExecFailed);
+         auto child = posix::FirstChildDescriptor;
+         for (auto const& parked: prepared.parked)
+-            if (::dup2(parked.get(), child++) == -1)
++            if (!inheritAs(parked.get(), child++))
+                 ::_exit(ExecFailed);
+         ::closefrom(prepared.childEnd());
+         if (::chdir("/") == -1)
+             ::_exit(ExecFailed);
+         ::execve(prepared.executable.c_str(), argv, envp);
+         ::_exit(ExecFailed);
+     }
+ 
+     class FreeBsdProcessLauncher final: public IProcessLauncher
+     {
+diff --git a/src/vtextension/wasm/remote/process/Process_macos.cpp b/src/vtextension/wasm/remote/process/Process_macos.cpp
+index 82db09ee8..1bbcca1a8 100644
+--- a/src/vtextension/wasm/remote/process/Process_macos.cpp
++++ b/src/vtextension/wasm/remote/process/Process_macos.cpp
+@@ -84,20 +84,30 @@ namespace
+             return _status;
+         }
+ 
+         [[nodiscard]] Waitable waitable() const noexcept override { return _pid; }
+ 
+       private:
+         pid_t _pid;
+         std::optional<ExitStatus> _status; ///< Set once reaped.
+     };
+ 
++    /// @return Whether @p pid, a child not yet reaped, has exited. Does not reap it.
++    [[nodiscard]] bool hasExited(pid_t pid) noexcept
++    {
++        auto info = siginfo_t {};
++        while (::waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT) == -1)
++            if (errno != EINTR)
++                return false;
++        return info.si_pid == pid;
++    }
++
+     /// Waits on a kqueue: EVFILT_PROC NOTE_EXIT per process, EVFILT_USER for wake().
+     class KqueueExitWaitSet final: public IExitWaitSet
+     {
+       public:
+         KqueueExitWaitSet(core::IClock& clock, UniqueFd queue) noexcept:
+             _clock { &clock }, _queue { std::move(queue) }
+         {
+         }
+ 
+         [[nodiscard]] std::expected<void, LaunchError> watch(uint64_t key,
+@@ -112,38 +122,44 @@ namespace
+                    NOTE_EXIT,
+                    0,
+                    reinterpret_cast<void*>(static_cast<uintptr_t>(key)));
+             if (::kevent(_queue.get(), &change, 1, nullptr, 0, nullptr) == -1)
+             {
+                 // ESRCH: it exited before it could be watched; it is reported at the next wait.
+                 if (errno != ESRCH)
+                     return std::unexpected(posix::launchErrorOf(errno));
+                 _exited.push_back(key);
+             }
++            else if (hasExited(pid))
++            {
++                // An exit racing the attach may never fire the event: looked at once, without reaping.
++                _exited.push_back(key);
++            }
+             _watched.insert_or_assign(key, pid);
+             return {};
+         }
+ 
+         void unwatch(uint64_t key) noexcept override
+         {
+             auto const found = _watched.find(key);
+             if (found == _watched.end())
+                 return;
+             auto change = KernelEvent {};
+             EV_SET(&change, static_cast<uintptr_t>(found->second), EVFILT_PROC, EV_DELETE, 0, 0, nullptr);
+             // Fails harmlessly once the one-shot event fired.
+             ::kevent(_queue.get(), &change, 1, nullptr, 0, nullptr);
+             _watched.erase(found);
+             std::erase(_exited, key);
+         }
+ 
+-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
++        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
++            std::optional<core::SteadyTimePoint> deadline) override
+         {
+             // An exit seen once is reported as long as it is watched, as a polled descriptor would be.
+             auto ended = _exited;
+             auto timeout = timespec {};
+             auto const hasTimeout = !ended.empty() || deadline.has_value();
+             if (ended.empty() && deadline)
+             {
+                 auto const remaining = std::max(core::SteadyDuration::zero(), *deadline - _clock->now());
+                 auto const seconds = std::chrono::floor<std::chrono::seconds>(remaining);
+                 timeout.tv_sec = static_cast<time_t>(seconds.count());
+@@ -156,20 +172,22 @@ namespace
+             {
+                 received = ::kevent(_queue.get(),
+                                     nullptr,
+                                     0,
+                                     events.data(),
+                                     static_cast<int>(events.size()),
+                                     hasTimeout ? &timeout : nullptr);
+                 if (received != -1 || errno != EINTR)
+                     break;
+             }
++            if (received == -1)
++                return std::unexpected(posix::launchErrorOf(errno));
+             for (auto const& event:
+                  std::span { events }.first(static_cast<std::size_t>(std::max(received, 0))))
+             {
+                 if (event.filter != EVFILT_PROC)
+                     continue;
+                 auto const key = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(event.udata));
+                 if (_watched.contains(key) && std::ranges::find(_exited, key) == _exited.end())
+                 {
+                     _exited.push_back(key);
+                     ended.push_back(key);
+diff --git a/src/vtextension/wasm/remote/process/Process_win32.cpp b/src/vtextension/wasm/remote/process/Process_win32.cpp
+index ec8f7bf81..9eb1fc423 100644
+--- a/src/vtextension/wasm/remote/process/Process_win32.cpp
++++ b/src/vtextension/wasm/remote/process/Process_win32.cpp
+@@ -1,21 +1,30 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The launcher on Windows. CreateProcessW() with two attributes: PROC_THREAD_ATTRIBUTE_HANDLE_LIST, so that
+-// the child inherits exactly the inheritable duplicates made for it (closed again once it started) and no
+-// other inheritable handle of this process; and PROC_THREAD_ATTRIBUTE_JOB_LIST, which puts it in its job
+-// before its first instruction -- no suspended start, no window outside the job. The job kills the child when
+-// its last handle closes (the process handle's), allows it no second process, caps its memory and lets an
+-// unhandled exception end it rather than open a dialog.
++// the child inherits exactly the duplicates made for it (closed again once it started) and no other
++// inheritable handle of this process; and PROC_THREAD_ATTRIBUTE_JOB_LIST, which puts it in its job before its
++// first instruction -- no suspended start, no window outside the job. The job kills the child when its last
++// handle closes (the process handle's), allows it no second process, caps its memory and lets an unhandled
++// exception end it rather than open a dialog.
+ //
+ // The child gets the null device as stdin and stdout, this process's stderr, the environment it is given and
+ // nothing else, and the root of its executable's volume as its working directory.
++//
++// The inheritance window. The handle list binds only this CreateProcessW(): while the duplicates are
++// inheritable, any other CreateProcess() of this process that inherits handles without a list of its own
++// (QProcess, a library's launcher) inherits them too -- a channel end, the interrupt page, the wake event --
++// and that stranger's copy of a lane end keeps a dead helper's lane from ending (its parent end would never
++// read Closed). So the duplicates are made uninheritable, the command line is built from their values, and
++// only right before CreateProcessW() are they made inheritable; right after it they are closed, whatever it
++// returned. The window is that one call. Helper launches never race one another in it: every one runs on the
++// supervisor's thread. macOS has the like window, on its channel ends (Process_macos.cpp).
+ #include <algorithm>
+ #include <array>
+ #include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cwctype>
+ #include <expected>
+ #include <filesystem>
+ #include <memory>
+ #include <optional>
+@@ -171,50 +180,62 @@ namespace
+         AttributeList& operator=(AttributeList&&) = delete;
+         AttributeList(AttributeList const&) = delete;
+         AttributeList& operator=(AttributeList const&) = delete;
+         ~AttributeList()
+         {
+             if (_list != nullptr)
+                 ::DeleteProcThreadAttributeList(_list);
+         }
+ 
+         /// Sets @p attribute to the handles @p values, which must outlive the list's use.
+-        /// @return Whether the list took it.
+-        [[nodiscard]] bool set(DWORD_PTR attribute, std::span<HANDLE> values) noexcept
++        /// @return Nothing; or why the list refused it.
++        [[nodiscard]] std::expected<void, LaunchError> set(DWORD_PTR attribute,
++                                                           std::span<HANDLE> values) noexcept
+         {
+-            return ::UpdateProcThreadAttribute(
+-                       _list, 0, attribute, values.data(), values.size_bytes(), nullptr, nullptr)
+-                   != FALSE;
++            if (!::UpdateProcThreadAttribute(
++                    _list, 0, attribute, values.data(), values.size_bytes(), nullptr, nullptr))
++                return std::unexpected(launchErrorOf(::GetLastError()));
++            return {};
+         }
+ 
+         [[nodiscard]] LPPROC_THREAD_ATTRIBUTE_LIST get() const noexcept { return _list; }
+ 
+       private:
+         AttributeList(std::unique_ptr<std::byte[]> storage, LPPROC_THREAD_ATTRIBUTE_LIST list) noexcept:
+             _storage { std::move(storage) }, _list { list }
+         {
+         }
+ 
+         std::unique_ptr<std::byte[]> _storage;
+         LPPROC_THREAD_ATTRIBUTE_LIST _list;
+     };
+ 
+-    /// @return An inheritable duplicate of @p handle; nothing if it could not be made.
+-    [[nodiscard]] OwnedHandle inheritableCopyOf(HANDLE handle) noexcept
++    /// @return A duplicate of @p handle, not inheritable (yet); nothing if it could not be made.
++    [[nodiscard]] OwnedHandle copyOf(HANDLE handle) noexcept
+     {
+         auto copy = HANDLE { nullptr };
+         if (!::DuplicateHandle(
+-                ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, TRUE, DUPLICATE_SAME_ACCESS))
++                ::GetCurrentProcess(), handle, ::GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS))
+             return OwnedHandle {};
+         return OwnedHandle { copy };
+     }
+ 
++    /// Makes each of @p handles inheritable.
++    /// @return Nothing; or why one could not be.
++    [[nodiscard]] std::expected<void, LaunchError> allowInheritance(std::span<HANDLE const> handles) noexcept
++    {
++        for (auto* const handle: handles)
++            if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
++                return std::unexpected(launchErrorOf(::GetLastError()));
++        return {};
++    }
++
+     /// @return A job that kills its process when closed, allows it no second one, caps its memory at
+     ///         @p dataBytes (0: no cap) and ends it on an unhandled exception; nothing if it could not be
+     ///         made.
+     [[nodiscard]] OwnedHandle makeJob(uint64_t dataBytes) noexcept
+     {
+         auto job = OwnedHandle { ::CreateJobObjectW(nullptr, nullptr) };
+         if (!job)
+             return job;
+         auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {};
+         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+@@ -285,35 +306,38 @@ namespace
+             unwatch(key);
+             _watched.emplace_back(key, process.waitable());
+             return {};
+         }
+ 
+         void unwatch(uint64_t key) noexcept override
+         {
+             std::erase_if(_watched, [&](auto const& watched) { return watched.first == key; });
+         }
+ 
+-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
++        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
++            std::optional<core::SteadyTimePoint> deadline) override
+         {
+             while (true)
+             {
+                 auto handles = std::vector<HANDLE> { _wake.get() };
+                 for (auto const& [key, process]: _watched | std::views::take(MaxWaitObjects - 1))
+                     handles.push_back(process);
+                 auto const result = ::WaitForMultipleObjects(
+                     static_cast<DWORD>(handles.size()), handles.data(), FALSE, timeoutOf(deadline));
++                // A watched handle closed while watched: waiting again would fail again, at once.
++                if (result == WAIT_FAILED)
++                    return std::unexpected(launchErrorOf(::GetLastError()));
+                 auto ended = std::vector<uint64_t> {};
+                 for (auto const& [key, process]: _watched)
+                     if (::WaitForSingleObject(process, 0) == WAIT_OBJECT_0)
+                         ended.push_back(key);
+-                auto const isWoken = result == WAIT_OBJECT_0 || result == WAIT_FAILED;
+-                if (!ended.empty() || isWoken || (deadline && _clock->now() >= *deadline))
++                if (!ended.empty() || result == WAIT_OBJECT_0 || (deadline && _clock->now() >= *deadline))
+                     return ended;
+             }
+         }
+ 
+         void wake() noexcept override { ::SetEvent(_wake.get()); }
+ 
+       private:
+         /// @return The wait's timeout in milliseconds until @p deadline, rounded up; at most the overflow
+         /// poll
+         ///         interval while processes overflow the wait.
+@@ -340,69 +364,67 @@ namespace
+     {
+       public:
+         [[nodiscard]] std::expected<std::unique_ptr<IProcessHandle>, LaunchError> launch(
+             LaunchSpec const& spec) override
+         {
+             auto const executable = std::filesystem::absolute(spec.executable);
+             auto const attributes = ::GetFileAttributesW(executable.c_str());
+             if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                 return std::unexpected(LaunchError::NotFound);
+ 
+-            // The child's copies: inheritable duplicates, which the handle list hands to it alone, and which
+-            // close here once it holds its own.
++            // The child's copies, uninheritable until right before CreateProcessW() (the file head's window).
+             auto owned = std::vector<OwnedHandle> {};
+             auto childHandles = std::vector<transport::NativeHandle> {};
+             for (auto const handle: spec.inherited)
+             {
+-                auto copy = inheritableCopyOf(handle);
++                auto copy = copyOf(handle);
+                 if (!copy)
+                     return std::unexpected(launchErrorOf(::GetLastError()));
+                 childHandles.push_back(copy.get());
+                 owned.push_back(std::move(copy));
+             }
+-            auto inheritable = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
+-                                                     .lpSecurityDescriptor = nullptr,
+-                                                     .bInheritHandle = TRUE };
+             auto nullDevice = OwnedHandle { ::CreateFileW(L"NUL",
+                                                           GENERIC_READ | GENERIC_WRITE,
+                                                           FILE_SHARE_READ | FILE_SHARE_WRITE,
+-                                                          &inheritable,
++                                                          nullptr,
+                                                           OPEN_EXISTING,
+                                                           0,
+                                                           nullptr) };
+             if (nullDevice.get() == INVALID_HANDLE_VALUE)
+             {
+                 std::ignore = nullDevice.release();
+                 return std::unexpected(launchErrorOf(::GetLastError()));
+             }
+             // This process's stderr, if it has one; the null device if not.
+             auto errorOutput = OwnedHandle {};
+             if (auto* const own = ::GetStdHandle(STD_ERROR_HANDLE);
+                 own != nullptr && own != INVALID_HANDLE_VALUE)
+-                errorOutput = inheritableCopyOf(own);
++                errorOutput = copyOf(own);
+             auto* const childError = errorOutput ? errorOutput.get() : nullDevice.get();
+ 
+             auto handleList = childHandles;
+             handleList.push_back(nullDevice.get());
+             if (errorOutput)
+                 handleList.push_back(errorOutput.get());
+ 
+             auto job = makeJob(spec.caps.dataBytes);
+             if (!job)
+                 return std::unexpected(launchErrorOf(::GetLastError()));
+             auto jobList = std::array<HANDLE, 1> { job.get() };
+             auto list = AttributeList::create(2);
+             if (!list)
+                 return std::unexpected(launchErrorOf(::GetLastError()));
+-            if (!list->set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handleList)
+-                || !list->set(PROC_THREAD_ATTRIBUTE_JOB_LIST, jobList))
+-                return std::unexpected(launchErrorOf(::GetLastError()));
++            if (auto const set = list->set(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handleList).and_then([&] {
++                    return list->set(PROC_THREAD_ATTRIBUTE_JOB_LIST, jobList);
++                });
++                !set)
++                return std::unexpected(set.error());
+ 
+             auto commandLine = std::wstring {};
+             appendArgument(commandLine, executable.wstring());
+             for (auto const& argument:
+                  spec.arguments ? spec.arguments(childHandles) : std::vector<std::string> {})
+             {
+                 auto const wide = wideOf(argument);
+                 if (!wide)
+                     return std::unexpected(LaunchError::Io);
+                 appendArgument(commandLine, *wide);
+@@ -413,32 +435,40 @@ namespace
+             auto const workingDirectory = executable.root_path().wstring();
+ 
+             auto startup = STARTUPINFOEXW {};
+             startup.StartupInfo.cb = sizeof(startup);
+             startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+             startup.StartupInfo.hStdInput = nullDevice.get();
+             startup.StartupInfo.hStdOutput = nullDevice.get();
+             startup.StartupInfo.hStdError = childError;
+             startup.lpAttributeList = list->get();
+             auto info = PROCESS_INFORMATION {};
+-            if (!::CreateProcessW(executable.c_str(),
+-                                  commandLine.data(),
+-                                  nullptr,
+-                                  nullptr,
+-                                  TRUE,
+-                                  EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT
+-                                      | CREATE_NO_WINDOW,
+-                                  block->data(),
+-                                  workingDirectory.c_str(),
+-                                  &startup.StartupInfo,
+-                                  &info))
+-                return std::unexpected(launchErrorOf(::GetLastError()));
++            if (auto const allowed = allowInheritance(handleList); !allowed)
++                return std::unexpected(allowed.error());
++            auto const created =
++                ::CreateProcessW(executable.c_str(),
++                                 commandLine.data(),
++                                 nullptr,
++                                 nullptr,
++                                 TRUE,
++                                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
++                                 block->data(),
++                                 workingDirectory.c_str(),
++                                 &startup.StartupInfo,
++                                 &info);
++            auto const error = ::GetLastError();
++            // Closed at once: the child holds its own copies, and no other process may inherit these.
++            owned.clear();
++            nullDevice.reset();
++            errorOutput.reset();
++            if (!created)
++                return std::unexpected(launchErrorOf(error));
+             ::CloseHandle(info.hThread);
+             return std::make_unique<Win32ProcessHandle>(
+                 OwnedHandle { info.hProcess }, std::move(job), static_cast<ProcessId>(info.dwProcessId));
+         }
+ 
+         [[nodiscard]] std::expected<std::unique_ptr<IExitWaitSet>, LaunchError> makeWaitSet(
+             core::IClock& clock) override
+         {
+             auto wake = OwnedHandle { ::CreateEventW(nullptr, FALSE, FALSE, nullptr) };
+             if (!wake)
+@@ -456,14 +486,16 @@ std::shared_ptr<IProcessLauncher> makeSystemProcessLauncher()
+ std::vector<std::pair<std::string, std::string>> defaultHelperEnvironment()
+ {
+     // Without SystemRoot a process cannot load the system's DLLs. Read through the Win32 block, which a
+     // process's own changes to its environment reach.
+     auto value = std::wstring(MAX_PATH, L'\0');
+     auto const length =
+         ::GetEnvironmentVariableW(L"SystemRoot", value.data(), static_cast<DWORD>(value.size()));
+     if (length == 0 || length >= value.size())
+         return {};
+     value.resize(length);
+-    return { { "SystemRoot", std::filesystem::path { value }.string() } };
++    // UTF-8, as every string of the launcher's is; path::string() would spell it in the ANSI code page.
++    auto const utf8 = std::filesystem::path { value }.u8string();
++    return { { "SystemRoot", std::string { utf8.begin(), utf8.end() } } };
+ }
+ 
+ } // namespace vtextension::wasm::remote::process
+diff --git a/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp b/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp
+index 6763793c1..994432580 100644
+--- a/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp
++++ b/src/vtextension/wasm/remote/process/testing/FakeProcessLauncher.cpp
+@@ -96,21 +96,22 @@ namespace
+             _watched.insert_or_assign(key, fake->index());
+             return {};
+         }
+ 
+         void unwatch(uint64_t key) noexcept override
+         {
+             auto const lock = std::scoped_lock { _state->mutex };
+             _watched.erase(key);
+         }
+ 
+-        [[nodiscard]] std::vector<uint64_t> wait(std::optional<core::SteadyTimePoint> deadline) override
++        [[nodiscard]] std::expected<std::vector<uint64_t>, LaunchError> wait(
++            std::optional<core::SteadyTimePoint> deadline) override
+         {
+             auto lock = std::unique_lock { _state->mutex };
+             _state->lastDeadline = deadline;
+             auto ended = std::vector<uint64_t> {};
+             _state->changed.wait(lock, [&] {
+                 ended = endedKeys();
+                 return _isWoken || !ended.empty();
+             });
+             _isWoken = false;
+             return ended;
+diff --git a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+index 7966290a1..a2208d19d 100644
+--- a/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/LaunchProbe.cpp
+@@ -1,39 +1,41 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // extension_host_probe: started by the launcher's tests in the place of the extension host process, it
+ // reports what it was started with, on the control channel it was handed, and exits once that channel ends.
+ //
+ //   extension_host_probe --report <helper arguments> [--check-handle=H]…
+ //
+ // The report is one `key=value` line each: `cwd=` its working directory, `env=NAME` per environment variable,
+-// and `fd=N` per open descriptor (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then
+-// `end`.
++// `stdin=` and `stdout=` each `null` if it is the null device, else `other`; and `fd=N` per open descriptor
++// (POSIX) or `handle=H:valid|invalid` per --check-handle (Windows); then `end`.
+ #include <array>
+ #include <bit>
+ #include <charconv>
+ #include <cstdint>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <format>
+ #include <span>
+ #include <string>
+ #include <string_view>
+ #include <vector>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
++    #include <sys/stat.h>
++
+     #include <algorithm>
+     #include <ranges>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::Channel;
+ using vtextension::wasm::remote::transport::parseHelperArguments;
+ 
+@@ -72,20 +74,47 @@ constexpr auto CheckHandle = std::string_view { "--check-handle=" };
+ #else
+     for (auto const* const* entry = environment; *entry != nullptr; ++entry)
+     {
+         auto const text = std::string_view { *entry };
+         lines += std::format("env={}\n", text.substr(0, text.find('=')));
+     }
+ #endif
+     return lines;
+ }
+ 
++/// The standard streams the report names.
++enum class StandardStream : uint8_t
++{
++    Input,
++    Output,
++};
++
++/// @return Whether @p stream is the null device: `null`, else `other`.
++[[nodiscard]] std::string_view deviceOf(StandardStream stream)
++{
++#ifdef _WIN32
++    auto* const handle =
++        ::GetStdHandle(stream == StandardStream::Input ? STD_INPUT_HANDLE : STD_OUTPUT_HANDLE);
++    // NUL is a character device, and unlike a console it has no console mode.
++    auto mode = DWORD { 0 };
++    auto const isNull = handle != nullptr && handle != INVALID_HANDLE_VALUE
++                        && ::GetFileType(handle) == FILE_TYPE_CHAR && !::GetConsoleMode(handle, &mode);
++#else
++    struct stat opened {};
++    struct stat nullDevice {};
++    auto const descriptor = stream == StandardStream::Input ? STDIN_FILENO : STDOUT_FILENO;
++    auto const isNull = ::fstat(descriptor, &opened) == 0 && ::stat("/dev/null", &nullDevice) == 0
++                        && opened.st_dev == nullDevice.st_dev && opened.st_ino == nullDevice.st_ino;
++#endif
++    return isNull ? "null" : "other";
++}
++
+ /// @return The open handles, one line each: every descriptor (POSIX), or the validity of each of @p checked
+ ///         (Windows).
+ [[nodiscard]] std::string handleLines([[maybe_unused]] std::span<std::string_view const> checked)
+ {
+     auto lines = std::string {};
+ #ifdef _WIN32
+     for (auto const value: checked)
+     {
+         auto number = uintptr_t {};
+         std::from_chars(value.data(), value.data() + value.size(), number);
+@@ -116,22 +145,24 @@ constexpr auto CheckHandle = std::string_view { "--check-handle=" };
+             checked.push_back(argument.substr(CheckHandle.size()));
+         else
+             helperArguments.push_back(argument);
+     auto const parsed = parseHelperArguments(helperArguments);
+     if (!parsed)
+         return ProbeExit::Usage;
+     auto control = Channel::adopt(parsed->control);
+     if (!control)
+         return ProbeExit::NoControl;
+ 
+-    auto const text = std::format("cwd={}\n{}{}end\n",
++    auto const text = std::format("cwd={}\nstdin={}\nstdout={}\n{}{}end\n",
+                                   std::filesystem::current_path().string(),
++                                  deviceOf(StandardStream::Input),
++                                  deviceOf(StandardStream::Output),
+                                   environmentLines(environment),
+                                   handleLines(checked));
+     auto const bytes = std::span { reinterpret_cast<uint8_t const*>(text.data()), text.size() };
+     if (!control->send(bytes))
+         return ProbeExit::ReportFailed;
+ 
+     // Whatever arrives is ignored; the end of the stream ends the probe.
+     auto buffer = std::array<uint8_t, 64> {};
+     while (control->receiveSome(buffer))
+     {
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage.hpp b/src/vtextension/wasm/remote/transport/ControlPage.hpp
+index b9a981093..62e21b9f2 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage.hpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage.hpp
+@@ -35,47 +35,47 @@ enum class SharedObjectError : uint8_t
+ 
+ /// One page both processes map: a flag per interrupt slot. Move-only; unmapped and closed when destroyed. A
+ /// moved-from page may only be assigned to or destroyed.
+ class ControlPage
+ {
+   public:
+     /// Creates the page, all slots clear: Contour's side. Not inherited by a child unless handed over.
+     /// @return The page; `Unsupported` or `Io` if the system refused.
+     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> create();
+ 
+-    /// Maps a page this process inherited: the helper's side. Takes ownership of @p handle, made
+-    /// close-on-exec (not inheritable) again.
++    /// Maps a page this process inherited, read-only: the helper's side, which only reads the flags. Takes
++    /// ownership of @p handle, made close-on-exec (not inheritable) again.
+     /// @param handle The page's handle.
+     /// @return The page; `WrongSize` if the object is not ControlPageBytes large, `Io` if it cannot be
+-    /// mapped.
+-    ///         On failure @p handle stays the caller's.
++    ///         mapped. On failure @p handle stays the caller's.
+     [[nodiscard]] static std::expected<ControlPage, SharedObjectError> adopt(NativeHandle handle);
+ 
+     ControlPage(ControlPage&& other) noexcept;
+     ControlPage& operator=(ControlPage&& other) noexcept;
+     ControlPage(ControlPage const&) = delete;
+     ControlPage& operator=(ControlPage const&) = delete;
+     ~ControlPage();
+ 
+-    /// Raises @p slot. Wait-free.
++    /// Raises @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
+     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
+     void raise(uint32_t slot) noexcept;
+ 
+-    /// Clears @p slot. Wait-free.
++    /// Clears @p slot. Wait-free. Only on the page create() made: an adopted page is mapped read-only.
+     /// @param slot The slot; below InterruptSlotCount, or else nothing happens.
+     void clear(uint32_t slot) noexcept;
+ 
+     /// @param slot The slot.
+     /// @return Whether @p slot is raised; never for one at or beyond InterruptSlotCount.
+     [[nodiscard]] bool isRaised(uint32_t slot) const noexcept;
+ 
+-    /// @return The page's handle, still owned by the page: for handing it to a child process.
++    /// @return The page's handle, still owned by the page: for handing it to a child process. On Windows it
++    ///         grants read access only, so that the child cannot map the page writable.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     ControlPage(NativeHandle handle, uint32_t* flags) noexcept;
+ 
+     /// @return @p slot's flag.
+     [[nodiscard]] std::atomic_ref<uint32_t> flag(uint32_t slot) const noexcept;
+ 
+     /// Unmaps and closes what this page holds, if anything.
+     void release() noexcept;
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp b/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp
+index 348c834bc..4c07f4777 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_posix.cpp
+@@ -1,16 +1,22 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The interrupt page on POSIX. Linux and FreeBSD: an anonymous memfd, sealed against shrinking and growing,
+ // so that neither process can make the other's mapping fault past the object's end. macOS has no memfd: a
+ // POSIX shared memory object under a name unique to this process, created exclusively and unlinked at once,
+ // so that it is reachable only through the descriptor.
++//
++// The helper maps the page read-only. On Linux (5.1 and later) the memfd is also sealed against every write
++// mapping made after Contour's own (F_SEAL_FUTURE_WRITE), so that a helper cannot map it writable even if it
++// tried, nor mprotect() its mapping writable. Where the seal is missing -- an older kernel, FreeBSD, macOS --
++// the read-only mapping is the helper's own choice; a helper that writes to the page anyway still misleads
++// only itself, as Contour never reads it back.
+ #include <sys/mman.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
+ #include <atomic>
+ #include <cerrno>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <utility>
+@@ -56,69 +62,97 @@ namespace
+             ::close(descriptor);
+             return std::unexpected(sharedObjectErrorOf(error));
+         }
+         return descriptor;
+ #else
+         auto const descriptor =
+             ::memfd_create("contour-extension-host-control", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+         if (descriptor == -1)
+             return std::unexpected(sharedObjectErrorOf(errno));
+         if (::ftruncate(descriptor, static_cast<off_t>(ControlPageBytes)) == -1
+-            || ::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) == -1)
++            || ::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) == -1)
+         {
+             auto const error = errno;
+             ::close(descriptor);
+             return std::unexpected(sharedObjectErrorOf(error));
+         }
+         return descriptor;
+ #endif
+     }
+ 
+-    /// @return @p descriptor's page mapped shared, readable and writable; or why it could not be.
+-    [[nodiscard]] std::expected<uint32_t*, SharedObjectError> mapPage(int descriptor) noexcept
++    /// Who maps the page, and so what it may do to it.
++    enum class PageAccess : uint8_t
++    {
++        ReadOnly,  ///< The helper: it reads the flags.
++        ReadWrite, ///< Contour: it raises and clears them.
++    };
++
++    /// @return @p descriptor's page mapped shared with @p access; or why it could not be.
++    [[nodiscard]] std::expected<uint32_t*, SharedObjectError> mapPage(int descriptor,
++                                                                      PageAccess access) noexcept
+     {
+-        auto* const mapping =
+-            ::mmap(nullptr, ControlPageBytes, PROT_READ | PROT_WRITE, MAP_SHARED, descriptor, 0);
++        auto const protection = access == PageAccess::ReadWrite ? PROT_READ | PROT_WRITE : PROT_READ;
++        auto* const mapping = ::mmap(nullptr, ControlPageBytes, protection, MAP_SHARED, descriptor, 0);
+         if (mapping == MAP_FAILED)
+             return std::unexpected(SharedObjectError::Io);
+         return static_cast<uint32_t*>(mapping);
+     }
++
++    /// Seals @p descriptor, once Contour mapped it: against any later write mapping where the system can, and
++    /// against further seals. Nothing to do where the object is no memfd (macOS).
++    /// @return Nothing; or why it could not be sealed.
++    [[nodiscard]] std::expected<void, SharedObjectError> sealMapped([[maybe_unused]] int descriptor) noexcept
++    {
++#ifndef __APPLE__
++    #ifdef F_SEAL_FUTURE_WRITE
++        // EINVAL: a kernel older than the seal; the helper's read-only mapping is then the only guard.
++        if (::fcntl(descriptor, F_ADD_SEALS, F_SEAL_FUTURE_WRITE) == -1 && errno != EINVAL)
++            return std::unexpected(sharedObjectErrorOf(errno));
++    #endif
++        if (::fcntl(descriptor, F_ADD_SEALS, F_SEAL_SEAL) == -1)
++            return std::unexpected(sharedObjectErrorOf(errno));
++#endif
++        return {};
++    }
+ } // namespace
+ 
+ ControlPage::ControlPage(NativeHandle handle, uint32_t* flags) noexcept: _handle { handle }, _flags { flags }
+ {
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::create()
+ {
+     auto const descriptor = createObject();
+     if (!descriptor)
+         return std::unexpected(descriptor.error());
+-    auto const flags = mapPage(*descriptor);
++    auto const flags = mapPage(*descriptor, PageAccess::ReadWrite);
+     if (!flags)
+     {
+         ::close(*descriptor);
+         return std::unexpected(flags.error());
+     }
+-    return ControlPage { *descriptor, *flags };
++    auto page = ControlPage { *descriptor, *flags };
++    return sealMapped(*descriptor).transform([&] { return std::move(page); });
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle handle)
+ {
+     struct stat status {};
+     if (::fstat(handle, &status) == -1)
+         return std::unexpected(SharedObjectError::Io);
+     if (std::cmp_not_equal(status.st_size, ControlPageBytes))
+         return std::unexpected(SharedObjectError::WrongSize);
+     if (::fcntl(handle, F_SETFD, FD_CLOEXEC) == -1)
+         return std::unexpected(SharedObjectError::Io);
+-    return mapPage(handle).transform([&](uint32_t* flags) { return ControlPage { handle, flags }; });
++    return mapPage(handle, PageAccess::ReadOnly).transform([&](uint32_t* flags) {
++        return ControlPage { handle, flags };
++    });
+ }
+ 
+ ControlPage::ControlPage(ControlPage&& other) noexcept:
+     _handle { std::exchange(other._handle, -1) }, _flags { std::exchange(other._flags, nullptr) }
+ {
+ }
+ 
+ ControlPage& ControlPage::operator=(ControlPage&& other) noexcept
+ {
+     if (this != &other)
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_test.cpp b/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
+index eaa0306be..66bd49c7e 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_test.cpp
+@@ -9,22 +9,24 @@
+ #include <optional>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ 
+ #ifdef _WIN32
+     #define WIN32_LEAN_AND_MEAN
+     #include <Windows.h>
+ #else
+     #include <sys/mman.h>
++    #include <sys/wait.h>
+ 
+     #include <cerrno>
++    #include <csignal>
+     #include <format>
+ 
+     #include <fcntl.h>
+     #include <unistd.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::ControlPage;
+ using vtextension::wasm::remote::transport::NativeHandle;
+ using vtextension::wasm::remote::transport::SharedObjectError;
+ 
+@@ -116,10 +118,66 @@ TEST_CASE("ControlPage.isNotInherited", "[vtextension]")
+ #ifdef _WIN32
+     auto flags = DWORD { 0 };
+     REQUIRE(::GetHandleInformation(page->nativeHandle(), &flags));
+     CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
+ #else
+     auto const flags = ::fcntl(page->nativeHandle(), F_GETFD);
+     REQUIRE(flags != -1);
+     CHECK((flags & FD_CLOEXEC) != 0);
+ #endif
+ }
++
++TEST_CASE("ControlPage.helperCannotWrite", "[vtextension]")
++{
++    auto parent = ControlPage::create();
++    REQUIRE(parent.has_value());
++#ifdef _WIN32
++    // The handle handed over grants reading only.
++    auto* const view = ::MapViewOfFile(parent->nativeHandle(), FILE_MAP_WRITE, 0, 0, 0);
++    CHECK(view == nullptr);
++    if (view != nullptr)
++        ::UnmapViewOfFile(view);
++#else
++    #if defined(__linux__) && defined(F_SEAL_FUTURE_WRITE)
++    // Sealed: no write mapping after Contour's own.
++    auto* const mapping = ::mmap(nullptr,
++                                 vtextension::wasm::remote::transport::ControlPageBytes,
++                                 PROT_READ | PROT_WRITE,
++                                 MAP_SHARED,
++                                 parent->nativeHandle(),
++                                 0);
++    auto const error = errno;
++    CHECK(mapping == MAP_FAILED);
++    CHECK(error == EPERM);
++    if (mapping != MAP_FAILED)
++        ::munmap(mapping, vtextension::wasm::remote::transport::ControlPageBytes);
++    #endif
++    // An adopted page is mapped read-only: a store through it faults. Tried in a child, which the fault ends
++    // (or the sanitizer's report of it, with a non-zero status).
++    auto const copy = duplicate(parent->nativeHandle());
++    REQUIRE(copy.has_value());
++    auto const child = ::fork();
++    REQUIRE(child != -1);
++    if (child == 0)
++    {
++        // Quietly: neither the test framework's fault handler nor the sanitizer's may report from here.
++        auto const nullDevice = ::open("/dev/null", O_WRONLY);
++        if (nullDevice == -1)
++            ::_exit(1);
++        ::dup2(nullDevice, STDOUT_FILENO);
++        ::dup2(nullDevice, STDERR_FILENO);
++        struct sigaction byDefault {};
++        byDefault.sa_handler = SIG_DFL;
++        ::sigaction(SIGSEGV, &byDefault, nullptr);
++        ::sigaction(SIGBUS, &byDefault, nullptr);
++        auto helper = ControlPage::adopt(*copy);
++        if (helper)
++            helper->raise(5);
++        ::_exit(0);
++    }
++    ::close(*copy);
++    auto status = 0;
++    REQUIRE(::waitpid(child, &status, 0) == child);
++    CHECK_FALSE((WIFEXITED(status) && WEXITSTATUS(status) == 0));
++    CHECK_FALSE(parent->isRaised(5));
++#endif
++}
+diff --git a/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp b/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
+index aad35242b..109df3790 100644
+--- a/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
++++ b/src/vtextension/wasm/remote/transport/ControlPage_win32.cpp
+@@ -1,38 +1,41 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The interrupt page on Windows: an unnamed, pagefile-backed section of one page, not inheritable until it is
+-// handed over. A section cannot be resized once created, so it needs no seal.
++// handed over. A section cannot be resized once created, so it needs no seal. Contour maps it writable and
++// then keeps only a handle that grants FILE_MAP_READ, the one it hands over: the helper cannot map the page
++// writable through it.
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/ControlPage.hpp>
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <Windows.h>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ static_assert(std::atomic_ref<uint32_t>::is_always_lock_free,
+               "the page is shared between processes: only a lock-free flag is address-free");
+ 
+ namespace
+ {
+-    /// @return @p section's whole view mapped readable and writable, and its size; or why it could not be.
++    /// @return @p section's whole view mapped with @p access (FILE_MAP_…), and its size; or why it could not
++    /// be.
+     [[nodiscard]] std::expected<std::pair<uint32_t*, std::size_t>, SharedObjectError> mapSection(
+-        HANDLE section) noexcept
++        HANDLE section, DWORD access) noexcept
+     {
+-        auto* const view = ::MapViewOfFile(section, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
++        auto* const view = ::MapViewOfFile(section, access, 0, 0, 0);
+         if (view == nullptr)
+             return std::unexpected(SharedObjectError::Io);
+         auto region = MEMORY_BASIC_INFORMATION {};
+         if (::VirtualQuery(view, &region, sizeof(region)) == 0)
+         {
+             ::UnmapViewOfFile(view);
+             return std::unexpected(SharedObjectError::Io);
+         }
+         return std::pair { static_cast<uint32_t*>(view), static_cast<std::size_t>(region.RegionSize) };
+     }
+@@ -41,32 +44,42 @@ namespace
+ ControlPage::ControlPage(NativeHandle handle, uint32_t* flags) noexcept: _handle { handle }, _flags { flags }
+ {
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::create()
+ {
+     auto* const section =
+         ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, ControlPageBytes, nullptr);
+     if (section == nullptr)
+         return std::unexpected(SharedObjectError::Io);
+-    auto const mapped = mapSection(section);
++    auto const mapped = mapSection(section, FILE_MAP_READ | FILE_MAP_WRITE);
+     if (!mapped)
+     {
+         ::CloseHandle(section);
+         return std::unexpected(mapped.error());
+     }
+-    return ControlPage { section, mapped->first };
++    // The view keeps the section alive; the full-access handle goes, and a read-only one stays.
++    auto readOnly = HANDLE { nullptr };
++    auto const duplicated = ::DuplicateHandle(
++        ::GetCurrentProcess(), section, ::GetCurrentProcess(), &readOnly, FILE_MAP_READ, FALSE, 0);
++    ::CloseHandle(section);
++    if (!duplicated)
++    {
++        ::UnmapViewOfFile(mapped->first);
++        return std::unexpected(SharedObjectError::Io);
++    }
++    return ControlPage { readOnly, mapped->first };
+ }
+ 
+ std::expected<ControlPage, SharedObjectError> ControlPage::adopt(NativeHandle handle)
+ {
+-    auto const mapped = mapSection(handle);
++    auto const mapped = mapSection(handle, FILE_MAP_READ);
+     if (!mapped)
+         return std::unexpected(mapped.error());
+     if (mapped->second != ControlPageBytes)
+     {
+         ::UnmapViewOfFile(mapped->first);
+         return std::unexpected(SharedObjectError::WrongSize);
+     }
+     if (!::SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0))
+     {
+         ::UnmapViewOfFile(mapped->first);
+diff --git a/src/vtextension/wasm/remote/transport/HelperArguments.cpp b/src/vtextension/wasm/remote/transport/HelperArguments.cpp
+index 375677bba..c5b58be07 100644
+--- a/src/vtextension/wasm/remote/transport/HelperArguments.cpp
++++ b/src/vtextension/wasm/remote/transport/HelperArguments.cpp
+@@ -1,16 +1,20 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The helper's command line, one row per option: its name, how its value is read into the arguments, and how
+ // it is written from them. A new option is a new row; nothing else changes.
+ #include <vtextension/wasm/remote/transport/HelperArguments.hpp>
+ 
++#ifndef _WIN32
++    #include <unistd.h>
++#endif
++
+ #include <algorithm>
+ #include <array>
+ #include <bit>
+ #include <bitset>
+ #include <charconv>
+ #include <cstddef>
+ #include <cstdint>
+ #include <expected>
+ #include <format>
+ #include <ranges>
+@@ -38,21 +42,22 @@ namespace
+ 
+     /// @return @p text as a handle; `Malformed` if it is none.
+     [[nodiscard]] std::expected<NativeHandle, ArgumentError> handleOf(std::string_view text) noexcept
+     {
+ #ifdef _WIN32
+         return numberOf<uintptr_t>(text).transform(
+             [](uintptr_t value) { return std::bit_cast<NativeHandle>(value); });
+ #else
+         return numberOf<NativeHandle>(text).and_then(
+             [](NativeHandle value) -> std::expected<NativeHandle, ArgumentError> {
+-                if (value < 0)
++                // 0, 1 and 2 are the standard streams, never a handle handed over.
++                if (value <= STDERR_FILENO)
+                     return std::unexpected(ArgumentError::Malformed);
+                 return value;
+             });
+ #endif
+     }
+ 
+     /// @return @p handle's decimal value.
+     [[nodiscard]] std::string textOf(NativeHandle handle)
+     {
+ #ifdef _WIN32
+@@ -191,14 +196,20 @@ std::expected<HelperArguments, ArgumentError> parseHelperArguments(
+         if (seen.test(*index))
+             return std::unexpected(ArgumentError::Duplicate);
+         seen.set(*index);
+         if (equals == std::string_view::npos)
+             return std::unexpected(ArgumentError::Malformed);
+         if (auto const parsed = Options[*index].parse(result, option.substr(equals + 1)); !parsed)
+             return std::unexpected(parsed.error());
+     }
+     if (!seen.all())
+         return std::unexpected(ArgumentError::Missing);
++    // Each role its own handle: two roles on one would have the helper read its control channel as a lane.
++    auto handles = std::vector<NativeHandle> { result.control, result.controlPage, result.wake };
++    handles.insert(handles.end(), result.lanes.begin(), result.lanes.end());
++    std::ranges::sort(handles);
++    if (std::ranges::adjacent_find(handles) != handles.end())
++        return std::unexpected(ArgumentError::Malformed);
+     return result;
+ }
+ 
+ } // namespace vtextension::wasm::remote::transport
+diff --git a/src/vtextension/wasm/remote/transport/HelperArguments.hpp b/src/vtextension/wasm/remote/transport/HelperArguments.hpp
+index 642ebdd44..ff76d1167 100644
+--- a/src/vtextension/wasm/remote/transport/HelperArguments.hpp
++++ b/src/vtextension/wasm/remote/transport/HelperArguments.hpp
+@@ -43,21 +43,22 @@ struct HelperArguments
+ 
+     bool operator==(HelperArguments const&) const = default;
+ };
+ 
+ /// Why a command line does not parse.
+ enum class ArgumentError : uint8_t
+ {
+     Unknown,   ///< An argument names no option.
+     Duplicate, ///< An option is given twice.
+     Missing,   ///< An option is not given.
+-    Malformed, ///< An option's value is not what it takes.
++    Malformed, ///< An option's value is not what it takes, or two roles name one handle, or (POSIX) a handle
++               ///< is a standard stream.
+ };
+ 
+ /// @param arguments What to tell the helper.
+ /// @return The command line, one `--name=value` argument per option.
+ [[nodiscard]] std::vector<std::string> formatHelperArguments(HelperArguments const& arguments);
+ 
+ /// @param arguments The command line after the program's name, each a `--name=value` argument.
+ /// @return What it tells the helper; or the first reason it does not parse.
+ [[nodiscard]] std::expected<HelperArguments, ArgumentError> parseHelperArguments(
+     std::span<std::string_view const> arguments);
+diff --git a/src/vtextension/wasm/remote/transport/HelperArguments_test.cpp b/src/vtextension/wasm/remote/transport/HelperArguments_test.cpp
+index 7e7f5b4fe..e8115f950 100644
+--- a/src/vtextension/wasm/remote/transport/HelperArguments_test.cpp
++++ b/src/vtextension/wasm/remote/transport/HelperArguments_test.cpp
+@@ -133,20 +133,28 @@ TEST_CASE("HelperArguments.rejects", "[vtextension]")
+     auto const rows = std::vector<Row> {
+         { .name = "an unknown option", .arguments = validAnd("--bogus=1"), .error = ArgumentError::Unknown },
+         { .name = "a repeated option", .arguments = validAnd("--wake=9"), .error = ArgumentError::Duplicate },
+         { .name = "a missing option", .arguments = validWithout("--wake="), .error = ArgumentError::Missing },
+         { .name = "too few lanes",
+           .arguments = validWith("--lanes=4,5,6"),
+           .error = ArgumentError::Malformed },
+         { .name = "a parent that is no number",
+           .arguments = validWith("--parent=x"),
+           .error = ArgumentError::Malformed },
++        { .name = "two roles on one handle",
++          .arguments = validWith("--wake=3"),
++          .error = ArgumentError::Malformed },
++#ifndef _WIN32
++        { .name = "a standard stream as a handle",
++          .arguments = validWith("--page=2"),
++          .error = ArgumentError::Malformed },
++#endif
+         { .name = "a negative cap",
+           .arguments = validWith("--data-bytes=-1"),
+           .error = ArgumentError::Malformed },
+     };
+     for (auto const& row: rows)
+     {
+         INFO(row.name);
+         CHECK(parse(row.arguments) == std::unexpected(row.error));
+     }
+ }
+diff --git a/src/vtextension/wasm/remote/transport/WakeSignal_test.cpp b/src/vtextension/wasm/remote/transport/WakeSignal_test.cpp
+index b53f40a78..9d7b927f3 100644
+--- a/src/vtextension/wasm/remote/transport/WakeSignal_test.cpp
++++ b/src/vtextension/wasm/remote/transport/WakeSignal_test.cpp
+@@ -8,28 +8,51 @@
+ #include <chrono>
+ #include <cstddef>
+ #include <future>
+ #include <ranges>
+ #include <thread>
+ #include <tuple>
+ #include <utility>
+ 
+ #include <vtextension/wasm/remote/transport/WakeSignal.hpp>
+ 
+-#ifndef _WIN32
++#ifdef _WIN32
++    #define WIN32_LEAN_AND_MEAN
++    #include <Windows.h>
++#else
+     #include <csignal>
++
++    #include <fcntl.h>
+ #endif
+ 
+ using vtextension::wasm::remote::transport::makeWakePair;
+ using vtextension::wasm::remote::transport::WakeResult;
+ using vtextension::wasm::remote::transport::WakeWait;
+ 
++TEST_CASE("WakeSignal.endsAreNotInherited", "[vtextension]")
++{
++    auto const pair = makeWakePair();
++    REQUIRE(pair.has_value());
++    for (auto const handle: { pair->parent.nativeHandle(), pair->helper.nativeHandle() })
++    {
++#ifdef _WIN32
++        auto flags = DWORD { 0 };
++        REQUIRE(::GetHandleInformation(handle, &flags));
++        CHECK((flags & HANDLE_FLAG_INHERIT) == 0);
++#else
++        auto const flags = ::fcntl(handle, F_GETFD);
++        REQUIRE(flags != -1);
++        CHECK((flags & FD_CLOEXEC) != 0);
++#endif
++    }
++}
++
+ TEST_CASE("WakeSignal.signalWakesTheReceiver", "[vtextension]")
+ {
+     auto pair = makeWakePair();
+     REQUIRE(pair.has_value());
+     auto result = std::promise<WakeWait> {};
+     auto woken = result.get_future();
+     auto waiter = std::jthread { [&] { result.set_value(pair->helper.wait()); } };
+     std::this_thread::sleep_for(std::chrono::milliseconds { 20 });
+     CHECK(pair->parent.signal() == WakeResult::Sent);
+     CHECK(woken.get() == WakeWait::Woken);

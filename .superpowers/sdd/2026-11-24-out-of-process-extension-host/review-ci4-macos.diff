@@ -1,0 +1,1227 @@
+ff4e3d5e1 test(vtextension): the macOS sandbox probe expects what Seatbelt refuses
+f2d60e683 fix(vtextension): the macOS sandbox lets the extension host learn its page size
+09e38993f fix(vtextension): WAMR maps memory MAP_JIT only where it is to run code
+bcbcfd69b fix(vtextension): a descriptor that comes unasked is closed on macOS
+7e685b25a fix(vtextension): an extension host's channel never waits to send on macOS
+
+ cmake/ContourThirdParties.cmake                    |  52 ++--
+ .../wamr-map-jit-only-for-executable-memory.patch  |  36 +++
+ src/vtextension/wasm/host/Sandbox_test.cpp         |   3 +-
+ src/vtextension/wasm/host/macos/SandboxProfile.hpp |   9 +-
+ src/vtextension/wasm/remote/Hostility_test.cpp     |   3 +-
+ .../wasm/remote/process/SandboxProbe_test.cpp      |  19 +-
+ .../wasm/remote/process/testing/SandboxProbe.cpp   |  50 +++-
+ src/vtextension/wasm/remote/transport/Channel.hpp  |  24 +-
+ .../wasm/remote/transport/Channel_posix.cpp        | 267 ++++++++++++++++-----
+ .../wasm/remote/transport/PduStream_test.cpp       |  37 ++-
+ 10 files changed, 387 insertions(+), 113 deletions(-)
+
+diff --git a/cmake/ContourThirdParties.cmake b/cmake/ContourThirdParties.cmake
+index 622812736..a1fd20ca9 100644
+--- a/cmake/ContourThirdParties.cmake
++++ b/cmake/ContourThirdParties.cmake
+@@ -256,41 +256,41 @@ function(ContourThirdParties_WamrTerminates target resultVar)
+ endfunction()
+ 
+ if(CONTOUR_EXTENSIONS)
+     add_library(contour_wamr INTERFACE)
+     add_library(contour::wamr ALIAS contour_wamr)
+ 
+     set(_wamr_target "")
+     set(_wamr_rejected "")
+     if(TARGET iwasm::vmlib)
+         set(_wamr_target iwasm::vmlib)
+-        set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's thread-safety patch")
++        set(THIRDPARTY_BUILTIN_wamr "embedded, without Contour's patches")
+     elseif(NOT CONTOUR_BUILD_STATIC)
+         find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
+         set(_wamr_candidate "")
+         if(TARGET iwasm::vmlib)
+             set(_wamr_candidate iwasm::vmlib)
+         else()
+             find_package(PkgConfig QUIET)
+             if(PkgConfig_FOUND)
+                 pkg_check_modules(PC_WAMR QUIET IMPORTED_TARGET GLOBAL iwasm>=${WAMR_MINIMAL_VERSION})
+                 if(TARGET PkgConfig::PC_WAMR)
+                     set(_wamr_candidate PkgConfig::PC_WAMR)
+                 endif()
+             endif()
+         endif()
+         if(_wamr_candidate)
+             ContourThirdParties_WamrTerminates(${_wamr_candidate} _wamr_terminates)
+             if(_wamr_terminates)
+                 set(_wamr_target ${_wamr_candidate})
+                 set(THIRDPARTY_BUILTIN_wamr
+-                    "system package, without Contour's thread-safety patch (its interrupt verified)")
++                    "system package, without Contour's patches (its interrupt verified)")
+             else()
+                 set(_wamr_rejected "${_wamr_terminates_REASON}")
+                 message(STATUS "System WAMR rejected: ${_wamr_rejected}.")
+             endif()
+         endif()
+     endif()
+ 
+     if(NOT _wamr_target)
+         if(NOT CONTOUR_USE_CPM)
+             if(_wamr_rejected)
+@@ -298,40 +298,58 @@ if(CONTOUR_EXTENSIONS)
+             else()
+                 set(_wamr_found "None is installed.")
+             endif()
+             message(FATAL_ERROR "Could not find a usable WAMR >= ${WAMR_MINIMAL_VERSION}: one built with "
+                 "WAMR_BUILD_THREAD_MGR=1, without a JIT, hardware bounds checks or wakeup of blocking operations, "
+                 "and with exactly the WebAssembly features src/vtextension/wasm/EngineFeatures.hpp allows. "
+                 "${_wamr_found} "
+                 "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+         endif()
+         message(STATUS "Using CPM to fetch WAMR")
+-        set(_wamr_patch "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch")
+-        file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
+-        string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
+-        # git applies it (cmake/ApplyPatchOnce.cmake); CPM, which clones WAMR, needs git already.
++        # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
++        # while setting or clearing any instance's exception walks every cluster under that lock: a data
++        # race between one extension's call or trap and another's unload. The first patch unlinks under the
++        # lock. An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory,
++        # as the cluster and the environment are freed only after the walk's list lock is released.
++        #
++        # On Apple silicon WAMR maps all of its memory MAP_JIT, an instance's linear memory included, which
++        # the hardened runtime refuses an executable without the allow-jit entitlement -- and the
++        # interpreting extension host has none, as it runs no code it made. The second patch asks for
++        # MAP_JIT only where the memory is to be executable, which an interpreter never maps.
++        set(_wamr_patches
++            "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-unlink-exec-env-under-cluster-lock.patch"
++            "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-map-jit-only-for-executable-memory.patch")
++        # git applies each (cmake/ApplyPatchOnce.cmake), one command after another; CPM, which clones WAMR,
++        # needs git already.
+         find_package(Git REQUIRED)
++        set(_wamr_patch_command "")
++        set(_wamr_patch_hashes "")
++        foreach(_wamr_patch IN LISTS _wamr_patches)
++            if(_wamr_patch_command)
++                list(APPEND _wamr_patch_command COMMAND)
++            endif()
++            list(APPEND _wamr_patch_command "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
++                 -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake")
++            file(SHA256 "${_wamr_patch}" _wamr_patch_hash)
++            string(SUBSTRING "${_wamr_patch_hash}" 0 12 _wamr_patch_hash)
++            string(APPEND _wamr_patch_hashes "-${_wamr_patch_hash}")
++        endforeach()
+         CPMAddPackage(
+             NAME wamr
+             VERSION ${WAMR_MINIMAL_VERSION}
+             GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
+             GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
+-            # Destroying an execution environment unlinks it from its thread cluster without the cluster's lock,
+-            # while setting or clearing any instance's exception walks every cluster under that lock: a data
+-            # race between one extension's call or trap and another's unload. The patch unlinks under the lock.
+-            # An installed WAMR goes without it: the walk reads a link being rewritten, never freed memory, as
+-            # the cluster and the environment are freed only after the walk's list lock is released. Applied
+-            # once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a patched tree succeeds; the
+-            # patch's own hash keys the source cache, so that a changed patch is never served an old tree.
+-            PATCH_COMMAND "${CMAKE_COMMAND}" -D "GIT_EXECUTABLE=${GIT_EXECUTABLE}"
+-                          -D "PATCH_FILE=${_wamr_patch}" -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatchOnce.cmake"
+-            CUSTOM_CACHE_KEY "25bd7eb63e82-${_wamr_patch_hash}"
++            # The patches above, each applied once (cmake/ApplyPatchOnce.cmake), so that a reconfigure over a
++            # patched tree succeeds; their own hashes key the source cache, so that a changed or added patch
++            # is never served an old tree.
++            PATCH_COMMAND ${_wamr_patch_command}
++            CUSTOM_CACHE_KEY "25bd7eb63e82${_wamr_patch_hashes}"
+             OPTIONS
+                 "WAMR_BUILD_INTERP 1"
+                 "WAMR_BUILD_FAST_INTERP 1"
+                 "WAMR_BUILD_AOT 0"
+                 "WAMR_BUILD_JIT 0"
+                 "WAMR_BUILD_FAST_JIT 0"
+                 "WAMR_BUILD_LIBC_WASI 1"
+                 "WAMR_BUILD_LIBC_BUILTIN 0"
+                 "WAMR_BUILD_THREAD_MGR 1"
+                 "WAMR_BUILD_LIB_PTHREAD 0"
+@@ -390,21 +408,21 @@ if(CONTOUR_EXTENSIONS)
+             # is right only for a WAMR DLL; this one is linked statically.
+             target_compile_definitions(contour_wamr INTERFACE WASM_RUNTIME_API_EXTERN=)
+         endif()
+         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+             # The native-call trampoline is a plain .s file, which the driver assembles without
+             # preprocessing; Clang then warns about every -D and dependency flag the build passes.
+             target_compile_options(vmlib PRIVATE $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>)
+         endif()
+         set(_wamr_target vmlib)
+         set(THIRDPARTY_BUILTIN_wamr
+-            "CPM (${WAMR_MINIMAL_VERSION}, static, fast interpreter, with Contour's thread-safety patch)")
++            "CPM (${WAMR_MINIMAL_VERSION}, static, fast interpreter, with Contour's patches)")
+         if(_wamr_rejected)
+             string(APPEND THIRDPARTY_BUILTIN_wamr "; system WAMR rejected: ${_wamr_rejected}")
+         endif()
+     endif()
+     target_link_libraries(contour_wamr INTERFACE ${_wamr_target})
+ else()
+     set(THIRDPARTY_BUILTIN_wamr "(extensions disabled)")
+ endif()
+ 
+ # Wasmtime compiles the status-line extensions to native code inside the extension host, the only
+diff --git a/cmake/patches/wamr-map-jit-only-for-executable-memory.patch b/cmake/patches/wamr-map-jit-only-for-executable-memory.patch
+new file mode 100644
+index 000000000..8fbd9499f
+--- /dev/null
++++ b/cmake/patches/wamr-map-jit-only-for-executable-memory.patch
+@@ -0,0 +1,36 @@
++diff --git a/core/shared/platform/common/posix/posix_memmap.c b/core/shared/platform/common/posix/posix_memmap.c
++index d5cad88..7d1b7fd 100644
++--- a/core/shared/platform/common/posix/posix_memmap.c
+++++ b/core/shared/platform/common/posix/posix_memmap.c
++@@ -41,12 +41,7 @@ void *
++ os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
++ {
++     int map_prot = PROT_NONE;
++-#if (defined(__APPLE__) || defined(__MACH__)) && defined(__arm64__) \
++-    && defined(TARGET_OS_OSX) && TARGET_OS_OSX != 0
++-    int map_flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_JIT;
++-#else
++     int map_flags = MAP_ANONYMOUS | MAP_PRIVATE;
++-#endif
++     uint64 request_size, page_size;
++     uint8 *addr = MAP_FAILED;
++     uint32 i;
++@@ -79,8 +74,17 @@ os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
++     if (prot & MMAP_PROT_WRITE)
++         map_prot |= PROT_WRITE;
++ 
++-    if (prot & MMAP_PROT_EXEC)
+++    if (prot & MMAP_PROT_EXEC) {
++         map_prot |= PROT_EXEC;
+++        /* Only memory that will hold code needs MAP_JIT, which the hardened
+++           runtime refuses without the allow-jit entitlement and a sandbox
+++           may refuse as dynamic code generation: an interpreter's linear
+++           memory and data must not ask for it. */
+++#if (defined(__APPLE__) || defined(__MACH__)) && defined(__arm64__) \
+++    && defined(TARGET_OS_OSX) && TARGET_OS_OSX != 0
+++        map_flags |= MAP_JIT;
+++#endif
+++    }
++ 
++ #if defined(BUILD_TARGET_X86_64) || defined(BUILD_TARGET_AMD_64)
++ #ifndef __APPLE__
+diff --git a/src/vtextension/wasm/host/Sandbox_test.cpp b/src/vtextension/wasm/host/Sandbox_test.cpp
+index a5cb88338..18d5886ad 100644
+--- a/src/vtextension/wasm/host/Sandbox_test.cpp
++++ b/src/vtextension/wasm/host/Sandbox_test.cpp
+@@ -407,23 +407,24 @@ TEST_CASE("Sandbox.profileHasNoNetworkOrMachLookup", "[vtextension][host]")
+     std::ranges::sort(allowed);
+     auto expected = AllowedOperations;
+     std::ranges::sort(expected);
+     auto listed = std::string {};
+     for (auto const& operation: allowed)
+         listed += operation + ' ';
+     INFO("allowed: " << listed);
+     CHECK(std::ranges::equal(allowed, expected));
+ 
+     // Each rule's filter: shared memory only by the prefix Contour names its objects with, read from a
+-    // parameter; signals only to itself; sysctls only the CPU feature names.
++    // parameter; signals only to itself; sysctls only the page size and the CPU feature names.
+     CHECK(SandboxProfile.contains("(ipc-posix-name-prefix (param \"SHM_PREFIX\"))"));
+     CHECK(SandboxProfile.contains("(allow signal (target self))"));
++    CHECK(SandboxProfile.contains("(sysctl-name \"hw.pagesize_compat\")"));
+     CHECK(SandboxProfile.contains("(sysctl-name-prefix \"hw.optional.\")"));
+ }
+ 
+ TEST_CASE("Sandbox.profileParserSeesWhatAWildcardWouldHide", "[vtextension][host]")
+ {
+     // The reading above, on profiles it must refuse: a second form, a wildcard, an operation not in the
+     // table, a head spaced from its parenthesis, a comment sign inside a string, a head not in the table.
+     using Operations = std::optional<std::vector<std::string>>;
+     CHECK(operationsOf("(allow file* (subpath \"/\"))\n(allow mach-lookup)", "allow")
+           == Operations { { "file*", "mach-lookup" } });
+diff --git a/src/vtextension/wasm/host/macos/SandboxProfile.hpp b/src/vtextension/wasm/host/macos/SandboxProfile.hpp
+index b003b4530..e5eb1ceba 100644
+--- a/src/vtextension/wasm/host/macos/SandboxProfile.hpp
++++ b/src/vtextension/wasm/host/macos/SandboxProfile.hpp
+@@ -3,20 +3,23 @@
+ 
+ /// @file
+ /// The extension host's sandbox profile on macOS, in Seatbelt's profile language (SBPL), and the parameters
+ /// it reads. Std-only, so that every system's tests read the text the host applies on macOS.
+ ///
+ /// Deny by default; what is allowed is what the locked-down host still does that Seatbelt mediates:
+ /// - mapping the guest memory objects Contour created and granted it, and asking their size, by the prefix
+ ///   their names carry (SharedObjectName.hpp): their data, and their metadata (fstat(), which XNU checks as
+ ///   such). Never creating, truncating or unlinking one: Contour makes every object.
+ /// - signalling itself, as a runtime that raises a signal does;
++/// - reading the page size (hw.pagesize_compat), which the C library's getpagesize() asks the kernel for on
++///   every call until one succeeds: the interpreting engine asks as it maps an instance's memory, after the
++///   lockdown, and without the answer maps none (the first macOS run's deny log, one denial per instance).
+ /// - reading the CPU feature sysctls (hw.optional.), kept defensively: the code generator reads them as it
+ ///   creates its first engine, which priming a thread does before the lockdown, and caches what it read. A
+ ///   read after the lockdown would only come from a library that does not cache; remove the rule once a
+ ///   green macOS run shows its deny log never asks for it.
+ ///
+ /// Nothing else: no network, no Mach service lookup, no file read or write, no new process, no exec.
+ 
+ #include <array>
+ #include <cstddef>
+ #include <string_view>
+@@ -42,23 +45,25 @@ inline constexpr auto ProfileParameters = std::array {
+ inline constexpr auto SandboxProfile = std::string_view { R"sbpl((version 1)
+ (deny default)
+ 
+ ; Guest memory: objects Contour created and granted, mapped (data) and fstat()ed (metadata). Never created.
+ (allow ipc-posix-shm-read-data ipc-posix-shm-read-metadata ipc-posix-shm-write-data
+     (ipc-posix-name-prefix (param "SHM_PREFIX")))
+ 
+ ; A runtime that raises a signal raises it on itself.
+ (allow signal (target self))
+ 
+-; The CPU features the code generator reads: read and cached before the lockdown; kept in case a library
+-; reads them again later. To be removed once a green run shows no denial needs it.
++; The page size, which getpagesize() asks for until it is answered: the interpreter asks as it maps an
++; instance's memory. And the CPU features the code generator reads: read and cached before the lockdown;
++; kept in case a library reads them again later. To be removed once a green run shows no denial needs it.
+ (allow sysctl-read
++    (sysctl-name "hw.pagesize_compat")
+     (sysctl-name-prefix "hw.optional."))
+ )sbpl" };
+ 
+ /// @return ProfileParameters as sandbox_init_with_parameters() takes them: name, value, name, value, …,
+ ///         then a null pointer.
+ [[nodiscard]] constexpr auto profileParameterList() noexcept
+ {
+     auto list = std::array<char const*, (2 * ProfileParameters.size()) + 1> {};
+     auto next = std::size_t { 0 };
+     for (auto const& parameter: ProfileParameters)
+diff --git a/src/vtextension/wasm/remote/Hostility_test.cpp b/src/vtextension/wasm/remote/Hostility_test.cpp
+index af48bef7b..d69cf38ee 100644
+--- a/src/vtextension/wasm/remote/Hostility_test.cpp
++++ b/src/vtextension/wasm/remote/Hostility_test.cpp
+@@ -863,21 +863,22 @@ constexpr auto ScribbledRendersBound = std::chrono::seconds { 10 };
+ /// How many renders run through a host that scribbles on memory.
+ constexpr auto ScribbledRenders = 200;
+ 
+ } // namespace
+ 
+ #ifndef _WIN32
+ TEST_CASE("Hostility.descriptorUpIsNeverInstalled", "[vtextension][process][hostility]")
+ {
+     // The host attaches a descriptor to its CallResult. Where Contour's ends refuse descriptors (Linux 6.16+)
+     // its send fails and it passes the frame on bare; elsewhere Contour's plain receives leave the system to
+-    // drop it. Either way the call is answered as if nothing came with it, and the host serves on.
++    // drop it, or, where it installs it all the same (macOS), close it at once. Either way the call is
++    // answered as if nothing came with it, and the host serves on.
+     auto const deadline = CaseDeadline { "Hostility.descriptorUpIsNeverInstalled" };
+     auto const composition = HelperComposition { HelperTeardownGrace, &withoutHostileMode };
+     {
+         auto const backend = composition.backend(hostileHelper("descriptor-up"));
+         auto const runtime = contract::createRuntime(*backend);
+         auto loaded = loadInstanceModule(*runtime);
+         REQUIRE(loaded.has_value());
+         auto const module = *std::move(loaded);
+         auto context = contract::RecordingHostContext {};
+         auto const instance = contract::instantiate(*module, context);
+diff --git a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+index d6e14e1d2..5a1a9c883 100644
+--- a/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
++++ b/src/vtextension/wasm/remote/process/SandboxProbe_test.cpp
+@@ -199,20 +199,21 @@ constexpr auto ForbiddenOperations = std::array {
+     Expectation { .op = "open-file", .fate = Fate::Refused, .error = EACCES },
+     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EACCES },
+     Expectation { .op = "open-own-process",
+                   .fate = Fate::Refused,
+                   .error = EACCES,
+                   .allowedIn = vtextension::wasm::BuildInstrumentation::Sanitizers },
+     Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = EACCES },
+     Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "send-descriptor", .fate = Fate::Killed },
+     Expectation { .op = "fork", .fate = Fate::Killed },
+     Expectation { .op = "spawn-thread", .fate = Fate::Killed },
+     Expectation { .op = "execve", .fate = Fate::Killed },
+     Expectation { .op = "ptrace-traceme", .fate = Fate::Killed },
+     Expectation { .op = "signal-parent", .fate = Fate::Killed },
+     Expectation { .op = "map-writable-executable", .fate = Fate::Killed },
+     Expectation { .op = "map-shared-unfixed",
+                   .fate = Fate::Killed,
+                   .allowedIn = vtextension::wasm::BuildInstrumentation::Coverage },
+@@ -226,50 +227,58 @@ constexpr auto ForbiddenOperations = std::array {
+ // discards what a helper attaches. Memory both writable and executable is refused with EACCES: the launcher
+ // started the probe, as it starts the host, with W^X enforced (Process_freebsd.cpp).
+ constexpr auto ForbiddenOperations = std::array {
+     Expectation { .op = "open-file", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "open-own-process", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "open-other-process", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "socket-inet", .fate = Fate::Allowed },
+     Expectation { .op = "socket-unix", .fate = Fate::Allowed },
+     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = ECAPMODE },
++    Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "ioctl-control", .fate = Fate::Refused, .error = ENOTCAPABLE },
+     Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
+     Expectation { .op = "fork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+     Expectation {
+         .op = "pdfork", .fate = Fate::Refused, .error = EAGAIN, .exemption = CapExemption::Uncapped },
+     Expectation { .op = "execve", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "ptrace-traceme", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = ECAPMODE },
+     Expectation { .op = "map-writable-executable", .fate = Fate::Refused, .error = EACCES },
+     Expectation { .op = "protect-writable-executable", .fate = Fate::Refused, .error = EACCES },
+ };
+ #elifdef __APPLE__
+-// The profile refuses what it does not allow with EPERM: a file, a socket of any family, a new process, a
+-// program, a signal to another process. A Mach service lookup it refuses is refused as unprivileged.
++// The profile refuses what it does not allow with EPERM: a file, an address of any family, a new process, a
++// program, a signal to another process. A Mach service lookup it refuses is refused as unprivileged. It does
++// not refuse a new Internet or Unix-domain socket: the first macOS run made both under the profile that, in
++// the same run, refused every file, connect, fork and lookup above -- so it was in force, and Seatbelt does
++// not ask it about these sockets' creation. As on FreeBSD, such a socket reaches nothing without an address,
++// and every address is refused, by path as by number.
+ constexpr auto ForbiddenOperations = std::array {
+     Expectation { .op = "open-file", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "open-directory", .fate = Fate::Refused, .error = EPERM },
+-    Expectation { .op = "socket-inet", .fate = Fate::Refused, .error = EPERM },
+-    Expectation { .op = "socket-unix", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "socket-inet", .fate = Fate::Allowed },
++    Expectation { .op = "socket-unix", .fate = Fate::Allowed },
+     Expectation { .op = "connect-inet", .fate = Fate::Refused, .error = EPERM },
++    Expectation { .op = "connect-unix", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "fork", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "execve", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "signal-parent", .fate = Fate::Refused, .error = EPERM },
+     Expectation { .op = "mach-lookup", .fate = Fate::Refused, .error = BOOTSTRAP_NOT_PRIVILEGED },
+     // What the profile leaves to other guards, or the system decides on its own, recorded: a descriptor sent
+-    // up (Contour's end discards it), tracing, a thread, and memory both writable and executable.
++    // up (Contour's end discards it), tracing, a thread, memory both writable and executable, and memory for
++    // code made at run time (MAP_JIT), which no engine of the host maps (cmake/patches/).
+     Expectation { .op = "send-descriptor", .fate = Fate::Unasserted },
+     Expectation { .op = "ptrace-traceme", .fate = Fate::Unasserted },
+     Expectation { .op = "spawn-thread", .fate = Fate::Unasserted },
+     Expectation { .op = "protect-writable-executable", .fate = Fate::Unasserted },
++    Expectation { .op = "map-jit", .fate = Fate::Unasserted },
+ };
+ #endif
+ 
+ /// @return What @p expectation's op comes to in this build, run by this user.
+ [[nodiscard]] Fate fateOf(Expectation const& expectation)
+ {
+     if (expectation.allowedIn == vtextension::wasm::ThisBuildInstrumentation)
+         return Fate::Allowed;
+     auto const uncapped = vtextension::wasm::host::BuildCapPolicy == vtextension::wasm::host::CapPolicy::Skip
+                           || ::geteuid() == 0;
+diff --git a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+index c75d9e465..88b760bb5 100644
+--- a/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
++++ b/src/vtextension/wasm/remote/process/testing/SandboxProbe.cpp
+@@ -1,19 +1,20 @@
+ // SPDX-License-Identifier: Apache-2.0
+ #include <vtextension/wasm/remote/process/testing/SandboxProbe.hpp>
+ 
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <sys/ptrace.h>
+ #include <sys/random.h>
+ #include <sys/socket.h>
+ #include <sys/syscall.h>
++#include <sys/un.h>
+ #include <sys/wait.h>
+ #ifdef __linux__
+     #include <sys/prctl.h>
+ #elifdef __FreeBSD__
+     #include <sys/procctl.h>
+     #include <sys/procdesc.h>
+ #elifdef __APPLE__
+     #include <mach/mach.h>
+     #include <servers/bootstrap.h>
+ #endif
+@@ -105,20 +106,32 @@ namespace
+         SetupFailed = 5,
+     };
+ 
+     /// A file the system has, which no locked-down host may read.
+ #ifdef __APPLE__
+     constexpr auto ReadableFile = "/etc/hosts";
+ #else
+     constexpr auto ReadableFile = "/etc/hostname";
+ #endif
+ 
++    /// A program every system has, which no locked-down host may run: macOS has no /bin/true.
++#ifdef __APPLE__
++    constexpr auto RunnableProgram = "/usr/bin/true";
++#else
++    constexpr auto RunnableProgram = "/bin/true";
++#endif
++
++    /// A Unix-domain socket the system listens on, which no locked-down host may reach. Linux and FreeBSD
++    /// refuse before the path is looked at, so it need exist only on macOS, whose profile refuses the
++    /// connect.
++    constexpr auto ListeningSocketPath = std::string_view { "/var/run/syslog" };
++
+     /// The type of the sockets the ops make: close-on-exec where the system takes it at creation.
+ #ifdef SOCK_CLOEXEC
+     constexpr auto StreamSocket = SOCK_STREAM | SOCK_CLOEXEC;
+ #else
+     constexpr auto StreamSocket = SOCK_STREAM;
+ #endif
+ 
+     /// The flags of a send that must not raise SIGPIPE: none where the system has no MSG_NOSIGNAL (macOS),
+     /// whose channel sockets carry SO_NOSIGPIPE instead (Channel_posix.cpp).
+ #ifdef MSG_NOSIGNAL
+@@ -208,20 +221,36 @@ namespace
+         auto address = sockaddr_in {};
+         address.sin_family = AF_INET;
+         address.sin_port = htons(DiscardPort);
+         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+         auto const outcome =
+             outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
+         ::close(descriptor);
+         return outcome;
+     }
+ 
++    /// Reaches for a Unix-domain socket by its path: where a sandbox lets a socket be made at all (macOS), it
++    /// is the connect that it refuses.
++    [[nodiscard]] std::string connectUnix(OperationContext&)
++    {
++        auto const descriptor = ::socket(AF_UNIX, StreamSocket, 0);
++        if (descriptor < 0)
++            return outcomeOf(descriptor);
++        auto address = sockaddr_un {};
++        address.sun_family = AF_UNIX;
++        std::ranges::copy(ListeningSocketPath, std::begin(address.sun_path));
++        auto const outcome =
++            outcomeOf(::connect(descriptor, reinterpret_cast<sockaddr const*>(&address), sizeof(address)));
++        ::close(descriptor);
++        return outcome;
++    }
++
+     /// Asks the control channel how much it holds, by an ioctl no descriptor of the host needs.
+     [[nodiscard]] std::string ioctlControl(OperationContext& context)
+     {
+         auto pending = 0;
+         return outcomeOf(::ioctl(context.controlDescriptor, FIONREAD, &pending));
+     }
+ 
+     /// Sends a byte to Contour with this process's stderr attached, as a helper handing a descriptor up
+     /// would.
+     [[nodiscard]] std::string sendDescriptor(OperationContext& context)
+@@ -268,21 +297,21 @@ namespace
+ #endif
+ 
+     [[nodiscard]] std::string spawnThread(OperationContext&)
+     {
+         auto thread = host::ExecutorThread::start(ThreadStackBytes, [] {});
+         return thread ? std::string { "ok" } : std::format("refused:{}", thread.error().value());
+     }
+ 
+     [[nodiscard]] std::string executeProgram(OperationContext&)
+     {
+-        auto program = std::string { "/bin/true" };
++        auto program = std::string { RunnableProgram };
+         auto arguments = std::array<char*, 2> { program.data(), nullptr };
+         auto environment = std::array<char*, 1> { nullptr };
+         return outcomeOf(::execve(program.c_str(), arguments.data(), environment.data()));
+     }
+ 
+     [[nodiscard]] std::string traceMe(OperationContext&)
+     {
+ #if defined(__FreeBSD__) || defined(__APPLE__)
+         return outcomeOf(::ptrace(PT_TRACE_ME, 0, nullptr, 0));
+ #else
+@@ -352,20 +381,29 @@ namespace
+     {
+         return protectAnonymous(PROT_READ | PROT_EXEC);
+     }
+ 
+     /// What every engine's host does as guest memory opens: no execute bit.
+     [[nodiscard]] std::string protectReadable(OperationContext&)
+     {
+         return protectAnonymous(PROT_READ);
+     }
+ 
++#ifdef __APPLE__
++    /// Maps memory for code made at run time (MAP_JIT), writable only, as WAMR maps all of its memory unless
++    /// patched (cmake/patches/): what the sandbox says of it, beside what the hardened runtime says.
++    [[nodiscard]] std::string mapForJit(OperationContext&)
++    {
++        return mapAnonymous(PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_JIT);
++    }
++#endif
++
+     [[nodiscard]] std::string mapExecutable(OperationContext&)
+     {
+         return mapAnonymous(PROT_READ | PROT_EXEC, MAP_PRIVATE);
+     }
+ 
+     [[nodiscard]] std::string channelPair(OperationContext&)
+     {
+         auto const pair = transport::makeChannelPair();
+         if (!pair)
+             return "failed:channel-pair";
+@@ -423,40 +461,44 @@ namespace
+         return "ok";
+     }
+ #endif
+ 
+     [[nodiscard]] std::string nothing(OperationContext&)
+     {
+         return "ok";
+     }
+ 
+     /// What the locked-down host does: takes a grant off control and maps it over a reservation, opens it,
+-    /// writes it, unmaps and closes it; draws random bytes, reads the clock, waits on a condition, asks for
+-    /// its alternate signal stack, and (aarch64) flushes the instruction caches.
++    /// writes it, unmaps and closes it; asks the page size; draws random bytes, reads the clock, waits on a
++    /// condition, asks for its alternate signal stack, and (aarch64) flushes the instruction caches.
+     [[nodiscard]] std::string permitted(OperationContext& context)
+     {
+         auto const request = context.control.receive();
+         auto const* const instantiate = request ? std::get_if<proto::Instantiate>(&*request) : nullptr;
+         if (!instantiate)
+             return "failed:instantiate";
+         {
+             auto handle = transport::claimGrantedHandle(context.control, instantiate->memory.handle);
+             if (!handle)
+                 return "failed:claim";
+             auto mapping = transport::GuestMemoryMapping::map(
+                 handle->get(), instantiate->memory.objectBytes, instantiate->memory.initialBytes, 0);
+             if (!mapping)
+                 return "failed:map";
+             std::ignore = std::move(*handle).adopt();
+             constexpr auto Mark = std::string_view { "probe" };
+             std::ranges::copy(std::as_bytes(std::span { Mark }), mapping->base());
+         }
++        // As an engine that maps an instance's memory itself asks (WAMR's os_mmap()): the C library may ask
++        // the kernel every time (macOS), where a sandbox must answer.
++        if (::getpagesize() <= 0)
++            return "failed:page-size";
+         auto random = std::array<std::byte, 8> {};
+ #ifdef __APPLE__
+         // macOS has no getrandom(); getentropy() is what its C++ library draws on.
+         if (::getentropy(random.data(), random.size()) != 0)
+             return "failed:getentropy";
+ #else
+         if (::getrandom(random.data(), random.size(), 0) != static_cast<ssize_t>(random.size()))
+             return "failed:getrandom";
+ #endif
+         auto now = timespec {};
+@@ -493,20 +535,21 @@ namespace
+ 
+     constexpr auto Operations = std::array {
+         Operation { .name = "none", .run = &nothing },
+         Operation { .name = "open-file", .run = &openFile },
+         Operation { .name = "open-directory", .run = &openDirectory },
+         Operation { .name = "open-own-process", .run = &openOwnProcess },
+         Operation { .name = "open-other-process", .run = &openOtherProcess },
+         Operation { .name = "socket-inet", .run = &socketInet },
+         Operation { .name = "socket-unix", .run = &socketUnix },
+         Operation { .name = "connect-inet", .run = &connectInet },
++        Operation { .name = "connect-unix", .run = &connectUnix },
+         Operation { .name = "ioctl-control", .run = &ioctlControl },
+         Operation { .name = "send-descriptor", .run = &sendDescriptor },
+         Operation { .name = "fork", .run = &forkProcess },
+ #ifdef __FreeBSD__
+         Operation { .name = "pdfork", .run = &forkToDescriptor },
+ #endif
+         Operation { .name = "spawn-thread", .run = &spawnThread },
+         Operation { .name = "execve", .run = &executeProgram },
+         Operation { .name = "ptrace-traceme", .run = &traceMe },
+         Operation { .name = "signal-parent", .run = &signalParent },
+@@ -514,20 +557,21 @@ namespace
+         Operation { .name = "map-shared-unfixed", .run = &mapSharedUnfixed },
+         Operation { .name = "protect-writable-executable", .run = &protectWritableExecutable },
+         Operation { .name = "map-executable", .run = &mapExecutable },
+         Operation { .name = "protect-executable", .run = &protectExecutable },
+         Operation { .name = "protect-readable", .run = &protectReadable },
+         Operation { .name = "channel-pair", .run = &channelPair },
+         Operation { .name = "held-limits", .run = &heldLimits },
+         Operation { .name = "permitted", .run = &permitted },
+ #ifdef __APPLE__
+         Operation { .name = "mach-lookup", .run = &lookUpMachService },
++        Operation { .name = "map-jit", .run = &mapForJit },
+ #endif
+     };
+ 
+ #ifdef __linux__
+     /// An outer sandbox's filter: what it refuses, and with which errno; only when the call's arguments pass
+     /// `checks`, if any.
+     struct OuterRefusal
+     {
+         host::SystemCall call;
+         int error;
+diff --git a/src/vtextension/wasm/remote/transport/Channel.hpp b/src/vtextension/wasm/remote/transport/Channel.hpp
+index 5e4a020e5..60ac6f27f 100644
+--- a/src/vtextension/wasm/remote/transport/Channel.hpp
++++ b/src/vtextension/wasm/remote/transport/Channel.hpp
+@@ -74,41 +74,43 @@ class Channel
+     /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down.
+     [[nodiscard]] std::expected<void, ChannelError> send(std::span<uint8_t const> bytes);
+ 
+     /// Sends as much of @p bytes as the channel takes now, without blocking.
+     /// @param bytes The bytes to send.
+     /// @return How many of them, from the front, were sent: 0 if none fit; `Closed` if the peer is gone or
+     ///         this end was shut down.
+     [[nodiscard]] std::expected<std::size_t, ChannelError> trySend(std::span<uint8_t const> bytes);
+ 
+     /// Receives at least one byte, blocking until one arrives. A descriptor the peer attached to them is
+-    /// discarded by the system, never installed in this process.
++    /// never kept: the system discards it, or, where it installs it all the same (macOS), it is closed at
++    /// once.
+     /// @param buffer Where the bytes go. Not empty.
+     /// @return How many bytes arrived, at least one; `Closed` at the peer's end of stream, or once this end
+     ///         was shut down.
+     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSome(std::span<uint8_t> buffer);
+ 
+ #ifndef _WIN32
+     /// Sends all of @p bytes, as send() does, with a duplicate of @p handle attached to their first byte
+     /// (SCM_RIGHTS): the peer receives it with that byte, as receiveSomeWithHandles() does.
+     /// @param bytes The bytes to send; not empty.
+     /// @param handle The descriptor; still the caller's.
+     /// @return Nothing once every byte is sent; `Closed` if the peer is gone or this end was shut down;
+     ///         `Refused`, with nothing sent, if the peer's end refuses descriptors
+     ///         (UpwardDescriptors::Refused).
+     [[nodiscard]] std::expected<void, ChannelError> sendWithHandle(std::span<uint8_t const> bytes,
+                                                                    NativeHandle handle);
+ 
+     /// Receives at least one byte, as receiveSome() does, and installs the descriptors attached to them,
+-    /// close-on-exec. At most two are taken in at once, so that a reader tells a peer that attached one
+-    /// more than a message may carry from one that did not; past that, the system truncates them, and the
+-    /// receive fails.
++    /// close-on-exec. At least two are taken in at once, so that a reader tells a peer that attached one
++    /// more than a message may carry from one that did not. Past that, Linux and FreeBSD truncate them, and
++    /// the receive fails; macOS, which installs every one before it truncates, has every one a message can
++    /// carry taken in, so that none stays installed unseen.
+     /// @param buffer Where the bytes go. Not empty.
+     /// @param handles Where the descriptors that arrived are appended, now the caller's.
+     /// @return How many bytes arrived, at least one; `Closed` as receiveSome(); `Refused` if the system
+     ///         truncated what was attached, or something other than descriptors was, every descriptor
+     ///         received then closed; `Io` if a received descriptor could not be made close-on-exec.
+     [[nodiscard]] std::expected<std::size_t, ChannelError> receiveSomeWithHandles(
+         std::span<uint8_t> buffer, std::vector<OwnedHandle>& handles);
+ #endif
+ 
+     /// Ends the stream, both ways and for both ends: a receive or send blocked on this end now, from any
+@@ -126,28 +128,30 @@ class Channel
+     ///         Not to be called, nor its value used, while another thread may call shutdown(): on Windows the
+     ///         handle may be closed, and its value reused, at any moment after shutdown() begins.
+     [[nodiscard]] NativeHandle nativeHandle() const noexcept;
+ 
+   private:
+     std::unique_ptr<Native> _native;
+ };
+ 
+ /// What becomes of a descriptor the extension host process attaches to what it sends Contour.
+ ///
+-/// Contour reads its ends with plain receives, so nothing a helper attaches is ever installed. But where the
+-/// system merely discards such a descriptor, it closes it in the receiving thread, and a last close can block
+-/// without bound (a socket lingering on a full send buffer): a compromised helper could hang a thread of
+-/// Contour's. Where the system lets an end refuse descriptors outright (Linux 6.16 and later,
+-/// `SO_PASSRIGHTS`), the helper's send fails instead, and no descriptor ever reaches Contour's process.
++/// Contour reads its ends with plain receives, so nothing a helper attaches is ever kept. But where the
++/// system merely discards such a descriptor -- or installs it all the same, as macOS does, for the receive to
++/// close
++/// -- it is closed in the receiving thread, and a last close can block without bound (a socket lingering on a
++/// full send buffer): a compromised helper could hang a thread of Contour's. Where the system lets an end
++/// refuse descriptors outright (Linux 6.16 and later, `SO_PASSRIGHTS`), the helper's send fails instead, and
++/// no descriptor ever reaches Contour's process.
+ enum class UpwardDescriptors : uint8_t
+ {
+-    Discarded, ///< The system takes them in and closes them, in the receiving thread (older kernels, BSDs).
++    Discarded, ///< They are taken in and closed, in the receiving thread (older kernels, BSDs, macOS).
+     Refused,   ///< The system refuses to send them: nothing reaches Contour (Linux 6.16+, and Windows, where
+                ///< no handle travels beside the bytes).
+ };
+ 
+ /// Two connected ends: what one sends, the other receives.
+ struct ChannelPair
+ {
+     Channel parent; ///< Contour's end.
+     Channel helper; ///< The extension host process's end; it takes descriptors (Contour's grants).
+     UpwardDescriptors upward {}; ///< What becomes of a descriptor sent from the helper's end to Contour's.
+diff --git a/src/vtextension/wasm/remote/transport/Channel_posix.cpp b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+index 4fba33cd3..6aeb84b0d 100644
+--- a/src/vtextension/wasm/remote/transport/Channel_posix.cpp
++++ b/src/vtextension/wasm/remote/transport/Channel_posix.cpp
+@@ -1,39 +1,48 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ // The channel on POSIX: a connected pair of Unix-domain stream sockets, close-on-exec, whose writes never
+ // raise SIGPIPE. Shutting an end down is ::shutdown(), which wakes a reader blocked on it; the descriptor is
+ // closed only when the channel is destroyed, so that no thread can find its number reused.
+ //
+-// A descriptor travels as SCM_RIGHTS on a message's first byte. Only receiveSomeWithHandles() installs what
+-// arrives; a plain recv() leaves the system to discard it. Contour's end of a pair refuses descriptors where
+-// Linux lets it (SO_PASSRIGHTS), so that none is even discarded there (UpwardDescriptors).
++// A descriptor travels as SCM_RIGHTS on a message's first byte. Only receiveSomeWithHandles() keeps what
++// arrives. A plain recv() leaves the system to discard it -- but on macOS, which installs it all the same,
++// receiveSome() takes it in and closes it. Contour's end of a pair refuses descriptors where Linux lets it
++// (SO_PASSRIGHTS), so that none is even discarded there (UpwardDescriptors).
++//
++// trySend() never waits. Where the system honours MSG_DONTWAIT on a send, that is all it takes. macOS does
++// not: XNU's sosendcheck() waits for room unless the socket itself is non-blocking or the caller passed
++// its private MSG_NBIO, and making the descriptor non-blocking would make a receive another thread blocks
++// in fail. There, a send goes out only once poll() says the socket is writable -- room for at least its
++// send low-water mark -- and is no larger than that mark, which XNU then takes without waiting. Only one
++// thread sends on an end at a time, so the room only grows in between.
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <sys/uio.h>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cerrno>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+ #include <expected>
+ #include <memory>
+ #include <ranges>
+ #include <span>
+ #include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+ #include <fcntl.h>
++#include <poll.h>
+ #include <unistd.h>
+ 
+ #include <vtextension/wasm/remote/transport/Channel.hpp>
+ #include <vtextension/wasm/remote/transport/OwnedHandle.hpp>
+ #include <vtextension/wasm/remote/transport/WouldBlock.hpp>
+ 
+ namespace vtextension::wasm::remote::transport
+ {
+ 
+ namespace
+@@ -105,29 +114,63 @@ namespace
+         return upwardDescriptorsWhenUnrefused(errno);
+ #else
+         return UpwardDescriptors::Discarded;
+ #endif
+     }
+ 
+     /// The types of msghdr::msg_controllen and cmsghdr::cmsg_len: size_t on Linux, socklen_t on macOS.
+     using ControlLength = decltype(::msghdr {}.msg_controllen);
+     using ControlMessageLength = decltype(::cmsghdr {}.cmsg_len);
+ 
+-    /// The most descriptors one receive takes in: one more than a message may carry, so that a peer that
+-    /// attached two is told from one that attached one.
++    /// What the system does with descriptors attached to bytes that a receive takes without asking for them.
++    enum class UnclaimedDescriptors : uint8_t
++    {
++        Disposed,  ///< It closes them, and none is ever installed (Linux, FreeBSD).
++        Installed, ///< It installs them all the same, unnamed: XNU's soreceive_ctl() externalizes SCM_RIGHTS
++                   ///< whether or not the caller takes the control message, then frees the message. Every
++                   ///< receive must then take them in, to close them.
++    };
++
++    /// Whether a send honours MSG_DONTWAIT.
++    enum class DontWaitSend : uint8_t
++    {
++        Honoured, ///< It fails with EAGAIN rather than wait for room.
++        Ignored,  ///< It waits for room all the same (macOS: XNU's sosendcheck() tests only the socket's
++                  ///< non-blocking state and MSG_NBIO).
++    };
++
++#ifdef __APPLE__
++    constexpr auto ThisSystemUnclaimedDescriptors = UnclaimedDescriptors::Installed;
++    constexpr auto ThisSystemDontWaitSend = DontWaitSend::Ignored;
++#else
++    constexpr auto ThisSystemUnclaimedDescriptors = UnclaimedDescriptors::Disposed;
++    constexpr auto ThisSystemDontWaitSend = DontWaitSend::Honoured;
++#endif
++
++    /// How many descriptors a receive takes in at least: one more than a message may carry, so that a peer
++    /// that attached two is told from one that attached one.
+     constexpr auto MaxReceivedHandles = std::size_t { 2 };
+ 
+     /// The control buffer one attached descriptor is sent in.
+     using SendControlBuffer = std::array<std::byte, CMSG_SPACE(sizeof(int))>;
+ 
++    /// How many bytes of control data a receive takes in. Where the system disposes of what does not fit
++    /// (Linux, FreeBSD), room for MaxReceivedHandles descriptors. Where it installs every descriptor before
++    /// it truncates what does not fit (macOS), room for all a message can carry, so that each one installed
++    /// is seen, and closed: XNU takes at most MCLBYTES (2048) of control data in, once each descriptor in it
++    /// is widened to a pointer, so no message carries more than that out.
++    constexpr auto ReceiveControlBytes = ThisSystemUnclaimedDescriptors == UnclaimedDescriptors::Installed
++                                             ? std::size_t { 2048 }
++                                             : std::size_t { CMSG_SPACE(sizeof(int) * MaxReceivedHandles) };
++
+     /// The control buffer a receive takes descriptors into.
+-    using ReceiveControlBuffer = std::array<std::byte, CMSG_SPACE(sizeof(int) * MaxReceivedHandles)>;
++    using ReceiveControlBuffer = std::array<std::byte, ReceiveControlBytes>;
+ 
+ #ifdef MSG_CMSG_CLOEXEC
+     /// Installs received descriptors close-on-exec, atomically.
+     constexpr auto ReceiveFlags = MSG_CMSG_CLOEXEC;
+ #else
+     // macOS has no MSG_CMSG_CLOEXEC: each descriptor is made close-on-exec right after recvmsg().
+     constexpr auto ReceiveFlags = 0;
+ #endif
+ } // namespace
+ 
+@@ -199,51 +242,182 @@ std::expected<void, ChannelError> Channel::send(std::span<uint8_t const> bytes)
+         {
+             if (errno == EINTR)
+                 continue;
+             return std::unexpected(channelErrorOf(errno));
+         }
+         bytes = bytes.subspan(static_cast<std::size_t>(sent));
+     }
+     return {};
+ }
+ 
++namespace
++{
++    /// @return How many bytes of @p bytes, from the front, one send on @p descriptor may be given without
++    ///         waiting for room: all of them where the send honours MSG_DONTWAIT; elsewhere at most the
++    ///         socket's send low-water mark, once poll() says it is writable, and none (0) while it is not.
++    ///         -1, with errno set, where asking failed.
++    [[nodiscard]] ssize_t sendableWithoutWaiting(int descriptor, std::span<uint8_t const> bytes) noexcept
++    {
++        if constexpr (ThisSystemDontWaitSend == DontWaitSend::Honoured)
++            return static_cast<ssize_t>(bytes.size());
++        else
++        {
++            auto ready = ::pollfd { .fd = descriptor, .events = POLLOUT, .revents = 0 };
++            auto const polled = ::poll(&ready, 1, 0);
++            if (polled == -1)
++                return -1;
++            // A peer that is gone, or an error pending, is what the send reports: let it.
++            if (polled == 0 || (ready.revents & (POLLOUT | POLLHUP | POLLERR)) == 0)
++                return 0;
++            auto lowWater = 0;
++            auto length = static_cast<socklen_t>(sizeof(lowWater));
++            if (::getsockopt(descriptor, SOL_SOCKET, SO_SNDLOWAT, &lowWater, &length) == -1)
++                return -1;
++            return static_cast<ssize_t>(
++                std::min(bytes.size(), static_cast<std::size_t>(std::max(lowWater, 1))));
++        }
++    }
++} // namespace
++
+ std::expected<std::size_t, ChannelError> Channel::trySend(std::span<uint8_t const> bytes)
+ {
+     auto sent = std::size_t { 0 };
+     while (sent < bytes.size())
+     {
+         auto const rest = bytes.subspan(sent);
+-        auto const count = ::send(_native->descriptor, rest.data(), rest.size(), SendFlags | MSG_DONTWAIT);
++        auto const sendable = sendableWithoutWaiting(_native->descriptor, rest);
++        if (sendable == -1)
++        {
++            if (errno == EINTR)
++                continue;
++            return std::unexpected(channelErrorOf(errno));
++        }
++        if (sendable == 0)
++            break;
++        auto const count = ::send(
++            _native->descriptor, rest.data(), static_cast<std::size_t>(sendable), SendFlags | MSG_DONTWAIT);
+         if (count == -1)
+         {
+             if (errno == EINTR)
+                 continue;
+             if (wouldBlock(errno))
+                 break;
+             return std::unexpected(channelErrorOf(errno));
+         }
+         sent += static_cast<std::size_t>(count);
+     }
+     return sent;
+ }
+ 
+-std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)
++namespace
+ {
+-    while (true)
++    /// What came beside the bytes of one receive.
++    enum class Ancillary : uint8_t
++    {
++        Descriptors,  ///< Descriptors only, if anything, every one taken in close-on-exec.
++        Foreign,      ///< Something other than descriptors, or descriptors the buffer had no room for.
++        Unconfigured, ///< Descriptors, one of which could not be made close-on-exec.
++    };
++
++    /// What one receive took in.
++    struct Receipt
++    {
++        std::size_t bytes = 0; ///< How many bytes; 0 at the peer's end of stream.
++        Ancillary ancillary = Ancillary::Descriptors;
++    };
++
++    /// Receives at least one byte from @p descriptor into @p buffer, blocking until one arrives, with what
++    /// came beside them.
++    /// @param arrived Where every descriptor installed is appended, owned at once, so that each is closed
++    ///                however the receive ends.
++    /// @return What arrived; why nothing did otherwise.
++    [[nodiscard]] std::expected<Receipt, ChannelError> receiveMessage(int descriptor,
++                                                                      std::span<uint8_t> buffer,
++                                                                      std::vector<OwnedHandle>& arrived)
+     {
+-        auto const received = ::recv(_native->descriptor, buffer.data(), buffer.size(), 0);
+-        if (received > 0)
+-            return static_cast<std::size_t>(received);
+-        if (received == 0)
+-            return std::unexpected(ChannelError::Closed);
+-        if (errno != EINTR)
++        auto iov = ::iovec { .iov_base = buffer.data(), .iov_len = buffer.size() };
++        alignas(::cmsghdr) auto control = ReceiveControlBuffer {};
++        auto message = ::msghdr {};
++        message.msg_iov = &iov;
++        message.msg_iovlen = 1;
++        message.msg_control = control.data();
++        message.msg_controllen = static_cast<ControlLength>(control.size());
++        auto received = ssize_t { 0 };
++        do
++            received = ::recvmsg(descriptor, &message, ReceiveFlags);
++        while (received == -1 && errno == EINTR);
++        if (received == -1)
+             return std::unexpected(channelErrorOf(errno));
++
++        auto foreign = false;
++        auto unconfigured = false;
++        auto const* const controlEnd = control.data() + message.msg_controllen;
++        for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr;
++             header = CMSG_NXTHDR(&message, header))
++        {
++            // Defence in depth: on Linux the 2-descriptor buffer is too small for any other cmsg, which ends
++            // as MSG_CTRUNC instead, so this is unreachable there.
++            if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
++                || header->cmsg_len < CMSG_LEN(0))
++            {
++                foreign = true;
++                continue;
++            }
++            // Every one the buffer holds, never past its end, whatever the header claims.
++            auto const* const data = reinterpret_cast<std::byte const*>(CMSG_DATA(header));
++            auto const held = static_cast<std::size_t>(std::max(controlEnd - data, std::ptrdiff_t { 0 }));
++            auto const count = std::min((header->cmsg_len - CMSG_LEN(0)) / sizeof(int), held / sizeof(int));
++            for (auto const index: std::views::iota(std::size_t { 0 }, count))
++            {
++                auto installed = -1;
++                std::memcpy(&installed, data + (index * sizeof(int)), sizeof(int));
++                arrived.emplace_back(installed);
++#ifndef MSG_CMSG_CLOEXEC
++                if (::fcntl(installed, F_SETFD, FD_CLOEXEC) == -1)
++                    unconfigured = true;
++#endif
++            }
++        }
++        // Something other than descriptors, or descriptors the buffer had no room for: nothing of the message
++        // can be trusted to carry what its sender meant.
++        if (foreign || (message.msg_flags & MSG_CTRUNC) != 0)
++            return Receipt { .bytes = static_cast<std::size_t>(received), .ancillary = Ancillary::Foreign };
++        return Receipt { .bytes = static_cast<std::size_t>(received),
++                         .ancillary = unconfigured ? Ancillary::Unconfigured : Ancillary::Descriptors };
++    }
++} // namespace
++
++std::expected<std::size_t, ChannelError> Channel::receiveSome(std::span<uint8_t> buffer)
++{
++    if constexpr (ThisSystemUnclaimedDescriptors == UnclaimedDescriptors::Installed)
++    {
++        // Whatever came beside the bytes is closed as this ends: the bytes are what was asked for.
++        auto discarded = std::vector<OwnedHandle> {};
++        return receiveMessage(_native->descriptor, buffer, discarded)
++            .and_then([](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
++                if (receipt.bytes == 0)
++                    return std::unexpected(ChannelError::Closed);
++                return receipt.bytes;
++            });
++    }
++    else
++    {
++        while (true)
++        {
++            auto const received = ::recv(_native->descriptor, buffer.data(), buffer.size(), 0);
++            if (received > 0)
++                return static_cast<std::size_t>(received);
++            if (received == 0)
++                return std::unexpected(ChannelError::Closed);
++            if (errno != EINTR)
++                return std::unexpected(channelErrorOf(errno));
++        }
+     }
+ }
+ 
+ std::expected<void, ChannelError> Channel::sendWithHandle(std::span<uint8_t const> bytes, NativeHandle handle)
+ {
+     if (bytes.empty())
+         return std::unexpected(ChannelError::Io);
+     auto iov = ::iovec { .iov_base = const_cast<uint8_t*>(bytes.data()), .iov_len = bytes.size() };
+     alignas(::cmsghdr) auto control = SendControlBuffer {};
+     auto message = ::msghdr {};
+@@ -269,71 +443,36 @@ std::expected<void, ChannelError> Channel::sendWithHandle(std::span<uint8_t cons
+             return std::unexpected(channelErrorOf(errno));
+         }
+         // The descriptor went with the first byte; the rest are plain bytes.
+         return send(bytes.subspan(static_cast<std::size_t>(sent)));
+     }
+ }
+ 
+ std::expected<std::size_t, ChannelError> Channel::receiveSomeWithHandles(std::span<uint8_t> buffer,
+                                                                          std::vector<OwnedHandle>& handles)
+ {
+-    auto iov = ::iovec { .iov_base = buffer.data(), .iov_len = buffer.size() };
+-    alignas(::cmsghdr) auto control = ReceiveControlBuffer {};
+-    auto message = ::msghdr {};
+-    message.msg_iov = &iov;
+-    message.msg_iovlen = 1;
+-    message.msg_control = control.data();
+-    message.msg_controllen = static_cast<ControlLength>(control.size());
+-    auto received = ssize_t { 0 };
+-    do
+-        received = ::recvmsg(_native->descriptor, &message, ReceiveFlags);
+-    while (received == -1 && errno == EINTR);
+-    if (received == -1)
+-        return std::unexpected(channelErrorOf(errno));
+-
+     // Owned at once, so that every one is closed should any part of the message be refused.
+     auto arrived = std::vector<OwnedHandle> {};
+-    auto foreign = false;
+-    auto unconfigured = false;
+-    for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header))
+-    {
+-        // Defence in depth: on Linux the 2-descriptor buffer is too small for any other cmsg, which ends as
+-        // MSG_CTRUNC instead, so this is unreachable there.
+-        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS
+-            || header->cmsg_len < CMSG_LEN(0))
+-        {
+-            foreign = true;
+-            continue;
+-        }
+-        auto const count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+-        for (auto const index: std::views::iota(std::size_t { 0 }, std::min(count, MaxReceivedHandles)))
+-        {
+-            auto descriptor = -1;
+-            std::memcpy(&descriptor, CMSG_DATA(header) + (index * sizeof(int)), sizeof(int));
+-            arrived.emplace_back(descriptor);
+-#ifndef MSG_CMSG_CLOEXEC
+-            if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) == -1)
+-                unconfigured = true;
+-#endif
+-        }
+-    }
+-    // Something other than descriptors, or descriptors the buffer had no room for: nothing of the message
+-    // can be trusted to carry what its sender meant.
+-    if (foreign || (message.msg_flags & MSG_CTRUNC) != 0)
+-        return std::unexpected(ChannelError::Refused);
+-    if (unconfigured)
+-        return std::unexpected(ChannelError::Io);
+-    if (received == 0)
+-        return std::unexpected(ChannelError::Closed);
+-    for (auto& handle: arrived)
+-        handles.push_back(std::move(handle));
+-    return static_cast<std::size_t>(received);
++    return receiveMessage(_native->descriptor, buffer, arrived)
++        .and_then([&](Receipt receipt) -> std::expected<std::size_t, ChannelError> {
++            switch (receipt.ancillary)
++            {
++                case Ancillary::Foreign: return std::unexpected(ChannelError::Refused);
++                case Ancillary::Unconfigured: return std::unexpected(ChannelError::Io);
++                case Ancillary::Descriptors: break;
++            }
++            if (receipt.bytes == 0)
++                return std::unexpected(ChannelError::Closed);
++            for (auto& handle: arrived)
++                handles.push_back(std::move(handle));
++            return receipt.bytes;
++        });
+ }
+ 
+ void Channel::shutdown() noexcept
+ {
+     if (_native)
+         ::shutdown(_native->descriptor, SHUT_RDWR);
+ }
+ 
+ NativeHandle Channel::nativeHandle() const noexcept
+ {
+diff --git a/src/vtextension/wasm/remote/transport/PduStream_test.cpp b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+index 384b73005..75cb5cb7b 100644
+--- a/src/vtextension/wasm/remote/transport/PduStream_test.cpp
++++ b/src/vtextension/wasm/remote/transport/PduStream_test.cpp
+@@ -232,29 +232,42 @@ TEST_CASE("PduStream.trySendKeepsAPartialFrame", "[vtextension]")
+     // in until one does not fit whole, and then until none fits at all.
+     auto const loadNumbered = [](uint32_t moduleId) {
+         return proto::Pdu { proto::Load {
+             .runtimeId = 1,
+             .moduleId = moduleId,
+             .bytes = std::vector<std::byte>(std::size_t { 256 } * 1024, std::byte { 9 }) } };
+     };
+     constexpr auto MaxFrames = uint32_t { 1024 };
+     auto sentFrames = uint32_t { 0 };
+     auto begunTail = std::size_t { 0 };
+-    while (sentFrames < MaxFrames)
++    auto filling = std::async(std::launch::async, [&]() -> std::expected<void, StreamError> {
++        while (sentFrames < MaxFrames)
++        {
++            auto const outcome = pair.parent.trySend(loadNumbered(sentFrames + 1));
++            if (!outcome)
++                return std::unexpected(outcome.error());
++            if (*outcome == transport::SendOutcome::WouldBlock)
++                break;
++            ++sentFrames;
++            begunTail = pair.parent.unsentBytes();
++        }
++        return {};
++    });
++    if (filling.wait_for(5s) != std::future_status::ready)
+     {
+-        auto const outcome = pair.parent.trySend(loadNumbered(sentFrames + 1));
+-        REQUIRE(outcome.has_value());
+-        if (*outcome == transport::SendOutcome::WouldBlock)
+-            break;
+-        ++sentFrames;
+-        begunTail = pair.parent.unsentBytes();
++        // Nobody reads yet: a trySend() that waits for room waits forever, and the future's destructor with
++        // it. The run ends here, rather than hang.
++        FAIL_CHECK("trySend() blocked");
++        std::fputs("PduStream.trySendKeepsAPartialFrame: trySend() blocked\n", stderr);
++        std::abort();
+     }
++    REQUIRE(filling.get().has_value());
+     REQUIRE(sentFrames < MaxFrames);
+ #ifndef _WIN32
+     // A socket takes part of a frame; a pipe's write may be taken whole or not at all.
+     CHECK(begunTail > 0);
+ #endif
+     CHECK(pair.parent.unsentBytes() == begunTail);
+ 
+     // A reader drains; the next send, a blocking one, finishes the frame begun before its own.
+     auto reading = std::async(std::launch::async, [&] {
+         auto moduleIds = std::vector<uint32_t> {};
+@@ -264,28 +277,32 @@ TEST_CASE("PduStream.trySendKeepsAPartialFrame", "[vtextension]")
+             if (!pdu || !std::holds_alternative<proto::Load>(*pdu))
+             {
+                 // Ended here, so that the blocking send below fails rather than waits.
+                 pair.helper.shutdown();
+                 break;
+             }
+             moduleIds.push_back(std::get<proto::Load>(*pdu).moduleId);
+         }
+         return moduleIds;
+     });
+-    auto const sent = pair.parent.send(loadNumbered(sentFrames + 1));
+-    if (reading.wait_for(5s) != std::future_status::ready)
++    // Sent from a thread of its own too: a system whose shutdown() wakes no blocked sender would otherwise
++    // hang the run here rather than fail it.
++    auto sending =
++        std::async(std::launch::async, [&] { return pair.parent.send(loadNumbered(sentFrames + 1)); });
++    if (reading.wait_for(5s) != std::future_status::ready
++        || sending.wait_for(5s) != std::future_status::ready)
+     {
+         FAIL_CHECK("the reader did not get every frame");
+         std::fputs("PduStream.trySendKeepsAPartialFrame: the reader did not get every frame\n", stderr);
+         std::abort();
+     }
+-    CHECK(sent.has_value());
++    CHECK(sending.get().has_value());
+     CHECK(pair.parent.unsentBytes() == 0);
+     auto const expected = std::views::iota(uint32_t { 1 }, sentFrames + 2);
+     CHECK(reading.get() == std::vector<uint32_t>(expected.begin(), expected.end()));
+ }
+ 
+ #ifndef _WIN32
+ using transport::testing::inodeOf;
+ 
+ namespace
+ {
