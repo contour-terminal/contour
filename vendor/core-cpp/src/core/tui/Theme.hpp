@@ -3,6 +3,7 @@
 
 #include <core/tui/Box.hpp>
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 namespace core::tui
 {
@@ -147,19 +148,19 @@ struct Theme
 };
 
 /// @brief Returns the default dark theme.
-[[nodiscard]] auto darkTheme() -> Theme;
+[[nodiscard]] CORE_TUI_CORE_API auto darkTheme() -> Theme;
 
 /// @brief Returns a light theme.
-[[nodiscard]] auto lightTheme() -> Theme;
+[[nodiscard]] CORE_TUI_CORE_API auto lightTheme() -> Theme;
 
 /// @brief Returns a minimal monochrome theme.
-[[nodiscard]] auto monoTheme() -> Theme;
+[[nodiscard]] CORE_TUI_CORE_API auto monoTheme() -> Theme;
 
 /// @brief Global theme accessor.
 ///
 /// The TUI uses a global theme for consistent styling. Components can
 /// access the current theme through this interface.
-class ThemeManager
+class CORE_TUI_CORE_API ThemeManager
 {
   public:
     /// @brief Returns the singleton instance.
@@ -180,7 +181,7 @@ class ThemeManager
 };
 
 /// @brief Convenience function to get the current theme.
-[[nodiscard]] auto currentTheme() -> Theme const&;
+[[nodiscard]] CORE_TUI_CORE_API auto currentTheme() -> Theme const&;
 
 /// @brief Maps a category index to its color from the syntax palette.
 ///

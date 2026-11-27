@@ -2,6 +2,7 @@
 #include <core/Utf8Path.hpp>
 #include <core/platform/FileInfoProvider.hpp>
 #include <core/platform/PathUtils.hpp>
+#include <core/platform/PlatformTestSupport.hpp>
 #include <core/platform/testing/MockFileInfoProvider.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
@@ -48,6 +49,9 @@ struct TempDir
 
 TEST_CASE("nativeFileInfoProvider is this platform's own provider, and lists a directory", "[platform]")
 {
+    if (core::platform::test::runsUnderWine())
+        SKIP("under wine the listing throws ERROR_MOD_NOT_FOUND (Module not found) out of the MSVC STL "
+             "std::filesystem");
     // The implementations are private (posix/, windows/); a composition root reaches them only
     // through the factory. Every POSIX system, and Emscripten, gets the lstat(2) one.
     auto const provider = nativeFileInfoProvider();
@@ -73,6 +77,9 @@ TEST_CASE("nativeFileInfoProvider is this platform's own provider, and lists a d
 
 TEST_CASE("nativeFileInfoProvider lists a directory beyond ASCII by its UTF-8 name", "[platform]")
 {
+    if (core::platform::test::runsUnderWine())
+        SKIP("under wine the listing throws ERROR_MOD_NOT_FOUND (Module not found) out of the MSVC STL "
+             "std::filesystem");
     // The provider is handed UTF-8 and answers UTF-8. On Windows it read the name it was handed in
     // the ANSI code page, so it listed a directory that does not exist and answered nothing.
     TempDir const tmp;

@@ -20,7 +20,9 @@ namespace core::net
 /// network. What changed is whose thread pays for the lookup, and three things a caller can see,
 /// each recorded under Breaking in the CHANGELOG: the host is a `std::string` rather than a
 /// `string_view`, a stop of the flow's own token throws rather than returning
-/// @c NetErrorCode::Cancelled, and an unresolvable name is @c NetErrorCode::AddressError.
+/// @c NetErrorCode::Cancelled, and an unresolvable name is a lookup error: since 0.24.0
+/// @c NetErrorCode::NameNotFound or @c NetErrorCode::ResolverTemporaryFailure where the resolver
+/// says which, otherwise @c NetErrorCode::AddressError.
 ///
 /// The connector is built per call rather than kept, and that is cheap by construction: it holds
 /// two references and allocates nothing else. Keeping one would mean caching it per loop, which

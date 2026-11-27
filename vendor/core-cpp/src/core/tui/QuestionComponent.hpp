@@ -7,6 +7,7 @@
 #include <core/tui/Component.hpp>
 #include <core/tui/InputField.hpp>
 #include <core/tui/List.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 #include <core/tui/runtime/ModalComponent.hpp>
 
 #include <cstdint>
@@ -67,7 +68,7 @@ struct QuestionConfig
 /// It is a @c runtime::ModalComponent<QuestionResult>, so it can be driven to a
 /// result with `co_await runModal(...)` as well as via the synchronous
 /// `processInput` API.
-class QuestionComponent: public runtime::ModalComponent<QuestionResult>
+class CORE_TUI_CORE_API QuestionComponent: public runtime::ModalComponent<QuestionResult>
 {
   public:
     /// @brief Constructs a question component with the given configuration.

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <string>
 #include <string_view>
@@ -32,7 +33,7 @@ using StyledLine = std::vector<StyledSpan>;
 ///
 /// This class bridges the gap between text parsing (plain or markdown) and
 /// Canvas-based rendering, enabling features like scrollable tooltips.
-class StyledText
+class CORE_TUI_CORE_API StyledText
 {
   public:
     StyledText() = default;

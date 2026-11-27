@@ -248,3 +248,18 @@ TEST_CASE("tui.TerminalOutput: deleteLines writes DL with its count")
     output.flush();
     CHECK(output.captured() == "\033[3M");
 }
+
+TEST_CASE("tui.TerminalOutput: the cursor motions write their counts in decimal")
+{
+    auto output = CapturingOutput { Destination::Terminal };
+    output.moveTo(12, 345);
+    output.moveTo(1, 1);
+    output.moveUp(7);
+    output.moveDown(10);
+    output.moveLeft(2147483647);
+    output.moveRight(1);
+    output.moveUp(0); // no motion, nothing written
+    output.moveLeft(-1);
+    output.flush();
+    CHECK(output.captured() == "\033[12;345H\033[1;1H\033[7A\033[10B\033[2147483647D\033[1C");
+}

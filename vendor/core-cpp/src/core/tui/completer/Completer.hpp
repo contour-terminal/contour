@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/tui/TuiCoreExport.hpp>
 #include <core/tui/completer/CompletionItem.hpp>
 #include <core/tui/completer/CompletionProvider.hpp>
 #include <core/tui/completer/FuzzyMatch.hpp>
@@ -42,7 +43,7 @@ struct CompletionConfig
 ///   auto items = completer.complete("git comm", 8);
 ///   // items contains completions from all registered providers
 /// @endcode
-class Completer
+class CORE_TUI_CORE_API Completer
 {
   public:
     Completer() = default;

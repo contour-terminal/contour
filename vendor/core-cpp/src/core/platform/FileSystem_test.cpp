@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/PlatformTestSupport.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
@@ -649,6 +650,9 @@ TEST_CASE("rename reports why the recase failed, not why the first attempt did",
 
 TEST_CASE("rename changes the lettercase of a name, whatever the volume", "[FileSystem]")
 {
+    if (core::platform::test::runsUnderWine())
+        SKIP("wine lists a case-only rename under the old spelling (foo, not Foo) on its case-folding layer "
+             "over Linux");
     // The case above can only run on a case-sensitive volume: it needs `foo` and `Foo` to be two
     // entries so the direct rename fails over the destination. That left the two-hop recase with
     // no case at all on the volumes it was written for -- its whole point is that a case-only

@@ -15,6 +15,7 @@
 /// in `await_suspend`: `ExecutorScope` marks the thread, `ResumeTarget::currentOr` reads the mark
 /// and holds on to it across the suspension. See `docs/design/strands.md`.
 
+#include <core/async/AsyncExport.hpp>
 #include <core/async/IExecutor.hpp>
 #include <core/async/ParkedWork.hpp>
 
@@ -31,17 +32,16 @@ namespace detail
 {
     /// The innermost @c ExecutorScope on the calling thread, or null.
     ///
-    /// A function-local `thread_local` with a constant initialiser, so reading it is a TLS load and
+    /// Defined in the library, not here: a `thread_local` in an inline function is one slot per
+    /// linked image, so a program with a DLL and an executable that both compile this header would
+    /// have two chains, and a scope stated in one would be invisible to an awaitable compiled into
+    /// the other. The definition is a `constinit thread_local`, so reading it is a TLS load and
     /// nothing more: no guard, no initialisation call. That is what lets an event loop state the
     /// context every turn at the cost of two stores
     /// ([`.agent/rules/async-and-net.md`](https://github.com/contour-terminal/core-cpp/blob/master/.agent/rules/async-and-net.md),
     /// "The resume context").
     /// @return A reference to the calling thread's slot.
-    [[nodiscard]] inline ExecutorScope*& innermostExecutorScope() noexcept
-    {
-        constinit thread_local ExecutorScope* innermost = nullptr;
-        return innermost;
-    }
+    [[nodiscard]] CORE_ASYNC_API ExecutorScope*& innermostExecutorScope() noexcept;
 } // namespace detail
 
 /// Marks the calling thread as running a task for an executor, for as long as it lives.
@@ -58,9 +58,9 @@ namespace detail
 ///
 /// Costs two thread-local stores and no allocation, whichever constructor is used.
 ///
-/// The slot is an `inline` thread-local, so there is one per linked image: a program that compiles
-/// these headers into two shared libraries with hidden visibility has two chains, and a scope stated
-/// in one is not seen by an awaitable compiled into the other. core-cpp's own targets are static.
+/// The slot lives in core::async's library (`detail::innermostExecutorScope()`), so every image
+/// that links core-cpp -- a DLL and the executable that loads it -- shares one chain, provided they
+/// share one core::async: a shared build of core-cpp (`CORE_CPP_BUILD_SHARED`).
 class ExecutorScope final
 {
   public:

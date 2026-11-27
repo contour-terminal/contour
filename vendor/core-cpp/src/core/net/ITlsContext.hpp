@@ -17,13 +17,30 @@
 
 #include <core/async/IExecutor.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/NetError.hpp>
 
+#include <expected>
 #include <memory>
 #include <string>
 #include <utility>
 
 namespace core::net
 {
+
+/// Who one client connection is for: what @c ITlsContext::wrapClient binds the connection to.
+struct TlsPeer
+{
+    /// The host the connection was dialled for, as the caller spelled it: a DNS name, or an IP
+    /// literal -- a dotted quad, or IPv6 text with or without the brackets a URL authority puts
+    /// around it, and with or without a zone (`fe80::1%eth0`). Brackets around anything but IPv6,
+    /// and a zone on anything but IPv6, are refused.
+    ///
+    /// A DNS name is sent as SNI and the certificate must name it in a DNS subjectAltName; an IP
+    /// literal is sent as nothing (RFC 6066 forbids an address in SNI) and the certificate must carry
+    /// it, without its zone, as an IP subjectAltName. A verifying context (@c makeTlsClientContext over
+    /// a @c TrustSource) refuses an empty one: the chain alone proves nothing about who the peer is.
+    std::string serverName;
+};
 
 /// A configured TLS role: a SERVER context holds the certificate and private key; a CLIENT context
 /// holds the peer-verification policy. `wrap()` layers TLS onto an already-connected transport.
@@ -53,6 +70,35 @@ class ITlsContext
     /// @return The TLS socket, or null when it could not be allocated.
     [[nodiscard]] virtual std::unique_ptr<ISocket> wrap(std::unique_ptr<ISocket> inner,
                                                         async::IExecutor& executor) = 0;
+
+    /// Wraps @p inner as a CLIENT connection to @p peer: SNI and the certificate check bound to the
+    /// one name this connection was dialled for.
+    ///
+    /// **A context never discards a requested name.** The default -- for a context with no
+    /// per-connection check, a server context or one written before this member existed -- refuses
+    /// a non-empty @c TlsPeer::serverName with @c NetErrorCode::Unsupported, because wrapping without
+    /// it would hand back a connection that is not verified for the host asked for. With an empty
+    /// name it is @c wrap. A context that does bind the name refuses one the wire cannot carry (an
+    /// embedded NUL, brackets around something that is no IPv6 literal), and an empty one, with
+    /// @c NetErrorCode::AddressError.
+    /// @param inner The connected transport to encrypt (owned by the result).
+    /// @param executor As for @c wrap.
+    /// @param peer Who the connection is for.
+    /// @return The TLS socket, negotiating lazily as @c wrap's does; @c NetErrorCode::Unsupported for
+    ///         a name this context cannot verify; @c NetErrorCode::ResourceExhausted when the socket
+    ///         could not be allocated.
+    [[nodiscard]] virtual std::expected<std::unique_ptr<ISocket>, NetError> wrapClient(
+        std::unique_ptr<ISocket> inner, async::IExecutor& executor, TlsPeer const& peer)
+    {
+        if (!peer.serverName.empty())
+            return std::unexpected(makeNetError(
+                NetErrorCode::Unsupported, 0, "this TLS context cannot verify a per-connection server name"));
+        auto socket = wrap(std::move(inner), executor);
+        if (socket == nullptr)
+            return std::unexpected(
+                makeNetError(NetErrorCode::ResourceExhausted, 0, "the TLS socket could not be allocated"));
+        return socket;
+    }
 
     /// The SHA-256 fingerprint of the certificate this context presents, as 64 lower-case hex
     /// digits.

@@ -110,7 +110,7 @@ TEST_CASE("HeadlessSurface: a headless Screen fed bytes through VtParser renders
     // typed cells and nothing else of the frame.
     CHECK(bytes.starts_with("\033[?2026h"));
     CHECK(bytes.contains("\033[1;1Hh"));
-    CHECK(bytes.contains("\033[1;3H!"));
+    CHECK(bytes.contains("i\033[m!"));
     CHECK_FALSE(bytes.contains("\033[2;1H"));
     CHECK(bytes.ends_with("\033[?2026l"));
 }

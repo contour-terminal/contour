@@ -17,6 +17,7 @@
 /// (`0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`), plus `MessageTooLarge`.
 
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <string>
 
@@ -30,7 +31,7 @@ namespace core::net::detail
 /// `SocketClosedStates_test.cpp`, which pins the in-memory fake to this answer against a real pair).
 /// @param systemCode An `errno` value on POSIX, a `WSAGetLastError()` value on Windows.
 /// @return The category it belongs to.
-[[nodiscard]] NetErrorCode classifySocketError(int systemCode) noexcept;
+[[nodiscard]] CORE_NET_API NetErrorCode classifySocketError(int systemCode) noexcept;
 
 /// @param systemCode As for @c classifySocketError.
 /// @param context What was being attempted.
@@ -41,6 +42,6 @@ namespace core::net::detail
 }
 
 /// @return The error the last socket call on this thread reported: `errno`, or `WSAGetLastError()`.
-[[nodiscard]] int lastSocketError() noexcept;
+[[nodiscard]] CORE_NET_API int lastSocketError() noexcept;
 
 } // namespace core::net::detail

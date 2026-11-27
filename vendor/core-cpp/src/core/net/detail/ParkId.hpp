@@ -19,6 +19,8 @@
 /// cancel request that arrives after its park is gone finds nothing, however many parks have been
 /// made since. See `detail/ParkTable.hpp`.
 
+#include <core/net/NetExport.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -33,7 +35,7 @@ namespace core::net
 /// handle id — a wide value space that never wraps in a session — and not an enumeration of named
 /// cases. (`performance-enum-size` refuses a `std::uint64_t` enumeration here, and it is an error
 /// in this tree.)
-struct ParkId
+struct CORE_NET_API ParkId
 {
     std::uint64_t value = 0; ///< The park's id; 0 means none.
 

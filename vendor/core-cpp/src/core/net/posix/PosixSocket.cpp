@@ -2,7 +2,9 @@
 #include <core/net/posix/PosixSocket.hpp>
 
 #include <core/net/SocketContract.hpp>
+#include <core/net/detail/SocketEndpoint.hpp>
 #include <core/net/detail/SocketErrors.hpp>
+#include <core/net/detail/SocketOptionAccess.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/net/detail/WouldBlock.hpp>
 #include <core/net/posix/FdUtils.hpp> // MSG_NOSIGNAL fallback, makeNonBlockingCloexec
@@ -168,6 +170,34 @@ std::expected<void, NetError> PosixSocket::armKeepAlive(KeepAliveSettings const&
     if (_closed || _fd < 0)
         return std::unexpected(closedSocket("armKeepAlive"));
     return detail::armKeepAlive(_fd, settings);
+}
+
+std::expected<ResolvedEndpoint, NetError> PosixSocket::localEndpoint() const
+{
+    if (_closed || _fd < 0)
+        return std::unexpected(closedSocket("localEndpoint"));
+    return detail::socketEndpoint(_fd, detail::SocketSide::Local);
+}
+
+std::expected<ResolvedEndpoint, NetError> PosixSocket::remoteEndpoint() const
+{
+    if (_closed || _fd < 0)
+        return std::unexpected(closedSocket("remoteEndpoint"));
+    return detail::socketEndpoint(_fd, detail::SocketSide::Remote);
+}
+
+std::expected<std::uint64_t, NetError> PosixSocket::option(SocketOption option) const
+{
+    if (_closed || _fd < 0)
+        return std::unexpected(closedSocket("option"));
+    return detail::readSocketOption(_fd, option);
+}
+
+std::expected<void, NetError> PosixSocket::setOption(SocketOption option, std::uint64_t value)
+{
+    if (_closed || _fd < 0)
+        return std::unexpected(closedSocket("setOption"));
+    return detail::writeSocketOption(_fd, option, value);
 }
 
 // ---- The read side ----------------------------------------------------------------------------

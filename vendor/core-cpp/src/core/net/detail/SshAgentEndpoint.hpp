@@ -11,6 +11,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <expected>
 #include <memory>
@@ -25,7 +26,7 @@ namespace core::net::detail
 /// @param endpoint The `SSH_AUTH_SOCK` path, or on Windows the named pipe.
 /// @return The connection; @c NetErrorCode::AddressError for an empty endpoint (or, on Windows,
 ///         one that is not UTF-8), else why the dial failed.
-[[nodiscard]] async::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectAgentEndpoint(
-    EventLoop* loop, std::string endpoint);
+[[nodiscard]] CORE_NET_API async::Task<std::expected<std::unique_ptr<ISocket>, NetError>>
+connectAgentEndpoint(EventLoop* loop, std::string endpoint);
 
 } // namespace core::net::detail

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
+
 #include <string_view>
 
 namespace core::platform
@@ -13,6 +15,6 @@ namespace core::platform
 }
 
 /// Matches a filename against a shell glob pattern (supports *, ?, and [...] bracket expressions).
-[[nodiscard]] bool globMatchFilename(std::string_view filename, std::string_view pattern);
+[[nodiscard]] CORE_PLATFORM_API bool globMatchFilename(std::string_view filename, std::string_view pattern);
 
 } // namespace core::platform

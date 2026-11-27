@@ -12,6 +12,7 @@
 #include <core/net/IAsyncAddressResolver.hpp>
 #include <core/net/IConnector.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketAddress.hpp>
 #include <core/platform/Clock.hpp>
 
@@ -56,7 +57,7 @@ struct BlockingConnectorOptions
 ///
 /// Name resolution, the total budget across candidates, and "report the LAST failure" are the
 /// shared flow's (`ConnectFlow.hpp`), so this connector and the loop's answer those identically.
-class BlockingConnector final: public IConnector
+class CORE_NET_API BlockingConnector final: public IConnector
 {
   public:
     /// @param resolver Name resolution; the process-wide `getaddrinfo` one by default. Injected so a

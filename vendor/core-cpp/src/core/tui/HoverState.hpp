@@ -3,6 +3,7 @@
 
 #include <core/Clock.hpp>
 #include <core/Defines.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <chrono>
 #include <functional>
@@ -32,7 +33,7 @@ struct HoverInfo
 /// 2. Use timeoutMs() to get poll timeout
 /// 3. Call tick() when poll times out (no events)
 /// 4. Register callbacks for hover confirmed/leave
-class HoverState
+class CORE_TUI_CORE_API HoverState
 {
   public:
     /// @brief Callback type for hover events.

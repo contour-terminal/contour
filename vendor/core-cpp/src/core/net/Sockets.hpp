@@ -14,6 +14,7 @@
 #include <core/net/IListener.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketBuffers.hpp>
 #include <core/net/UdpSocket.hpp>
 #include <core/platform/Types.hpp>
@@ -77,8 +78,8 @@ struct ListenOptions
 /// @param loop The loop whose backend drives accept readiness (not owned).
 /// @param options The bind address, port and backlog.
 /// @return The bound listener, or a @c NetError on failure.
-[[nodiscard]] std::expected<std::unique_ptr<IListener>, NetError> listen(EventLoop& loop,
-                                                                         ListenOptions options);
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IListener>, NetError> listen(EventLoop& loop,
+                                                                                      ListenOptions options);
 
 /// Binds a TCP listener on @p host : @p port.
 ///
@@ -89,10 +90,10 @@ struct ListenOptions
 /// @param port The bind port; 0 requests an OS-assigned ephemeral port.
 /// @param backlog The listen backlog.
 /// @return The bound listener, or a @c NetError on failure.
-[[nodiscard]] std::expected<std::unique_ptr<IListener>, NetError> listen(EventLoop& loop,
-                                                                         std::string_view host,
-                                                                         std::uint16_t port,
-                                                                         int backlog = 128);
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IListener>, NetError> listen(EventLoop& loop,
+                                                                                      std::string_view host,
+                                                                                      std::uint16_t port,
+                                                                                      int backlog = 128);
 
 /// Adopts an already-bound, already-listening handle as an @c IListener driven by @p loop.
 ///
@@ -118,7 +119,7 @@ struct ListenOptions
 /// @param loop The loop whose backend drives accept readiness (not owned).
 /// @param handle The listening socket handle (a descriptor on POSIX, a `SOCKET` on Windows).
 /// @return The adopted listener, or a @c NetError if the handle could not be prepared.
-[[nodiscard]] std::expected<std::unique_ptr<IListener>, NetError> adoptListener(
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IListener>, NetError> adoptListener(
     EventLoop& loop, platform::NativeHandle handle);
 
 /// Connects a TCP client socket to @p host : @p port, parking the caller until the connection
@@ -141,9 +142,13 @@ struct ListenOptions
 ///        then. `connect(loop, makeHost(), port)` is the ordinary call that would dangle.
 /// @param port The remote port.
 /// @return A task resolving to the connected socket, or a @c NetError on failure: a name that
-///         cannot be resolved is @c NetErrorCode::AddressError.
+///         does not exist is @c NetErrorCode::NameNotFound, a resolver that could not answer
+///         @c NetErrorCode::ResolverTemporaryFailure, and any other lookup failure
+///         @c NetErrorCode::AddressError.
 /// @throws async::OperationCancelled if the awaiting flow is stopped while the dial is outstanding.
-[[nodiscard]] async::Task<SocketResult> connect(EventLoop* loop, std::string host, std::uint16_t port);
+[[nodiscard]] CORE_NET_API async::Task<SocketResult> connect(EventLoop* loop,
+                                                             std::string host,
+                                                             std::uint16_t port);
 
 /// Connects through an injected resolver, with a per-call budget and keepalive.
 ///
@@ -159,11 +164,11 @@ struct ListenOptions
 /// @return A task resolving to the connected socket, or a @c NetError on failure;
 ///         @c NetErrorCode::Timeout when the budget ran out.
 /// @throws async::OperationCancelled if the awaiting flow is stopped while the dial is outstanding.
-[[nodiscard]] async::Task<SocketResult> connect(EventLoop* loop,
-                                                std::string host,
-                                                std::uint16_t port,
-                                                IAsyncAddressResolver* resolver,
-                                                DialOptions options);
+[[nodiscard]] CORE_NET_API async::Task<SocketResult> connect(EventLoop* loop,
+                                                             std::string host,
+                                                             std::uint16_t port,
+                                                             IAsyncAddressResolver* resolver,
+                                                             DialOptions options);
 
 /// Binds an AF_UNIX listener on the socket file @p path, hardening its parent
 /// directory first (see UnixListener::bind for the exact policy).
@@ -177,9 +182,8 @@ struct ListenOptions
 /// @return The bound listener; @c NetErrorCode::Unsupported where AF_UNIX is not available;
 ///         @c NetErrorCode::AddressError on Windows where @p path is not UTF-8, which names no file
 ///         there (core::pathFromUtf8()).
-[[nodiscard]] std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& loop,
-                                                                             std::string_view path,
-                                                                             int backlog = 128);
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IListener>, NetError> listenUnix(
+    EventLoop& loop, std::string_view path, int backlog = 128);
 
 /// Connects to the AF_UNIX socket file @p path.
 ///
@@ -195,7 +199,7 @@ struct ListenOptions
 ///         @c NetError on failure,
 ///         @c NetErrorCode::Cancelled if the flow was stopped while it waited,
 ///         @c NetErrorCode::Unsupported where AF_UNIX is not available.
-[[nodiscard]] async::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(
+[[nodiscard]] CORE_NET_API async::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(
     EventLoop* loop, std::string_view path);
 
 /// Adopts an already-open stream file descriptor (a socketpair end, a PTY
@@ -204,7 +208,7 @@ struct ListenOptions
 /// @param loop The loop whose reactor drives readiness (not owned).
 /// @param fd The open, stream-capable descriptor.
 /// @return The adopted socket; @c NetErrorCode::Unsupported on Windows.
-[[nodiscard]] std::expected<std::unique_ptr<ISocket>, NetError> adoptFd(EventLoop& loop, int fd);
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<ISocket>, NetError> adoptFd(EventLoop& loop, int fd);
 
 /// Adopts a connected stream socket that was accepted or dialled outside core-cpp, driven by
 /// @p loop -- the loop the caller chooses, which need not be the one anything was accepted on.
@@ -237,9 +241,8 @@ struct ListenOptions
 ///        ask the kernel.
 /// @return The adopted socket; @c NetErrorCode::BadHandle for an invalid handle, or why the loop
 ///         could not take it -- with @p handle closed either way.
-[[nodiscard]] std::expected<std::unique_ptr<ISocket>, NetError> adoptSocket(EventLoop& loop,
-                                                                            platform::NativeHandle handle,
-                                                                            std::string peerAddress);
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<ISocket>, NetError> adoptSocket(
+    EventLoop& loop, platform::NativeHandle handle, std::string peerAddress);
 
 /// Appends one read chunk from @p socket to @p buffer — the accumulate step of
 /// every binary-framed decode loop.
@@ -252,6 +255,7 @@ struct ListenOptions
 ///        coroutine reference parameters can dangle).
 /// @param buffer Receives the read bytes.
 /// @return The number of bytes appended, 0 on a clean EOF, or the transport error.
-[[nodiscard]] async::Task<IoResult> appendReadChunk(ISocket* socket, std::vector<std::byte>* buffer);
+[[nodiscard]] CORE_NET_API async::Task<IoResult> appendReadChunk(ISocket* socket,
+                                                                 std::vector<std::byte>* buffer);
 
 } // namespace core::net

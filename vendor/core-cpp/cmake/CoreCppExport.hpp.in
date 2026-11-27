@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// The export macro of core-cpp's @CORE_CPP_EXPORT_TARGET@ library, generated when core-cpp is
+/// configured.
+///
+/// @CORE_CPP_EXPORT_MACRO@ marks what the library exports. It is empty in a static build, and in a
+/// shared build it makes the symbol visible outside the library (the library is compiled with hidden
+/// visibility, so an unmarked symbol is not).
+
+@CORE_CPP_EXPORT_BODY@

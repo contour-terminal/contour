@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/Error.hpp>
+#include <core/tui/TuiExport.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -27,7 +28,7 @@ struct OwnedImage
 ///
 /// @param filePath Path to the image file, in UTF-8 (core::pathToUtf8()), on Windows too.
 /// @return Owned image data on success, or an error string.
-[[nodiscard]] auto loadImage(std::string_view filePath) -> Result<OwnedImage>;
+[[nodiscard]] CORE_TUI_API auto loadImage(std::string_view filePath) -> Result<OwnedImage>;
 
 /// @brief Resizes an image to target dimensions, preserving aspect ratio.
 ///
@@ -38,7 +39,7 @@ struct OwnedImage
 /// @param targetWidth Desired width (0 to auto-compute from height).
 /// @param targetHeight Desired height (0 to auto-compute from width).
 /// @return Resized image on success, or an error string.
-[[nodiscard]] auto resizeImage(OwnedImage const& image, int targetWidth, int targetHeight)
+[[nodiscard]] CORE_TUI_API auto resizeImage(OwnedImage const& image, int targetWidth, int targetHeight)
     -> Result<OwnedImage>;
 
 /// @brief Loads an image from raw bytes in memory into RGBA pixel data.
@@ -47,7 +48,7 @@ struct OwnedImage
 ///
 /// @param data Raw image bytes (PNG, JPEG, GIF, BMP, etc.).
 /// @return Owned image data on success, or an error string.
-[[nodiscard]] auto loadImageFromMemory(std::span<std::uint8_t const> data) -> Result<OwnedImage>;
+[[nodiscard]] CORE_TUI_API auto loadImageFromMemory(std::span<std::uint8_t const> data) -> Result<OwnedImage>;
 
 /// @brief Detects the image media type from raw bytes by checking magic byte signatures.
 ///
@@ -55,7 +56,7 @@ struct OwnedImage
 ///
 /// @param data Raw bytes to inspect.
 /// @return MIME type string (e.g. "image/png"), or empty string if not recognized.
-[[nodiscard]] auto detectImageMediaType(std::span<std::uint8_t const> data) -> std::string;
+[[nodiscard]] CORE_TUI_API auto detectImageMediaType(std::span<std::uint8_t const> data) -> std::string;
 
 /// @brief Checks if a file extension corresponds to a supported image format.
 ///
@@ -63,7 +64,7 @@ struct OwnedImage
 ///
 /// @param ext File extension including the dot (e.g., ".png").
 /// @return true if the extension is a recognized image format.
-[[nodiscard]] auto isImageExtension(std::string_view ext) -> bool;
+[[nodiscard]] CORE_TUI_API auto isImageExtension(std::string_view ext) -> bool;
 
 /// @brief Image data read from the system clipboard.
 struct ClipboardImage
@@ -78,6 +79,6 @@ struct ClipboardImage
 /// data is available in the clipboard or the required tool is not installed.
 ///
 /// @return Clipboard image data on success, or nullopt.
-[[nodiscard]] auto readClipboardImage() -> std::optional<ClipboardImage>;
+[[nodiscard]] CORE_TUI_API auto readClipboardImage() -> std::optional<ClipboardImage>;
 
 } // namespace core::tui

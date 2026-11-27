@@ -6,6 +6,7 @@
 
 #include <core/tui/Component.hpp>
 #include <core/tui/Rect.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstddef>
 #include <functional>
@@ -40,7 +41,7 @@ struct Breakpoint
 /// for ever. The screen stops re-laying such a chain after a bounded number of frames
 /// (Screen's MaxChainedLayoutSweeps), leaving whichever layout it reached, until a resize or a changed
 /// hint asks again. A chain that settles, one Responsive's swap resizing another once, ends long before.
-class Responsive final: public Component
+class CORE_TUI_CORE_API Responsive final: public Component
 {
   public:
     /// @param breakpoints The bands, narrowest first; fixed for the container's life.

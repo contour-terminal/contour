@@ -9,6 +9,7 @@
 #include <core/tui/KeyBindings.hpp>
 #include <core/tui/TerminalOutput.hpp>
 #include <core/tui/TextDecorator.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 #include <core/tui/completer/CompletionProvider.hpp>
 
 #include <chrono>
@@ -68,7 +69,7 @@ enum class InputFieldAction : std::uint8_t
 ///
 /// As a Component, InputField can be added to a Screen's component tree
 /// and will receive events through the standard event dispatch mechanism.
-class InputField: public Component
+class CORE_TUI_CORE_API InputField: public Component
 {
   public:
     /// @brief Constructs an empty field timed by the process's steady clock.

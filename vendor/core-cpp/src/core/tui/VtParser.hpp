@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/InputEvent.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -18,7 +19,7 @@ namespace core::tui
 /// Handles CSI sequences, CSIu (Kitty keyboard protocol), SS3 sequences,
 /// SGR mouse reporting, bracketed paste, UTF-8 multi-byte sequences,
 /// and bare ESC disambiguation via timeout().
-class VtParser
+class CORE_TUI_CORE_API VtParser
 {
   public:
     /// @brief The largest bracketed paste delivered whole.

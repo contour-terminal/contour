@@ -8,6 +8,7 @@
 /// (`0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`).
 
 #include <core/net/IDatagramSocket.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <condition_variable>
 #include <cstddef>
@@ -36,7 +37,7 @@ namespace core::net::testing
 /// protocol shares one: every node on the segment binds the beacon port, and two nodes on one host
 /// bind it on the same machine. A double that gave one address one inbox could not express that at
 /// all — see @c deliver for what sharing does and does not buy.
-class DatagramBus
+class CORE_NET_API DatagramBus
 {
   public:
     /// The address every broadcast is sent to, whatever port its listeners bound.

@@ -50,7 +50,7 @@ struct Session
     std::unique_ptr<ISocket> client;
     core::net::CertKeyPem material;
 
-    Session(TlsOptions serverOptions, bool handshake)
+    Session(TlsOptions const& serverOptions, bool handshake)
     {
         auto generated = core::net::generateSelfSignedCertificate();
         REQUIRE(generated.has_value());
@@ -100,7 +100,7 @@ TEST_CASE("a TLS 1.3-only server refuses a 1.2-only client", "[net][tls][session
     auto server = (*context)->wrap(std::move(pair->first), loop);
     auto wire = std::move(pair->second);
     REQUIRE(server != nullptr);
-    auto peer = StrictTlsPeer::client(TlsVersion::Tls12);
+    auto peer = StrictTlsPeer::client({ .maximumVersion = TlsVersion::Tls12 });
     REQUIRE(peer.has_value());
 
     auto serverOk = true;
@@ -238,7 +238,7 @@ TEST_CASE("channelBinding of a TLS 1.2 session is an error", "[net][tls][session
     auto server = (*context)->wrap(std::move(pair->first), loop);
     auto wire = std::move(pair->second);
     REQUIRE(server != nullptr);
-    auto peer = StrictTlsPeer::client(TlsVersion::Tls12);
+    auto peer = StrictTlsPeer::client({ .maximumVersion = TlsVersion::Tls12 });
     REQUIRE(peer.has_value());
 
     auto const outcome = shakeWithPeer(loop, server.get(), peer->get(), wire.get());
@@ -265,7 +265,7 @@ TEST_CASE("a TLS 1.3-only client refuses a 1.2-only server", "[net][tls][session
     auto client = (*context)->wrap(std::move(pair->first), loop);
     auto wire = std::move(pair->second);
     REQUIRE(client != nullptr);
-    auto peer = StrictTlsPeer::server(*material, TlsVersion::Tls12);
+    auto peer = StrictTlsPeer::server(*material, { .maximumVersion = TlsVersion::Tls12 });
     REQUIRE(peer.has_value());
 
     auto const outcome = shakeWithPeer(loop, client.get(), peer->get(), wire.get());

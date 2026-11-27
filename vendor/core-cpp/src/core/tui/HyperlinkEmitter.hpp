@@ -5,6 +5,7 @@
 /// @brief Emits OSC 8 framing around a buffer's hyperlink regions while its cells flush.
 
 #include <core/tui/Buffer.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <span>
 #include <string_view>
@@ -19,7 +20,7 @@ class TerminalOutput;
 /// A flat scan rather than a row index: a frame carries at most a handful of regions, so bucketing
 /// them would cost more bookkeeping than it saves. The scan is never reached on a linkless frame —
 /// HyperlinkEmitter::beforeWrite() tests empty() inline first, which is where the win actually is.
-class HyperlinkIndex
+class CORE_TUI_CORE_API HyperlinkIndex
 {
   public:
     /// @brief Builds an empty index that reports every cell as unlinked.
@@ -56,7 +57,7 @@ class HyperlinkIndex
 /// while its cells did not is the caller's job — compare HyperlinkIndex::uriAt() against the
 /// previous frame's index in the diff condition, since Cell equality cannot see an
 /// out-of-band URI.
-class HyperlinkEmitter
+class CORE_TUI_CORE_API HyperlinkEmitter
 {
   public:
     /// @brief Constructs an emitter writing to @p out for the regions in @p index.
@@ -106,7 +107,7 @@ class HyperlinkEmitter
 /// Bundled so each flush path sets links up in one line and asks one question, rather than
 /// repeating the setup and — more importantly — the retargeted() test, which is easy to omit and
 /// silently leaves the terminal pointing at a stale target.
-struct FlushLinks
+struct CORE_TUI_CORE_API FlushLinks
 {
     HyperlinkIndex current;  ///< The frame being flushed.
     HyperlinkIndex previous; ///< The frame on screen; empty when not diffing.

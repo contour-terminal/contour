@@ -9,8 +9,12 @@
 #include <core/async/Task.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/net/NetError.hpp>
+#include <core/net/SocketAddress.hpp>
+#include <core/net/SocketOption.hpp>
 #include <core/platform/Types.hpp>
 
+#include <cstdint>
 #include <expected>
 #include <memory>
 
@@ -74,6 +78,45 @@ class IListener
     [[nodiscard]] virtual platform::NativeHandle nativeHandle() const noexcept
     {
         return platform::InvalidHandle;
+    }
+
+    /// The address and port this listener is bound to -- `getsockname` -- as a raw endpoint
+    /// (@c toIpSocketAddress reads it): @c boundPort with the address beside it.
+    ///
+    /// Not pure, so a listener with no socket of its own (a test double, a decorator) need not
+    /// answer; **the default is @c NetErrorCode::Unsupported**, for @c ISocket::localEndpoint's reason.
+    /// @return The endpoint; @c NetErrorCode::BadHandle once closed; otherwise the classified OS error.
+    [[nodiscard]] virtual std::expected<ResolvedEndpoint, NetError> localEndpoint() const
+    {
+        return std::unexpected(
+            makeNetError(NetErrorCode::Unsupported, 0, "this listener has no local address"));
+    }
+
+    /// Reads @p option of the listening socket, through the option's row (@c socketOptionTable).
+    /// What a listener carries, the connections it accepts inherit: the buffer sizes, keepalive.
+    ///
+    /// Not pure, so a listener with no socket of its own need not answer; **the default is
+    /// @c NetErrorCode::Unsupported**, for @c ISocket::option's reason.
+    /// @param option The option.
+    /// @return Its value in the row's unit; @c NetErrorCode::BadHandle once closed; otherwise the
+    ///         classified OS error.
+    [[nodiscard]] virtual std::expected<std::uint64_t, NetError> option(
+        [[maybe_unused]] SocketOption option) const
+    {
+        return std::unexpected(
+            makeNetError(NetErrorCode::Unsupported, 0, "this listener has no socket options"));
+    }
+
+    /// Sets @p option to @p value, in the unit of the option's row; otherwise as @c option, default
+    /// included.
+    /// @param option The option.
+    /// @param value The value.
+    /// @return Nothing, or as @c option.
+    [[nodiscard]] virtual std::expected<void, NetError> setOption([[maybe_unused]] SocketOption option,
+                                                                  [[maybe_unused]] std::uint64_t value)
+    {
+        return std::unexpected(
+            makeNetError(NetErrorCode::Unsupported, 0, "this listener has no socket options"));
     }
 
     /// Stops accepting. A pending @c accept() resolves with @c NetErrorCode::Cancelled.

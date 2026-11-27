@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/platform/FileSystem.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <optional>
 #include <string>
@@ -21,6 +22,6 @@ namespace core::platform
 /// @return The 32-digit lowercase id, or `std::nullopt` if the file is missing or unreadable, holds
 ///         `uninitialized` (a machine that has not finished its first boot), or holds anything but
 ///         exactly 32 hexadecimal digits.
-[[nodiscard]] std::optional<std::string> readMachineId(FileSystem const& fileSystem);
+[[nodiscard]] CORE_PLATFORM_API std::optional<std::string> readMachineId(FileSystem const& fileSystem);
 
 } // namespace core::platform

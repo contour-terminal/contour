@@ -7,6 +7,24 @@
 namespace core::log
 {
 
+std::vector<std::reference_wrapper<Category>>& get()
+{
+    static std::vector<std::reference_wrapper<Category>> logStore;
+    return logStore;
+}
+
+Category& errorCategory() noexcept
+{
+    static auto category = Category("error", "Error Logger", Category::State::Enabled);
+    return category;
+}
+
+Category& fatalCategory() noexcept
+{
+    static auto category = Category("fatal", "Fatal error Logger", Category::State::Enabled);
+    return category;
+}
+
 Sink::Sink(bool enabled, Writer wr): _enabled { enabled }, _writer { std::move(wr) }
 {
 }

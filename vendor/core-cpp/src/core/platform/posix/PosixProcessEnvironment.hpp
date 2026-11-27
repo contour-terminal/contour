@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
 #include <core/platform/ProcessEnvironment.hpp>
 
 #include <functional>
@@ -15,7 +16,7 @@ namespace core::platform
 /// Keeps variables set but not yet exported in memory. It reads the process environment through
 /// @c core::LiveEnvironment, and exports to it through @c core::setProcessEnvironmentVariable() and
 /// @c core::unsetProcessEnvironmentVariable() (never `setenv()`, see there).
-class PosixProcessEnvironment final: public ProcessEnvironment
+class CORE_PLATFORM_API PosixProcessEnvironment final: public ProcessEnvironment
 {
   public:
     [[nodiscard]] std::expected<void, PlatformError> set(std::string_view name,

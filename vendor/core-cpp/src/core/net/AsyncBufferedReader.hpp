@@ -17,6 +17,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <array>
 #include <cstddef>
@@ -32,7 +33,7 @@ namespace core::net
 ///
 /// Not thread-safe and single-consumer: at most one `readLine()` may be awaited
 /// at a time (it parks on the socket's read path).
-class AsyncBufferedReader
+class CORE_NET_API AsyncBufferedReader
 {
   public:
     /// Default cap on a single line's length (guards a peer that never sends LF).

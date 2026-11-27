@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/platform/PlatformError.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +33,7 @@ namespace detail
 /// when a dispatch still holds the handler. A handler may drop its own subscription: that does not wait.
 ///
 /// The token keeps the monitor's handler table alive, so it may outlive the monitor that issued it.
-class PowerSubscription
+class CORE_PLATFORM_API PowerSubscription
 {
   public:
     /// An empty token, subscribed to nothing.
@@ -107,7 +108,7 @@ namespace detail
     /// Thread-safe handler table every ISystemPowerMonitor implementation dispatches through, and the
     /// supported way to write one: PowerSubscription is constructible only from here.
     /// Tokens it hands out keep its state alive, so they may safely outlive the registry.
-    class PowerHandlerRegistry
+    class CORE_PLATFORM_API PowerHandlerRegistry
     {
       public:
         PowerHandlerRegistry();
@@ -141,7 +142,7 @@ namespace detail
 /// Creates the platform's system power monitor.
 /// @return The monitor, or the reason this platform (or session) cannot report power events;
 ///         PlatformError::NotImplemented where there is no backend.
-[[nodiscard]] std::expected<std::unique_ptr<ISystemPowerMonitor>, PlatformError>
+[[nodiscard]] CORE_PLATFORM_API std::expected<std::unique_ptr<ISystemPowerMonitor>, PlatformError>
 makeNativeSystemPowerMonitor();
 
 } // namespace core::platform

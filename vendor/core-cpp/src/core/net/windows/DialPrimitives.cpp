@@ -82,9 +82,13 @@ void closeDialSocket(EventLoop* loop, DialHandles& handles) noexcept
 {
     if (!handles.valid())
         return;
-    if (loop != nullptr)
-        loop->notifyHandleClosing(handles.readiness, FdWakePolicy::Cancel);
-    ::WSACloseEvent(static_cast<WSAEVENT>(handles.readiness));
+    // A completion-port socket (an `ITcpSocket`'s, a `ConnectEx` dial's) has no readiness event.
+    if (handles.readiness != platform::InvalidHandle)
+    {
+        if (loop != nullptr)
+            loop->notifyHandleClosing(handles.readiness, FdWakePolicy::Cancel);
+        ::WSACloseEvent(static_cast<WSAEVENT>(handles.readiness));
+    }
     ::closesocket(reinterpret_cast<SOCKET>(handles.socket));
     handles = DialHandles {};
 }

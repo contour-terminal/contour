@@ -3,6 +3,7 @@
 
 #include <core/tui/Component.hpp>
 #include <core/tui/Theme.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <string>
 #include <vector>
@@ -32,7 +33,7 @@ struct StatusBarStyle
 /// Typically rendered at the bottom of the screen. Supports left, center, and right
 /// aligned sections for different types of information.
 /// As a Component, StatusBar can be added to a Screen's component tree.
-class StatusBar: public Component
+class CORE_TUI_CORE_API StatusBar: public Component
 {
   public:
     /// @brief Constructs an empty status bar.
@@ -99,6 +100,6 @@ class StatusBar: public Component
 };
 
 /// @brief Returns a default status bar style.
-[[nodiscard]] auto defaultStatusBarStyle() -> StatusBarStyle;
+[[nodiscard]] CORE_TUI_CORE_API auto defaultStatusBarStyle() -> StatusBarStyle;
 
 } // namespace core::tui

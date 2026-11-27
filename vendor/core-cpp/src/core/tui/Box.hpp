@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <optional>
 #include <string>
@@ -22,7 +23,7 @@ enum class BorderStyle : std::uint8_t
 };
 
 /// @brief Border characters for a box.
-struct BorderChars
+struct CORE_TUI_CORE_API BorderChars
 {
     std::string_view horizontal;  ///< Horizontal line (─)
     std::string_view vertical;    ///< Vertical line (│)
@@ -72,7 +73,7 @@ struct BoxConfig
 ///
 /// Renders a rectangular box with configurable borders, titles, and padding.
 /// Can be used standalone or as a container for other content.
-class Box
+class CORE_TUI_CORE_API Box
 {
   public:
     /// @brief Constructs a box with the given configuration.
@@ -115,6 +116,6 @@ class Box
 
 /// @brief Renders a simple bordered box at the specified position.
 /// Convenience function for one-off box rendering.
-void renderBox(TerminalOutput& output, BoxConfig const& config);
+CORE_TUI_CORE_API void renderBox(TerminalOutput& output, BoxConfig const& config);
 
 } // namespace core::tui

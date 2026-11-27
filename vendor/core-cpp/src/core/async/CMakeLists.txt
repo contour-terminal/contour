@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
-# core::async: the coroutine vocabulary, header-only, needing nothing of the standard library but
-# what a threaded standard library already links -- see Threads below.
+# core::async: the coroutine vocabulary, almost all of it header-only, needing nothing of the standard
+# library but what a threaded standard library already links -- see Threads below. Its two sources
+# define the thread-local state the headers share (the current-executor slot, Strand's per-thread
+# slots): inline, each image that compiles the headers would get a slot of its own, so a DLL and its
+# executable would disagree about which executor a thread is running.
 # Task A5 imports contour's Task, cancellation and combinators; Task B1 adds fastcached's executors.
 #
 # Threads, on the same condition core::base uses, which is off exactly under single-threaded
@@ -10,7 +13,7 @@
 # CORE_CPP_USE_THREADS is on, and an INTERFACE target that declares none of that leaves
 # `target_link_libraries(app PRIVATE core::async)` -- what the consumer guide shows, and what morph
 # and tuidu will write -- failing to link wherever pthread is a library of its own and the fallback
-# branch is taken. PUBLIC because the headers are all there is of this module.
+# branch is taken. PUBLIC because the headers use it.
 set(_coreCppAsyncLibs "")
 if(CORE_CPP_USE_THREADS)
     list(APPEND _coreCppAsyncLibs Threads::Threads)
@@ -30,7 +33,7 @@ if(CORE_CPP_USE_THREADS)
     set(_coreCppAsyncThreadedHeaders ThreadPoolExecutor.hpp)
 endif()
 
-core_cpp_add_module(async KIND INTERFACE
+core_cpp_add_module(async KIND STATIC
     HEADERS
         AsTask.hpp
         AsyncQueue.hpp
@@ -41,6 +44,7 @@ core_cpp_add_module(async KIND INTERFACE
         IExecutor.hpp
         Join.hpp
         KeyedStrands.hpp
+        Offload.hpp
         ParkedWork.hpp
         ResumeOn.hpp
         StopToken.hpp
@@ -52,6 +56,9 @@ core_cpp_add_module(async KIND INTERFACE
         WhenAny.hpp
         testing/ManualExecutor.hpp
         ${_coreCppAsyncThreadedHeaders}
+    SOURCES
+        ExecutorContext.cpp
+        Strand.cpp
     PUBLIC_LIBS ${_coreCppAsyncLibs})
 
 # That the module carries the dependency, asserted here because a host whose pthread is part of
@@ -73,6 +80,7 @@ set(_coreCppAsyncStopTokenTests
     AsyncQueue_test.cpp
     Awaitable_test.cpp
     KeyedStrands_test.cpp
+    Offload_test.cpp
     ParkedWork_test.cpp
     StopToken_test.cpp
     Strand_test.cpp

@@ -4,6 +4,7 @@
 /// @file Wakeup.hpp
 /// @brief Cross-platform wakeup primitive for inter-thread signaling.
 
+#include <core/platform/PlatformExport.hpp>
 #include <core/platform/Types.hpp>
 
 namespace core::platform
@@ -17,7 +18,7 @@ namespace core::platform
 ///
 /// Usage: one thread calls signal() to wake another thread that is
 /// blocked in TerminalInput::poll() or WaitForMultipleObjects().
-class Wakeup
+class CORE_PLATFORM_API Wakeup
 {
   public:
     /// @brief Creates the wakeup channel: an eventfd on Linux, a self-pipe on other UNIX systems,

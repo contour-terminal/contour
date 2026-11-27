@@ -33,6 +33,7 @@
 /// `Detail::RequireReadBuffer`, at `0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`.
 
 #include <core/Assert.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <cassert>
 #include <cstddef>
@@ -69,7 +70,7 @@ namespace core::net::contract
 /// Debug-only, like every other guard here. Origin:
 /// [fastcached#668](https://github.com/LASTRADA-Software/fastcached/issues/668).
 /// @param loop The loop the object being destroyed belongs to.
-void assertTeardownIsSerialisedWithDispatch(EventLoop const& loop) noexcept;
+CORE_NET_API void assertTeardownIsSerialisedWithDispatch(EventLoop const& loop) noexcept;
 
 /// Refuses a `read` whose destination span is empty, at the transport that was handed it.
 ///

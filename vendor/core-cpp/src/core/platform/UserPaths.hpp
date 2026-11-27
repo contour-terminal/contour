@@ -3,11 +3,13 @@
 
 #include <core/Environment.hpp>
 #include <core/Utf8Path.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <filesystem>
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace core::platform
@@ -66,6 +68,38 @@ namespace core::platform
                 return *std::move(path);
     if (auto home = homeDirectory(environment))
         return *home / ".config";
+    return std::nullopt;
+}
+
+namespace detail
+{
+    /// Where this OS keeps a user's caches below the home directory, `/`-separated, when no
+    /// variable names them: `.cache` (the XDG default; Linux, the BSDs), `Library/Caches` (macOS),
+    /// `AppData/Local` (Windows). Defined by a CMake-selected source per OS.
+    /// @return The row.
+    [[nodiscard]] CORE_PLATFORM_API std::string_view cacheHomeBelowHome() noexcept;
+} // namespace detail
+
+/// @brief Returns the user's cache base directory.
+///
+/// $XDG_CACHE_HOME, then %LOCALAPPDATA%, then the OS's row below homeDirectory(): ~/.cache (Linux,
+/// FreeBSD), ~/Library/Caches (macOS), ~/AppData/Local (Windows). Each variable is read as UTF-8, as
+/// for homeDirectory(); an empty one, one that is not UTF-8, or **a relative one counts as unset**,
+/// as the XDG Base Directory specification says, so a cache never lands below the working directory.
+/// A relative home directory names no cache.
+///
+/// @param environment The environment to read the variables from: by default the process
+///                    environment as it is now, and in a test a fake one.
+/// @return The absolute cache directory path, or std::nullopt if it cannot be determined.
+[[nodiscard]] inline auto cacheHome(core::Environment const& environment = core::LiveEnvironment {})
+    -> std::optional<std::filesystem::path>
+{
+    for (auto const* const name: { "XDG_CACHE_HOME", "LOCALAPPDATA" })
+        if (auto const value = environment.get(name); value && !value->empty())
+            if (auto path = core::pathFromUtf8(*value); path && path->is_absolute())
+                return *std::move(path);
+    if (auto home = homeDirectory(environment); home && home->is_absolute())
+        return *home / std::filesystem::path { detail::cacheHomeBelowHome() }; // ASCII: no conversion to fail
     return std::nullopt;
 }
 

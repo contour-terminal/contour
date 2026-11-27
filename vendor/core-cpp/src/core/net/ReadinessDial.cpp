@@ -212,11 +212,24 @@ async::Task<SocketResult> dialReadiness(EventLoop* loop,
     if (!opened.has_value())
         co_return std::unexpected(opened.error());
 
-    auto handles = *opened;
-    // Closes whatever is LEFT when this frame goes — an `OperationCancelled` thrown out of the
-    // park included, which is the path that would otherwise leak a descriptor per cancelled dial.
+    // The task is made in a statement of its own, so the `DialSocket` temporary is gone before the
+    // `co_await`: MSVC at /O2 cannot emit a symmetric transfer's tail call with a destructor still
+    // pending in the awaiting full-expression (C4737; see `ReadinessDial_test.cpp`).
+    auto dial = dialReadinessOn(loop, DialSocket { loop, *opened }, endpoint, deadline, options);
+    co_return co_await std::move(dial);
+}
+
+async::Task<SocketResult> dialReadinessOn(EventLoop* loop,
+                                          DialSocket socket,
+                                          ResolvedEndpoint endpoint,
+                                          platform::SteadyTimePoint deadline,
+                                          StreamSocketOptions options)
+{
+    // Closes whatever is LEFT when this frame goes — an `OperationCancelled` thrown out of the park
+    // included, which is the path that would otherwise leak a descriptor per cancelled dial.
     // `adoptDialled` empties `handles`, so the success path disarms this by having nothing to
     // close rather than by a flag somebody can forget to set.
+    auto handles = socket.release();
     auto const discard = ScopeGuard { [&]() noexcept { closeDialSocket(loop, handles); } };
 
     // Before the connect, while the window scale can still take the receive buffer into account.

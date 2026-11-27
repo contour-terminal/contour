@@ -11,6 +11,7 @@
 /// close-on-exec and error classification instead of carrying a fourth copy of each.
 
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -36,7 +37,7 @@ inline constexpr std::chrono::milliseconds DefaultProbeTimeout { 3000 };
 /// @param timeout Bound on the dial and on each send and receive.
 /// @return The status code, or why none was read: the dial's or the socket's error, or
 ///         @c NetErrorCode::Unsupported for a response that is not an HTTP/1.x status line.
-[[nodiscard]] std::expected<unsigned, NetError> probeHttpStatus(
+[[nodiscard]] CORE_NET_API std::expected<unsigned, NetError> probeHttpStatus(
     std::string_view host,
     std::uint16_t port,
     std::string_view path,
@@ -44,9 +45,9 @@ inline constexpr std::chrono::milliseconds DefaultProbeTimeout { 3000 };
 
 /// @return Whether @p host : @p port answered @p path with status 200 -- @c probeHttpStatus
 ///         reduced to the one bit a health check exits on.
-[[nodiscard]] bool httpHealthProbe(std::string_view host,
-                                   std::uint16_t port,
-                                   std::string_view path,
-                                   std::chrono::milliseconds timeout = DefaultProbeTimeout);
+[[nodiscard]] CORE_NET_API bool httpHealthProbe(std::string_view host,
+                                                std::uint16_t port,
+                                                std::string_view path,
+                                                std::chrono::milliseconds timeout = DefaultProbeTimeout);
 
 } // namespace core::net

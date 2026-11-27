@@ -18,6 +18,7 @@
 
 #include <core/net/IHostScheduler.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <cstddef>
@@ -29,7 +30,7 @@ namespace core::net
 {
 
 /// An @c IoBackend with no wait of its own, driven by a host event loop.
-class HostDrivenBackend final: public IoBackend
+class CORE_NET_API HostDrivenBackend final: public IoBackend
 {
   public:
     /// @param host The host's timer seam (not owned; outlives this backend).

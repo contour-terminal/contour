@@ -44,14 +44,27 @@ using ResolveResult = std::expected<std::vector<ResolvedEndpoint>, NetError>;
 /// @param port The port it was to be paired with.
 /// @param why The underlying resolver's own message.
 /// @return The structured error, coded @c NetErrorCode::AddressError — "address resolution or
-///         parsing failed", in @c NetError.hpp's own words. Not @c NetErrorCode::AddressNotAvail,
-///         which that header reserves for a BIND whose address is not local: a caller retrying a
-///         DNS failure matches on this code, and one that read a lookup failure as a local bind
-///         problem would stop retrying the thing that is worth retrying.
+///         parsing failed", in @c NetError.hpp's own words: a failure only known in words claims
+///         nothing about whether asking again helps. A resolver that knows the cause reports it
+///         through the @c NetError overload below, so a caller retrying a DNS failure matches on
+///         @c NetErrorCode::ResolverTemporaryFailure. Never @c NetErrorCode::AddressNotAvail, which
+///         that header reserves for a BIND whose address is not local.
 [[nodiscard]] inline NetError resolveFailure(std::string_view host, std::uint16_t port, std::string_view why)
 {
     return makeNetError(
         NetErrorCode::AddressError, 0, std::format("cannot resolve {}:{}: {}", host, port, why));
+}
+
+/// Builds the error a failed classified lookup produces: @p why's code and system code, kept, with
+/// its context worded as @c resolveFailure words it.
+/// @param host The host that could not be resolved.
+/// @param port The port it was to be paired with.
+/// @param why What @c IAddressResolver::resolveClassified answered.
+/// @return The same failure, its context naming what was being looked up.
+[[nodiscard]] inline NetError resolveFailure(std::string_view host, std::uint16_t port, NetError why)
+{
+    why.context = std::format("cannot resolve {}:{}: {}", host, port, why.context);
+    return why;
 }
 
 /// Name resolution a coroutine can await.
@@ -131,14 +144,19 @@ class InlineAddressResolver final: public IAsyncAddressResolver
     /// @copydoc IAsyncAddressResolver::resolve
     ///
     /// @p loop is accepted and ignored: this resolver has nothing to hand back FROM, so honouring
-    /// it would mean suspending for no reason.
+    /// it would mean suspending for no reason. A failure carries the code
+    /// @c IAddressResolver::resolveClassified gave it. Host text @c detail::checkLookupHost refuses
+    /// (empty, an embedded NUL, more than 253 bytes) is @c NetErrorCode::AddressError, and @p inner
+    /// is never asked, as with the threaded and the executor resolvers.
     [[nodiscard]] async::Task<ResolveResult> resolve(std::string host,
                                                      std::uint16_t port,
                                                      EventLoop* /*loop*/) override
     {
-        auto resolved = _inner.resolve(host, port);
+        if (auto checked = detail::checkLookupHost(host); !checked.has_value())
+            co_return std::unexpected(std::move(checked.error()));
+        auto resolved = _inner.resolveClassified(host, port);
         if (!resolved.has_value())
-            co_return std::unexpected(resolveFailure(host, port, resolved.error()));
+            co_return std::unexpected(resolveFailure(host, port, std::move(resolved.error())));
         co_return std::move(*resolved);
     }
 

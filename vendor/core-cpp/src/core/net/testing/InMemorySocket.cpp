@@ -134,10 +134,12 @@ namespace
 
 InMemorySocket::InMemorySocket(std::shared_ptr<InMemoryPipe> inbound,
                                std::shared_ptr<InMemoryPipe> outbound,
-                               std::string peerAddress) noexcept:
+                               std::string peerAddress,
+                               InMemoryEndpoints endpoints) noexcept:
     _inbound { std::move(inbound) },
     _outbound { std::move(outbound) },
-    _peerAddress { std::move(peerAddress) }
+    _peerAddress { std::move(peerAddress) },
+    _endpoints { endpoints }
 {
     _inbound->onReadable(&InMemorySocket::onInboundProgress, this);
     _outbound->onWritable(&InMemorySocket::onOutboundProgress, this);
@@ -213,6 +215,24 @@ std::expected<void, NetError> InMemorySocket::armKeepAlive(KeepAliveSettings con
         return std::unexpected(closedSocket("armKeepAlive"));
     _keepAliveRequests.push_back(settings);
     return {};
+}
+
+std::expected<ResolvedEndpoint, NetError> InMemorySocket::localEndpoint() const
+{
+    if (_closed)
+        return std::unexpected(closedSocket("localEndpoint"));
+    if (!_endpoints.local.has_value())
+        return ISocket::localEndpoint();
+    return *_endpoints.local;
+}
+
+std::expected<ResolvedEndpoint, NetError> InMemorySocket::remoteEndpoint() const
+{
+    if (_closed)
+        return std::unexpected(closedSocket("remoteEndpoint"));
+    if (!_endpoints.remote.has_value())
+        return ISocket::remoteEndpoint();
+    return *_endpoints.remote;
 }
 
 ResultAwaitable<void> InMemorySocket::shutdownWrite()
@@ -496,14 +516,23 @@ void InMemorySocket::retireWrite(void* owner, void* awaitable) noexcept
 
 // -- InMemorySocketPair ---------------------------------------------------------------------------
 
-InMemorySocketPair InMemorySocketPair::create(std::size_t maxBytesInFlight, std::string serverPeerAddress)
+InMemorySocketPair InMemorySocketPair::create(std::size_t maxBytesInFlight,
+                                              std::string serverPeerAddress,
+                                              InMemoryPairEndpoints endpoints)
 {
     auto clientToServer = std::make_shared<InMemoryPipe>(maxBytesInFlight);
     auto serverToClient = std::make_shared<InMemoryPipe>(maxBytesInFlight);
     return InMemorySocketPair {
-        .client = std::make_unique<InMemorySocket>(serverToClient, clientToServer),
-        .server =
-            std::make_unique<InMemorySocket>(clientToServer, serverToClient, std::move(serverPeerAddress)),
+        .client = std::make_unique<InMemorySocket>(
+            serverToClient,
+            clientToServer,
+            std::string {},
+            InMemoryEndpoints { .local = endpoints.client, .remote = endpoints.server }),
+        .server = std::make_unique<InMemorySocket>(
+            clientToServer,
+            serverToClient,
+            std::move(serverPeerAddress),
+            InMemoryEndpoints { .local = endpoints.server, .remote = endpoints.client }),
     };
 }
 

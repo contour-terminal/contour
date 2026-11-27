@@ -27,11 +27,21 @@ if(WIN32)
     list(APPEND _coreCppBaseWindowsLibs bcrypt)
 endif()
 
+# The value and memory barriers behind core::constantTimeEquals and core::secureZero, one per
+# compiler front end: GNU inline assembly where the front end has it (GCC, Clang, Emscripten, WASI),
+# a volatile object under MSVC's (cl, clang-cl), which has no inline assembly on x64 or arm64.
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set(_coreCppBaseValueBarrier ValueBarrierMsvc.cpp)
+else()
+    set(_coreCppBaseValueBarrier ValueBarrierGnu.cpp)
+endif()
+
 core_cpp_add_module(base KIND STATIC
     HEADERS
         Assert.hpp
         Base64.hpp
         Clock.hpp
+        ConstantTime.hpp
         Deferred.hpp
         Defines.hpp
         Environment.hpp
@@ -52,12 +62,17 @@ core_cpp_add_module(base KIND STATIC
         WideString.hpp
         "${CORE_CPP_GENERATED_INCLUDE_DIR}/core/Config.hpp"
     SOURCES
+        Assert.cpp
+        Clock.cpp
+        ConstantTime.cpp
         Environment.cpp
         Random.cpp
         SystemRandomSource.hpp
         UserInfo.cpp
         Utf8Path.cpp
         Utils.cpp
+        ValueBarrier.hpp
+        ${_coreCppBaseValueBarrier}
     # One fillFromSystemRandom() per platform (core::systemRandom()): getentropy() on every POSIX
     # system, under Emscripten and under WASI (whose libc answers it from random_get), BCryptGenRandom()
     # on Windows.
@@ -86,6 +101,7 @@ core_cpp_add_test(base
     SOURCES
         Base64_test.cpp
         Clock_test.cpp
+        ConstantTime_test.cpp
         Environment_test.cpp
         Escape_test.cpp
         Flags_test.cpp

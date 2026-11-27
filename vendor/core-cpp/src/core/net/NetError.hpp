@@ -23,31 +23,40 @@ namespace core::net
 /// either lineage still has a code for every failure it used to distinguish.
 enum class NetErrorCode : std::uint8_t
 {
-    Ok = 0,            ///< No error. Not stored in an error result; it is what a `NetErrorCode`
-                       ///< variable holds before anything has failed.
-    Eof,               ///< The peer finished sending (it closed its write side cleanly).
-    Cancelled,         ///< The operation was cancelled by the resource (close, cancelRead, a closed
-                       ///< listener). A cancel from the flow's own stop token throws instead.
-    Timeout,           ///< A deadline elapsed before the operation completed.
-    WouldBlock,        ///< The operation would block (transient; the backend reports readiness).
-    BadHandle,         ///< The socket, descriptor or handle is closed or invalid.
-    ConnReset,         ///< The peer reset the connection mid-flight.
-    ConnRefused,       ///< A connect was refused by the peer.
-    AddressInUse,      ///< A bind failed because the endpoint is taken.
-    AddressNotAvail,   ///< A bind failed because the address is not available locally.
-    AddressError,      ///< Address resolution or parsing failed.
-    HostUnreach,       ///< The network reports the destination as unreachable.
-    PermissionDenied,  ///< The OS refused the operation (a low-numbered port without privileges, a
-                       ///< firewall's EACCES).
-    Unsupported,       ///< The operation is not supported on this platform or transport.
-    MessageTooLarge,   ///< A framed unit (line, PDU, datagram) exceeded its configured bound.
-    SystemError,       ///< An OS error nothing classified further; inspect `NetError::systemCode`.
-    ResourceExhausted, ///< The process or the system ran out of something the call needs: descriptors
-                       ///< (`EMFILE`, `ENFILE`, `WSAEMFILE`), buffer space (`ENOBUFS`, `WSAENOBUFS`)
-                       ///< or memory (`ENOMEM`). Transient where `SystemError` may be permanent: the
-                       ///< same call can succeed once something is released, so an accept loop backs
-                       ///< off and accepts again (`AcceptPolicy.hpp`). After `SystemError` rather
-                       ///< than beside its neighbours so that no earlier code is renumbered.
+    Ok = 0,                   ///< No error. Not stored in an error result; it is what a `NetErrorCode`
+                              ///< variable holds before anything has failed.
+    Eof,                      ///< The peer finished sending (it closed its write side cleanly).
+    Cancelled,                ///< The operation was cancelled by the resource (close, cancelRead, a closed
+                              ///< listener). A cancel from the flow's own stop token throws instead.
+    Timeout,                  ///< A deadline elapsed before the operation completed.
+    WouldBlock,               ///< The operation would block (transient; the backend reports readiness).
+    BadHandle,                ///< The socket, descriptor or handle is closed or invalid.
+    ConnReset,                ///< The peer reset the connection mid-flight.
+    ConnRefused,              ///< A connect was refused by the peer.
+    AddressInUse,             ///< A bind failed because the endpoint is taken.
+    AddressNotAvail,          ///< A bind failed because the address is not available locally.
+    AddressError,             ///< Address resolution or parsing failed. For a name lookup: a permanent
+                              ///< resolver failure (`EAI_FAIL`, WASI's `permanent-resolver-failure`), and
+                              ///< any lookup failure nothing classified further.
+    HostUnreach,              ///< The network reports the destination as unreachable.
+    PermissionDenied,         ///< The OS refused the operation (a low-numbered port without privileges, a
+                              ///< firewall's EACCES).
+    Unsupported,              ///< The operation is not supported on this platform or transport.
+    MessageTooLarge,          ///< A framed unit (line, PDU, datagram) exceeded its configured bound.
+    SystemError,              ///< An OS error nothing classified further; inspect `NetError::systemCode`.
+    ResourceExhausted,        ///< The process or the system ran out of something the call needs: descriptors
+                              ///< (`EMFILE`, `ENFILE`, `WSAEMFILE`), buffer space (`ENOBUFS`, `WSAENOBUFS`)
+                              ///< or memory (`ENOMEM`). Transient where `SystemError` may be permanent: the
+                              ///< same call can succeed once something is released, so an accept loop backs
+                              ///< off and accepts again (`AcceptPolicy.hpp`). After `SystemError` rather
+                              ///< than beside its neighbours so that no earlier code is renumbered.
+    NameNotFound,             ///< A name lookup answered that the name does not exist, or has no address:
+                              ///< `EAI_NONAME`, `WSAHOST_NOT_FOUND` (WASI's `name-unresolvable`). Asking
+                              ///< again gives the same answer. Classified by @c resolverErrorTable.
+    ResolverTemporaryFailure, ///< The resolver could not answer now, a name server not reachable or
+                              ///< not responding: `EAI_AGAIN`, `WSATRY_AGAIN` (WASI's
+                              ///< `temporary-resolver-failure`). Asking again later may succeed. A
+                              ///< permanent resolver failure stays @c AddressError.
 
     Last, ///< Not a code: the number of codes above it, so a table or a test can cover every one of
           ///< them without restating the list. Never constructed, never returned, never compared
@@ -91,6 +100,8 @@ enum class NetErrorCode : std::uint8_t
         case NetErrorCode::MessageTooLarge: return "message too large";
         case NetErrorCode::SystemError: return "system error";
         case NetErrorCode::ResourceExhausted: return "resource exhausted";
+        case NetErrorCode::NameNotFound: return "name not found";
+        case NetErrorCode::ResolverTemporaryFailure: return "resolver temporarily unavailable";
         case NetErrorCode::Last: break;
     }
     return "unknown error";

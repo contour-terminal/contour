@@ -9,6 +9,7 @@
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/InputField.hpp>
 #include <core/tui/ScrollableSelection.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstdint>
 #include <string>
@@ -34,7 +35,7 @@ enum class CommandPaletteAction : std::uint8_t
 ///
 /// Follows the CompletionPopup pattern: manages its own visibility state,
 /// handles keyboard navigation, and renders using the Canvas API.
-class CommandPalettePopup: public Component
+class CORE_TUI_CORE_API CommandPalettePopup: public Component
 {
   public:
     /// @brief Constructs a hidden palette timed by the process's steady clock.

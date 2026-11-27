@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/log/LogExport.hpp>
+
 /// @file
 /// The process id the `[PID]` field prints, asked once per platform.
 ///
@@ -13,6 +15,6 @@ namespace core::log::detail
 {
 
 /// @return The current process id, as a plain number.
-[[nodiscard]] int processId() noexcept;
+[[nodiscard]] CORE_LOG_API int processId() noexcept;
 
 } // namespace core::log::detail

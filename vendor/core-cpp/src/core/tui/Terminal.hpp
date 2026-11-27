@@ -8,6 +8,7 @@
 #include <core/tui/ScreenSurface.hpp>
 #include <core/tui/TerminalInput.hpp>
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiExport.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -89,7 +90,7 @@ class TerminalQueryInput
 ///
 /// Manages initialization order, cleanup, and SIGWINCH handler installation.
 /// Provides convenience methods that delegate to TerminalInput and TerminalOutput.
-class Terminal: public ScreenSurface
+class CORE_TUI_API Terminal: public ScreenSurface
 {
   public:
     /// @brief Constructs a Terminal with the default real TerminalOutput.

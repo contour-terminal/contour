@@ -53,6 +53,7 @@ set(_coreCppNetSubset
     detail/CompletionHook.hpp
     detail/ParkId.hpp
     detail/ParkTable.hpp
+    detail/ReadyBatch.cpp
     detail/ReadyBatch.hpp
     detail/RingQueue.hpp
     detail/ScopeGuard.hpp
@@ -103,6 +104,7 @@ endif()
 if(NOT _coreCppNetDefaultBackend STREQUAL "posix/DefaultBackend.cpp")
     core_cpp_add_unbuilt_source_check(net-default-backend
         SOURCES posix/DefaultBackend.cpp
+        PART_OF net
         USAGE core::net_types core::async core::platform)
 endif()
 
@@ -117,6 +119,7 @@ endif()
 core_cpp_add_module(net KIND STATIC
     HEADERS
         AcceptLoopHealth.hpp
+        AcceptLoop.hpp
         AcceptPolicy.hpp
         AsyncBufferedReader.hpp
         BlockingConnector.hpp
@@ -125,11 +128,13 @@ core_cpp_add_module(net KIND STATIC
         DeadlineTimer.hpp
         Diagnostics.hpp
         EventLoop.hpp
+        ExecutorAddressResolver.hpp
         HealthProbe.hpp
         HostDrivenBackend.hpp
         HttpServer.hpp
         IAdmissionControl.hpp
         IAsyncAddressResolver.hpp
+        IAsyncDatagramSocket.hpp
         ICompletionPort.hpp
         IConnector.hpp
         IDatagramSocket.hpp
@@ -138,7 +143,9 @@ core_cpp_add_module(net KIND STATIC
         InterruptibleSleep.hpp
         IoAwaitable.hpp
         IoBackend.hpp
+        IpSocketAddress.hpp
         ISocket.hpp
+        ITcpSocket.hpp
         ITlsContext.hpp
         ITlsSession.hpp
         KeepAlive.hpp
@@ -150,16 +157,20 @@ core_cpp_add_module(net KIND STATIC
         SocketBuffers.hpp
         SocketContract.hpp
         SocketDeadline.hpp
+        SocketOption.hpp
         SleepUntil.hpp
         Sockets.hpp
         SplitSocket.hpp
         SshAgentEndpoint.hpp
+        StandardStreams.hpp
         TcpClient.hpp
         ThreadedAddressResolver.hpp
         UdpSocket.hpp
         WithTimeout.hpp
         WriteQueue.hpp
         detail/CompletionHook.hpp
+        detail/InFlightBudget.hpp
+        detail/ParkedCall.hpp
         detail/ParkId.hpp
         detail/ParkTable.hpp
         detail/ReadinessSlot.hpp
@@ -172,6 +183,7 @@ core_cpp_add_module(net KIND STATIC
         testing/CoroTestSupport.hpp
         testing/DatagramPayload.hpp
         testing/FailingListener.hpp
+        testing/InMemoryAsyncDatagram.hpp
         testing/InMemoryDatagram.hpp
         testing/InMemorySocket.hpp
         testing/InMemoryTransport.hpp
@@ -179,41 +191,56 @@ core_cpp_add_module(net KIND STATIC
         testing/NullBackend.hpp
         testing/ParkingReadableSocket.hpp
         testing/RawSockets.hpp
+        testing/ScriptedAddressResolver.hpp
         testing/ScriptedBackend.hpp
         testing/SocketDecorator.hpp
         testing/TestLoop.hpp
     SOURCES
         ${_coreCppNetSubset}
         AcceptLoopHealth.cpp
+        AcceptLoop.cpp
         AcceptPolicy.cpp
         AsyncBufferedReader.cpp
+        AsyncDatagramSocket.cpp
         BlockingConnector.cpp
         BlockingSocket.cpp
         ConnectFlow.cpp
         Connector.cpp
         Diagnostics.cpp
+        ExecutorAddressResolver.cpp
         HealthProbe.cpp
         HttpServer.cpp
+        IpSocketAddress.cpp
         ISocket.cpp
         LingeringClose.cpp
         ReadinessDial.cpp
         SharedPortDatagram.cpp
         SocketAddress.cpp
         SocketContract.cpp
+        SocketOption.cpp
         Sockets.cpp
+        StandardStreams.cpp
         TcpClient.cpp
+        TcpSocket.cpp
         ThreadedAddressResolver.cpp
         WriteQueue.cpp
+        testing/InMemoryAsyncDatagram.cpp
         testing/InMemoryDatagram.cpp
         testing/InMemorySocket.cpp
         ${_coreCppNetDefaultBackend}
         detail/BlockingPrimitives.hpp
         detail/DatagramAddressing.hpp
+        detail/DatagramChannel.hpp
         detail/DatagramReceiveBuffer.hpp
         detail/DialPrimitives.hpp
+        detail/OperationClaim.hpp
         detail/PeerAddress.hpp
+        detail/SocketEndpoint.hpp
         detail/SocketErrors.hpp
+        detail/SocketOptionAccess.hpp
         detail/SshAgentEndpoint.hpp
+        detail/StandardStreamPrimitives.hpp
+        detail/TcpSocketPrimitives.hpp
         detail/WakeupChannel.hpp
     SOURCES_POSIX
         detail/WouldBlock.hpp
@@ -228,9 +255,14 @@ core_cpp_add_module(net KIND STATIC
         posix/PosixListener.hpp
         posix/PosixSocket.cpp
         posix/PosixSocket.hpp
+        posix/PosixTcpSocket.cpp
+        posix/ReadinessDatagramSocket.cpp
         posix/SocketErrors.cpp
+        posix/SocketOptionTable.cpp
         posix/SocketsPosix.cpp
         posix/SshAgentEndpoint.cpp
+        posix/StandardStreamPrimitives.cpp
+        posix/StreamKindTable.cpp
         posix/StreamSocketOptions.cpp
         posix/UdpSocket.cpp
         posix/UnixListener.cpp
@@ -251,17 +283,22 @@ core_cpp_add_module(net KIND STATIC
         windows/InvalidSocket.hpp
         windows/IocpBackend.cpp
         windows/IocpBackend.hpp
+        windows/IocpDatagramSocket.cpp
         windows/IocpDial.cpp
         windows/IocpOperation.hpp
         windows/IocpSocket.cpp
         windows/IocpSocket.hpp
+        windows/IocpTcpSocket.cpp
         windows/NamedPipe.cpp
         windows/NamedPipe.hpp
         windows/NetworkEvents.cpp
         windows/NetworkEvents.hpp
         windows/SocketErrors.cpp
+        windows/SocketOptionTable.cpp
         windows/SocketsWin32.cpp
         windows/SshAgentEndpoint.cpp
+        windows/StandardStreamPrimitives.cpp
+        windows/StreamKindTable.cpp
         windows/StreamSocketOptions.cpp
         windows/UdpSocket.cpp
         windows/UnixSocketPath.cpp
@@ -292,22 +329,46 @@ core_cpp_add_module(net KIND STATIC
 # software because ssh-keygen makes sk signatures only with a device attached. Both are permitted
 # units of the seam, and neither header names an OpenSSL type. SshAgent is the ssh-agent protocol
 # over a socket: no OpenSSL, here only for SshPublicKey.
+#
+# The system trust is one CMake-selected SystemTrust.cpp, never an #ifdef: macOS and Windows hand
+# every chain to the platform's verifier (Security.framework; CryptoAPI's chain engine), so the
+# operating system's own trust settings decide, and every other system reads its bundle or hashed
+# directory through the portable file store in TrustStore.cpp.
+if(APPLE)
+    set(_coreCppNetSystemTrust darwin/SystemTrust.cpp darwin/DarwinChainVerifier.cpp darwin/DarwinChainVerifier.hpp)
+    set(_coreCppNetTlsPlatformLibs "-framework Security" "-framework CoreFoundation")
+    set(_coreCppNetTlsPlatformTests darwin/DarwinChainVerifier_test.cpp)
+elseif(WIN32)
+    set(_coreCppNetSystemTrust windows/SystemTrust.cpp windows/WindowsChainVerifier.cpp windows/WindowsChainVerifier.hpp)
+    set(_coreCppNetTlsPlatformLibs crypt32)
+    set(_coreCppNetTlsPlatformTests windows/WindowsChainVerifier_test.cpp)
+else()
+    set(_coreCppNetSystemTrust posix/SystemTrust.cpp)
+    set(_coreCppNetTlsPlatformLibs "")
+    # No platform verifier here: the file store's cases run on every OS from TrustStore_test.cpp.
+    set(_coreCppNetTlsPlatformTests "")
+endif()
+
 core_cpp_add_module(net_tls KIND STATIC
     HEADERS
         SshAgent.hpp
         SshKeys.hpp
         Tls.hpp
+        TrustStore.hpp
         testing/SoftwareSecurityKey.hpp
         testing/StrictTlsPeer.hpp
     SOURCES
         SshAgent.cpp
         SshKeys.cpp
         Tls.cpp
+        TrustStore.cpp
+        ${_coreCppNetSystemTrust}
+        detail/Alpn.hpp
         detail/SshWire.hpp
         testing/SoftwareSecurityKey.cpp
         testing/StrictTlsPeer.cpp
     PUBLIC_LIBS core::net
-    PRIVATE_LIBS OpenSSL::SSL OpenSSL::Crypto)
+    PRIVATE_LIBS OpenSSL::SSL OpenSSL::Crypto ${_coreCppNetTlsPlatformLibs})
 
 # The error vocabulary alone, in every build: under Emscripten this is what proves net_types builds.
 core_cpp_add_test(net NAME net_types SOURCES NetError_test.cpp)
@@ -325,8 +386,10 @@ core_cpp_add_test(net NAME net_backend
 # What a drain-step callback costs in allocations: a binary of its own because it replaces the
 # global allocation functions, which would reach every case linked beside it. Not under a
 # sanitizer, whose runtime defines those functions itself (the link refuses a second definition)
-# and whose allocator is not the one a Release program counts against.
-if(NOT CORE_CPP_SANITIZERS)
+# and whose allocator is not the one a Release program counts against. Not against a Windows DLL
+# either: a program's replacement reaches only its own image there, so what core::net allocates
+# inside its DLL is never counted or refused. ELF binds every image's operator new to the program's.
+if(NOT CORE_CPP_SANITIZERS AND NOT (WIN32 AND CORE_CPP_BUILD_SHARED))
     core_cpp_add_test(net NAME net_alloc
         SOURCES CallbackAllocation_test.cpp ../testing/ReplacedGlobalAllocation.cpp
         SOURCES_EMSCRIPTEN CallbackAllocation_test.cpp ../testing/ReplacedGlobalAllocation.cpp)
@@ -345,6 +408,8 @@ core_cpp_add_test(net
         AcceptPolicy_test.cpp
         AdoptSocket_test.cpp
         AsyncBufferedReader_test.cpp
+        AsyncDatagram_test.cpp
+        AsyncDatagramLoopback_test.cpp
         BackendParity_test.cpp
         BlockingConnector_test.cpp
         BlockingSocket_test.cpp
@@ -355,10 +420,12 @@ core_cpp_add_test(net
         ConnectFlow_test.cpp
         Connector_test.cpp
         EventLoop_test.cpp
+        ExecutorAddressResolver_test.cpp
         HealthProbe_test.cpp
         HttpServer_test.cpp
         IAdmissionControl_test.cpp
         IoAwaitable_test.cpp
+        IpSocketAddress_test.cpp
         LingeringClose_test.cpp
         LoopTeardown_test.cpp
         ReadinessDial_test.cpp
@@ -366,18 +433,24 @@ core_cpp_add_test(net
         SocketAddress_test.cpp
         SocketClosedStates_test.cpp
         SocketDeadline_test.cpp
+        SocketEndpoints_test.cpp
         Socket_test.cpp
+        StandardStreams_test.cpp
+        StandardStreamsTestSupport.hpp
         StreamSocketOptions_test.cpp
         TcpClient_test.cpp
+        TcpSocket_test.cpp
         ThreadedAddressResolver_test.cpp
         UdpSocket_test.cpp
         WaitReadable_test.cpp
         WithTimeout_test.cpp
         WriteQueue_test.cpp
+        detail/ParkedCall_test.cpp
         testing/FailingListener_test.cpp
         testing/InMemoryDatagram_test.cpp
         testing/InMemorySocket_test.cpp
         testing/ParkingReadableSocket_test.cpp
+        testing/ScriptedAddressResolver_test.cpp
         testing/TestLoop_test.cpp
     # POSIX-only, each for its own reason. `ReactorSocket_test` names PosixSocket directly, and
     # `SocketRegistration_test` counts what PosixSocket's kept registration costs the backend.
@@ -408,10 +481,15 @@ core_cpp_add_test(net
         posix/AdoptListener_test.cpp
         posix/FdPassing_test.cpp
         posix/PortSharing_test.cpp
+        posix/ResolverErrors_test.cpp
         posix/SocketErrors_test.cpp
         posix/SshAgentEndpoint_test.cpp
+        posix/StandardStreams_test.cpp
+        posix/StandardStreamsTestSupport.cpp
         posix/UnixSocket_test.cpp
         posix/WaitReadableClose_test.cpp
+    SOURCES_LINUX
+        linux/AcceptedSocketOptions_test.cpp
     SOURCES_WINDOWS
         windows/AdoptListener_test.cpp
         windows/IocpBackend_test.cpp
@@ -420,8 +498,10 @@ core_cpp_add_test(net
         windows/NamedPipe_test.cpp
         windows/NetworkEvents_test.cpp
         windows/PortSharing_test.cpp
+        windows/ResolverErrors_test.cpp
         windows/SocketErrors_test.cpp
         windows/SshAgentEndpoint_test.cpp
+        windows/StandardStreamsTestSupport.cpp
         windows/UnixListener_test.cpp
     LABELS loopback
     # IoAwaitable_test.cpp's loop of inline completions skips where symmetric transfer is not a
@@ -443,14 +523,19 @@ endif()
 # core::net_tls, and OpenSSL stays PRIVATE to it.
 core_cpp_add_test(net NAME net_tls
     SOURCES
+        ChainVerifierTestSupport.hpp
         SshAgent_test.cpp
         SshKeys_test.cpp
         TlsContext_test.cpp
         TlsLifetime_test.cpp
         TlsCancelRead_test.cpp
+        TlsPeer_test.cpp
+        TlsTestSupport.hpp
         TlsSession_test.cpp
         TlsSocket_test.cpp
         Tls_test.cpp
+        TrustStore_test.cpp
+        ${_coreCppNetTlsPlatformTests}
     LABELS loopback
     # The keys and signatures ssh-keygen made, read where they are checked in (testdata/ssh/README.md).
     DEFINITIONS "CORE_CPP_SSH_TESTDATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/testdata/ssh\""

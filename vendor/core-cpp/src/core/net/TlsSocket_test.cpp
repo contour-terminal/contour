@@ -18,11 +18,15 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/IpSocketAddress.hpp>
+#include <core/net/NetError.hpp>
+#include <core/net/SocketOption.hpp>
 #include <core/net/Tls.hpp>
 #include <core/net/WithTimeout.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
+#include <core/net/testing/SocketDecorator.hpp>
 #include <core/net/testing/StrictTlsPeer.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -31,6 +35,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
@@ -596,4 +601,91 @@ TEST_CASE("A TLS socket forwards armKeepAlive to its inner transport", "[net][tl
     CHECK(inner->keepAliveRequests().front().idle == settings.idle);
     CHECK(inner->keepAliveRequests().front().interval == settings.interval);
     CHECK(inner->keepAliveRequests().front().count == settings.count);
+}
+
+TEST_CASE("A TLS socket forwards its local and remote endpoints to its inner transport",
+          "[net][tls][endpoints]")
+{
+    auto loopBackend = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *loopBackend };
+    auto context = core::net::makeSelfSignedServerContext();
+    REQUIRE(context.has_value());
+
+    auto const clientAddress = core::net::IpSocketAddress {
+        .address = core::net::Ipv6Address { { 0x2001, 0x0db8, 0, 0, 0, 0, 0, 1 } }, .port = 50'001
+    };
+    auto const serverAddress = core::net::IpSocketAddress {
+        .address = core::net::Ipv6Address { { 0x2001, 0x0db8, 0, 0, 0, 0, 0, 2 } }, .port = 443
+    };
+    auto pair = core::net::testing::InMemorySocketPair::create(
+        0,
+        {},
+        core::net::testing::InMemoryPairEndpoints { .client = core::net::toEndpoint(clientAddress),
+                                                    .server = core::net::toEndpoint(serverAddress) });
+    auto tls = (*context)->wrap(std::move(pair.server), loop);
+    REQUIRE(tls != nullptr);
+
+    // Through the IP form, so a TLS layer that answered from the base -- Unsupported -- fails here
+    // rather than comparing two errors equal.
+    auto const local = tls->localEndpoint().and_then(core::net::toIpSocketAddress);
+    auto const remote = tls->remoteEndpoint().and_then(core::net::toIpSocketAddress);
+    REQUIRE(local.has_value());
+    REQUIRE(remote.has_value());
+    CHECK(*local == serverAddress);
+    CHECK(*remote == clientAddress);
+}
+
+namespace
+{
+
+/// An in-memory end that answers every option with a value of its own and records what it was
+/// asked to set: the one way to tell a forwarded option from the base class's @c Unsupported.
+class OptionRecordingSocket final: public core::net::testing::SocketDecorator
+{
+  public:
+    /// @param inner The end it wraps, owned.
+    explicit OptionRecordingSocket(std::unique_ptr<ISocket> inner):
+        SocketDecorator { *inner }, _inner { std::move(inner) }
+    {
+    }
+
+    [[nodiscard]] std::expected<std::uint64_t, core::net::NetError> option(
+        core::net::SocketOption option) const override
+    {
+        return static_cast<std::uint64_t>(option) + 100;
+    }
+
+    [[nodiscard]] std::expected<void, core::net::NetError> setOption(core::net::SocketOption option,
+                                                                     std::uint64_t value) override
+    {
+        lastSet = std::pair { option, value };
+        return {};
+    }
+
+    std::optional<std::pair<core::net::SocketOption, std::uint64_t>> lastSet; ///< What @c setOption last saw.
+
+  private:
+    std::unique_ptr<ISocket> _inner;
+};
+
+} // namespace
+
+TEST_CASE("A TLS socket forwards socket options to its inner transport", "[net][tls][socket-option]")
+{
+    auto loopBackend = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *loopBackend };
+    auto context = core::net::makeSelfSignedServerContext();
+    REQUIRE(context.has_value());
+
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    auto recording = std::make_unique<OptionRecordingSocket>(std::move(pair.server));
+    auto* const inner = recording.get();
+    auto tls = (*context)->wrap(std::move(recording), loop);
+    REQUIRE(tls != nullptr);
+
+    using core::net::SocketOption;
+    CHECK(tls->option(SocketOption::SendBufferSize)
+          == std::uint64_t { static_cast<std::uint64_t>(SocketOption::SendBufferSize) + 100 });
+    REQUIRE(tls->setOption(SocketOption::KeepAliveCount, 6).has_value());
+    CHECK(inner->lastSet == std::pair { SocketOption::KeepAliveCount, std::uint64_t { 6 } });
 }

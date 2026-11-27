@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/tui/TuiCoreExport.hpp>
+
 #include <string_view>
 #include <vector>
 
@@ -18,7 +20,7 @@ struct FuzzyConfig
 };
 
 /// @brief Result of a fuzzy match operation.
-struct FuzzyMatchResult
+struct CORE_TUI_CORE_API FuzzyMatchResult
 {
     bool matches = false;            ///< Did the pattern match?
     size_t matchedChars = 0;         ///< Number of pattern graphemes matched.
@@ -66,7 +68,7 @@ struct FuzzyMatchResult
 ///       // result.positions = {7, 8} for highlighting the "ds" in "Downloads"
 ///   }
 /// @endcode
-struct FuzzyMatch
+struct CORE_TUI_CORE_API FuzzyMatch
 {
     /// @brief Fuzzy match with explicit case sensitivity.
     /// @param text The text to search in.
