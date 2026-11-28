@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp> // For Style
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <string>
 
@@ -17,7 +18,7 @@ namespace core::tui
 /// Wide characters (e.g., CJK characters, emoji) occupy two cells:
 /// - The first cell contains the grapheme with width=2
 /// - The second cell is a continuation cell with empty grapheme and width=0
-struct Cell
+struct CORE_TUI_CORE_API Cell
 {
     std::string grapheme; ///< UTF-8 grapheme cluster (empty for continuation cells)
     Style style;          ///< Visual style (colors, attributes)

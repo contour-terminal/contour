@@ -5,6 +5,7 @@
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/KeyCode.hpp>
 #include <core/tui/Modifier.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <optional>
 #include <span>
@@ -19,7 +20,7 @@ namespace core::tui
 ///
 /// This is used to define keybindings. A KeyChord can match against
 /// a KeyEvent to determine if the binding should trigger.
-struct KeyChord
+struct CORE_TUI_CORE_API KeyChord
 {
     KeyCode key {};                      ///< The key code (for special keys like Enter, arrows)
     Modifier modifiers = Modifier::None; ///< Modifier keys (Ctrl, Alt, Shift)
@@ -76,13 +77,13 @@ struct KeyChord
 ///
 /// @param str The action name to parse.
 /// @return The parsed EditAction, or std::nullopt if unknown.
-[[nodiscard]] std::optional<EditAction> parseEditAction(std::string_view str);
+[[nodiscard]] CORE_TUI_CORE_API std::optional<EditAction> parseEditAction(std::string_view str);
 
 /// Converts an EditAction to its string name.
 ///
 /// @param action The action to convert.
 /// @return The action name (e.g., "redo", "move-forward-char").
-[[nodiscard]] std::string_view editActionToString(EditAction action) noexcept;
+[[nodiscard]] CORE_TUI_CORE_API std::string_view editActionToString(EditAction action) noexcept;
 
 /// Info about a bindable edit action (name + short description).
 struct EditActionInfo
@@ -92,10 +93,10 @@ struct EditActionInfo
 };
 
 /// Returns all bindable edit actions with their descriptions.
-[[nodiscard]] std::vector<EditActionInfo> allEditActionNames();
+[[nodiscard]] CORE_TUI_CORE_API std::vector<EditActionInfo> allEditActionNames();
 
 /// Returns all recognized key names (enter, escape, tab, up, f1, etc.).
-[[nodiscard]] std::vector<std::string_view> allKeyNames();
+[[nodiscard]] CORE_TUI_CORE_API std::vector<std::string_view> allKeyNames();
 
 /// Configurable keybinding system for InputField.
 ///
@@ -116,7 +117,7 @@ struct EditActionInfo
 ///
 /// The design supports future editing modes (vi, emacs) by allowing
 /// complete replacement of the binding set.
-class KeyBindings
+class CORE_TUI_CORE_API KeyBindings
 {
   public:
     /// Creates an empty keybinding set.

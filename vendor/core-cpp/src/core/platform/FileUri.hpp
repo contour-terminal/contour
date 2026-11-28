@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
+
 #include <string>
 #include <string_view>
 
@@ -20,7 +22,8 @@ namespace core::platform
 /// @param extraSafe Additional bytes to pass through unencoded, e.g. `/` for a path component.
 ///        Keep it short: membership is a linear scan per input byte.
 /// @return The percent-encoded text.
-[[nodiscard]] auto percentEncode(std::string_view input, std::string_view extraSafe = {}) -> std::string;
+[[nodiscard]] CORE_PLATFORM_API auto percentEncode(std::string_view input, std::string_view extraSafe = {})
+    -> std::string;
 
 /// @brief Appends percentEncode(@p input, @p extraSafe) to @p out.
 ///
@@ -30,7 +33,9 @@ namespace core::platform
 /// @param out Destination to append to.
 /// @param input Text to encode.
 /// @param extraSafe Additional bytes to pass through unencoded.
-void appendPercentEncoded(std::string& out, std::string_view input, std::string_view extraSafe = {});
+CORE_PLATFORM_API void appendPercentEncoded(std::string& out,
+                                            std::string_view input,
+                                            std::string_view extraSafe = {});
 
 /// @brief Percent-encodes a filesystem path for the path component of a URI.
 ///
@@ -38,12 +43,12 @@ void appendPercentEncoded(std::string& out, std::string_view input, std::string_
 ///
 /// @param path Path with `/` separators (see normalizePath()).
 /// @return The percent-encoded path.
-[[nodiscard]] auto percentEncodeUriPath(std::string_view path) -> std::string;
+[[nodiscard]] CORE_PLATFORM_API auto percentEncodeUriPath(std::string_view path) -> std::string;
 
 /// @brief Appends percentEncodeUriPath(@p path) to @p out.
 /// @param out Destination to append to.
 /// @param path Path with `/` separators (see normalizePath()).
-void appendPercentEncodedUriPath(std::string& out, std::string_view path);
+CORE_PLATFORM_API void appendPercentEncodedUriPath(std::string& out, std::string_view path);
 
 /// @brief Builds an RFC 8089 `file://` URI for an absolute filesystem path.
 ///
@@ -65,8 +70,8 @@ void appendPercentEncodedUriPath(std::string& out, std::string_view path);
 /// @param fragment Optional fragment appended as `#fragment`, e.g. a line number. Encoded
 ///        with the same rules as the path.
 /// @return The complete URI, or an empty string when @p absolutePath is empty.
-[[nodiscard]] auto fileUri(std::string_view absolutePath,
-                           std::string_view host,
-                           std::string_view fragment = {}) -> std::string;
+[[nodiscard]] CORE_PLATFORM_API auto fileUri(std::string_view absolutePath,
+                                             std::string_view host,
+                                             std::string_view fragment = {}) -> std::string;
 
 } // namespace core::platform

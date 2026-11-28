@@ -12,7 +12,9 @@
 #include <cstddef>
 #include <cstdint>
 
-#ifndef _WIN32
+#ifdef _WIN32
+    #include <core/platform/PlatformExport.hpp>
+#else
     #include <sys/types.h>
 
     #include <unistd.h>
@@ -37,13 +39,13 @@ inline void* const InvalidHandle = reinterpret_cast<NativeHandle>(static_cast<st
 constexpr ProcessId InvalidProcessId = 0;
 
 /// @brief Returns the standard input handle for the current platform.
-[[nodiscard]] NativeHandle standardInput() noexcept;
+[[nodiscard]] CORE_PLATFORM_API NativeHandle standardInput() noexcept;
 
 /// @brief Returns the standard output handle for the current platform.
-[[nodiscard]] NativeHandle standardOutput() noexcept;
+[[nodiscard]] CORE_PLATFORM_API NativeHandle standardOutput() noexcept;
 
 /// @brief Returns the standard error handle for the current platform.
-[[nodiscard]] NativeHandle standardError() noexcept;
+[[nodiscard]] CORE_PLATFORM_API NativeHandle standardError() noexcept;
 #else
 /// Native file/pipe handle type for the current platform.
 using NativeHandle = int;
@@ -98,7 +100,7 @@ constexpr auto standardError() -> NativeHandle
 /// Cross-platform close using Windows CloseHandle.
 ///
 /// @param h The native handle to close.
-void platformClose(NativeHandle h) noexcept;
+CORE_PLATFORM_API void platformClose(NativeHandle h) noexcept;
 
 /// Cross-platform write using Windows WriteFile.
 ///
@@ -106,7 +108,7 @@ void platformClose(NativeHandle h) noexcept;
 /// @param data Pointer to data to write.
 /// @param size Number of bytes to write.
 /// @return Number of bytes written, or -1 on error.
-std::intptr_t platformWrite(NativeHandle h, void const* data, std::size_t size);
+CORE_PLATFORM_API std::intptr_t platformWrite(NativeHandle h, void const* data, std::size_t size);
 
 /// Cross-platform read using Windows ReadFile.
 ///
@@ -118,13 +120,13 @@ std::intptr_t platformWrite(NativeHandle h, void const* data, std::size_t size);
 /// @param data Pointer to buffer to read into.
 /// @param size Maximum number of bytes to read.
 /// @return Bytes read, 0 on EOF / broken pipe, or -1 on error.
-std::intptr_t platformRead(NativeHandle h, void* data, std::size_t size);
+CORE_PLATFORM_API std::intptr_t platformRead(NativeHandle h, void* data, std::size_t size);
 
 /// Checks whether a native handle refers to a terminal (console) device.
 ///
 /// @param h The native handle to check.
 /// @return true if the handle is connected to a terminal.
-[[nodiscard]] bool isTerminal(NativeHandle h) noexcept;
+[[nodiscard]] CORE_PLATFORM_API bool isTerminal(NativeHandle h) noexcept;
 #else
 /// Cross-platform close using POSIX close.
 ///

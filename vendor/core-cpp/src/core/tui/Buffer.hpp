@@ -3,6 +3,7 @@
 
 #include <core/tui/Cell.hpp>
 #include <core/tui/Rect.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -63,7 +64,7 @@ struct RowMark
 ///
 /// The buffer also tracks cursor position and visibility state for
 /// final cursor placement after rendering.
-class Buffer
+class CORE_TUI_CORE_API Buffer
 {
   public:
     /// Constructs an empty buffer (0x0).

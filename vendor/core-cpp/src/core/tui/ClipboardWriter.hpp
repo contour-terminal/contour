@@ -5,6 +5,7 @@
 #include <core/tui/ClipboardProtocol.hpp>
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/TerminalChannel.hpp>
+#include <core/tui/TuiExport.hpp>
 
 #include <chrono>
 #include <expected>
@@ -34,7 +35,7 @@ struct ClipboardWriterTimeouts
 /// reply is, and the probe waits for its timeout only when nothing answers at all. The answer is
 /// kept for this writer's lifetime. Each copy opens its own channel and closes it again, so nothing
 /// holds the terminal between copies.
-class ClipboardWriter
+class CORE_TUI_API ClipboardWriter
 {
   public:
     /// @brief Opens the channel a copy is sent over.

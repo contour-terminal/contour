@@ -3,6 +3,7 @@
 
 #include <core/net/SocketContract.hpp>
 #include <core/net/detail/BlockingPrimitives.hpp>
+#include <core/net/detail/SocketEndpoint.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 
 #include <expected>
@@ -114,6 +115,20 @@ std::expected<void, NetError> BlockingSocket::armKeepAlive(KeepAliveSettings con
     if (_closed)
         return std::unexpected(closedSocket("armKeepAlive"));
     return detail::armKeepAlive(_socket, settings);
+}
+
+std::expected<ResolvedEndpoint, NetError> BlockingSocket::localEndpoint() const
+{
+    if (_closed)
+        return std::unexpected(closedSocket("localEndpoint"));
+    return detail::socketEndpoint(_socket, detail::SocketSide::Local);
+}
+
+std::expected<ResolvedEndpoint, NetError> BlockingSocket::remoteEndpoint() const
+{
+    if (_closed)
+        return std::unexpected(closedSocket("remoteEndpoint"));
+    return detail::socketEndpoint(_socket, detail::SocketSide::Remote);
 }
 
 void BlockingSocket::setSendDeadline(std::chrono::milliseconds deadline) const noexcept

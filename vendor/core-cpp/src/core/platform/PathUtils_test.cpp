@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/platform/PathUtils.hpp>
+#include <core/platform/PlatformTestSupport.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -93,6 +94,8 @@ TEST_CASE("canonicalCasePath.nonexistent_path_falls_back_to_normalize", "[platfo
 #ifdef _WIN32
 TEST_CASE("canonicalCasePath.corrects_case_and_uppercases_drive", "[platform]")
 {
+    if (core::platform::test::runsUnderWine())
+        SKIP("wine answers a name in the case it was asked for, not the case on disk");
     namespace fs = std::filesystem;
     auto const dirName = std::string("CoreCanonCaseTEST_dir");
     auto const dir = fs::temp_directory_path() / dirName;

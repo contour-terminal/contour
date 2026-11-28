@@ -43,6 +43,7 @@
 #include <core/platform/Types.hpp>
 #include <core/platform/Wakeup.hpp>
 #include <core/tui/InputEvent.hpp>
+#include <core/tui/TuiExport.hpp>
 #include <core/tui/runtime/InputSource.hpp>
 #include <core/tui/runtime/TerminalInputSource.hpp>
 
@@ -138,7 +139,7 @@ struct TuiRuntimeOptions
 /// into freed storage. The destructor takes every one of them back off the loop, which it can only
 /// do while the loop is still there — the obligation half of @c core::net::EventLoop's own rule
 /// that objects registered with a loop are destroyed before it.
-class TuiRuntime
+class CORE_TUI_API TuiRuntime
 {
   public:
     /// @param loop The event loop this runtime's flows and sources run on (not owned; outlives

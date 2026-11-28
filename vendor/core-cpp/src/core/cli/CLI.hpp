@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/Utils.hpp>
+#include <core/cli/CliExport.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -172,7 +173,8 @@ using StringViewList = std::vector<std::string_view>;
  * @return A @c FlagStore holding every option's value, the defaults included, or the
  *         @c ParseError that says what was wrong and at which token.
  */
-[[nodiscard]] std::expected<FlagStore, ParseError> parse(Command const& command, StringViewList const& args);
+[[nodiscard]] CORE_CLI_API std::expected<FlagStore, ParseError> parse(Command const& command,
+                                                                      StringViewList const& args);
 
 /**
  * Parses the command line arguments with respect to @p command as passed via (argc, argv) suitable
@@ -183,9 +185,9 @@ using StringViewList = std::vector<std::string_view>;
  * @param argv The arguments, `argv[0]` first.
  * @return As for the @c StringViewList overload.
  */
-[[nodiscard]] std::expected<FlagStore, ParseError> parse(Command const& command,
-                                                         int argc,
-                                                         char const* const* argv);
+[[nodiscard]] CORE_CLI_API std::expected<FlagStore, ParseError> parse(Command const& command,
+                                                                      int argc,
+                                                                      char const* const* argv);
 
 enum class HelpElement : uint8_t
 {
@@ -200,7 +202,7 @@ enum class HelpElement : uint8_t
     HelpText
 };
 
-struct HelpDisplayStyle
+struct CORE_CLI_API HelpDisplayStyle
 {
     using ColorMap = std::map<HelpElement, std::string>;
     static ColorMap defaultColors();
@@ -218,10 +220,10 @@ struct HelpDisplayStyle
  * @param margin       Number of characters to write at most per line.
  * @param cmdPrefix    Some text to prepend in front of each generated line in the output.
  */
-std::string usageText(Command const& command,
-                      HelpDisplayStyle const& style,
-                      unsigned margin,
-                      std::string const& cmdPrefix = {});
+CORE_CLI_API std::string usageText(Command const& command,
+                                   HelpDisplayStyle const& style,
+                                   unsigned margin,
+                                   std::string const& cmdPrefix = {});
 
 /**
  * Constructs a help text suitable for printing out the command usage syntax in terminals.
@@ -230,10 +232,10 @@ std::string usageText(Command const& command,
  * @param style        Determines how to format and colorize the output string.
  * @param margin       Number of characters to write at most per line.
  */
-std::string helpText(Command const& command, HelpDisplayStyle const& style, unsigned margin);
+CORE_CLI_API std::string helpText(Command const& command, HelpDisplayStyle const& style, unsigned margin);
 
 // Throw if command is not well defined.
-void validate(Command const& command);
+CORE_CLI_API void validate(Command const& command);
 
 namespace about
 {
@@ -244,11 +246,10 @@ namespace about
         std::string_view url;
     };
 
-    inline std::vector<Project>& store()
-    {
-        static std::vector<Project> instance;
-        return instance;
-    }
+    /// The registry of projects, defined in the library so that every image linking core-cpp
+    /// registers into one list.
+    /// @return The registered projects.
+    CORE_CLI_API std::vector<Project>& store();
 
     inline void registerProjects(Project project)
     {

@@ -143,6 +143,22 @@ TEST_CASE("No code hides above Last", "[net][types]")
     CHECK(hiddenAt == -1);
 }
 
+TEST_CASE("A lookup that found no such name is told from a resolver that could not answer", "[net][types]")
+{
+    // The two outcomes wasi:sockets' ip-name-lookup names `name-unresolvable` and
+    // `temporary-resolver-failure`: the first is the answer, the second says to ask again later, and
+    // a caller that receives one code for both retries a typo forever or gives up on a flaky link.
+    CHECK(core::net::toString(NetErrorCode::NameNotFound) == "name not found");
+    CHECK(core::net::toString(NetErrorCode::ResolverTemporaryFailure) == "resolver temporarily unavailable");
+    CHECK(NetErrorCode::NameNotFound != NetErrorCode::AddressError);
+    CHECK(NetErrorCode::ResolverTemporaryFailure != NetErrorCode::AddressError);
+
+    // Appended, so no code a consumer has already stored or logged is renumbered.
+    CHECK(NetErrorCode::ResourceExhausted < NetErrorCode::NameNotFound);
+    CHECK(NetErrorCode::NameNotFound < NetErrorCode::ResolverTemporaryFailure);
+    CHECK(NetErrorCode::ResolverTemporaryFailure < NetErrorCode::Last);
+}
+
 TEST_CASE("A value outside the enumeration is described as unknown", "[net][types]")
 {
     CHECK(core::net::toString(static_cast<NetErrorCode>(0xFF)) == "unknown error");

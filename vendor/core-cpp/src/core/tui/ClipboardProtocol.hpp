@@ -9,6 +9,8 @@
 /// chunks, and a status reply that says whether the copy happened. This file composes the
 /// sequences and reads the replies; it does no I/O. @c ClipboardWriter is what sends them.
 
+#include <core/tui/TuiOutputExport.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -65,13 +67,14 @@ constexpr std::string_view Osc5522Probe = "\033[?5522$p\033[c";
 /// @param data The bytes to copy.
 /// @param target The selection to replace.
 /// @return `ESC ] 52 ; c|p ; <base64> ESC \`.
-[[nodiscard]] auto encodeOsc52(std::string_view data, ClipboardTarget target) -> std::string;
+[[nodiscard]] CORE_TUI_OUTPUT_API auto encodeOsc52(std::string_view data, ClipboardTarget target)
+    -> std::string;
 
 /// @brief Appends the OSC 52 sequence that copies @p data to @p out, encoding in place.
 /// @param out The buffer to append to.
 /// @param data The bytes to copy.
 /// @param target The selection to replace.
-void appendOsc52(std::string& out, std::string_view data, ClipboardTarget target);
+CORE_TUI_OUTPUT_API void appendOsc52(std::string& out, std::string_view data, ClipboardTarget target);
 
 /// @brief Composes the whole OSC 5522 packet sequence that copies @p data as @p mime.
 ///
@@ -82,26 +85,27 @@ void appendOsc52(std::string& out, std::string_view data, ClipboardTarget target
 /// @param mime Their MIME type.
 /// @param target The selection to replace.
 /// @return The packets, concatenated.
-[[nodiscard]] auto encodeOsc5522Write(std::string_view data, std::string_view mime, ClipboardTarget target)
-    -> std::string;
+[[nodiscard]] CORE_TUI_OUTPUT_API auto encodeOsc5522Write(std::string_view data,
+                                                          std::string_view mime,
+                                                          ClipboardTarget target) -> std::string;
 
 /// @brief Reads an OSC reply as the terminal's answer to an OSC 5522 write.
 /// @param oscPayload The content between `ESC ]` and the string terminator.
 /// @return std::nullopt when the reply is not a `type=write` status; otherwise success for `DONE`
 ///         and the error the status names for anything else.
-[[nodiscard]] auto parseOsc5522WriteStatus(std::string_view oscPayload)
+[[nodiscard]] CORE_TUI_OUTPUT_API auto parseOsc5522WriteStatus(std::string_view oscPayload)
     -> std::optional<std::expected<void, ClipboardWriteError>>;
 
 /// @brief A sentence that says what went wrong, for a message to the user.
 /// @param error The error to describe.
 /// @return A lower-case description without a trailing period.
-[[nodiscard]] auto describe(ClipboardWriteError error) noexcept -> std::string_view;
+[[nodiscard]] CORE_TUI_OUTPUT_API auto describe(ClipboardWriteError error) noexcept -> std::string_view;
 
 /// @brief Tells whether @p mime is `text/plain`, with or without parameters.
 ///
 /// That is the only type OSC 52 can carry: it has no field to name another.
 /// @param mime A MIME type.
 /// @return True for `text/plain` and `text/plain;...`.
-[[nodiscard]] auto isPlainTextMimeType(std::string_view mime) noexcept -> bool;
+[[nodiscard]] CORE_TUI_OUTPUT_API auto isPlainTextMimeType(std::string_view mime) noexcept -> bool;
 
 } // namespace core::tui

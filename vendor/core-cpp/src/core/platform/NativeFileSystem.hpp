@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/platform/FileSystem.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <functional>
 
@@ -16,10 +17,10 @@ using RenameFunction = std::function<void(
 
 /// @return The rename primitive @ref NativeFileSystem uses unless it is given another:
 ///         `std::filesystem::rename`.
-[[nodiscard]] RenameFunction nativeRename();
+[[nodiscard]] CORE_PLATFORM_API RenameFunction nativeRename();
 
 /// Native filesystem implementation that delegates to std::filesystem and POSIX/Win32.
-class NativeFileSystem final: public FileSystem
+class CORE_PLATFORM_API NativeFileSystem final: public FileSystem
 {
   public:
     /// @brief Constructs the backend over a rename primitive.

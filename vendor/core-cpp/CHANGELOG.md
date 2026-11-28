@@ -7,6 +7,178 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.24.0] - 2026-11-28
+
+### Breaking
+
+- **`NetErrorCode` has two new values, `NameNotFound` and `ResolverTemporaryFailure`**, above `Last`. A
+  name lookup that answers that the name does not exist (`EAI_NONAME`, `WSAHOST_NOT_FOUND`) is now
+  `NameNotFound`, and one the resolver could not answer now (`EAI_AGAIN`, `WSATRY_AGAIN`) is
+  `ResolverTemporaryFailure`, where both were `AddressError`; a permanent resolver failure stays
+  `AddressError`. `ThreadedAddressResolver`, `InlineAddressResolver` and the dial report them. Migration: an
+  exhaustive `switch` over `NetErrorCode` handles the two (or adds a `default:`); code that tested for
+  `AddressError` after a lookup tests for all three. Consumers grepped (contour, endo, fastcached, Lightweight, morph,
+  tuidu): none switches exhaustively over `NetErrorCode`.
+- **A full resolver budget is `ResourceExhausted`, not `WouldBlock`.** `ThreadedAddressResolver`'s full
+  queue and `ExecutorAddressResolver`'s `maxInFlight` refuse a lookup with `NetErrorCode::ResourceExhausted`,
+  as a full TLS verification budget does, so `isDeadlineExpiry()` no longer reads a refusal as a deadline's
+  tick. Migration: code that retried a lookup on `WouldBlock` retries on `ResourceExhausted`.
+- **`ITlsContext::wrapClient(inner, executor, TlsPeer)` refuses a server name unless it is overridden.** Its
+  default wraps only for an empty `TlsPeer::serverName` and answers `NetErrorCode::Unsupported` otherwise, so a
+  context that cannot verify a per-connection name is never used as though it did. The pinned-name
+  `makeTlsClientContext(caPem, expectedHostName, options)` keeps that default. An `ITlsContext` outside
+  core-cpp that can bind a connection to a name overrides it. Consumers grepped: none implements `ITlsContext`.
+- **The pinned-name `makeTlsClientContext(caPem, expectedHostName, options)` no longer falls back to the
+  certificate's common name**: the host is checked against the subjectAltNames alone (RFC 9525), and an
+  expected name in brackets or with a zone that is not an IPv6 literal is now a factory error instead of a name
+  nothing matches. A server whose certificate names the host only in its CN must get a subjectAltName.
+- **`testing::StrictTlsPeer::client()` and `server()` take a `StrictTlsPeerOptions`** (the highest version,
+  ALPN, an alert to refuse or warn with) where they took a `TlsVersion`. Migration:
+  `StrictTlsPeer::server(socket, material, { .maximumVersion = TlsVersion::Tls12 })`. Consumers grepped: none
+  constructs one.
+- **A vendored copy without `fs` or `http` sets `CORE_CPP_WITH_FS=OFF` or `CORE_CPP_WITH_HTTP=OFF`.** Both
+  default ON, and a configure whose enabled module's directory is missing stops with a message naming the
+  option. contour's copy, whose `MODULES` names neither, needs the two options OFF, or `fs;http` in its `MODULES`.
+
+### Added
+
+- **`core::fs`**, a new module (`CORE_CPP_WITH_FS`, ON; native only): a descriptor-relative file system
+  (`IDescriptorFileSystem`, `IDescriptor`, `IDirectoryStream`, `makeNativeDescriptorFileSystem()`) whose every
+  operation is an `async::Task` run on an injected blocking executor. A path never leaves its descriptor
+  (`openat2(RESOLVE_BENEATH)` on Linux, a component walker over held handles elsewhere, `NtCreateFile` relative
+  to a handle on Windows), names follow a per-OS `PathPolicy` row, every descriptor enforces one rights table
+  (`rightsTable()`, `checkOpenRights()`), errors are `FsError`/`FsResult`, and
+  `testing::InMemoryDescriptorFileSystem` is held to the same contract.
+  - `fs::OpenFlags::OwnerOnly` and `fs::CreationAccess` (taken by `createDirectoryAt`): files and directories
+    no other user can reach at any moment, on every OS.
+  - `fs::AccessScope`, `fs::DescriptorStat::access` and `fs::classifyAccess()`: who may reach an object, read
+    from its open handle; `nullopt` where the system cannot tell.
+  - `fs::Relation` and `IDescriptorFileSystem::relation()`: whether one opened directory is, contains or lies
+    beneath another, decided on real parents by identity, never by path text, and failing closed
+    (`Unsupported`) where a mount may hide one from the other, or a mount beneath either may show the other's
+    file system (the mount table is scanned); `NativeFileSystemOptions::maxAncestorDepth` bounds the walk.
+  - `fs::isRootedLinkTarget()`: whether a symbolic link's target names a root, under a `PathPolicy`.
+- **`core::http`**, a new module (`CORE_CPP_WITH_HTTP`, ON; native only): HTTP/1.1 with streamed bodies,
+  chunked transfer coding, trailers and keep-alive. The pure layer (`Fields`, the validating `Method`,
+  `RequestTarget` and `ReasonPhrase`, `requestFraming()`, `responseFraming()`, `HeadParser`,
+  `ChunkedDecoder`, `HttpLimits`), `HttpErrorCode` (one per case of `wasi:http`'s `error-code`) with
+  `HttpError` and `RefusalReason`; `Connection` with `WireTimeouts`; `HttpClient` with a per-origin pool
+  (`maxIdlePerOrigin`, `maxConnectionsPerOrigin`, `maxConnectionsTotal`, `idleTimeout`) and a safe retry of a
+  stale pooled connection, `HttpTimeouts` of 600 s each by default (wasmtime's), at most 32 interim
+  responses, and no connection pooled that holds unread bytes; `serveHttp()`, `serveHttpConnection()`, `IHttpHandler`, `HttpServerOptions`
+  (every wait on a client bounded by default), `errorStatusTable()`, `errorStatusFor()`; and
+  `testing::ScriptedConnector`. HTTP/1.1 only, no client pipelining.
+- **`core::async::offload(home, blocking, work)`**: a blocking call on an injected executor, resumed on the
+  home one; the stop token is read once, before the hop, and a result that was produced is never dropped.
+- **`core::net::ExecutorAddressResolver`**, a resolver that owns no thread: every lookup runs on an injected
+  executor, bounded by `ExecutorResolverOptions::maxInFlight`. `IAddressResolver::resolveClassified()`
+  (defaulted, so existing resolvers compile unchanged), `resolverErrorTable()` and
+  `testing::ScriptedAddressResolver`.
+- **`core::net::IpSocketAddress`** (`Ipv4Address`, `Ipv6Address`, `AddressFamily`), with `toEndpoint()` and
+  `toIpSocketAddress()`.
+- **Endpoints and options on `ISocket` and `IListener`**: `localEndpoint()`, `remoteEndpoint()` (sockets),
+  `option()` and `setOption()` over `SocketOption` and the per-platform `socketOptionTable()`; every
+  decorator forwards them.
+- **`core::net::ITcpSocket` and `openTcpSocket(loop, family)`**: bind, then connect or listen, with options.
+- **`core::net::IAsyncDatagramSocket` and `openAsyncDatagramSocket(loop, family)`**: a UDP socket on an
+  `EventLoop` (readiness on POSIX, the completion port on Windows), and
+  `testing::InMemoryAsyncDatagramNetwork`.
+- **`core::net::openStandardStreams(loop, blocking, handles, maxReadChunk)`**: the process's standard input,
+  output and error as coroutine streams (`IInputStream`, `IOutputStream`), waiting on the loop where the OS
+  allows and on the blocking executor otherwise; `processStandardHandles()`, `classifyStreamHandle()`.
+- **TLS**: `ITlsContext::wrapClient()` with `TlsPeer`, which binds one client connection to the host it was
+  dialled for (SNI and a host check for a name, an IP-SAN check for an address literal);
+  `ISocket::tlsSession()`; `ITlsSession::failure()` (`TlsFailure`) and `negotiatedProtocol()`;
+  `TlsOptions::alpn`; `TlsClientOptions`; `TrustAnchors`, `trustAnchorsFromPem()`, `IChainVerifier` (its
+  `verify()` finishes on the verifier's own executor and hands only a parked wait back to the asking
+  socket's loop, and a stop ends the socket's wait for it, bounded by
+  `TlsClientOptions::maxVerificationsInFlight`, 256, past which a handshake fails `ResourceExhausted` and
+  may be driven again) and `TrustSource`; the verifying, fail-closed
+  `makeTlsClientContext(TrustSource, TlsClientOptions)`, whose `wrapClient()` refuses an empty server name; the trust
+  stores of `<core/net/TrustStore.hpp>` (`ITrustStore`, `makePemTrustStore()`, `makeFileTrustStore()`,
+  `trustBundleLocations()`), loaded as a `Task`; and `makeSystemTlsClientContext()`, which verifies through
+  Security.framework on macOS and CryptoAPI on Windows, and through the file store elsewhere. No verifier
+  fetches a missing intermediate from a certificate's AIA URL, so an incomplete chain is refused everywhere.
+- `core::net::acceptLoop()` (`<core/net/AcceptLoop.hpp>`): the accept loop `net::serve()` and
+  `http::serveHttp()` share.
+- `core::constantTimeEquals()` and `core::secureZero()` in `<core/ConstantTime.hpp>`, for code that links no
+  TLS.
+- `core::platform::cacheHome()`: `XDG_CACHE_HOME`, then `LOCALAPPDATA`, then the OS's row below the home
+  directory.
+- `CORE_CPP_WITH_FS` and `CORE_CPP_WITH_HTTP` (both ON).
+
+### Changed
+
+- `core::net_tls` links Security.framework and CoreFoundation on macOS and `crypt32` on Windows, PRIVATE.
+- `core::fs` links `ntdll` and `advapi32` on Windows, PRIVATE.
+- `tlsSessionOf()` finds the session behind a forwarding decorator: it is `ISocket::tlsSession()`, which every
+  decorator forwards.
+- The pinned-name `makeTlsClientContext(caPem, expectedHostName, options)` offers `TlsOptions::alpn`.
+
+### Fixed
+
+- **core-cpp configures as a subproject on a Clang without `clang-scan-deps`.** It sets CMP0155 OLD in its own
+  directory scope (where CMake knows the policy: 3.28 on, so the setting is guarded), so its `try_compile()`
+  probes no longer scan for module imports that nobody asked for; a parent's `CMAKE_CXX_SCAN_FOR_MODULES=ON`
+  still applies. CMake 3.25 to 3.27 scan for no modules, so they never had the problem, and the check that a
+  subproject asking for modules is still refused runs from 3.28 on.
+- **The asynchronous resolvers refuse a host that names no host.** `ThreadedAddressResolver`,
+  `ExecutorAddressResolver` and `InlineAddressResolver` answer `AddressError` for an empty host (which `getaddrinfo` took as the wildcard
+  address), one with an embedded NUL, or one longer than 253 bytes, before any lookup
+  (`detail::checkLookupHost()`).
+- A scoped IPv6 literal (`fe80::1%eth0`) is resolved by `getaddrinfo` on every platform: macOS's `inet_pton`
+  dropped the zone, so the literal fast path dialled a link-local address on no interface.
+
+## [0.23.0] - 2026-11-24
+
+### Changed
+
+- **`writeFrameDiff` reaches a run of changed cells with one cursor move** (#104), not one per cell: with
+  absolute addressing it skips the move to a cell the cursor already stands on, after a single printable
+  ASCII character short of the last column. After a wider or non-ASCII grapheme the move stays, so a
+  terminal that disagrees about a width cannot shift the cells after it. `TerminalOutput`'s cursor motions
+  (`moveTo`, `moveUp`/`Down`/`Left`/`Right`) and `deleteLines` format their counts with `std::to_chars`
+  instead of parsing a `std::format` string per call. A full 120x40 repaint costs about half as many
+  instructions, which a guest drawing its TUI under a WebAssembly interpreter feels most. The bytes a diff
+  writes change: a consumer that compares them byte for byte sees fewer `CUP` sequences, for the same
+  screen.
+
+## [0.22.0] - 2026-11-16
+
+### Added
+
+- **`CORE_CPP_BUILD_SHARED`** (OFF) builds core-cpp's compiled modules as shared libraries (`.so`,
+  `.dylib`, DLL), so a consumer that is itself a DLL and the executable that loads it share one core-cpp:
+  one log registry, fail handler, default clock, readiness-dispatch counter and, per thread, one
+  current-executor chain. A static core-cpp linked into both has a copy per image, and a scope stated in
+  one image is invisible to an awaitable compiled into the other. The libraries are compiled with hidden
+  visibility and export what a generated per-library macro marks (`CORE_BASE_API`, `CORE_LOG_API`,
+  `CORE_CLI_API`, `CORE_CODEC_API`, `CORE_ASYNC_API`, `CORE_PLATFORM_API`, `CORE_NET_API`,
+  `CORE_NET_TLS_API`, `CORE_TUI_OUTPUT_API`, `CORE_TUI_CORE_API`, `CORE_TUI_API`; each in a generated
+  `<Name>Export.hpp` that is part of the library's installed headers), so a missing mark fails to link on
+  Linux as it does on Windows. `core::testing` and `core::testing_main` stay static. The installed package
+  of a shared build is shared. Static remains the default. The option is refused under Emscripten and
+  WASI, and together with `CORE_CPP_MSVC_STATIC_RUNTIME_VARIANTS`. It is not `BUILD_SHARED_LIBS`, which is
+  the parent's. New presets `clang-debug-shared` and `cl-release-shared` run it in CI.
+- `core-cpp.shared-state` (a shared build only): proves, across a shared-library boundary that is
+  compiled apart with hidden visibility, that each piece of state moved below is one object in both
+  images.
+
+### Changed
+
+- **`core::async` is a compiled library** (one `.cpp` for the current-executor slot, one for `Strand`'s
+  per-thread slots) instead of an `INTERFACE` target. Consumers link it as before; `core::async`'s
+  headers are unchanged but for `detail::innermostExecutorScope()`, `detail::buryDeadPump()` and
+  `detail::FreeingAbandoned`'s slot, which are now declared exported and defined in the library, so
+  that one image owns each thread's slot. A static build pays one call (not inlined across a library
+  boundary without LTO) where it read a `constinit thread_local` directly.
+- State a header used to define inline is defined in its module's library: `core::detail::failHandler()`
+  and `core::defaultSteadyClock()` (base), `core::platform::defaultSystemWallClock()` (platform),
+  `core::log::get()` and the `error` and `fatal` categories (log; `core::log::errorLog` is now a
+  `Category&` bound to the library's one), `core::cli::about::store()` (cli) and
+  `core::net::detail::readinessDispatchDepth()` (net). Source compatible; a static build is unchanged in
+  behaviour.
+
 ## [0.21.0] - 2026-11-16
 
 ### Breaking

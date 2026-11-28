@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/Utils.hpp>
+#include <core/log/LogExport.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -151,7 +152,7 @@ class Category
 /// Logging sink API.
 ///
 /// Such as the console, a log file, or UDP endpoint.
-class Sink
+class CORE_LOG_API Sink
 {
   public:
     using Writer = std::function<void(std::string_view const&)>;
@@ -184,8 +185,10 @@ class Sink
     Writer _writer;
 };
 
+/// The registry is defined in the library, so every image linking core-cpp registers into, and
+/// filters over, one list.
 /// @return Every category that exists now, in the order they were constructed.
-std::vector<std::reference_wrapper<Category>>& get();
+CORE_LOG_API std::vector<std::reference_wrapper<Category>>& get();
 
 /// @param categoryName The name to look up.
 /// @return The category of that name, or nullptr if none exists.
@@ -195,20 +198,20 @@ Category* get(std::string_view categoryName);
 ///
 /// @p sink must outlive every category that uses it, or be replaced first.
 /// @param sink The sink to install.
-void setSink(Sink& sink);
+CORE_LOG_API void setSink(Sink& sink);
 
 /// Gives every category the formatter @p f: every one that exists now, and every one constructed
 /// from now on.
 /// @param f The formatter to install; an empty one writes the bare text.
-void setFormatter(Category::Formatter const& f);
+CORE_LOG_API void setFormatter(Category::Formatter const& f);
 
 /// @return The sink a category constructed now starts out with: the one last given to setSink(),
 ///         or Sink::console() before any was.
-[[nodiscard]] Sink& installedSink();
+[[nodiscard]] CORE_LOG_API Sink& installedSink();
 
 /// @return The formatter a category constructed now starts out with: the one last given to
 ///         setFormatter(), or an empty one before any was.
-[[nodiscard]] Category::Formatter const& installedFormatter();
+[[nodiscard]] CORE_LOG_API Category::Formatter const& installedFormatter();
 
 /// Enables (or disables) the category named @p categoryName, if it exists.
 void enable(std::string_view categoryName, bool enabled = true);
@@ -230,12 +233,6 @@ inline std::string MessageBuilder::message() const
         return _buffer + '\n';
     else
         return "";
-}
-
-inline std::vector<std::reference_wrapper<Category>>& get()
-{
-    static std::vector<std::reference_wrapper<Category>> logStore;
-    return logStore;
 }
 
 inline Category* get(std::string_view categoryName)
@@ -368,8 +365,24 @@ inline void Sink::setWriter(Writer writer)
 }
 // }}}
 
-/// The `error` category: enabled from the start, and kept enabled by configure().
-auto inline errorLog = Category("error", "Error Logger", Category::State::Enabled);
+/// The one `error` category: enabled from the start, and kept enabled by configure().
+///
+/// Constructed in the library: a category registers itself by name and refuses a second of the same
+/// name, so one built in each image that includes this header would be refused in the second.
+/// @return The category.
+[[nodiscard]] CORE_LOG_API Category& errorCategory() noexcept;
+
+/// The `fatal` category behind fatal(), constructed in the library for the reason errorCategory() is.
+/// @return The category.
+[[nodiscard]] CORE_LOG_API Category& fatalCategory() noexcept;
+
+/// The `error` category: a reference to errorCategory(), initialised in every translation unit that
+/// includes this header before that unit's first use of it.
+///
+/// Internal linkage on purpose: a mutable object with external linkage defined in a header is one per
+/// shared library, which is what errorCategory() exists to avoid. This is a reference to the one
+/// object, so a copy per translation unit is a copy of a pointer.
+[[maybe_unused]] static Category& errorLog = errorCategory();
 
 #define errorLog() (::core::log::errorLog())
 

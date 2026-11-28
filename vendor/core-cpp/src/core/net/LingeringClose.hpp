@@ -11,6 +11,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -82,8 +83,8 @@ struct LingerOutcome
 ///        blocking socket's only bound, and one a loop socket honours too.
 /// @param bounds How long and how much to listen.
 /// @return A task that completes once the socket is closed, with how the linger ended.
-[[nodiscard]] async::Task<LingerOutcome> closeLingering(ISocket* socket,
-                                                        EventLoop* loop,
-                                                        LingerBounds bounds);
+[[nodiscard]] CORE_NET_API async::Task<LingerOutcome> closeLingering(ISocket* socket,
+                                                                     EventLoop* loop,
+                                                                     LingerBounds bounds);
 
 } // namespace core::net

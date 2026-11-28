@@ -88,6 +88,9 @@ TEST_CASE("Only a closed or dead listener ends an accept loop at once", "[net][a
     // A poll timeout is one event under two names, and neither is a failure.
     expect(NetErrorCode::Timeout, AcceptDisposition::PollTick);
     expect(NetErrorCode::WouldBlock, AcceptDisposition::PollTick);
+    // A resolver's answers that an accept never gives, like the bind-time ones: nothing says they pass.
+    expect(NetErrorCode::NameNotFound, AcceptDisposition::Unclassified);
+    expect(NetErrorCode::ResolverTemporaryFailure, AcceptDisposition::Unclassified);
     // A value that is no code is unclassified: backed off on within a bound, never spun on.
     expect(NetErrorCode::Last, AcceptDisposition::Unclassified);
     INFO("classified wrongly: " << wrong);

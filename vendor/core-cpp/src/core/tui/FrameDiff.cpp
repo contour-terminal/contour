@@ -191,7 +191,17 @@ namespace
         });
     }
 
-    /// @brief Absolute addressing: a cursor move to each written cell, then the images.
+    /// @brief Whether writing @p cell advances the cursor by exactly one column on every terminal: a
+    /// single printable ASCII character. A wider or ambiguous grapheme is followed by an absolute move,
+    /// so that a terminal disagreeing about its width cannot shift the cells after it.
+    [[nodiscard]] bool advancesOneColumn(Cell const& cell) noexcept
+    {
+        return cell.width == 1 && cell.grapheme.size() == 1 && cell.grapheme.front() >= ' '
+               && cell.grapheme.front() <= '~';
+    }
+
+    /// @brief Absolute addressing: a cursor move to each written cell the cursor is not already at,
+    /// then the images.
     void writeAbsolute(TerminalOutput& out,
                        Buffer const& previous,
                        Buffer const& next,
@@ -219,6 +229,10 @@ namespace
         // Clipped to the frame: an area wholly outside it writes nothing.
         auto const clipped =
             area.intersect(Rect { .x = 0, .y = 0, .width = next.cols(), .height = next.rows() });
+        // Where the cursor stands while that is known: after a cell that advancesOneColumn(), short of
+        // the last column (where a terminal holds the cursor with a wrap pending). A run of changed
+        // cells is then reached by one move, not one per cell.
+        auto cursor = std::optional<Point> {};
         for (auto const row: std::views::iota(clipped.y, clipped.bottom()))
         {
             auto const rowMarksChanged = context.beginRow(row);
@@ -239,9 +253,13 @@ namespace
                 if (!context.diffing() || rowMarksChanged || covered(staleImages, row, col)
                     || context.changed(cell, row, col))
                 {
-                    out.moveTo(row + 1, col + 1); // Terminal is 1-based
+                    if (cursor != Point { .x = col, .y = row })
+                        out.moveTo(row + 1, col + 1); // Terminal is 1-based
                     context.beforeWrite(row, col);
                     out.writeText(cell.grapheme, cell.style);
+                    cursor = advancesOneColumn(cell) && col + 1 < next.cols()
+                                 ? std::optional { Point { .x = col + 1, .y = row } }
+                                 : std::nullopt;
                 }
                 col += advance;
             }

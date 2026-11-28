@@ -8,6 +8,7 @@
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/InputField.hpp>
 #include <core/tui/ScrollableSelection.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstdint>
 #include <string>
@@ -34,7 +35,7 @@ enum class FuzzyPickerAction : std::uint8_t
 ///
 /// Designed to be used for file path selection (fzf replacement) but is
 /// generic enough for any list of strings.
-class FuzzyPickerPopup: public Component
+class CORE_TUI_CORE_API FuzzyPickerPopup: public Component
 {
   public:
     /// @brief Constructs a hidden picker timed by the process's steady clock.

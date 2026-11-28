@@ -10,6 +10,7 @@
 /// key. The design, and why a coroutine that parks on something another thread completes comes
 /// back to the strand, are in `docs/design/strands.md`.
 
+#include <core/async/AsyncExport.hpp>
 #include <core/async/ExecutorContext.hpp>
 #include <core/async/IExecutor.hpp>
 #include <core/async/ParkedWork.hpp>
@@ -232,47 +233,17 @@ namespace detail
     /// @return The pump, suspended.
     inline StrandPump runStrandPump(std::shared_ptr<StrandCore> strand);
 
-    /// Keeps the frame of a pump that ended by exception until it is safe to free.
+    /// Hands @p dead to the calling thread's reaper, which keeps the frame of a pump that ended by
+    /// exception until it is safe to free.
     ///
     /// A coroutine whose `resume()` throws is left suspended at its final point, and nothing may
     /// free it until that `resume()` has returned -- the compiler still marks the frame on the way
     /// out. The thread it threw on is the one thread that knows when that is: the next time it
     /// buries one, or when it exits, the previous one is long finished. So at most one dead pump
-    /// per thread is ever held.
-    class DeadPumpReaper final
-    {
-      public:
-        DeadPumpReaper() noexcept = default;
-        DeadPumpReaper(DeadPumpReaper const&) = delete;
-        DeadPumpReaper(DeadPumpReaper&&) = delete;
-        DeadPumpReaper& operator=(DeadPumpReaper const&) = delete;
-        DeadPumpReaper& operator=(DeadPumpReaper&&) = delete;
-
-        ~DeadPumpReaper()
-        {
-            if (_dead)
-                _dead.destroy();
-        }
-
-        /// Frees the pump buried before, and keeps @p dead in its place.
-        /// @param dead A pump whose `resume()` is throwing on this thread right now.
-        void bury(std::coroutine_handle<> dead) noexcept
-        {
-            if (auto const previous = std::exchange(_dead, dead))
-                previous.destroy();
-        }
-
-      private:
-        std::coroutine_handle<> _dead;
-    };
-
-    /// Hands @p dead to the calling thread's @c DeadPumpReaper.
+    /// per thread is ever held. The reaper is a thread-local with a destructor, defined in the
+    /// library so that every image shares one per thread.
     /// @param dead A pump whose `resume()` is throwing on this thread right now.
-    inline void buryDeadPump(std::coroutine_handle<> dead) noexcept
-    {
-        thread_local DeadPumpReaper reaper;
-        reaper.bury(dead);
-    }
+    CORE_ASYNC_API void buryDeadPump(std::coroutine_handle<> dead) noexcept;
 
     /// Marks the calling thread as freeing work a refused hand-off abandoned, for as long as it
     /// lives: a submit the freed frames' destructors make to the same strand -- or, for a keyed
@@ -283,7 +254,7 @@ namespace detail
     /// Only the destructors themselves: a task that one of them starts on an executor that runs it
     /// inline -- another strand over an inline base -- runs under an executor scope of its own, and
     /// what it submits here is not a resubmit of abandoned work, so it is handed on as usual.
-    class FreeingAbandoned final
+    class CORE_ASYNC_API FreeingAbandoned final
     {
       public:
         /// @param owner The strand, or the keyed family, whose work is being freed.
@@ -314,11 +285,8 @@ namespace detail
             ExecutorScope const* scope { nullptr };
         };
 
-        [[nodiscard]] static Freeing& slot() noexcept
-        {
-            constinit thread_local Freeing freeing {};
-            return freeing;
-        }
+        /// @return The calling thread's slot, defined in the library so that every image shares it.
+        [[nodiscard]] static Freeing& slot() noexcept;
 
         Freeing _previous;
     };

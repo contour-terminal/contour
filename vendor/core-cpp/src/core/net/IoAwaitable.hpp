@@ -33,6 +33,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/IoResult.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/detail/CompletionHook.hpp>
 #include <core/net/detail/ParkId.hpp>
 
@@ -65,13 +66,13 @@ class EventLoop;
 /// nothing rather than to whatever took its place.
 /// @param loop The loop the park belongs to.
 /// @param park The park to cancel.
-void requestCancelOn(EventLoop& loop, ParkId park) noexcept;
+CORE_NET_API void requestCancelOn(EventLoop& loop, ParkId park) noexcept;
 
 /// Takes @p waiter back out of @p loop's ready queue, where @c detail::resumeSoonOn put it, because its
 /// frame is being destroyed before the loop reached it. Loop thread only.
 /// @param loop The loop it was queued on.
 /// @param waiter The coroutine to take back.
-void cancelPendingOn(EventLoop& loop, std::coroutine_handle<> waiter) noexcept;
+CORE_NET_API void cancelPendingOn(EventLoop& loop, std::coroutine_handle<> waiter) noexcept;
 
 /// The result of one socket operation: a value, or why it could not be produced.
 ///

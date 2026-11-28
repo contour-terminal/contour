@@ -41,11 +41,11 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# core-cpp has no module units, and core_cpp_apply_toolchain() turns scanning off on its own
-# targets. A try_compile() has no such target: from C++20 on, CMake scans every probe of
-# check_cxx_compiler_flag() and FindThreads, and where the compiler has no clang-scan-deps
-# (FreeBSD's base clang) every probe then fails, the configure dropping the pedantic set and
-# stopping at Threads. Off by default here, for the probes and the fetched dependencies alike.
+# core-cpp has no module units. Its own targets and probes scan for none in either role: the root
+# CMakeLists.txt sets CMP0155 OLD, and core_cpp_apply_toolchain() turns scanning off per target. A
+# fetched dependency sets CMP0155 NEW again with its own cmake_minimum_required(), and from C++20 on
+# its try_compile() probes then scan; where the compiler has no clang-scan-deps (FreeBSD's base
+# clang) every one of them fails. This default reaches those too, so it is global, hence top-level.
 if(NOT DEFINED CMAKE_CXX_SCAN_FOR_MODULES)
     set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 endif()

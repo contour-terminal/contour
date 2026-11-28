@@ -4,6 +4,7 @@
 #include <core/tui/Component.hpp>
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/Theme.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstddef>
 #include <functional>
@@ -52,7 +53,7 @@ struct ListStyle
 /// Supports keyboard navigation (Up/Down, j/k, Home/End, PageUp/PageDown),
 /// filtering, and selection. As a Component, List can be added to a Screen's
 /// component tree and will receive events through the standard event dispatch.
-class List: public Component
+class CORE_TUI_CORE_API List: public Component
 {
   public:
     /// @brief Constructs an empty list.
@@ -186,6 +187,6 @@ class List: public Component
 };
 
 /// @brief Returns a default list style with sensible defaults.
-[[nodiscard]] auto defaultListStyle() -> ListStyle;
+[[nodiscard]] CORE_TUI_CORE_API auto defaultListStyle() -> ListStyle;
 
 } // namespace core::tui

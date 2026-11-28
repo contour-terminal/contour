@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -64,6 +66,6 @@ class FileInfoProvider
 /// way to reach them.
 ///
 /// @return The provider, owned by the caller.
-[[nodiscard]] std::unique_ptr<FileInfoProvider> nativeFileInfoProvider();
+[[nodiscard]] CORE_PLATFORM_API std::unique_ptr<FileInfoProvider> nativeFileInfoProvider();
 
 } // namespace core::platform

@@ -215,6 +215,20 @@ function(core_cpp_add_modules)
             endif()
         endforeach()
 
+        # A vendored copy may leave a module's directory out (docs/vendoring.md). Without this, the
+        # add_subdirectory() below fails naming a path, and nothing says which option would have
+        # switched the module off -- the one thing the consumer has to know.
+        if(NOT EXISTS "${CORE_CPP_SOURCE_DIR}/src/core/${CORE_CPP_MODULE_${module}_DIR}/CMakeLists.txt")
+            if(when)
+                set(remedy "Set ${when}=OFF before adding core-cpp, or copy the module in.")
+            else()
+                set(remedy "No option switches it off, so the copy has to carry it.")
+            endif()
+            message(FATAL_ERROR
+                "[core-cpp] module ${module} is enabled but its directory src/core/${CORE_CPP_MODULE_${module}_DIR} "
+                "is missing from ${CORE_CPP_SOURCE_DIR}. ${remedy}")
+        endif()
+
         set(CORE_CPP_CURRENT_MODULE "${module}")
         add_subdirectory("${CORE_CPP_SOURCE_DIR}/src/core/${CORE_CPP_MODULE_${module}_DIR}"
                          "${CORE_CPP_BINARY_DIR}/src/core/${CORE_CPP_MODULE_${module}_DIR}")
@@ -243,8 +257,9 @@ core_cpp_module(NAME codec KIND STATIC DEPS base PLATFORMS any)
 # log to apply the LOG filter.
 core_cpp_module(NAME testing KIND STATIC DEPS base log PLATFORMS any)
 
-# Header-only, and needing nothing but the standard library.
-core_cpp_module(NAME async KIND INTERFACE PLATFORMS any)
+# Header-only but for the thread-local state its headers share (src/core/async/CMakeLists.txt), and
+# needing nothing but the standard library.
+core_cpp_module(NAME async KIND STATIC PLATFORMS any)
 
 # Under single-threaded Emscripten only Types, PlatformError, Clock, StringUtils, PathUtils,
 # GlobMatch, FileUri and the POSIX providers build: see its SOURCES_EMSCRIPTEN.
@@ -259,6 +274,18 @@ core_cpp_module(NAME platform KIND STATIC DEPS base log PLATFORMS wasm-subset)
 core_cpp_module(NAME net KIND STATIC DEPS async platform PLATFORMS wasm-subset)
 core_cpp_module_target(NAME net_types MODULE net KIND INTERFACE PLATFORMS any)
 core_cpp_module_target(NAME net_tls MODULE net KIND STATIC DEPS net PLATFORMS native WHEN CORE_CPP_WITH_TLS)
+
+# The descriptor-relative file system: every operation an async::Task, every blocking call offloaded to
+# an injected executor (async::offload), and no path resolved outside the directory it is relative to.
+# Its own module rather than more of platform, which has no async edge. Native only: Emscripten and
+# WASI have no file descriptors to hold.
+core_cpp_module(NAME fs KIND STATIC DEPS base log async platform PLATFORMS native WHEN CORE_CPP_WITH_FS)
+
+# HTTP/1.1 (RFC 9110/9112): the message vocabulary, the framing rules, the head parser and the
+# chunked codec, a pure layer no socket enters. async and net are its edges for what runs over
+# core::net's sockets; the error payload already names net::TlsFailure. Native only, like those
+# sockets. Its own module rather than more of net, whose serve()/HttpServer.hpp it leaves untouched.
+core_cpp_module(NAME http KIND STATIC DEPS base async net PLATFORMS native WHEN CORE_CPP_WITH_HTTP)
 
 # endo's terminal UI. Native only: there is no terminal under Emscripten, where CORE_CPP_WITH_TUI is
 # forced off. core::tui_output is the part that composes and writes bytes, and it has a row of its

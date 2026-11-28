@@ -12,6 +12,7 @@
 #include <core/net/IConnector.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/KeepAlive.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketAddress.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/platform/Clock.hpp>
@@ -81,14 +82,14 @@ namespace detail
     ///         when the budget ran out, during resolution included.
     /// @throws async::OperationCancelled if the awaiting flow's stop token is stopped, while
     ///         resolving or while dialling. A cancel from the flow's own token unwinds.
-    [[nodiscard]] async::Task<SocketResult> runConnectFlow(IAsyncAddressResolver* resolver,
-                                                           EventLoop* loop,
-                                                           platform::IClock* clock,
-                                                           std::string host,
-                                                           std::uint16_t port,
-                                                           DialOptions options,
-                                                           DialStep dial,
-                                                           void* dialState);
+    [[nodiscard]] CORE_NET_API async::Task<SocketResult> runConnectFlow(IAsyncAddressResolver* resolver,
+                                                                        EventLoop* loop,
+                                                                        platform::IClock* clock,
+                                                                        std::string host,
+                                                                        std::uint16_t port,
+                                                                        DialOptions options,
+                                                                        DialStep dial,
+                                                                        void* dialState);
 
 } // namespace detail
 

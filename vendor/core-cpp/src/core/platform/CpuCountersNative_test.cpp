@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/platform/CpuCounters.hpp>
+#include <core/platform/PlatformTestSupport.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -125,6 +126,8 @@ class SimulatedSource final: public ICpuCounterSource
 
 TEST_CASE("supported measures grow with the work", "[cpucounters]")
 {
+    if (core::platform::test::runsUnderWine())
+        SKIP("wine reports the cycle counters supported but reads them as 0");
     auto const source = makeDefaultCpuCounterSource();
     auto anySupported = false;
     for (auto const counter: AllCpuCounters)

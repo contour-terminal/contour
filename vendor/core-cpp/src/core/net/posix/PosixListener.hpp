@@ -61,6 +61,15 @@ class PosixListener final: public IListener
 
     [[nodiscard]] std::uint16_t boundPort() const noexcept override { return _boundPort; }
 
+    /// @copydoc IListener::localEndpoint
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> localEndpoint() const override;
+
+    /// @copydoc IListener::option
+    [[nodiscard]] std::expected<std::uint64_t, NetError> option(SocketOption option) const override;
+
+    /// @copydoc IListener::setOption
+    [[nodiscard]] std::expected<void, NetError> setOption(SocketOption option, std::uint64_t value) override;
+
     /// @return The listening descriptor, or -1 once closed; for diagnostics and tests.
     [[nodiscard]] int native() const noexcept { return _fd; }
 

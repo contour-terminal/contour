@@ -19,6 +19,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetTlsExport.hpp>
 #include <core/net/SshAgentEndpoint.hpp>
 #include <core/net/SshKeys.hpp>
 
@@ -76,13 +77,13 @@ using SshAgentConnector = std::function<async::Task<std::expected<std::unique_pt
 /// An agent reached through @p connector.
 /// @param connector Dials the agent; called once per request.
 /// @return The client.
-[[nodiscard]] std::unique_ptr<ISshAgent> makeSshAgent(SshAgentConnector connector);
+[[nodiscard]] CORE_NET_TLS_API std::unique_ptr<ISshAgent> makeSshAgent(SshAgentConnector connector);
 
 /// An agent at @p endpoint.
 /// @param loop The loop that drives the connection; must outlive the agent.
 /// @param endpoint A Unix socket path (`SSH_AUTH_SOCK`), or on Windows a named pipe such as
 ///        `\\.\pipe\openssh-ssh-agent`. An empty endpoint is an agent that is always unavailable.
 /// @return The client.
-[[nodiscard]] std::unique_ptr<ISshAgent> makeSshAgent(EventLoop& loop, std::string endpoint);
+[[nodiscard]] CORE_NET_TLS_API std::unique_ptr<ISshAgent> makeSshAgent(EventLoop& loop, std::string endpoint);
 
 } // namespace core::net

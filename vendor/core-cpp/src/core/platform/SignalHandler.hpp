@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
 #include <core/platform/Types.hpp>
 
 namespace core::platform
@@ -42,7 +43,7 @@ class SignalCallback
 /// - SIGCHLD: Child process state change (exit, stop, continue)
 /// - SIGTSTP: Terminal stop signal (Ctrl+Z at the controlling terminal, or kill -TSTP)
 /// - SIGCONT: Continue after stop (when resumed via fg or kill -CONT)
-class SignalHandler
+class CORE_PLATFORM_API SignalHandler
 {
   public:
     /// Initializes signal handling.

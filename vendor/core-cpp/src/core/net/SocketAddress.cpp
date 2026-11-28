@@ -20,10 +20,9 @@
 #include <core/platform/WinsockInit.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cstring>
 #include <format>
-#include <ranges>
+#include <optional>
 #include <utility>
 
 namespace core::net
@@ -50,6 +49,14 @@ namespace
 std::expected<std::vector<ResolvedEndpoint>, std::string> SystemAddressResolver::resolve(
     std::string_view host, std::uint16_t port)
 {
+    return resolveClassified(host, port).transform_error([](NetError error) {
+        return std::move(error.context);
+    });
+}
+
+std::expected<std::vector<ResolvedEndpoint>, NetError> SystemAddressResolver::resolveClassified(
+    std::string_view host, std::uint16_t port)
+{
     platform::ensureWinsockInitialized();
 
     auto hints = addrinfo {};
@@ -67,7 +74,14 @@ std::expected<std::vector<ResolvedEndpoint>, std::string> SystemAddressResolver:
 
     addrinfo* head = nullptr;
     if (auto const rc = ::getaddrinfo(node, service.c_str(), &hints, &head); rc != 0)
-        return std::unexpected(std::format("cannot resolve '{}': {}", host, resolverMessage(rc)));
+    {
+        // The system code first: on POSIX it is errno for EAI_SYSTEM, which formatting may change.
+        auto const systemCode = detail::resolverSystemCode(rc);
+        return std::unexpected(
+            makeNetError(detail::classifyResolverError(rc),
+                         systemCode,
+                         std::format("cannot resolve '{}': {}", host, resolverMessage(rc))));
+    }
 
     auto endpoints = std::vector<ResolvedEndpoint> {};
     auto const* next = head;
@@ -89,7 +103,8 @@ std::expected<std::vector<ResolvedEndpoint>, std::string> SystemAddressResolver:
     ::freeaddrinfo(head);
 
     if (endpoints.empty())
-        return std::unexpected(std::format("cannot resolve '{}': no usable address", host));
+        return std::unexpected(makeNetError(
+            NetErrorCode::AddressError, 0, std::format("cannot resolve '{}': no usable address", host)));
     return endpoints;
 }
 
@@ -114,21 +129,71 @@ std::string formatPeerAddress(ResolvedEndpoint const& endpoint)
 namespace detail
 {
 
-    bool isNumericHost(std::string_view host) noexcept
+    std::expected<void, NetError> checkLookupHost(std::string_view host)
     {
         if (host.empty())
-            return false;
+            return std::unexpected(
+                makeNetError(NetErrorCode::AddressError, 0, "an empty host names no host to look up"));
+        if (host.contains('\0'))
+            return std::unexpected(
+                makeNetError(NetErrorCode::AddressError, 0, "a host with an embedded NUL is no name"));
+        if (host.size() > MaxLookupHostLength)
+            return std::unexpected(makeNetError(
+                NetErrorCode::AddressError,
+                0,
+                std::format(
+                    "a host of {} bytes is longer than a DNS name's {}", host.size(), MaxLookupHostLength)));
+        return {};
+    }
+
+    bool isNumericHost(std::string_view host) noexcept
+    {
+        return endpointOfLiteral(host, 0).has_value();
+    }
+
+    std::optional<ResolvedEndpoint> endpointOfLiteral(std::string_view host, std::uint16_t port) noexcept
+    {
+        // An embedded NUL would end the text inet_pton reads early, and "127.0.0.1\0evil" would
+        // parse as the address before it.
+        if (host.empty() || host.contains('\0'))
+            return std::nullopt;
+
+        // A scoped literal (`fe80::1%eth0`) is a name here on every platform, never a literal: macOS's
+        // inet_pton accepts the zone and drops it, so the endpoint would lose the scope a link-local
+        // dial needs. getaddrinfo keeps it, so such a host goes to the resolver everywhere.
+        if (host.contains('%'))
+            return std::nullopt;
 
         // inet_pton needs a NUL-terminated string, and a host is short.
         auto const text = std::string { host };
 
-        // The two families in a table rather than two ifs, so a third — there is none today —
-        // would be a row. The scratch is sized for the larger of the two.
-        constexpr auto Families = std::array<int, 2> { AF_INET, AF_INET6 };
-        auto scratch = std::array<std::byte, sizeof(in6_addr)> {};
-        return std::ranges::any_of(Families, [&](int family) noexcept {
-            return ::inet_pton(family, text.c_str(), scratch.data()) == 1;
-        });
+        auto v4 = sockaddr_in {};
+        if (::inet_pton(AF_INET, text.c_str(), &v4.sin_addr) == 1)
+        {
+            v4.sin_family = AF_INET;
+            v4.sin_port = htons(port);
+            auto endpoint = endpointFromSockaddr(&v4, sizeof(v4));
+            endpoint.protocol = IPPROTO_TCP;
+            return endpoint;
+        }
+
+        auto v6 = sockaddr_in6 {};
+        if (::inet_pton(AF_INET6, text.c_str(), &v6.sin6_addr) == 1)
+        {
+            v6.sin6_family = AF_INET6;
+            v6.sin6_port = htons(port);
+            auto endpoint = endpointFromSockaddr(&v6, sizeof(v6));
+            endpoint.protocol = IPPROTO_TCP;
+            return endpoint;
+        }
+        return std::nullopt;
+    }
+
+    NetErrorCode classifyResolverError(int gaiCode) noexcept
+    {
+        auto const table = resolverErrorTable();
+        auto const row = std::ranges::find(table, gaiCode, &ResolverErrorRow::gaiCode);
+        return row != table.end() ? row->code : NetErrorCode::AddressError;
     }
 
     ResolvedEndpoint endpointFromSockaddr(void const* sockaddr, std::uint32_t length) noexcept

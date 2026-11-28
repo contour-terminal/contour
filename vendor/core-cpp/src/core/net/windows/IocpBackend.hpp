@@ -62,6 +62,7 @@
 
 #include <core/net/ICompletionPort.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/detail/ReadyBatch.hpp>
 #include <core/net/detail/WorkerIdentity.hpp>
 
@@ -93,7 +94,7 @@ namespace detail
 /// acceptable to `cppcoreguidelines-virtual-class-destructor`: public-and-virtual is
 /// refused on a `final` class, and protected-and-non-virtual is refused by the
 /// `unique_ptr` that would have to hold it.
-class IocpBackend final: public IoBackend, public ICompletionPort
+class CORE_NET_API IocpBackend final: public IoBackend, public ICompletionPort
 {
   public:
     /// Which bridge a waitable HANDLE is watched through.

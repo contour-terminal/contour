@@ -103,4 +103,27 @@ std::expected<void, NetError> ISocket::armKeepAlive(KeepAliveSettings const& /*s
         makeNetError(NetErrorCode::Unsupported, 0, "this transport cannot arm TCP keepalive"));
 }
 
+std::expected<ResolvedEndpoint, NetError> ISocket::localEndpoint() const
+{
+    return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "this transport has no local address"));
+}
+
+std::expected<ResolvedEndpoint, NetError> ISocket::remoteEndpoint() const
+{
+    return std::unexpected(
+        makeNetError(NetErrorCode::Unsupported, 0, "this transport has no remote address"));
+}
+
+std::expected<std::uint64_t, NetError> ISocket::option(SocketOption /*option*/) const
+{
+    return std::unexpected(
+        makeNetError(NetErrorCode::Unsupported, 0, "this transport has no socket options"));
+}
+
+std::expected<void, NetError> ISocket::setOption(SocketOption /*option*/, std::uint64_t /*value*/)
+{
+    return std::unexpected(
+        makeNetError(NetErrorCode::Unsupported, 0, "this transport has no socket options"));
+}
+
 } // namespace core::net

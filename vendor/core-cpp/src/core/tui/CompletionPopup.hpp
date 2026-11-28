@@ -7,6 +7,7 @@
 #include <core/tui/ScrollableSelection.hpp>
 #include <core/tui/StyledText.hpp>
 #include <core/tui/Theme.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 #include <core/tui/completer/CompletionItem.hpp>
 
 #include <cstddef>
@@ -47,7 +48,7 @@ enum class CompletionAction : std::uint8_t
 ///
 ///   // Rendering happens automatically via Component::render(Canvas&)
 /// @endcode
-class CompletionPopup: public Component
+class CORE_TUI_CORE_API CompletionPopup: public Component
 {
   public:
     /// @brief Constructs an initially hidden completion popup framed in single lines.

@@ -16,6 +16,7 @@
 #include <core/tui/Component.hpp>
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -115,7 +116,7 @@ struct TreeTableConfig
 
 /// A generic, reusable tree/table browser. Owns only cursor + scroll state; all data
 /// and navigation come from an injected @ref TreeTableModel.
-class TreeTableView: public Component
+class CORE_TUI_CORE_API TreeTableView: public Component
 {
   public:
     /// @param model The data/navigation seam (not owned; must outlive the view).

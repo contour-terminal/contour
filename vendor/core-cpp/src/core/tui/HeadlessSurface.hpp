@@ -4,6 +4,7 @@
 #include <core/tui/ByteSinkOutput.hpp>
 #include <core/tui/Rect.hpp>
 #include <core/tui/ScreenSurface.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <expected>
 #include <utility>
@@ -21,7 +22,7 @@ namespace core::tui
 /// @c queryCursorPosition() answers @c QueryUnanswered::NotAsked, and an inline viewport on this
 /// surface falls back as it does on a terminal that stays silent: it assumes the cursor is on the
 /// last row. The inline viewport's cursor query is the terminal's, and stays in core::tui.
-class HeadlessSurface final: public ScreenSurface
+class CORE_TUI_CORE_API HeadlessSurface final: public ScreenSurface
 {
   public:
     /// @brief Constructs a surface of @p size whose frames go to @p sink.

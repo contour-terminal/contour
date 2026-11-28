@@ -8,7 +8,7 @@
 #                       [SOURCES_POSIX ...] [SOURCES_LINUX ...] [SOURCES_BSD ...] [SOURCES_WINDOWS ...]
 #                       [SOURCES_EMSCRIPTEN ...] [SOURCES_WASI ...] [SOURCES_PORTABLE ...]
 #                       [PUBLIC_LIBS <lib>...] [PRIVATE_LIBS <lib>...]
-#                       [NO_STATIC_RUNTIME_TWIN])
+#                       [NO_STATIC_RUNTIME_TWIN] [ALWAYS_STATIC])
 #
 #   core_cpp_add_test(<module> [NAME <name>]
 #                     [SOURCES ...] [SOURCES_POSIX ...] [SOURCES_LINUX ...]
@@ -28,6 +28,13 @@
 # root, so the target is install-ready. Private headers (detail/, posix/, linux/,
 # bsd/, darwin/, windows/, emscripten/, portable/) go in a SOURCES list and are in no file
 # set.
+#
+# With CORE_CPP_BUILD_SHARED a KIND STATIC module is a shared library (ALWAYS_STATIC keeps one
+# static: test support, and the target that holds main()), compiled with hidden visibility, and
+# carries a generated export macro, CORE_<NAME>_API, in the header core_cpp_export_header() names.
+# What a shared library exports is what the macro marks -- the out-of-line public API and the
+# process and thread state the module owns -- so a missing mark is a link error on every platform,
+# not only on Windows.
 #
 # SOURCES is compiled everywhere the module builds, and each platform list where the
 # platform source table below says. Under Emscripten the module row's PLATFORMS
@@ -284,8 +291,63 @@ function(core_cpp_add_static_runtime_twin name module sources publicLibs private
     set_property(GLOBAL APPEND PROPERTY CORE_CPP_TARGETS ${twin})
 endfunction()
 
+## @brief Configures the shared library @p target: hidden visibility, so only what CORE_<NAME>_API
+## marks is exported; a version, so the installed file names which core-cpp it is; and on Windows
+## the macro that makes the marks dllexport inside the library.
+function(core_cpp_make_shared target exportMacro)
+    set_target_properties(${target} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        WINDOWS_EXPORT_ALL_SYMBOLS OFF
+        VERSION "${core-cpp_VERSION}"
+        SOVERSION "${core-cpp_VERSION_MAJOR}.${core-cpp_VERSION_MINOR}")
+    target_compile_definitions(${target} PRIVATE "${exportMacro}_BUILDING")
+endfunction()
+
+## @brief Generates the export header of the compiled target @p name of module @p module and sets
+## @p headerVar to its path and @p macroVar to the macro it defines, CORE_<NAME>_API.
+##
+## The header is generated for every compiled library, shared or not, so a public header can include
+## it unconditionally: the macro is empty in a static build and in a build whose target is static. In
+## a shared build it is __attribute__((visibility("default"))), or on Windows dllexport inside the
+## library (CORE_<NAME>_API_BUILDING, defined by core_cpp_add_module()) and dllimport outside it.
+## A configure-time decision rather than a consumer-side define, so an installed package needs
+## nothing of its consumers: its headers are as shared or as static as the build that installed them.
+function(core_cpp_export_header name module shared headerVar macroVar)
+    string(TOUPPER "${name}" upper)
+    set(macro "CORE_${upper}_API")
+    set(camel "")
+    string(REPLACE "_" ";" words "${name}")
+    foreach(word IN LISTS words)
+        string(SUBSTRING "${word}" 0 1 first)
+        string(SUBSTRING "${word}" 1 -1 rest)
+        string(TOUPPER "${first}" first)
+        string(APPEND camel "${first}${rest}")
+    endforeach()
+    set(directory "${CORE_CPP_MODULE_${module}_DIR}")
+    if(directory STREQUAL ".")
+        set(relative "core/${camel}Export.hpp")
+    else()
+        set(relative "core/${directory}/${camel}Export.hpp")
+    endif()
+    if(NOT shared)
+        set(body "#define ${macro}")
+    elseif(WIN32)
+        set(body "#if defined(${macro}_BUILDING)\n#define ${macro} __declspec(dllexport)\n#else\n#define ${macro} __declspec(dllimport)\n#endif")
+    else()
+        set(body "#define ${macro} __attribute__((visibility(\"default\")))")
+    endif()
+    set(CORE_CPP_EXPORT_TARGET "core::${name}")
+    set(CORE_CPP_EXPORT_MACRO "${macro}")
+    set(CORE_CPP_EXPORT_BODY "${body}")
+    configure_file("${CORE_CPP_SOURCE_DIR}/cmake/CoreCppExport.hpp.in"
+                   "${CORE_CPP_GENERATED_INCLUDE_DIR}/${relative}" @ONLY)
+    set(${headerVar} "${CORE_CPP_GENERATED_INCLUDE_DIR}/${relative}" PARENT_SCOPE)
+    set(${macroVar} "${macro}" PARENT_SCOPE)
+endfunction()
+
 function(core_cpp_add_module name)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "NO_STATIC_RUNTIME_TWIN" "KIND"
+    cmake_parse_arguments(PARSE_ARGV 1 arg "NO_STATIC_RUNTIME_TWIN;ALWAYS_STATIC" "KIND"
                           "HEADERS;${CORE_CPP_SOURCE_KEYWORDS};PUBLIC_LIBS;PRIVATE_LIBS")
     if(arg_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "core_cpp_add_module(${name}): unexpected arguments: ${arg_UNPARSED_ARGUMENTS}")
@@ -311,11 +373,17 @@ function(core_cpp_add_module name)
     core_cpp_selected_sources(arg "${row_PLATFORMS}" sources)
 
     set(target core-cpp-${name})
+    set(shared OFF)
     if(arg_KIND STREQUAL "STATIC")
         if(NOT sources)
             message(FATAL_ERROR "core_cpp_add_module(${name}): a STATIC library needs sources; a header-only one is KIND INTERFACE.")
         endif()
-        add_library(${target} STATIC)
+        if(CORE_CPP_BUILD_SHARED AND NOT arg_ALWAYS_STATIC)
+            set(shared ON)
+            add_library(${target} SHARED)
+        else()
+            add_library(${target} STATIC)
+        endif()
         set(usage PUBLIC)
     elseif(arg_KIND STREQUAL "OBJECT")
         add_library(${target} OBJECT)
@@ -338,6 +406,14 @@ function(core_cpp_add_module name)
     if(sources)
         target_sources(${target} PRIVATE ${sources})
     endif()
+    # The export header joins the public headers: the headers that mark the API include it.
+    if(arg_KIND STREQUAL "STATIC" AND NOT arg_ALWAYS_STATIC)
+        core_cpp_export_header(${name} ${module} ${shared} exportHeader exportMacro)
+        list(APPEND arg_HEADERS "${exportHeader}")
+        if(shared)
+            core_cpp_make_shared(${target} ${exportMacro})
+        endif()
+    endif()
     if(arg_HEADERS)
         # The generated headers (core/Config.hpp) are public too, based at the generated root.
         target_sources(${target} ${usage}
@@ -355,6 +431,7 @@ function(core_cpp_add_module name)
     endif()
     if(arg_PRIVATE_LIBS)
         target_link_libraries(${target} PRIVATE ${arg_PRIVATE_LIBS})
+        set_property(TARGET ${target} PROPERTY CORE_CPP_PRIVATE_LIBS "${arg_PRIVATE_LIBS}")
     endif()
 
     if(arg_KIND STREQUAL "INTERFACE")
@@ -420,6 +497,15 @@ function(core_cpp_add_test module)
     endif()
     if(TARGET ${tested})
         list(PREPEND libs ${tested})
+    endif()
+    # A test is white-box: it calls what the library calls (Winsock, OpenSSL), and a static library's
+    # private links reached its link line by that alone. A shared library's do not.
+    if(TARGET ${tested})
+        get_target_property(testedType ${tested} TYPE)
+        get_target_property(testedPrivate ${tested} CORE_CPP_PRIVATE_LIBS)
+        if(testedType STREQUAL "SHARED_LIBRARY" AND testedPrivate)
+            list(APPEND libs ${testedPrivate})
+        endif()
     endif()
     target_link_libraries(${target} PRIVATE ${libs})
     if(arg_DEFINITIONS)

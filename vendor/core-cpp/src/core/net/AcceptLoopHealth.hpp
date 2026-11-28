@@ -16,6 +16,7 @@
 /// Origin: fastcached `src/FastCache/Transport/AcceptLoopHealth.hpp`.
 
 #include <core/net/AcceptPolicy.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <functional>
 #include <mutex>
@@ -38,7 +39,7 @@ struct SurfaceCondition
 /// changes.
 ///
 /// Thread-safe: an accept loop reports from its own thread, a probe reads from another.
-class AcceptLoopHealth
+class CORE_NET_API AcceptLoopHealth
 {
   public:
     /// Told of each change -- degraded, recovered, gave up -- outside the lock, on the reporting

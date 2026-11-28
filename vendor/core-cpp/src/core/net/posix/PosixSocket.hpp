@@ -25,6 +25,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoAwaitable.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -39,7 +40,7 @@ namespace core::net
 {
 
 /// A reactor-driven, non-blocking POSIX stream socket.
-class PosixSocket final: public ISocket
+class CORE_NET_API PosixSocket final: public ISocket
 {
   public:
     /// Wraps an already-connected, non-blocking fd.
@@ -67,6 +68,10 @@ class PosixSocket final: public ISocket
     [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override;
 
     [[nodiscard]] std::string peerAddress() const override { return _peerAddress; }
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> localEndpoint() const override;
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> remoteEndpoint() const override;
+    [[nodiscard]] std::expected<std::uint64_t, NetError> option(SocketOption option) const override;
+    [[nodiscard]] std::expected<void, NetError> setOption(SocketOption option, std::uint64_t value) override;
 
     void close() noexcept override;
 
