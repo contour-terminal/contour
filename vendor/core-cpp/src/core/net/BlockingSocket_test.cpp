@@ -19,6 +19,7 @@
 #include <core/net/BlockingConnector.hpp>
 #include <core/net/BlockingSocket.hpp>
 #include <core/net/IListener.hpp>
+#include <core/net/IpSocketAddress.hpp>
 #include <core/net/PlatformLoop.hpp>
 #include <core/net/SocketAddress.hpp>
 #include <core/net/Sockets.hpp>
@@ -328,4 +329,37 @@ TEST_CASE("Every verb on a closed blocking socket answers BadHandle", "[net][soc
 
     // And a half-close after a close is a successful no-op, as on every socket here.
     CHECK(syncRun(shutOnce(pair.client.get())).has_value());
+
+    // Refused by the socket itself, so no system code: a call that reached the OS with the closed
+    // handle would carry its EBADF/WSAENOTSOCK.
+    auto const local = pair.client->localEndpoint();
+    REQUIRE_FALSE(local.has_value());
+    CHECK(local.error().code == NetErrorCode::BadHandle);
+    CHECK(local.error().systemCode == 0);
+    auto const remote = pair.client->remoteEndpoint();
+    REQUIRE_FALSE(remote.has_value());
+    CHECK(remote.error().code == NetErrorCode::BadHandle);
+    CHECK(remote.error().systemCode == 0);
+}
+
+TEST_CASE("A blocking socket reports its own port and its peer's", "[net][socket][blocking][endpoints]")
+{
+    auto pair = Connected();
+    connectPair(pair);
+
+    // Ports, because both ends are 127.0.0.1: only the ephemeral port tells the two ends apart, so a
+    // socket that asked `getpeername` for its own address would be caught here and nowhere else.
+    auto const portOf = [](std::expected<core::net::ResolvedEndpoint, core::net::NetError> const& endpoint) {
+        REQUIRE(endpoint.has_value());
+        auto const address = core::net::toIpSocketAddress(*endpoint);
+        REQUIRE(address.has_value());
+        return address->port;
+    };
+    auto const clientLocal = portOf(pair.client->localEndpoint());
+    auto const clientRemote = portOf(pair.client->remoteEndpoint());
+
+    CHECK(clientRemote == pair.listener->boundPort());
+    CHECK(clientLocal != 0);
+    CHECK(clientLocal != clientRemote);
+    CHECK(clientLocal == portOf(pair.accepted->remoteEndpoint()));
 }

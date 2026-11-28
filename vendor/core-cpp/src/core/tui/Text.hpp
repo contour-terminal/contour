@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstddef>
 #include <string>
@@ -35,7 +36,7 @@ struct TextSpan
 };
 
 /// @brief A line of styled text composed of multiple spans.
-struct TextLine
+struct CORE_TUI_CORE_API TextLine
 {
     std::vector<TextSpan> spans; ///< The spans in this line.
 
@@ -53,7 +54,7 @@ struct TextLine
 ///
 /// Can render single or multi-line text with word wrapping and various
 /// alignment options. Supports styled text through TextLine/TextSpan.
-class Text
+class CORE_TUI_CORE_API Text
 {
   public:
     /// @brief Constructs an empty text component.
@@ -126,16 +127,16 @@ class Text
 /// @param text The text to wrap.
 /// @param width The maximum line width.
 /// @return A vector of wrapped lines.
-[[nodiscard]] auto wordWrap(std::string_view text, int width) -> std::vector<std::string>;
+[[nodiscard]] CORE_TUI_CORE_API auto wordWrap(std::string_view text, int width) -> std::vector<std::string>;
 
 /// @brief Truncates a string to fit within the given width, adding ellipsis if needed.
 /// @param text The text to truncate.
 /// @param width The maximum width.
 /// @return The truncated string.
-[[nodiscard]] auto truncate(std::string_view text, int width) -> std::string;
+[[nodiscard]] CORE_TUI_CORE_API auto truncate(std::string_view text, int width) -> std::string;
 
 /// @brief Returns the display width of a string (accounting for multi-byte characters).
 /// @param text The text to measure.
-[[nodiscard]] auto displayWidth(std::string_view text) -> int;
+[[nodiscard]] CORE_TUI_CORE_API auto displayWidth(std::string_view text) -> int;
 
 } // namespace core::tui

@@ -210,10 +210,16 @@ class CompletionWait
 
     /// Retires the park if the frame is going away while it is still registered — a flow
     /// destroyed mid-wait. The operation outlives this on its own share.
+    ///
+    /// An operation still in the kernel is asked back too: nobody will read what it completes
+    /// with, and an orphaned receive left posted would take the next datagram on its socket into
+    /// storage nobody reads.
     ~CompletionWait()
     {
         _cancelReg.reset();
         _timer.reset();
+        if (_outcome == Outcome::Pending && !_operation.completed)
+            std::ignore = ::CancelIoEx(reinterpret_cast<HANDLE>(_socket), &_operation.overlapped);
         if (_park)
             _loop.unregisterPark(std::exchange(_park, ParkId {}));
         // Finished and handed to the loop, and the frame is going away before the loop resumed

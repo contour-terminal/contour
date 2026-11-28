@@ -11,6 +11,7 @@
 /// signature an honest authenticator makes when the user did not touch it, which is the case that
 /// must be refused.
 
+#include <core/net/NetTlsExport.hpp>
 #include <core/net/SshKeys.hpp>
 
 #include <cstddef>
@@ -33,7 +34,7 @@ enum class UserPresence : std::uint8_t
 };
 
 /// One `sk-ssh-ed25519@openssh.com` or `sk-ecdsa-sha2-nistp256@openssh.com` key pair.
-class SoftwareSecurityKey
+class CORE_NET_TLS_API SoftwareSecurityKey
 {
   public:
     /// A fresh key pair.

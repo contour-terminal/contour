@@ -8,6 +8,7 @@
 /// composition root applies on top of it: open a destination, apply a filter, install the
 /// formatters, and put everything back on the way out.
 
+#include <core/log/LogExport.hpp>
 #include <core/log/LogStore.hpp>
 
 #include <expected>
@@ -58,40 +59,40 @@ struct OutputConfig
 ///             standard error.
 /// @return The file to append to, or nullopt for standard error; @c std::errc::illegal_byte_sequence
 ///         on Windows where @p spec is not UTF-8.
-[[nodiscard]] std::expected<std::optional<std::filesystem::path>, std::error_code> parseLogFileSpec(
-    std::string_view spec);
+[[nodiscard]] CORE_LOG_API std::expected<std::optional<std::filesystem::path>, std::error_code>
+parseLogFileSpec(std::string_view spec);
 
 /// Builds the standard log line formatter:
 /// `[timestamp] [pid] [category] text`, with the continuation lines of a multi-line message
 /// indented under the text column and carrying no repeated tag.
 /// @param options How the line is laid out.
 /// @return The formatter, for core::log::setFormatter().
-[[nodiscard]] Category::Formatter makeStandardFormatter(FormatterOptions options);
+[[nodiscard]] CORE_LOG_API Category::Formatter makeStandardFormatter(FormatterOptions options);
 
 /// As makeStandardFormatter(), but tagged `[error]` and coloured red — for the errorLog
 /// category, whose lines a reader must be able to pick out of a busy log at a glance.
 /// @param options How the line is laid out.
 /// @return The formatter, for Category::setFormatter().
-[[nodiscard]] Category::Formatter makeErrorFormatter(FormatterOptions options);
+[[nodiscard]] CORE_LOG_API Category::Formatter makeErrorFormatter(FormatterOptions options);
 
 /// Names the filter patterns in @p filterString that match no registered category, so a typo
 /// ("--log vthost.session") can be reported instead of silently logging nothing.
 /// @param filterString A category filter string, as configure() takes it.
 /// @return The unmatched patterns, in the order given; empty for "all" or an empty filter.
-[[nodiscard]] std::vector<std::string> unmatchedFilters(std::string_view filterString);
+[[nodiscard]] CORE_LOG_API std::vector<std::string> unmatchedFilters(std::string_view filterString);
 
 /// @return Whether this process's standard output is a terminal.
 ///
 /// The colourisation gate for anything written there, such as a help text. It is asked here, in one place,
 /// rather than spelled out at each call site: the Windows half of the branch that used to do the asking
 /// answered `true` unconditionally, so a redirected stream received SGR escapes.
-[[nodiscard]] bool isStdOutTerminal() noexcept;
+[[nodiscard]] CORE_LOG_API bool isStdOutTerminal() noexcept;
 
 /// @return Whether this process's standard error is a terminal.
 ///
 /// The gate for a destination that writes there -- core::log::Sink::console() and ScopedOutput's
 /// default -- which can be redirected independently of standard output.
-[[nodiscard]] bool isStdErrTerminal() noexcept;
+[[nodiscard]] CORE_LOG_API bool isStdErrTerminal() noexcept;
 
 /// Installs a process-wide log destination for its own lifetime, restoring what was installed
 /// before on destruction.
@@ -112,7 +113,7 @@ struct OutputConfig
 /// assigns each category's sink and formatter, which would race with a concurrent emit. A
 /// program satisfies this structurally by creating the object before it spawns any thread and
 /// destroying it after every thread is joined.
-class ScopedOutput
+class CORE_LOG_API ScopedOutput
 {
   public:
     /// Opens the configured destination (creating parent directories, appending to an existing
@@ -168,7 +169,7 @@ class ScopedOutput
 /// valid only while no thread logs into the capture -- after the writers are joined, say. Read
 /// with @c snapshot while they run. Construction and destruction reassign each category's sink,
 /// so, like @c ScopedOutput, construct and destroy this while no other thread logs.
-class ScopedCapture
+class CORE_LOG_API ScopedCapture
 {
   public:
     /// @param categoryName The category to capture; empty captures every registered category.

@@ -10,6 +10,7 @@
 /// command, read the replies -- and gives it back as it found it.
 
 #include <core/tui/InputEvent.hpp>
+#include <core/tui/TuiExport.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -80,6 +81,6 @@ using TerminalChannelResult = std::expected<std::unique_ptr<TerminalChannel>, Te
 /// ECHO are cleared; ISIG is kept, so Ctrl+C still interrupts); the destructor restores what it
 /// found. A process outside the terminal's foreground process group gets a @c WriteOnly channel.
 /// @return The channel, or @c TerminalChannelError::NoTerminal when there is no terminal to open.
-[[nodiscard]] auto openControllingTerminal() -> TerminalChannelResult;
+[[nodiscard]] CORE_TUI_API auto openControllingTerminal() -> TerminalChannelResult;
 
 } // namespace core::tui

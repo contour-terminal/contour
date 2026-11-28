@@ -21,6 +21,7 @@
 ///   stack, instead of corrupting the walk it is inside of.
 
 #include <core/net/IoBackend.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <cassert>
 #include <cstddef>
@@ -35,13 +36,11 @@ namespace core::net::detail
 /// A counter rather than a flag, and thread-local rather than global, because a
 /// process may run one loop per thread and each dispatches independently. Exposed as
 /// a reference so @c ReadinessDispatchGuard is the only writer worth having; callers
-/// ask @c readinessDispatchInFlight().
+/// ask @c readinessDispatchInFlight(). Defined in the library: a thread-local in an inline function
+/// is one counter per linked image, and a dispatch started in one image would be invisible to the
+/// loop's assertion compiled into another.
 /// @return The current thread's nesting counter.
-[[nodiscard]] inline std::size_t& readinessDispatchDepth() noexcept
-{
-    static thread_local auto depth = std::size_t { 0 };
-    return depth;
-}
+[[nodiscard]] CORE_NET_API std::size_t& readinessDispatchDepth() noexcept;
 
 /// @return True while this thread is inside a backend's readiness dispatch.
 ///

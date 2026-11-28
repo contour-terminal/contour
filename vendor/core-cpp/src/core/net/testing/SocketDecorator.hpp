@@ -8,10 +8,15 @@
 /// Origin: fastcached `src/tests/SocketDecorator.hpp` (`0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`).
 
 #include <core/net/ISocket.hpp>
+#include <core/net/ITlsSession.hpp>
 #include <core/net/IoAwaitable.hpp>
+#include <core/net/NetError.hpp>
+#include <core/net/SocketAddress.hpp>
+#include <core/net/SocketOption.hpp>
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <span>
@@ -30,12 +35,14 @@ namespace core::net::testing
 ///
 /// **What hand-written copies get wrong is the part they did not write.** @c ISocket has virtuals
 /// with default implementations -- @c readWithFd, @c handshakeIfNeeded, @c waitReadable,
-/// @c cancelRead, @c shutdownWrite, @c setReceiveDeadline, @c armKeepAlive, @c peerAddress -- and a decorator
-/// that overrides none of them silently answers from the BASE rather than from the socket it decorates: a
+/// @c cancelRead, @c shutdownWrite, @c setReceiveDeadline, @c armKeepAlive, @c peerAddress,
+/// @c localEndpoint, @c remoteEndpoint, @c option, @c setOption, @c tlsSession -- and a decorator that
+/// overrides none of them silently answers from the BASE rather than from the socket it decorates: a
 /// decorated peer has no address, a half-close reaches nothing, a deadline bounds nothing. None of that is
-/// visible at a call site, because every one of those defaults succeeds. Forwarding them is a property of
-/// this type, so a double cannot omit it -- and when @c ISocket grows a virtual, this is the one place that
-/// must grow with it.
+/// visible at a call site, because every one of those defaults succeeds, or answers @c
+/// NetErrorCode::Unsupported as though the socket had nothing to give. Forwarding them is a property of this
+/// type, so a double cannot omit it -- and when @c ISocket grows a virtual, this is the one place that must
+/// grow with it.
 class SocketDecorator: public ISocket
 {
   public:
@@ -85,6 +92,33 @@ class SocketDecorator: public ISocket
     }
 
     [[nodiscard]] std::string peerAddress() const override { return _inner.peerAddress(); }
+
+    /// Forwarded, so a decorated socket keeps its address; the base default answers
+    /// @c NetErrorCode::Unsupported.
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> localEndpoint() const override
+    {
+        return _inner.localEndpoint();
+    }
+
+    /// Forwarded, as @c localEndpoint is.
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> remoteEndpoint() const override
+    {
+        return _inner.remoteEndpoint();
+    }
+
+    /// Forwarded, as @c localEndpoint is.
+    [[nodiscard]] std::expected<std::uint64_t, NetError> option(SocketOption option) const override
+    {
+        return _inner.option(option);
+    }
+
+    /// Forwarded, as @c localEndpoint is.
+    [[nodiscard]] std::expected<void, NetError> setOption(SocketOption option, std::uint64_t value) override
+    {
+        return _inner.setOption(option, value);
+    }
+
+    [[nodiscard]] ITlsSession const* tlsSession() const noexcept override { return _inner.tlsSession(); }
 
     void close() noexcept override { _inner.close(); }
 

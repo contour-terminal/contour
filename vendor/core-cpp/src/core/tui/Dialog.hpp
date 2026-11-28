@@ -5,6 +5,7 @@
 #include <core/tui/Component.hpp>
 #include <core/tui/InputEvent.hpp>
 #include <core/tui/List.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <functional>
 #include <optional>
@@ -43,7 +44,7 @@ struct SelectDialogConfig
 /// Renders centered on screen with optional background dimming.
 /// Supports keyboard navigation for list selection.
 /// As a Component, SelectDialog can be added to a Screen's component tree.
-class SelectDialog: public Component
+class CORE_TUI_CORE_API SelectDialog: public Component
 {
   public:
     /// @brief Constructs a selection dialog with the given configuration.
@@ -110,7 +111,7 @@ struct ConfirmDialogConfig
 
 /// @brief A modal confirmation dialog with Yes/No buttons.
 /// As a Component, ConfirmDialog can be added to a Screen's component tree.
-class ConfirmDialog: public Component
+class CORE_TUI_CORE_API ConfirmDialog: public Component
 {
   public:
     /// @brief Constructs a confirmation dialog.
@@ -163,7 +164,7 @@ struct InputDialogConfig
 
 /// @brief A modal input dialog with a text field.
 /// As a Component, InputDialog can be added to a Screen's component tree.
-class InputDialog: public Component
+class CORE_TUI_CORE_API InputDialog: public Component
 {
   public:
     /// @brief Constructs an input dialog.

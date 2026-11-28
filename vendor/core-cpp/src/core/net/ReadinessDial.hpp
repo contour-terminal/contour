@@ -21,6 +21,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/KeepAlive.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketAddress.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/platform/Clock.hpp>
@@ -52,10 +53,10 @@ namespace detail
     /// @throws async::OperationCancelled if the awaiting flow's own stop token is stopped while
     ///         the dial is outstanding. A cancel from the FLOW unwinds; the socket is closed on
     ///         the way out, so nothing is leaked.
-    [[nodiscard]] async::Task<SocketResult> dialReadiness(EventLoop* loop,
-                                                          ResolvedEndpoint endpoint,
-                                                          platform::SteadyTimePoint deadline,
-                                                          StreamSocketOptions options);
+    [[nodiscard]] CORE_NET_API async::Task<SocketResult> dialReadiness(EventLoop* loop,
+                                                                       ResolvedEndpoint endpoint,
+                                                                       platform::SteadyTimePoint deadline,
+                                                                       StreamSocketOptions options);
 
 } // namespace detail
 

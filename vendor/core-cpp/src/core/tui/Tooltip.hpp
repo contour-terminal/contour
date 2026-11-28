@@ -4,6 +4,7 @@
 #include <core/tui/Box.hpp>
 #include <core/tui/Component.hpp>
 #include <core/tui/StyledText.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <string>
 #include <string_view>
@@ -30,7 +31,7 @@ enum class TooltipContentType : std::uint8_t
 /// - Scrollable content with scroll indicators
 /// - Mouse wheel scrolling support
 /// - Configurable maximum size
-class Tooltip: public Component
+class CORE_TUI_CORE_API Tooltip: public Component
 {
   public:
     /// @brief Constructs an empty tooltip framed in single lines.

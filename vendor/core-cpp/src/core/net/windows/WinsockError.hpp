@@ -14,6 +14,7 @@
 /// copy of it used to live alone.
 
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <string>
 
@@ -24,6 +25,6 @@ namespace core::net::detail
 /// @param error The system error.
 /// @param context What was being attempted, for the message.
 /// @return The classified error, carrying @p error as its system code.
-[[nodiscard]] NetError fromWinsockError(int error, std::string context);
+[[nodiscard]] CORE_NET_API NetError fromWinsockError(int error, std::string context);
 
 } // namespace core::net::detail

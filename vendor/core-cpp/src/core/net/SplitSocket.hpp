@@ -10,9 +10,14 @@
 /// other, closing both together.
 
 #include <core/net/ISocket.hpp>
+#include <core/net/ITlsSession.hpp>
+#include <core/net/NetError.hpp>
+#include <core/net/SocketAddress.hpp>
+#include <core/net/SocketOption.hpp>
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <span>
@@ -110,6 +115,34 @@ class SplitSocket final: public ISocket
     /// Forwards to the read half so tmux sessions attached via combineHalves()
     /// report the real peer address instead of the ISocket default (empty).
     [[nodiscard]] std::string peerAddress() const override { return _readHalf->peerAddress(); }
+
+    /// The read half's, for @c peerAddress's reason: it is the half that came from the peer.
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> localEndpoint() const override
+    {
+        return _readHalf->localEndpoint();
+    }
+
+    /// The read half's, as @c localEndpoint is.
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> remoteEndpoint() const override
+    {
+        return _readHalf->remoteEndpoint();
+    }
+
+    /// The read half's, as @c localEndpoint is: the half that came from the peer is the one with a
+    /// connection to configure.
+    [[nodiscard]] std::expected<std::uint64_t, NetError> option(SocketOption option) const override
+    {
+        return _readHalf->option(option);
+    }
+
+    /// Set on the read half, as @c option reads it.
+    [[nodiscard]] std::expected<void, NetError> setOption(SocketOption option, std::uint64_t value) override
+    {
+        return _readHalf->setOption(option, value);
+    }
+
+    /// From the read half, as @c option reads it: the half whose bytes a session would decrypt.
+    [[nodiscard]] ITlsSession const* tlsSession() const noexcept override { return _readHalf->tlsSession(); }
 
   private:
     std::unique_ptr<ISocket> _readHalf;

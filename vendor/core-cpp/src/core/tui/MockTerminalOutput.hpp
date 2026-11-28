@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <optional>
 #include <span>
@@ -24,7 +25,7 @@ struct HyperlinkRun
 ///
 /// Tracks cursor position and visibility semantically instead of writing VT sequences.
 /// Use this to verify cursor positioning logic in tests without a real terminal.
-class MockTerminalOutput: public TerminalOutput
+class CORE_TUI_CORE_API MockTerminalOutput: public TerminalOutput
 {
   public:
     /// @brief One writeRaw() call, with the cursor position it was made at.

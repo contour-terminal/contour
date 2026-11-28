@@ -93,4 +93,16 @@ async::Task<SocketResult> dialCompletion(EventLoop* /*loop*/,
         makeNetError(NetErrorCode::Unsupported, 0, "a completion-port dial on a platform without one"));
 }
 
+async::Task<SocketResult> dialCompletionOn(EventLoop* /*loop*/,
+                                           DialSocket /*socket*/,
+                                           LocalBinding /*binding*/,
+                                           ResolvedEndpoint /*endpoint*/,
+                                           platform::SteadyTimePoint /*deadline*/,
+                                           StreamSocketOptions /*options*/)
+{
+    // As `dialCompletion`; the socket closes with the frame.
+    co_return std::unexpected(
+        makeNetError(NetErrorCode::Unsupported, 0, "a completion-port dial on a platform without one"));
+}
+
 } // namespace core::net::detail

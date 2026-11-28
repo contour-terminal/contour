@@ -47,6 +47,7 @@
 #include <core/net/IListener.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoAwaitable.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketBuffers.hpp>
 
 // clang-format off
@@ -95,7 +96,7 @@ enum class IocpAssociation : std::uint8_t
 /// NetErrorCode::Cancelled from the abort. What IS synchronous is the slot — a read armed right after
 /// `cancelRead` gets its own operation, never the one the kernel still owns. A `waitReadable` probe is a
 /// ZERO-byte receive, carries nothing to lose, and is retired inline as the interface describes.
-class IocpSocket final: public ISocket
+class CORE_NET_API IocpSocket final: public ISocket
 {
   public:
     /// Wraps a connected socket and associates it with @p loop's completion port.
@@ -149,6 +150,10 @@ class IocpSocket final: public ISocket
     [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override;
 
     [[nodiscard]] std::string peerAddress() const override { return _peerAddress; }
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> localEndpoint() const override;
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> remoteEndpoint() const override;
+    [[nodiscard]] std::expected<std::uint64_t, NetError> option(SocketOption option) const override;
+    [[nodiscard]] std::expected<void, NetError> setOption(SocketOption option, std::uint64_t value) override;
 
     void close() noexcept override;
 
@@ -296,7 +301,7 @@ class IocpSocket final: public ISocket
 
 /// A listener whose accepts are overlapped `AcceptEx` operations on the loop's completion port,
 /// handing out @c IocpSocket.
-class IocpListener final: public IListener
+class CORE_NET_API IocpListener final: public IListener
 {
   public:
     ~IocpListener() override;
@@ -354,6 +359,15 @@ class IocpListener final: public IListener
     [[nodiscard]] async::Task<AcceptResult> accept() override;
 
     [[nodiscard]] std::uint16_t boundPort() const noexcept override { return _boundPort; }
+
+    /// @copydoc IListener::localEndpoint
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> localEndpoint() const override;
+
+    /// @copydoc IListener::option
+    [[nodiscard]] std::expected<std::uint64_t, NetError> option(SocketOption option) const override;
+
+    /// @copydoc IListener::setOption
+    [[nodiscard]] std::expected<void, NetError> setOption(SocketOption option, std::uint64_t value) override;
 
     /// @return The listening socket, or `INVALID_SOCKET` once closed; for diagnostics and tests.
     [[nodiscard]] SOCKET native() const noexcept;

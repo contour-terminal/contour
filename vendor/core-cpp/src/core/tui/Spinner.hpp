@@ -4,6 +4,7 @@
 #include <core/Clock.hpp>
 #include <core/Defines.hpp>
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <array>
 #include <chrono>
@@ -31,16 +32,16 @@ enum class SpinnerType : std::uint8_t
 };
 
 /// @brief Returns the frames for a given spinner type.
-[[nodiscard]] auto spinnerFrames(SpinnerType type) -> std::span<std::string_view const>;
+[[nodiscard]] CORE_TUI_CORE_API auto spinnerFrames(SpinnerType type) -> std::span<std::string_view const>;
 
 /// @brief Returns the recommended frame interval for a spinner type in milliseconds.
-[[nodiscard]] auto spinnerInterval(SpinnerType type) -> std::chrono::milliseconds;
+[[nodiscard]] CORE_TUI_CORE_API auto spinnerInterval(SpinnerType type) -> std::chrono::milliseconds;
 
 /// @brief A loading/progress spinner animation.
 ///
 /// Tracks animation state and renders the current frame. Call tick() periodically
 /// to advance the animation.
-class Spinner
+class CORE_TUI_CORE_API Spinner
 {
   public:
     /// @brief Constructs a spinner with the given type.
@@ -116,7 +117,7 @@ class Spinner
 };
 
 /// @brief A progress bar component.
-class ProgressBar
+class CORE_TUI_CORE_API ProgressBar
 {
   public:
     /// @brief Constructs a progress bar.

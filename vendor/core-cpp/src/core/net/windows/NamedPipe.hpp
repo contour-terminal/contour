@@ -8,6 +8,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <expected>
 #include <memory>
@@ -31,7 +32,7 @@ namespace core::net::detail
 ///         @c NetErrorCode::PermissionDenied when the OS refuses access,
 ///         @c NetErrorCode::ResourceExhausted when the socket's events cannot be made, and
 ///         @c NetErrorCode::SystemError for anything else.
-[[nodiscard]] std::expected<std::unique_ptr<ISocket>, NetError> connectNamedPipe(EventLoop& loop,
-                                                                                 std::wstring_view name);
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<ISocket>, NetError> connectNamedPipe(
+    EventLoop& loop, std::wstring_view name);
 
 } // namespace core::net::detail

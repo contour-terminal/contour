@@ -16,6 +16,8 @@
 /// includes this header and names these types in @c core::platform too, beside the caching and
 /// wall clocks that stay there.
 
+#include <core/BaseExport.hpp>
+
 #include <chrono>
 #include <mutex>
 
@@ -112,11 +114,8 @@ class ManualClock final: public IClock
 /// source without threading an injection through every constructor (e.g. the
 /// default argument of an event loop's constructor). Prefer explicit constructor
 /// injection where a test needs deterministic time.
+/// The instance is defined in the library, so every image linking core-cpp shares one.
 /// @return A reference to a function-local-static @c SteadyClock.
-[[nodiscard]] inline IClock& defaultSteadyClock() noexcept
-{
-    static SteadyClock instance;
-    return instance;
-}
+[[nodiscard]] CORE_BASE_API IClock& defaultSteadyClock() noexcept;
 
 } // namespace core

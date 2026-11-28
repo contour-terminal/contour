@@ -77,10 +77,17 @@ set(CORE_CPP_WINDOWS_DEFINITIONS NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A0
 #       clang 22 classifies as a C2y extension under -Wpedantic. The expansion lands
 #       in the test's own source, so Catch2 being a SYSTEM include does not hide it.
 #       fastcached measured the same finding (PedanticCompiler.cmake at eb9c9c68).
+#   /wd4251 /wd4275: a standard-library member, or an unexported base, of a class exported
+#       from a CORE_CPP_BUILD_SHARED DLL has no DLL interface of its own. Every image on either
+#       side of the boundary links the one shared CRT the DLL does -- the only standard library a
+#       DLL boundary can carry safely -- so the warning names a hazard that does not exist here.
+#       It fires in every translation unit that includes such a class, not only in the DLL's.
 set(CORE_CPP_PEDANTIC_TABLE
     "CORE_CPP_GNU_DRIVER|-Wall"
     "CORE_CPP_MSVC_DRIVER|/W4"
     "CORE_CPP_MSVC_DRIVER|/Zc:inline"
+    "CORE_CPP_MSVC_DRIVER|/wd4251"
+    "CORE_CPP_MSVC_DRIVER|/wd4275"
     "CORE_CPP_GCC_OR_CLANG|-Wextra"
     "CORE_CPP_GCC_OR_CLANG|-Wpedantic"
     "CORE_CPP_GCC_OR_CLANG|-Wconversion"
@@ -356,6 +363,16 @@ function(core_cpp_apply_toolchain target)
                 set_property(SOURCE "${absolute}" TARGET_DIRECTORY ${target} APPEND PROPERTY OBJECT_DEPENDS ${inputs})
             endif()
         endforeach()
+    endif()
+
+    # Windows finds a DLL beside the executable that loads it, and a module's DLL is built in its own
+    # directory, so each executable gets copies of the DLLs it links. The condition keeps an
+    # executable that links none from running a copy command with nothing to copy.
+    if(CORE_CPP_BUILD_SHARED AND WIN32 AND type STREQUAL "EXECUTABLE")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${target}> $<TARGET_FILE_DIR:${target}>
+            COMMAND_EXPAND_LISTS
+            VERBATIM)
     endif()
 
     if(CORE_CPP_MSVC_DRIVER)

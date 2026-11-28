@@ -3,6 +3,7 @@
 
 #include <core/tui/MockTerminalOutput.hpp>
 #include <core/tui/ScreenSurface.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <expected>
 #include <memory>
@@ -15,7 +16,7 @@ namespace core::tui
 ///
 /// Its size is the mock's, and it answers the inline viewport's cursor query from the mock's own
 /// cursor -- what a @c Terminal over a mock output answers, without the terminal half of the TUI.
-class MockScreenSurface final: public ScreenSurface
+class CORE_TUI_CORE_API MockScreenSurface final: public ScreenSurface
 {
   public:
     /// @brief Constructs a surface over an 80x24 mock output.

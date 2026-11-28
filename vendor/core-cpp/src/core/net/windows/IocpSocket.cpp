@@ -15,6 +15,8 @@
 #include <core/net/SocketContract.hpp>
 #include <core/net/detail/PeerAddress.hpp>
 #include <core/net/detail/ScopeGuard.hpp>
+#include <core/net/detail/SocketEndpoint.hpp>
+#include <core/net/detail/SocketOptionAccess.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/net/windows/InvalidSocket.hpp>
 #include <core/net/windows/IocpOperation.hpp>
@@ -685,6 +687,36 @@ std::expected<void, NetError> IocpSocket::armKeepAlive(KeepAliveSettings const& 
     return detail::armKeepAlive(reinterpret_cast<platform::NativeHandle>(_socket), settings);
 }
 
+std::expected<ResolvedEndpoint, NetError> IocpSocket::localEndpoint() const
+{
+    if (_closed || _socket == detail::InvalidSocket)
+        return std::unexpected(closedSocket("localEndpoint"));
+    return detail::socketEndpoint(reinterpret_cast<platform::NativeHandle>(_socket),
+                                  detail::SocketSide::Local);
+}
+
+std::expected<ResolvedEndpoint, NetError> IocpSocket::remoteEndpoint() const
+{
+    if (_closed || _socket == detail::InvalidSocket)
+        return std::unexpected(closedSocket("remoteEndpoint"));
+    return detail::socketEndpoint(reinterpret_cast<platform::NativeHandle>(_socket),
+                                  detail::SocketSide::Remote);
+}
+
+std::expected<std::uint64_t, NetError> IocpSocket::option(SocketOption option) const
+{
+    if (_closed || _socket == detail::InvalidSocket)
+        return std::unexpected(closedSocket("option"));
+    return detail::readSocketOption(reinterpret_cast<platform::NativeHandle>(_socket), option);
+}
+
+std::expected<void, NetError> IocpSocket::setOption(SocketOption option, std::uint64_t value)
+{
+    if (_closed || _socket == detail::InvalidSocket)
+        return std::unexpected(closedSocket("setOption"));
+    return detail::writeSocketOption(reinterpret_cast<platform::NativeHandle>(_socket), option, value);
+}
+
 ResultAwaitable<void> IocpSocket::shutdownWrite()
 {
     // The precondition -- no write outstanding -- is the caller's, and is not asserted here, as it
@@ -1114,6 +1146,30 @@ SOCKET IocpListener::native() const noexcept
     return _shared->socket;
 }
 
+std::expected<ResolvedEndpoint, NetError> IocpListener::localEndpoint() const
+{
+    if (_closed || _shared->socket == detail::InvalidSocket)
+        return std::unexpected(
+            makeNetError(NetErrorCode::BadHandle, 0, "localEndpoint on a closed listener"));
+    return detail::socketEndpoint(reinterpret_cast<platform::NativeHandle>(_shared->socket),
+                                  detail::SocketSide::Local);
+}
+
+std::expected<std::uint64_t, NetError> IocpListener::option(SocketOption option) const
+{
+    if (_closed || _shared->socket == detail::InvalidSocket)
+        return std::unexpected(makeNetError(NetErrorCode::BadHandle, 0, "option on a closed listener"));
+    return detail::readSocketOption(reinterpret_cast<platform::NativeHandle>(_shared->socket), option);
+}
+
+std::expected<void, NetError> IocpListener::setOption(SocketOption option, std::uint64_t value)
+{
+    if (_closed || _shared->socket == detail::InvalidSocket)
+        return std::unexpected(makeNetError(NetErrorCode::BadHandle, 0, "setOption on a closed listener"));
+    return detail::writeSocketOption(
+        reinterpret_cast<platform::NativeHandle>(_shared->socket), option, value);
+}
+
 platform::NativeHandle IocpListener::nativeHandle() const noexcept
 {
     // `INVALID_SOCKET` once closed, which is `platform::InvalidHandle` spelled as a SOCKET.
@@ -1285,8 +1341,11 @@ std::expected<std::unique_ptr<IocpListener>, NetError> IocpListener::bind(EventL
     addrinfo* resolved = nullptr;
     if (auto const rc = ::getaddrinfo(
             hostString.empty() ? nullptr : hostString.c_str(), portString.c_str(), &hints, &resolved);
-        rc != 0 || resolved == nullptr)
-        return std::unexpected(makeNetError(NetErrorCode::AddressError, rc, "getaddrinfo"));
+        rc != 0)
+        return std::unexpected(
+            makeNetError(detail::classifyResolverError(rc), detail::resolverSystemCode(rc), "getaddrinfo"));
+    if (resolved == nullptr)
+        return std::unexpected(makeNetError(NetErrorCode::AddressError, 0, "getaddrinfo"));
 
     auto socket = detail::InvalidSocket;
     auto lastError = makeNetError(NetErrorCode::AddressError, 0, "no usable address");

@@ -5,6 +5,8 @@
 /// `detail::resumeSoonOn` -- one declaration for the header that calls it (`IoAwaitable.hpp`) and
 /// the one that befriends it (`EventLoop.hpp`), neither of which includes the other.
 
+#include <core/net/NetExport.hpp>
+
 #include <coroutine>
 
 namespace core::net
@@ -28,9 +30,9 @@ namespace detail
     /// @param unownedRoot The root of @p waiter's chain where nobody owns it -- the loop is then to
     ///        free the chain rather than resume it if it is torn down first -- or an empty handle
     ///        (@c async::detail::unownedRootOf).
-    void resumeSoonOn(EventLoop& loop,
-                      std::coroutine_handle<> waiter,
-                      std::coroutine_handle<> unownedRoot) noexcept;
+    CORE_NET_API void resumeSoonOn(EventLoop& loop,
+                                   std::coroutine_handle<> waiter,
+                                   std::coroutine_handle<> unownedRoot) noexcept;
 
 } // namespace detail
 

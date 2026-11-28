@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/BaseExport.hpp>
 #include <core/Defines.hpp>
 #include <core/Escape.hpp>
 #include <core/Overloaded.hpp>
@@ -901,7 +902,7 @@ constexpr void ignoreUnused(Ts const&... /*values*/) noexcept
 
 /// @return The name of the calling thread, or an empty string where it has none, or threads have
 ///         no names (single-threaded WebAssembly).
-[[nodiscard]] std::string threadName();
+[[nodiscard]] CORE_BASE_API std::string threadName();
 
 template <typename T, typename... Ts>
 concept oneOf = (std::same_as<T, Ts> || ...);

@@ -5,6 +5,8 @@
 #include <core/tui/SgrBuilder.hpp>
 #include <core/tui/TerminalProtocols.hpp>
 
+#include <array>
+#include <charconv>
 #include <format>
 #include <optional>
 #include <string_view>
@@ -26,6 +28,29 @@ namespace core::tui
 
 using namespace std::string_view_literals;
 
+namespace
+{
+    /// @brief Appends @p value in decimal to @p buffer, with no format string to parse.
+    ///
+    /// The cursor motions go through here: a frame diff writes one per repainted cell run, and parsing a
+    /// format string for each was most of what drawing a full screen cost.
+    void appendDecimal(std::string& buffer, int value)
+    {
+        // Sixteen characters hold every int's digits and sign, so the conversion cannot run out of room.
+        auto digits = std::array<char, 16> {};
+        auto const converted = std::to_chars(digits.data(), digits.data() + digits.size(), value);
+        buffer.append(digits.data(), converted.ptr);
+    }
+
+    /// @brief Appends `CSI n <final>` to @p buffer.
+    void appendCsi(std::string& buffer, int n, char final)
+    {
+        buffer += "\033["sv;
+        appendDecimal(buffer, n);
+        buffer += final;
+    }
+} // namespace
+
 void TerminalOutput::writeText(std::string_view text, Style const& style)
 {
     appendSgr(style);
@@ -40,31 +65,35 @@ void TerminalOutput::writeRaw(std::string_view text)
 
 void TerminalOutput::moveTo(int row, int col)
 {
-    _buffer += std::format("\033[{};{}H", row, col);
+    _buffer += "\033["sv;
+    appendDecimal(_buffer, row);
+    _buffer += ';';
+    appendDecimal(_buffer, col);
+    _buffer += 'H';
 }
 
 void TerminalOutput::moveUp(int n)
 {
     if (n > 0)
-        _buffer += std::format("\033[{}A", n);
+        appendCsi(_buffer, n, 'A');
 }
 
 void TerminalOutput::moveDown(int n)
 {
     if (n > 0)
-        _buffer += std::format("\033[{}B", n);
+        appendCsi(_buffer, n, 'B');
 }
 
 void TerminalOutput::moveLeft(int n)
 {
     if (n > 0)
-        _buffer += std::format("\033[{}D", n);
+        appendCsi(_buffer, n, 'D');
 }
 
 void TerminalOutput::moveRight(int n)
 {
     if (n > 0)
-        _buffer += std::format("\033[{}C", n);
+        appendCsi(_buffer, n, 'C');
 }
 
 void TerminalOutput::carriageReturn()
@@ -120,7 +149,7 @@ void TerminalOutput::clearToStartOfLine()
 void TerminalOutput::deleteLines(int n)
 {
     if (n > 0)
-        _buffer += std::format("\033[{}M", n);
+        appendCsi(_buffer, n, 'M');
 }
 
 void TerminalOutput::clearScreen()

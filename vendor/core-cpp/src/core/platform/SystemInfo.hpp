@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
+
 #include <string>
 
 namespace core::platform
@@ -20,7 +22,7 @@ namespace core::platform
 ///   lower-case letter.
 ///
 /// @return The hostname, or an empty string if it could not be determined.
-[[nodiscard]] std::string hostName();
+[[nodiscard]] CORE_PLATFORM_API std::string hostName();
 
 /// @brief Returns the local machine's hostname, resolved once per process.
 ///
@@ -29,6 +31,6 @@ namespace core::platform
 /// under a running process.
 ///
 /// @return The hostname, or an empty string if it could not be determined.
-[[nodiscard]] std::string const& cachedHostName();
+[[nodiscard]] CORE_PLATFORM_API std::string const& cachedHostName();
 
 } // namespace core::platform

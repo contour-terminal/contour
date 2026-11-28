@@ -1,9 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.25...3.31)
+# core-cpp has no module units, so nothing in its directory scans for imports unless asked. On CMake
+# 3.28 and later the range above sets CMP0155 NEW, under which every try_compile() of C++20 or later
+# scans -- FindThreads among them -- and a Clang without clang-scan-deps then fails the configure
+# with exit 127, even when core-cpp is a parent's subproject that never asked for modules. OLD scans
+# only a target or probe whose CXX_SCAN_FOR_MODULES is ON, so a parent's CMAKE_CXX_SCAN_FOR_MODULES=ON
+# is still honoured. A policy is directory state: the parent's scope keeps its own, and a dependency
+# fetched here sets its own with its cmake_minimum_required(). CMake 3.25 to 3.27 know no CMP0155 and
+# scan nothing unasked, so there is nothing to set; they refuse to configure on a policy they do not
+# know, hence the guard (the hygiene check's unguarded-policy rule). tests/cmake/check-module-scan.cmake
+# holds both roles.
+if(POLICY CMP0155)
+    cmake_policy(SET CMP0155 OLD)
+endif()
 
 # The version literal is the source of truth; a release tag must equal it.
 project(core-cpp
-    VERSION 0.21.0
+    VERSION 0.24.0
     DESCRIPTION "Shared C++23 foundation libraries of the Contour Terminal projects"
     HOMEPAGE_URL "https://github.com/contour-terminal/core-cpp"
     LANGUAGES CXX)

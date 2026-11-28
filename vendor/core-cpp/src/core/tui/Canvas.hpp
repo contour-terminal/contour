@@ -4,6 +4,7 @@
 #include <core/tui/Box.hpp>
 #include <core/tui/Buffer.hpp>
 #include <core/tui/Rect.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstddef>
 #include <string>
@@ -25,7 +26,7 @@ struct Theme;
 ///
 /// Canvases can be subdivided into smaller regions using subcanvas(),
 /// enabling hierarchical layout of components.
-class Canvas
+class CORE_TUI_CORE_API Canvas
 {
   public:
     /// Constructs a Canvas for the given buffer region.
@@ -235,12 +236,12 @@ class Canvas
 /// @param matchStyle Style for matched characters.
 /// @param matchPositions Grapheme indices of matched characters.
 /// @return Number of columns consumed.
-int putStringWithHighlights(Canvas& canvas,
-                            int row,
-                            int col,
-                            std::string_view text,
-                            Style const& normalStyle,
-                            Style const& matchStyle,
-                            std::vector<size_t> const& matchPositions);
+CORE_TUI_CORE_API int putStringWithHighlights(Canvas& canvas,
+                                              int row,
+                                              int col,
+                                              std::string_view text,
+                                              Style const& normalStyle,
+                                              Style const& matchStyle,
+                                              std::vector<size_t> const& matchPositions);
 
 } // namespace core::tui

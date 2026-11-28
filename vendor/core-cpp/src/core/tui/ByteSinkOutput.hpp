@@ -3,6 +3,7 @@
 
 #include <core/tui/Rect.hpp>
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -27,7 +28,7 @@ enum class SinkDestination : std::uint8_t
 /// capability probe, the terminal test -- is answered here instead, so this output behaves the same on
 /// every platform and in a WebAssembly guest: its size is the one it was given, nothing is probed, and
 /// @c isTerminal() says what the sink was declared to be.
-class ByteSinkOutput final: public TerminalOutput
+class CORE_TUI_CORE_API ByteSinkOutput final: public TerminalOutput
 {
   public:
     /// @brief Constructs an output that hands every flushed byte to @p sink.

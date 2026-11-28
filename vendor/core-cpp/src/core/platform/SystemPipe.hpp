@@ -18,6 +18,7 @@
 /// loop's own post() self-pipe) work identically on Linux, macOS, and Windows.
 
 #include <core/platform/PlatformError.hpp>
+#include <core/platform/PlatformExport.hpp>
 #include <core/platform/Types.hpp>
 
 #include <cstddef>
@@ -39,7 +40,7 @@ namespace core::platform
 ///
 /// A read that fails reports a @c PlatformError instead, beside this type in a
 /// `std::expected`.
-class ChannelResult
+class CORE_PLATFORM_API ChannelResult
 {
   public:
     /// An empty result: nothing to read yet.
@@ -149,6 +150,6 @@ class SystemPipe
 
 /// Creates a connected @c SystemPipe.
 /// @return A unique pointer to the channel on success, or a @c PlatformError.
-[[nodiscard]] std::expected<std::unique_ptr<SystemPipe>, PlatformError> createSystemPipe();
+[[nodiscard]] CORE_PLATFORM_API std::expected<std::unique_ptr<SystemPipe>, PlatformError> createSystemPipe();
 
 } // namespace core::platform

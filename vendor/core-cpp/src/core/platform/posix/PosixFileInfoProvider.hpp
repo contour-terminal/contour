@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/platform/FileInfoProvider.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 namespace core::platform
 {
@@ -11,7 +12,7 @@ namespace core::platform
 /// Uses directory_iterator for non-recursive listing and lstat(2) for each entry's metadata,
 /// which every POSIX system has in full: Linux, macOS and the BSDs, and Emscripten over its
 /// virtual filesystem. Gracefully skips unreadable entries via std::error_code overloads.
-class PosixFileInfoProvider final: public FileInfoProvider
+class CORE_PLATFORM_API PosixFileInfoProvider final: public FileInfoProvider
 {
   public:
     [[nodiscard]] std::vector<FileEntry> listDirectory(std::string const& path) const override;

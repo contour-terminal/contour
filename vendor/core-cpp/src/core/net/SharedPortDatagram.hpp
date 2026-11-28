@@ -8,6 +8,7 @@
 /// (`0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`).
 
 #include <core/net/IDatagramSocket.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -53,7 +54,7 @@ namespace core::net
 ///        @c BroadcastMode::On, because every send leaves by it.
 /// @return The pair as one socket, or @c NetErrorCode::BadHandle when either half is null — which
 ///         is what a caller has after a bind it could not make.
-[[nodiscard]] std::expected<std::unique_ptr<IDatagramSocket>, NetError> answerFromOwnAddress(
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IDatagramSocket>, NetError> answerFromOwnAddress(
     std::unique_ptr<IDatagramSocket> shared, std::unique_ptr<IDatagramSocket> own);
 
 /// Opens the two UDP sockets @c answerFromOwnAddress pairs, over the real stack.
@@ -73,7 +74,7 @@ namespace core::net
 /// @param ownPort The port to be answered on; 0 lets the kernel choose, which is what a node wants
 ///        unless something outside it needs to predict the number.
 /// @return The pair as one socket, or why the first half that failed could not be bound.
-[[nodiscard]] std::expected<std::unique_ptr<IDatagramSocket>, NetError> openSharedPortUdpSocket(
+[[nodiscard]] CORE_NET_API std::expected<std::unique_ptr<IDatagramSocket>, NetError> openSharedPortUdpSocket(
     std::string_view bindAddress, std::uint16_t sharedPort, std::uint16_t ownPort);
 
 } // namespace core::net
