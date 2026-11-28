@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/SixelParser.hpp>
 
+#include <vtbackend/core/ColorPalette.hpp>
+
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <limits>
 #include <ranges>
+#include <span>
 
 using std::max;
 using std::min;
@@ -39,6 +42,22 @@ namespace
         return static_cast<int8_t>(static_cast<int>(value) - 63);
     }
 
+    /// The colour each sixel colour register holds before an image defines it.
+    ///
+    /// The VT340 has 16 colour registers (VT340 manual, vol. 2, §14.3.3.1), and the manual says nothing
+    /// of the registers past them. Registers 0..15 are the VT340's sixel palette; 16..255 are, as in
+    /// Windows Terminal, the xterm 256-colour cube and grey ramp, so an image that selects a high
+    /// register without defining it is not painted black. Registers past 255 start black.
+    constexpr auto SixelDefaultColorPalette = [] {
+        auto const xterm = makeDefaultColorPalette();
+        auto colors = std::array<RGBColor, 256> {};
+        std::ranges::copy(VT340DefaultColorPalette, colors.begin());
+        std::ranges::copy(std::span { xterm }.subspan(VT340DefaultColorPalette.size(),
+                                                      colors.size() - VT340DefaultColorPalette.size()),
+                          colors.begin() + std::ssize(VT340DefaultColorPalette));
+        return colors;
+    }();
+
 } // namespace
 
 // The VT340 default palette and the HLS->RGB conversion live in vtbackend/Color.h, shared verbatim
@@ -55,8 +74,8 @@ SixelColorPalette::SixelColorPalette(unsigned int size, unsigned int maxSize): _
 
 void SixelColorPalette::reset()
 {
-    for (size_t i = 0; i < min(static_cast<size_t>(size()), VT340DefaultColorPalette.size()); ++i)
-        _palette[i] = VT340DefaultColorPalette[i];
+    auto const count = min(_palette.size(), SixelDefaultColorPalette.size());
+    std::ranges::copy(std::span { SixelDefaultColorPalette }.first(count), _palette.begin());
 }
 
 void SixelColorPalette::setSize(unsigned int newSize)
@@ -203,72 +222,39 @@ void SixelParser::foldDigits(std::string_view digits)
     number = value;
 }
 
+unsigned SixelParser::param(size_t index) const noexcept
+{
+    return index < _paramCount ? _params[index] : 0u;
+}
+
 void SixelParser::submitRaster()
 {
-    // Fewer than two parameters says nothing, and more than four is not a raster attribute at all.
-    if (_paramCount <= 1 || _paramCount >= 5)
-        return;
-
-    auto const pan = _params[0];
-    auto const pad = _params[1];
-
-    auto const imageSize = _paramCount > 3
-                               ? optional<ImageSize> { ImageSize { Width(_params[2]), Height(_params[3]) } }
-                               : std::nullopt;
-
-    _events.setRaster(pan, pad, imageSize);
+    // An omitted parameter reads as 0 (VT340 manual, vol. 2, §14.3.6,
+    // https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.3.6); setRaster() gives a 0 its meaning per
+    // field. Parameters past the fourth are ignored.
+    _events.setRaster(param(0), param(1), ImageSize { Width(param(2)), Height(param(3)) });
 }
 
 void SixelParser::submitColor()
 {
-    if (_paramCount == 1)
+    // A missing parameter reads as 0 (VT340 manual, vol. 2, §14.3.6), so a bare '#' selects colour 0
+    // and '#1;2' defines it black. The manual has only models 1 (HLS) and 2 (RGB) (§14.3.3,
+    // https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.3.3) and leaves any other open: as in Windows
+    // Terminal, the reference implementation, it and any parameter past the fifth are ignored, but the
+    // colour is selected either way.
+    auto const number = param(0);
+    if (_paramCount > 1)
     {
-        auto const index = _params[0];
-        _events.useColor(index); // TODO: move color palette into image builder (to have access to it
-                                 // during clear!)
-    }
-    else if (_paramCount == 5)
-    {
-        auto constexpr ConvertValue = [](unsigned value) {
-            // Converts a color from range 0..100 to 0..255, saturating at full intensity.
-            //
-            // The parameter comes straight off the wire unclamped, so '#0;2;99999999999999999999;0;0'
-            // reaches here as a wrapped value near 2^32: scaling that as a float lands outside int's
-            // range, and the conversion is undefined before the old '% 256' ever got to tame it.
-            // Integer math over a saturated value cannot overflow -- 100 * 255 is 25500 -- and 0..100
-            // is the only range the VT340 defines, so anything above it is full intensity.
-            return static_cast<uint8_t>((std::min(value, 100u) * 255u) / 100u);
-        };
-        auto const index = _params[0];
-        auto const colorSpace = _params[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
-        switch (colorSpace)
+        switch (param(1))
         {
-            case Colorspace::RGB: {
-                auto const p1 = ConvertValue(_params[2]);
-                auto const p2 = ConvertValue(_params[3]);
-                auto const p3 = ConvertValue(_params[4]);
-                auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
-                _events.setColor(index, color);
-                break;
-            }
-            case Colorspace::HSL: {
-                // HLS Values
-                // Px 	0 to 360 degrees 	Hue angle
-                // Py 	0 to 100 percent 	Lightness
-                // Pz 	0 to 100 percent 	Saturation
-                //
-                // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
-                //
-                // decHlsToRgb saturates each parameter to its VT340 range first: they arrive off the
-                // wire unclamped, and converting an out-of-range double to uint8_t is undefined. The
-                // conversion is shared with the ReGIS colour introducer so both render identically.
-                auto const rgb = decHlsToRgb(_params[2], _params[3], _params[4]);
-                _events.setColor(index, rgb);
-                break;
-            }
+            // decHlsToRgb saturates each parameter to its VT340 range first: they arrive off the wire
+            // unclamped. The conversion is shared with the ReGIS colour introducer.
+            case 1: _events.setColor(number, decHlsToRgb(param(2), param(3), param(4))); break;
+            case 2: _events.setColor(number, sixelColorFromRgb100(param(2), param(3), param(4))); break;
+            default: break;
         }
-        _events.useColor(index); // Also use the specified color.
     }
+    _events.useColor(number);
 }
 
 void SixelParser::pass(char ch)
@@ -300,10 +286,10 @@ void SixelParser::pass(std::string_view bytes)
                  && SixelTable.transitions[s][static_cast<uint8_t>(*input)] == State::Undefined)
         {
             // The table says a digit here stays put and folds into the current parameter. That is
-            // true of every parameter state but not of ColorIntroducer, whose first digit opens
-            // ColorParam -- so the branch is gated on the table rather than on a list of states
-            // spelled out here. Scanning the rest of the run by isDigit() alone is sound because all
-            // ten digits share that one cell, which theHotRunsAreFoldable() asserts at compile time.
+            // true of every parameter state, but the branch is gated on the table rather than on a
+            // list of states spelled out here, so a state added later decides for itself. Scanning the rest
+            // of the run by isDigit() alone is sound because all ten digits share that one cell, which
+            // theHotRunsAreFoldable() asserts at compile time.
             //
             // Digits are 30% of a sixel stream and each one otherwise pays a full table dispatch to
             // do n = n*10 + d.
@@ -359,6 +345,7 @@ void SixelImageBuilder::fillRun(std::span<uint8_t> dst, RGBAColor color) noexcep
 void SixelImageBuilder::clear(RGBAColor fillColor)
 {
     _sixelCursor = {};
+    _bandTop = {};
     _finalized = false;
     // Memoized so storage grown later is background-filled rather than zero-filled.
     _fillColor = fillColor;
@@ -410,6 +397,8 @@ void SixelImageBuilder::newline()
     auto const bandHeight = sixelBandHeight();
     if (unbox<unsigned>(_sixelCursor.line) + bandHeight < unbox<unsigned>(canvasSize().height))
         _sixelCursor.line = LineOffset::cast_from(_sixelCursor.line.as<unsigned>() + bandHeight);
+    _bandTop = LineOffset::cast_from(
+        std::min(_bandTop.as<uint64_t>() + bandHeight, uint64_t { unbox<unsigned>(_maxSize.height) }));
 }
 
 namespace
@@ -433,15 +422,29 @@ void SixelImageBuilder::setSize(ImageSize requested) noexcept
     _size = vtpty::min(requested, _maxSize);
 }
 
-void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<ImageSize> imageSize)
+void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, ImageSize declaredSize)
 {
+    // The VT340 manual does not say what a Pad of 0 means (vol. 2, §14.3.2); as in Windows Terminal, the
+    // reference implementation, it leaves the aspect ratio as it was.
     // Against _maxSize -- Terminal::maxImageSize(), the negotiated canvas -- not canvasSize(), which
     // a previous raster may have narrowed: the ceiling is what a new raster is measured by.
-    _aspectRatio = sixelAspectRatioFrom({ .vertical = pan, .horizontal = pad }, _maxSize.height);
-    if (imageSize)
+    if (pad != 0)
+        _aspectRatio = sixelAspectRatioFrom({ .vertical = pan, .horizontal = pad }, _maxSize.height);
+
+    // The raster attribute is also a graphics carriage return. The manual does not say so; Windows
+    // Terminal does it, and its source records it as observed on a VT330.
+    rewind();
+
+    // A 0 (omitted) Ph or Pv keeps that dimension as an earlier raster attribute declared it, each one
+    // on its own, as in Windows Terminal; the manual leaves it open. With nothing declared before, the
+    // image is left to grow as it is painted rather than clipped to a zero-sized canvas.
+    auto const previous = _explicitSize ? _size : ImageSize {};
+    auto const width = declaredSize.width != Width(0) ? declaredSize.width : previous.width;
+    auto const height = declaredSize.height != Height(0) ? saturatingScale(declaredSize.height, _aspectRatio)
+                                                         : previous.height;
+    if (width != Width(0) && height != Height(0))
     {
-        setSize(ImageSize { .width = imageSize->width,
-                            .height = saturatingScale(imageSize->height, _aspectRatio) });
+        setSize(ImageSize { .width = width, .height = height });
         _explicitSize = true;
         // Exactly the declared raster, background-filled: a plain resize() would zero-fill any
         // grown region, leaving a black band when a raster attribute widens the image.

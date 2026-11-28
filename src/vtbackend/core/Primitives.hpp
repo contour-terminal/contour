@@ -995,10 +995,14 @@ enum class DECMode : std::uint8_t
 
     /// Sixel cursor positioning (DEC mode 8452).
     ///
-    /// If enabled (default, as per spec), then the cursor is left next to the graphic,
-    /// that is, the text cursor is placed at the position of the sixel cursor.
-    /// If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
-    /// which is how xterm behaves by default (sadly).
+    /// Recognized, so it can be set, reset and queried, but it does not move the cursor: whichever way
+    /// it is set, a sixel image leaves the text cursor on the row its final band starts in, which is
+    /// where DEC puts it: on leaving sixel mode "the text cursor is set to the current sixel cursor
+    /// position" (VT330/VT340 Programmer Reference Manual, vol. 2, §14.4.1,
+    /// https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.4.1). The mode is an xterm extension DEC never
+    /// had. Reset, xterm leaves the cursor on the same row and column; set, xterm moves it right of the
+    /// image, which Contour does not. In none of them does the cursor go below the image unless
+    /// the image ends with a Graphics New Line (`-`): a program sends its own newline after it.
     SixelCursorNextToGraphic = 43,
 
     /// Win32 Input Mode (DEC private mode 9001).

@@ -77,8 +77,10 @@ struct SixelAspectRatio
 /// undefined for a Pan whose float rounds beyond UINT_MAX, and resolves differently per
 /// architecture -- arm64 saturates, x86-64 yields zero -- so one stream rendered at two different
 /// scales.
-/// @param aspect the raster attribute's Pan:Pad; a zero on either side reads as 1, as STD 070's
-///               guideline for omitted parameters and xterm's own handling both do.
+/// @param aspect the raster attribute's Pan:Pad; a zero on either side reads as 1. A raster
+///               attribute never passes a zero Pad: SixelImageBuilder::setRaster() keeps the
+///               previous ratio instead, as Windows Terminal does; the VT340 manual leaves a zero
+///               Pad open.
 /// @param surfaceHeight the pixel height of the surface the image may occupy.
 /// @return the vertical scaling, in [1, maxSixelAspectRatio(surfaceHeight)].
 [[nodiscard]] constexpr unsigned sixelAspectRatioFrom(SixelAspectRatio aspect, Height surfaceHeight) noexcept
@@ -88,6 +90,25 @@ struct SixelAspectRatio
     // Quotient plus remainder rather than (n + d - 1) / d: the same ceiling, but no sum to overflow.
     auto const ratio = (numerator / denominator) + (numerator % denominator != 0 ? 1u : 0u);
     return std::min(ratio, maxSixelAspectRatio(surfaceHeight));
+}
+
+/// Converts a sixel RGB colour definition, each component in percent, to a colour.
+///
+/// The VT340 manual gives each component as "0 to 100 percent" (vol. 2, §14.3.3,
+/// https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.3.3) but not how a percentage maps to a level;
+/// this rounds to the nearest 0..255 step, as Windows Terminal does, so 50% is 128 rather than 127. The
+/// components arrive off the wire unclamped; anything above 100 is full intensity, and the integer
+/// math cannot overflow (100 * 255 + 50 fits easily).
+/// @param red Red in percent.
+/// @param green Green in percent.
+/// @param blue Blue in percent.
+/// @return the colour.
+[[nodiscard]] constexpr RGBColor sixelColorFromRgb100(unsigned red, unsigned green, unsigned blue) noexcept
+{
+    auto constexpr Scale = [](unsigned percent) {
+        return static_cast<uint8_t>(((std::min(percent, 100u) * 255u) + 50u) / 100u);
+    };
+    return RGBColor { Scale(red), Scale(green), Scale(blue) };
 }
 
 /// Sixel Stream Parser API.
@@ -107,13 +128,12 @@ class SixelParser: public ParserExtension
         Ground,           // Sixel data
         RasterSettings,   // '"', configuring the raster
         RepeatIntroducer, // '!'
-        ColorIntroducer,  // '#', color-set or color-use
-        ColorParam        // color parameter
+        ColorIntroducer,  // '#', color-set or color-use, and its parameters
     };
 
     /// Number of @c State enumerators, including the @c Undefined sentinel. Sizes the state table.
-    static constexpr size_t StateCount = 6;
-    static_assert(static_cast<size_t>(State::ColorParam) + 1 == StateCount,
+    static constexpr size_t StateCount = 5;
+    static_assert(static_cast<size_t>(State::ColorIntroducer) + 1 == StateCount,
                   "StateCount must cover every State enumerator");
 
     /// The work a table cell asks the dispatcher to perform.
@@ -205,12 +225,6 @@ class SixelParser: public ParserExtension
         }
     };
 
-    enum class Colorspace : uint8_t
-    {
-        RGB,
-        HSL
-    };
-
     /// SixelParser's event handler
     class Events
     {
@@ -231,7 +245,12 @@ class SixelParser: public ParserExtension
 
         /// Defines the aspect ratio (pan / pad = aspect ratio) and image dimensions in pixels for
         /// the upcoming pixel data.
-        virtual void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) = 0;
+        /// @param pan Raster attribute Pan; omitted reads as 0.
+        /// @param pad Raster attribute Pad; 0 (or omitted) leaves the aspect ratio unchanged.
+        /// @param declaredSize Raster attributes Ph and Pv. A 0 (or omitted) dimension keeps what an
+        ///                     earlier raster attribute declared for it; with nothing declared before,
+        ///                     the image grows as it is painted.
+        virtual void setRaster(unsigned int pan, unsigned int pad, ImageSize declaredSize) = 0;
 
         /// renders a given sixel at the current sixel-cursor position.
         virtual void render(int8_t sixel) = 0;
@@ -322,7 +341,11 @@ class SixelParser: public ParserExtension
     /// @param digits the run's raw bytes, each in '0'..'9'.
     void foldDigits(std::string_view digits);
 
-    /// Hands the gathered raster attributes to the sink, if they form a well-shaped set.
+    /// @return parameter @p index of the current introducer, or 0 if it was omitted.
+    /// @param index 0-based; below MaxParams.
+    [[nodiscard]] unsigned param(size_t index) const noexcept;
+
+    /// Hands the gathered raster attributes to the sink.
     void submitRaster();
 
     /// Defines and/or selects a colour register from the gathered parameters.
@@ -346,9 +369,9 @@ class SixelParser: public ParserExtension
 
     /// Parameters gathered, saturating at @c MaxParams + 1.
     ///
-    /// Saturating cannot change a decision. Every reader tests this against a value of at most five
-    /// (@c ==1, @c >1&&<5, @c >3, @c ==5), and six answers all of them identically to seven, or to
-    /// the thousands of ';' an untrusted stream may send. The spare slot is where a digit lands once
+    /// Saturating cannot change a decision. Readers only test it for @c >1 or read a slot below
+    /// @c MaxParams through param(), and six answers both identically to seven, or to the thousands
+    /// of ';' an untrusted stream may send. The spare slot is where a digit lands once
     /// saturated, which is what keeps a clamp off the digit path -- 30% of a sixel stream's bytes.
     size_t _paramCount = 0;
 
@@ -385,7 +408,6 @@ constexpr SixelParser::Table SixelParser::Table::get() noexcept
     t.event(State::Ground, Action::Render, Sixels);
     t.transition(State::RasterSettings, State::Ground, Action::Render, Sixels);
     t.transition(State::ColorIntroducer, State::Ground, Action::Render, Sixels);
-    t.transition(State::ColorParam, State::Ground, Action::Render, Sixels);
     // '!' NUMBER BYTE -- the byte both closes the run and says what to paint.
     t.transition(State::RepeatIntroducer, State::Ground, Action::RenderRepeated, Sixels);
 
@@ -404,20 +426,18 @@ constexpr SixelParser::Table SixelParser::Table::get() noexcept
     t.event(State::RepeatIntroducer, Action::Param, Digits);
     t.event(State::RasterSettings, Action::Param, Digits);
     t.event(State::RasterSettings, Action::ParamSeparator, uint8_t { ';' });
-    t.event(State::ColorParam, Action::Param, Digits);
-    t.event(State::ColorParam, Action::ParamSeparator, uint8_t { ';' });
-    // A '#' introducer's first digit both opens the parameter and enters ColorParam.
-    t.transition(State::ColorIntroducer, State::ColorParam, Action::Param, Digits);
+    t.event(State::ColorIntroducer, Action::Param, Digits);
+    t.event(State::ColorIntroducer, Action::ParamSeparator, uint8_t { ';' });
 
-    // Each introducer starts a fresh parameter list. ColorParam deliberately has no entry action:
-    // it inherits the list ColorIntroducer opened.
+    // Each introducer starts a fresh parameter list.
     t.entry(State::RasterSettings, Action::ResetParams);
     t.entry(State::RepeatIntroducer, Action::ResetParams);
     t.entry(State::ColorIntroducer, Action::ResetParams);
 
-    // Parameters only mean something once whatever carried them ends.
+    // Parameters only mean something once whatever carried them ends. A bare '#' still submits: it
+    // selects colour 0, its omitted parameter reading as 0 (VT340 manual, vol. 2, §14.3.6).
     t.exit(State::RasterSettings, Action::SubmitRaster);
-    t.exit(State::ColorParam, Action::SubmitColor);
+    t.exit(State::ColorIntroducer, Action::SubmitColor);
 
     return t;
 }
@@ -498,13 +518,21 @@ class SixelImageBuilder: public SixelParser::Events
     void useColor(unsigned index) override;
     void rewind() override;
     void newline() override;
-    void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) override;
+    void setRaster(unsigned int pan, unsigned int pad, ImageSize declaredSize) override;
     void render(int8_t sixel) override;
     void renderRepeated(int8_t sixel, unsigned count) override;
     void renderRun(std::string_view sixels) override;
     void finalize() override;
 
     [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }
+
+    /// The pixel row the last sixel band starts on: every Graphics New Line (`-`) adds one band, a
+    /// trailing one included, however tall the raster attributes declared the image -- Ph and Pv "do
+    /// not limit the size of the image defined by the sixel data" (VT340 manual, vol. 2, §14.3.2,
+    /// https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.3.2). The text cursor is placed by it once
+    /// the image is done.
+    /// @return The band's top pixel row, at most the maximum image height.
+    [[nodiscard]] LineOffset bandTop() const noexcept { return _bandTop; }
 
   private:
     /// @return the height of one sixel band in pixel rows.
@@ -589,6 +617,9 @@ class SixelImageBuilder: public SixelParser::Events
     /// The background last passed to clear(); newly exposed storage is filled with it.
     RGBAColor _fillColor {};
     CellLocation _sixelCursor {};
+    /// The pixel row the current band starts on, advanced by every Graphics New Line. Unlike
+    /// _sixelCursor it is not held inside the canvas, and it stops only at the maximum image height.
+    LineOffset _bandTop {};
     unsigned _currentColor = 0;
     /// _colors->at(_currentColor), memoized. Stable while the palette only grows.
     RGBColor _currentColorValue {};

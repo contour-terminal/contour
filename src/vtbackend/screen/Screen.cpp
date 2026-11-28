@@ -3152,7 +3152,7 @@ void Screen::logImageDroppedForUnknownCellSize(std::string_view kind, ImageSize 
         "Dropping a {} image of {}: the cell size in pixels is not known (logged once).", kind, pixelSize);
 }
 
-void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
+void Screen::sixelImage(ImageSize pixelSize, LineOffset lastBandTop, Image::Data&& rgbaData)
 {
     // Dropped while the cell size is not known, and the log says so.
     auto const extent = cellsCovering(pixelSize, _terminal->cellPixelSize());
@@ -3179,10 +3179,36 @@ void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
                 alignmentPolicy,
                 resizePolicy,
                 autoScrollAtBottomMargin,
-                ImageCursorPolicy::BelowSixelBands);
+                autoScrollAtBottomMargin ? ImageCursorPolicy::OnLastImageRow : ImageCursorPolicy::Stay);
 
-    if (!_terminal->isModeEnabled(DECMode::SixelCursorNextToGraphic))
-        linefeed(topLeft.column);
+    // Sixel display mode (DECSDM) draws from the home position and leaves the text cursor where it was:
+    // with sixel scrolling disabled "the text cursor does not change" (VT340 manual, vol. 2, §14.4.2).
+    if (!autoScrollAtBottomMargin)
+        return;
+
+    // With sixel scrolling enabled, leaving sixel mode sets "the text cursor ... to the current sixel
+    // cursor position" (VT340 manual, vol. 2, §14.4.1,
+    // https://vt100.net/docs/vt3xx-gp/chapter14.html#S14.4.1). The sixel cursor sits at the top of the
+    // last band, so the cursor goes to the row where that band begins, in the image's first column (the
+    // manual names no column). Windows Terminal does the same.
+    //
+    // A band can begin a row above the image's bottom edge: with 20-pixel cells, a 21-pixel image covers
+    // two rows, but its last band begins at pixel 18, in the first. The cursor then ends a row higher,
+    // as measured on a real VT340 (https://github.com/hackerb9/vt340test/blob/main/glitches.md).
+    //
+    // renderImage() left the cursor on the image's last row, which scrolling may have moved to the bottom
+    // margin, so the image's top is found from there. After a trailing Graphics New Line the last band
+    // begins below the image, and the cursor moves down to it with line feeds, scrolling at the bottom
+    // margin as sixel scrolling does.
+    auto const lastImageRow = logicalCursorPosition().line;
+    auto const imageTop = lastImageRow - (boxed_cast<LineOffset>(extent->lines) - 1);
+    auto const bandRow = LineOffset::cast_from(unbox(lastBandTop) / unbox(_terminal->cellPixelSize().height));
+    auto const targetRow = imageTop + bandRow;
+    if (targetRow <= lastImageRow)
+        moveCursorTo(std::max(targetRow, LineOffset(0)), topLeft.column);
+    else
+        for ([[maybe_unused]] auto const _: core::times(unbox(targetRow - lastImageRow)))
+            linefeed(topLeft.column);
 }
 
 shared_ptr<Image const> Screen::uploadImage(ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
@@ -3230,35 +3256,12 @@ void Screen::renderImage(shared_ptr<Image const> image,
                                                               imageSize,
                                                               kittyPlacementId);
 
-    // Compute the cursor line offset after rendering.
-    // For Sixel images, use VT340-compatible sixel band math. Which image is one is the caller's to
-    // say (@see ImageCursorPolicy::BelowSixelBands): a pixel imageSize does not tell, since GIP names
-    // the part of an image to show the same way.
-    // For GIP images, simply place the cursor at the last row of the rendered area.
-    // Sixel's band math divides by the cell height, which is zero until the display has reported it; such an
-    // image is then placed like a GIP one.
+    // Where the cursor goes, relative to the image's top row: below the rendered rows, or on the last.
     auto const goesBelowImage =
-        cursorPolicy == ImageCursorPolicy::BelowImage || cursorPolicy == ImageCursorPolicy::BelowSixelBands;
-    auto const isSixelImage = cursorPolicy == ImageCursorPolicy::BelowSixelBands && imageSize.width.value > 0
-                              && imageSize.height.value > 0 && _terminal->cellPixelSize().area() > 0;
-    auto const cursorLineOffset = [&]() -> LineOffset {
-        if (isSixelImage)
-        {
-            auto const lastSixelBand = unbox(imageSize.height) % 6;
-            auto lineOffset =
-                LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
-                                                / _terminal->cellPixelSize().height.as<double>()))
-                - 1 * (lastSixelBand == 0);
-            auto const h = unbox(imageSize.height) - 1;
-            // VT340 quirk: for some heights the text cursor is placed one row too high.
-            // See: https://github.com/hackerb9/vt340test/blob/main/glitches.md
-            if (h % 6 > h % unbox(_terminal->cellPixelSize().height))
-                lineOffset = lineOffset - 1;
-            return lineOffset;
-        }
-        // GIP: cursor goes to the line immediately below the last rendered image row.
-        return boxed_cast<LineOffset>(linesToBeRendered);
-    }();
+        cursorPolicy == ImageCursorPolicy::BelowImage || cursorPolicy == ImageCursorPolicy::OnLastImageRow;
+    auto const cursorLineOffset = cursorPolicy == ImageCursorPolicy::OnLastImageRow
+                                      ? boxed_cast<LineOffset>(linesToBeRendered) - 1
+                                      : boxed_cast<LineOffset>(linesToBeRendered);
 
     // Both extents have to be positive before the grid is walked: the iterator's makeOffset() divides
     // by the column count, which a cursor sitting in the pending-wrap column reduces to zero.
@@ -3276,7 +3279,7 @@ void Screen::renderImage(shared_ptr<Image const> image,
         {
             case ImageCursorPolicy::Stay: break;
             case ImageCursorPolicy::BelowImage:
-            case ImageCursorPolicy::BelowSixelBands:
+            case ImageCursorPolicy::OnLastImageRow:
                 moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
                 break;
             case ImageCursorPolicy::AdvancePastImage:
@@ -3304,9 +3307,8 @@ void Screen::renderImage(shared_ptr<Image const> image,
                 cell.setHyperlink(_cursor.hyperlink);
             };
         }
-        // After auto-scroll, cursor is ON the last image row. Move it below.
-        // Only for GIP — Sixel handles its own cursor positioning at the call site.
-        if (goesBelowImage && !isSixelImage)
+        // After auto-scroll, the cursor is on the last image row, where OnLastImageRow wants it.
+        if (cursorPolicy == ImageCursorPolicy::BelowImage)
             linefeed(topLeft.column);
     }
 
@@ -9640,7 +9642,8 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
 
     return make_unique<SixelParser>(*_sixelImageBuilder, [this]() {
         _terminal->dropSixelRegistersAtHook();
-        sixelImage(_sixelImageBuilder->size(), std::move(_sixelImageBuilder->data()));
+        sixelImage(
+            _sixelImageBuilder->size(), _sixelImageBuilder->bandTop(), std::move(_sixelImageBuilder->data()));
     });
 }
 
