@@ -127,6 +127,7 @@
           <li>Fixes the sidebar's tab rows of a window without a daemon showing "Terminal" instead of the title the shell set, until something else changed</li>
           <li>Shows a working directory beneath your home as <code>~/…</code> in the sidebar, as the pane header does, for a directory on this machine only: a path an ssh session or another machine's daemon reports is shown in full</li>
           <li>Fixes Contour on Windows ending when a terminal is resized just as its program exits</li>
+          <li>Fixes an image in one tab sometimes being drawn with another tab's picture, stretched to its size, such as a frame of a GIF played earlier in another tab flashing in place of the current one</li>
           <li>Fixes inline images drawn smaller than they were sent, such as the Mermaid diagrams Claude Code renders at twice their size, looking jagged: each pixel now averages the image pixels it covers instead of picking one of them, so text and thin lines in a picture stay smooth, and transparent edges keep their colour</li>
           <li>Fixes a kitty graphics delete (<code>a=d</code>) arriving during a chunked image transmission being taken for the transmission's last chunk: as in kitty, the transmission is now aborted and the delete carried out</li>
           <li>Fixes the kitty graphics delete <code>a=d,d=A</code> freeing every stored image, even one never placed: as in kitty, it now frees only the images whose placements it removed, so an image transmitted for a later <code>a=p</code> survives it</li>

@@ -54,6 +54,7 @@ TEST_CASE("image placement ordinals name a placement for as long as it lives", "
     auto const makePlacement = [] {
         auto image = std::make_shared<vtbackend::Image>(
             vtbackend::ImageId(1),
+            vtbackend::ImagePoolId(0),
             vtbackend::ImageFormat::RGBA,
             vtbackend::Image::Data(4, 0xFF),
             vtbackend::ImageSize { vtbackend::Width(1), vtbackend::Height(1) },

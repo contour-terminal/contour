@@ -88,12 +88,30 @@ enum class ImageFormat : uint8_t
 
 // clang-format off
 namespace detail { struct ImageId {}; }
-using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
+using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique within its ImagePool only; see ImageKey
+
+namespace detail { struct ImagePoolIdTag {}; }
+/// Identifies the ImagePool an image was created in. An ImageId is unique only within its pool: every
+/// terminal numbers its images from 1, so two tabs routinely hold different images under the same id.
+/// Zero names no pool (an image built outside one, as tests do).
+using ImagePoolId = boxed::boxed<uint32_t, detail::ImagePoolIdTag>;
 
 namespace detail { struct KittyPlacementIdTag {}; }
 /// A kitty graphics placement id (`p=`); zero means the placement has none.
 using KittyPlacementId = boxed::boxed<uint32_t, detail::KittyPlacementIdTag>;
 // clang-format on
+
+/// What names an image across every pool: the pool it lives in and its id within that pool.
+///
+/// A consumer serving several terminals at once -- the renderer, whose display switches between tabs --
+/// must key on this rather than on the ImageId alone, or one tab's image is drawn with another's texture.
+struct ImageKey
+{
+    ImagePoolId pool {}; ///< The pool the image was created in.
+    ImageId id {};       ///< The image's id within that pool.
+
+    [[nodiscard]] constexpr bool operator==(ImageKey const&) const noexcept = default;
+};
 
 struct ImageStats
 {
@@ -114,10 +132,20 @@ class Image: public std::enable_shared_from_this<Image>
     using OnImageRemove = std::function<void(Image const*)>;
     /// Constructs an RGBA image.
     ///
-    /// @param data      RGBA buffer data
-    /// @param pixelSize image dimensionss in pixels
-    Image(ImageId id, ImageFormat format, Data data, ImageSize pixelSize, OnImageRemove remover) noexcept:
+    /// @param id        the image's id within its pool
+    /// @param pool      the pool the image belongs to; with @p id, its ImageKey. See ImagePoolId.
+    /// @param format    the pixel format of @p data
+    /// @param data      the pixels
+    /// @param pixelSize image dimensions in pixels
+    /// @param remover   invoked when the image is destroyed
+    Image(ImageId id,
+          ImagePoolId pool,
+          ImageFormat format,
+          Data data,
+          ImageSize pixelSize,
+          OnImageRemove remover) noexcept:
         _id { id },
+        _pool { pool },
         _format { format },
         _data { std::move(data) },
         _size { pixelSize },
@@ -134,6 +162,10 @@ class Image: public std::enable_shared_from_this<Image>
     Image& operator=(Image&&) noexcept = default;
 
     constexpr ImageId id() const noexcept { return _id; }
+    /// @return The pool this image was created in.
+    [[nodiscard]] constexpr ImagePoolId pool() const noexcept { return _pool; }
+    /// @return The key naming this image across every pool.
+    [[nodiscard]] constexpr ImageKey key() const noexcept { return ImageKey { .pool = _pool, .id = _id }; }
     constexpr ImageFormat format() const noexcept { return _format; }
     Data const& data() const noexcept { return _data; }
     constexpr ImageSize size() const noexcept { return _size; }
@@ -142,6 +174,7 @@ class Image: public std::enable_shared_from_this<Image>
 
   private:
     ImageId _id;
+    ImagePoolId _pool;
     ImageFormat _format;
     Data _data;
     ImageSize _size;
@@ -415,9 +448,8 @@ inline bool operator<(ImageFragment const& a, ImageFragment const& b) noexcept
 class ImagePool
 {
   public:
-    using OnImageRemove = std::function<void(Image const*)>;
-
-    ImagePool(OnImageRemove onImageRemove = [](auto) {}, ImageId nextImageId = ImageId(1));
+    /// @param nextImageId The id the first created image receives.
+    explicit ImagePool(ImageId nextImageId = ImageId(1));
 
     /// Creates an RGBA image of given size in pixels.
     std::shared_ptr<Image const> create(ImageFormat format, ImageSize pixelSize, Image::Data&& data);
@@ -435,6 +467,9 @@ class ImagePool
                                                      ImageFormat format,
                                                      ImageSize pixelSize,
                                                      Image::Data&& data);
+
+    /// @return This pool's identity, distinct from every other pool's in the process and never zero.
+    [[nodiscard]] ImagePoolId poolId() const noexcept { return _poolId; }
 
     /// @return The id the next created image receives.
     [[nodiscard]] ImageId nextImageId() const noexcept { return _nextImageId; }
@@ -487,9 +522,9 @@ class ImagePool
 
     // data members
     //
+    ImagePoolId _poolId;                       //!< This pool's process-unique identity
     ImageId _nextImageId;                      //!< ID for next image to be put into the pool
     NameToImageIdCache _imageNameToImageCache; //!< keeps mapping from name to raw image
-    OnImageRemove _onImageRemove;              //!< Callback to be invoked when image gets removed from pool.
     std::shared_ptr<IdIndex> _idIndex = std::make_shared<IdIndex>(); //!< id -> live image index
 };
 

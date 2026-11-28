@@ -329,8 +329,6 @@ class Renderer
         growAtlasForPage(pageSize);
     }
 
-    void discardImage(vtbackend::Image const& image);
-
     void clearCache();
 
     void inspect(std::ostream& textOutput) const;
@@ -506,8 +504,6 @@ class Renderer
                               vtbackend::ColumnCount columns,
                               int smoothScrollOffset);
 
-    void executeImageDiscards();
-
     /// The atlas sizing the *configuration* asked for, kept apart from the effective sizing below.
     ///
     /// The effective budget is raised to cover the page actually being rendered, and a resize can raise
@@ -675,9 +671,6 @@ class Renderer
     ///
     /// @param fontDescriptions  the new font descriptions to apply.
     void applyFontDescriptions(FontDescriptions fontDescriptions);
-
-    std::mutex _imageDiscardLock;                       //!< Lock guard for accessing _discardImageQueue.
-    std::vector<vtbackend::ImageId> _discardImageQueue; //!< List of images to be discarded.
 
     BackgroundRenderer _backgroundRenderer;
     ImageRenderer _imageRenderer;

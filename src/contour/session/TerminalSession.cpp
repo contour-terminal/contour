@@ -3493,14 +3493,6 @@ void TerminalSession::setTerminalProfile(string const& configProfileName)
     });
 }
 
-void TerminalSession::discardImage(vtbackend::Image const& image)
-{
-    if (!_display)
-        return;
-
-    _display->discardImage(image);
-}
-
 void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
 {
     using vtbackend::ViMode;

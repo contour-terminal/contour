@@ -12,6 +12,7 @@
 #include <core/FNV.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -73,14 +74,10 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
     void renderImage(crispy::Point pos, vtbackend::ImageFragment const& fragment);
 
-    /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some
-    /// GPU caches.
-    void discardImage(vtbackend::ImageId imageId);
-
     void inspect(std::ostream& output) const override;
 
-    /// Opens a new frame: advances what the LRU stamps against, and drops the textures the backend
-    /// failed to create.
+    /// Opens a new frame: advances what the LRU stamps against, drops the textures the backend failed to
+    /// create, and releases those whose image has died.
     ///
     /// Call once per frame, before its first pass. A frame may be drawn in several passes (smooth
     /// scrolling draws the main display and the status line separately), and an image any of them drew
@@ -108,6 +105,19 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
     /// Forgets the textures the backend failed to create, freeing what they charged to the budget.
     void dropFailedTextures();
+
+    /// Releases the textures of images that have died.
+    ///
+    /// This is how the renderer learns an image is gone -- nobody tells it. Watching the image rather than
+    /// being notified covers every way one dies: in the tab on screen, in a background tab, with a tab
+    /// closed while another is shown, or in a session that has since moved to another display. A
+    /// notification has to find the renderer that holds the texture, and a detached session has none.
+    void releaseOrphanedTextures();
+
+    /// Releases one image's texture and forgets the mapping, so the next sight of the image uploads it
+    /// again.
+    /// @param imageKey The image's pool and id.
+    void releaseTexture(vtbackend::ImageKey imageKey);
 
     /// Paints the part of a cell the image does not reach, in the image's gap colour.
     ///
@@ -145,11 +155,27 @@ class ImageRenderer: public Renderable, public TextRendererEvents
         atlas::ImageTextureId id;
         size_t bytes = 0;           ///< GPU bytes the texture occupies.
         uint64_t lastUsedFrame = 0; ///< The frame this was last drawn in; the LRU key.
+        /// The image the texture was uploaded from, watched rather than held: once it dies the texture
+        /// names nothing that can be drawn again. See releaseOrphanedTextures().
+        std::weak_ptr<vtbackend::Image const> image;
     };
 
-    /// vtbackend ImageId -> the texture holding it. Keyed on the image rather than on the
+    /// Hashes an ImageKey by packing its pool and id into one 64-bit value.
+    struct ImageKeyHash
+    {
+        [[nodiscard]] size_t operator()(vtbackend::ImageKey key) const noexcept
+        {
+            return std::hash<uint64_t> {}((static_cast<uint64_t>(key.pool.value) << 32U) | key.id.value);
+        }
+    };
+
+    /// The image's pool and id -> the texture holding it. Keyed on the image rather than on the
     /// rasterization: policies and cell size change where an image is sampled, not what it contains.
-    std::unordered_map<uint32_t, ImageTextureEntry> _imageTextures;
+    ///
+    /// The pool is part of the key because one renderer serves every tab its display switches to, and each
+    /// tab's terminal numbers its images from 1: keyed on the id alone, one tab's image was drawn with
+    /// another tab's texture, stretched to its size.
+    std::unordered_map<vtbackend::ImageKey, ImageTextureEntry, ImageKeyHash> _imageTextures;
     uint32_t _nextImageTextureId = 1;
 
     size_t const _textureBudgetBytes;

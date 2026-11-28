@@ -36,7 +36,8 @@ std::shared_ptr<Image> makeCoordinateImage(ImageSize size)
             data[base + 2] = ImageMarker;
             data[base + 3] = 0xFF;
         }
-    return std::make_shared<Image>(ImageId(1), ImageFormat::RGBA, std::move(data), size, [](auto) {});
+    return std::make_shared<Image>(
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(data), size, [](auto) {});
 }
 
 /// Counts the cells of a full-page sixel's span that the image fails to cover -- i.e. the gap.
@@ -212,8 +213,8 @@ TEST_CASE("RasterizedImage.fragment", "[RasterizedImage]")
 {
     auto const imageSize = ImageSize { Width(100), Height(100) };
     auto imageData = std::vector<uint8_t>(static_cast<std::size_t>(100 * 100 * 4), 0xFF); // White opaque
-    auto image =
-        std::make_shared<Image>(ImageId(1), ImageFormat::RGBA, std::move(imageData), imageSize, [](auto) {});
+    auto image = std::make_shared<Image>(
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(imageData), imageSize, [](auto) {});
 
     auto rasterizedImage = rasterize(image,
                                      ImageAlignment::MiddleCenter,
@@ -356,4 +357,22 @@ TEST_CASE("RasterizedImage.placeholderOriginIsNotPreservedOnTextWrite", "[Raster
         auto const fragment = std::make_shared<ImageFragment>(raster, CellLocation {});
         CHECK_FALSE(shouldPreserveImageOnTextWrite(fragment));
     }
+}
+
+TEST_CASE("ImagePool.tagsItsImagesWithItsOwnIdentity", "[image]")
+{
+    // Every pool numbers its images from 1, so the id alone cannot tell two terminals' images apart;
+    // the pool identity on each image is what can.
+    auto first = ImagePool {};
+    auto second = ImagePool {};
+    CHECK(first.poolId() != second.poolId());
+    CHECK(first.poolId() != ImagePoolId(0));
+
+    auto const pixel = ImageSize { Width(1), Height(1) };
+    auto const a = first.create(ImageFormat::RGBA, pixel, Image::Data { 0, 0, 0, 0xFF });
+    auto const b = second.create(ImageFormat::RGBA, pixel, Image::Data { 0, 0, 0, 0xFF });
+    REQUIRE(a->id() == b->id());
+    CHECK(a->pool() == first.poolId());
+    CHECK(b->pool() == second.poolId());
+    CHECK(a->key() != b->key());
 }

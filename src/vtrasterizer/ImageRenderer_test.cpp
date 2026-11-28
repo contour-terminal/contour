@@ -24,6 +24,23 @@ auto const testGridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24),
                                            .baseline = 15,
                                            .underline = { .position = 17, .thickness = 1 } };
 
+/// Places @p image across @p cellSpan cells, pinned to the top-left and never resized.
+/// @param image the image to place.
+/// @param cellSpan how many cells it covers.
+/// @param layer which side of the text it composites on.
+std::shared_ptr<RasterizedImage> rasterizeImage(std::shared_ptr<Image const> image,
+                                                GridSize cellSpan,
+                                                ImageLayer layer = ImageLayer::Replace)
+{
+    return std::make_shared<RasterizedImage>(std::move(image),
+                                             ImageAlignment::TopStart,
+                                             ImageResize::NoResize,
+                                             RGBAColor { 0, 0, 0, 0xFF },
+                                             cellSpan,
+                                             CellSize,
+                                             layer);
+}
+
 /// A rasterized image spanning @p cellSpan cells at exactly one image pixel per target pixel.
 /// @param cellSpan how many cells the image covers.
 /// @param layer which side of the text it composites on.
@@ -35,15 +52,21 @@ std::shared_ptr<RasterizedImage> makeImage(GridSize cellSpan,
     auto const imageSize = ImageSize { Width::cast_from(unbox(cellSpan.columns) * unbox(CellSize.width)),
                                        Height::cast_from(unbox(cellSpan.lines) * unbox(CellSize.height)) };
     auto data = Image::Data(imageSize.area() * 4, 0x7F);
-    auto image = std::make_shared<Image>(imageId, ImageFormat::RGBA, std::move(data), imageSize, [](auto) {});
+    return rasterizeImage(
+        std::make_shared<Image>(
+            imageId, ImagePoolId(0), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {}),
+        cellSpan,
+        layer);
+}
 
-    return std::make_shared<RasterizedImage>(std::move(image),
-                                             ImageAlignment::TopStart,
-                                             ImageResize::NoResize,
-                                             RGBAColor { 0, 0, 0, 0xFF },
-                                             cellSpan,
-                                             CellSize,
-                                             layer);
+/// Lets go of the image every recorded upload holds, as a real backend does once it has executed the
+/// command (RhiRenderer drops its queued creates with the frame). The mock keeps the commands for
+/// inspection, so without this they would keep every uploaded image alive.
+/// @param backend the mock whose recorded uploads to release.
+void releaseUploadOwners(MockImageTextureBackend& backend)
+{
+    for (auto& create: backend.createCommands)
+        create.owner.reset();
 }
 
 /// A rasterized image that does NOT fill the cells it spans, leaving an alignment gap.
@@ -61,8 +84,8 @@ std::shared_ptr<RasterizedImage> makeLetterboxedImage(ImageSize imageSize,
                                                       ImageLayer layer = ImageLayer::Replace)
 {
     auto data = Image::Data(imageSize.area() * 4, 0x7F);
-    auto image =
-        std::make_shared<Image>(ImageId(1), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {});
+    auto image = std::make_shared<Image>(
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(data), imageSize, [](auto) {});
 
     return std::make_shared<RasterizedImage>(std::move(image),
                                              ImageAlignment::TopStart,
@@ -187,14 +210,9 @@ TEST_CASE("ImageRenderer.widens a 24-bit RGB image for upload", "[image][rendere
         rgb[(pixel * 3) + 1] = 0x22;
         rgb[(pixel * 3) + 2] = 0x33;
     }
-    auto image =
-        std::make_shared<Image>(ImageId(2), ImageFormat::RGB, std::move(rgb), imageSize, [](auto) {});
-    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
-                                                              ImageAlignment::TopStart,
-                                                              ImageResize::NoResize,
-                                                              RGBAColor { 0, 0, 0, 0xFF },
-                                                              Span,
-                                                              CellSize);
+    auto image = std::make_shared<Image>(
+        ImageId(2), ImagePoolId(0), ImageFormat::RGB, std::move(rgb), imageSize, [](auto) {});
+    auto const rasterized = rasterizeImage(std::move(image), Span);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -222,13 +240,9 @@ TEST_CASE("ImageRenderer.refuses an image that is still an encoded file", "[imag
     auto const imageSize = ImageSize { Width::cast_from(unbox(Span.columns) * unbox(CellSize.width)),
                                        Height::cast_from(unbox(Span.lines) * unbox(CellSize.height)) };
     auto image = std::make_shared<Image>(
-        ImageId(3), ImageFormat::PNG, Image::Data(8, uint8_t { 0x89 }), imageSize, [](auto) {});
-    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
-                                                              ImageAlignment::TopStart,
-                                                              ImageResize::NoResize,
-                                                              RGBAColor { 0, 0, 0, 0xFF },
-                                                              Span,
-                                                              CellSize);
+        ImageId(3), ImagePoolId(0), ImageFormat::PNG, Image::Data(8, uint8_t { 0x89 }), imageSize, [](auto) {
+        });
+    auto const rasterized = rasterizeImage(std::move(image), Span);
 
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -442,8 +456,12 @@ TEST_CASE("ImageRenderer.leaves a kitty placeholder's gap to the cell background
 
         // A 10x10 image across two 10x20 cells: the first cell is half gap, the second all gap.
         auto data = Image::Data(std::size_t { 100 } * 4, 0x7F);
-        auto image = std::make_shared<Image>(
-            ImageId(1), ImageFormat::RGBA, std::move(data), ImageSize { Width(10), Height(10) }, [](auto) {});
+        auto image = std::make_shared<Image>(ImageId(1),
+                                             ImagePoolId(0),
+                                             ImageFormat::RGBA,
+                                             std::move(data),
+                                             ImageSize { Width(10), Height(10) },
+                                             [](auto) {});
         auto const raster = std::make_shared<RasterizedImage>(std::move(image),
                                                               ImageAlignment::TopStart,
                                                               ImageResize::NoResize,
@@ -497,14 +515,8 @@ TEST_CASE("ImageRenderer.refuses an image whose pixmap is shorter than its geome
     auto const declaredSize = ImageSize { Width(10), Height(20) };
     auto shortData = Image::Data(16, 0x7F); // 16 bytes claiming to be 10*20*4 = 800
     auto image = std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, std::move(shortData), declaredSize, [](auto) {});
-    auto const rasterized = std::make_shared<RasterizedImage>(std::move(image),
-                                                              ImageAlignment::TopStart,
-                                                              ImageResize::NoResize,
-                                                              RGBAColor { 0, 0, 0, 0xFF },
-                                                              Span,
-                                                              CellSize,
-                                                              ImageLayer::Replace);
+        ImageId(1), ImagePoolId(0), ImageFormat::RGBA, std::move(shortData), declaredSize, [](auto) {});
+    auto const rasterized = rasterizeImage(std::move(image), Span);
 
     renderRow(imageRenderer, rasterized, 1);
 
@@ -598,7 +610,7 @@ TEST_CASE("ImageRenderer.does not evict what an earlier pass of the same frame d
 TEST_CASE("ImageRenderer.forgets its textures when the render target detaches", "[image][renderer]")
 {
     // The textures belong to the render target and die with it, so holding entries that name them
-    // would charge the budget for textures that no longer exist and route later discards at a
+    // would charge the budget for textures that no longer exist and route later releases at a
     // scheduler that is gone.
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
@@ -610,9 +622,6 @@ TEST_CASE("ImageRenderer.forgets its textures when the render target detaches", 
     REQUIRE(renderTarget.getMockImageBackend().createCommands.size() == 1);
 
     imageRenderer.detachRenderTarget();
-
-    // A discard draining after the detach must not reach the departed scheduler.
-    imageRenderer.discardImage(ImageId(1));
 
     // Re-attached, the image is uploaded to the new target rather than assumed resident on it.
     auto secondTarget = MockRenderTarget {};
@@ -648,24 +657,85 @@ TEST_CASE("ImageRenderer.clearCache releases the textures", "[image][renderer]")
     CHECK(backend.createCommands.size() == 2);
 }
 
-TEST_CASE("ImageRenderer.discardImage releases the texture", "[image][renderer]")
+TEST_CASE("ImageRenderer.keeps images of different pools apart under a shared id", "[image][renderer]")
 {
+    // One renderer serves every tab its display switches to, and each tab's terminal numbers its images
+    // from 1. Keyed on the id alone, the second tab's image 1 was drawn with the first tab's texture,
+    // stretched to its own size.
     auto renderTarget = MockRenderTarget {};
     auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
     auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
     imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
 
-    auto const image = makeImage(GridSize { .lines = LineCount(1), .columns = ColumnCount(2) });
-    renderRow(imageRenderer, image, 2);
+    auto firstPool = ImagePool {};
+    auto secondPool = ImagePool {};
+    REQUIRE(firstPool.poolId() != secondPool.poolId());
+
+    auto const cellSpan = GridSize { .lines = LineCount(1), .columns = ColumnCount(1) };
+    auto first = rasterizeImage(
+        firstPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x11)), cellSpan);
+    auto const second = rasterizeImage(
+        secondPool.create(ImageFormat::RGBA, CellSize, Image::Data(CellSize.area() * 4, 0x22)), cellSpan);
+    REQUIRE(first->image().id() == second->image().id());
+
+    renderRow(imageRenderer, first, 1);
+    renderRow(imageRenderer, second, 1);
 
     auto& backend = renderTarget.getMockImageBackend();
-    REQUIRE(backend.createCommands.size() == 1);
+    REQUIRE(backend.createCommands.size() == 2);
+    auto const firstTexture = backend.createCommands[0].id;
+    auto const secondTexture = backend.createCommands[1].id;
+    CHECK(firstTexture != secondTexture);
+    REQUIRE(backend.quadCommands.size() == 2);
+    CHECK(backend.quadCommands[0].texture == firstTexture);
+    CHECK(backend.quadCommands[1].texture == secondTexture);
 
-    imageRenderer.discardImage(image->image().id());
+    // The first pool's image dying releases only its own texture, though the second shares its id.
+    releaseUploadOwners(backend);
+    first.reset();
+    renderRow(imageRenderer, second, 1);
     REQUIRE(backend.destroyCommands.size() == 1);
-    CHECK(backend.destroyCommands.front().id == backend.createCommands.front().id);
+    CHECK(backend.destroyCommands.front().id == firstTexture);
 
-    // Discarding twice must not double-destroy.
-    imageRenderer.discardImage(image->image().id());
+    // The second pool's image is still resident: drawn again, it reused its texture.
+    CHECK(backend.createCommands.size() == 2);
+    REQUIRE(backend.quadCommands.size() == 3);
+    CHECK(backend.quadCommands[2].texture == secondTexture);
+}
+
+TEST_CASE("ImageRenderer.releases the texture of an image once it dies", "[image][renderer]")
+{
+    // Nobody tells the renderer an image is gone -- not the tab on screen, and not a background tab or a
+    // closed one, which have no display to tell. It notices the death itself, on its next frame, rather
+    // than keeping the texture until LRU pressure happens to reach it.
+    auto renderTarget = MockRenderTarget {};
+    auto directMappingAllocator = Renderable::DirectMappingAllocator { 0 };
+    auto imageRenderer = ImageRenderer { testGridMetrics, CellSize };
+    imageRenderer.setRenderTarget(renderTarget, directMappingAllocator);
+
+    auto& backend = renderTarget.getMockImageBackend();
+    auto survivor = makeImage(
+        GridSize { .lines = LineCount(1), .columns = ColumnCount(1) }, ImageLayer::Replace, ImageId(1));
+    {
+        auto const doomed = makeImage(
+            GridSize { .lines = LineCount(1), .columns = ColumnCount(1) }, ImageLayer::Replace, ImageId(2));
+        renderRow(imageRenderer, doomed, 1);
+        renderRow(imageRenderer, survivor, 1);
+        REQUIRE(backend.createCommands.size() == 2);
+        releaseUploadOwners(backend);
+    }
+    auto const doomedTexture = backend.createCommands[0].id;
+
+    // The death itself issues nothing: the renderer learns of it when it next opens a frame.
+    CHECK(backend.destroyCommands.empty());
+
+    // The next frame finds it dead and releases exactly its texture.
+    renderRow(imageRenderer, survivor, 1);
+    REQUIRE(backend.destroyCommands.size() == 1);
+    CHECK(backend.destroyCommands.front().id == doomedTexture);
+    CHECK(backend.createCommands.size() == 2); // the survivor is still resident
+
+    // Once released, it is not released again.
+    renderRow(imageRenderer, survivor, 1);
     CHECK(backend.destroyCommands.size() == 1);
 }

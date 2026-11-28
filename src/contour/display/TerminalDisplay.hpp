@@ -318,7 +318,6 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void renderBufferUpdated() final;
     void onSelectionCompleted();
     void bufferChanged(vtbackend::ScreenType) final;
-    void discardImage(vtbackend::Image const&) final;
     void setScreenshotOutput(ScreenshotOutput where) final { _saveScreenshot = std::move(where); }
     // }}}
 

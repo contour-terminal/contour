@@ -202,10 +202,6 @@ class DisplaySurface
     /// @param screenType The buffer now active.
     virtual void bufferChanged(vtbackend::ScreenType screenType) = 0;
 
-    /// Drops any cached GPU resources for @p image, which the terminal is about to forget.
-    /// @param image The image being released.
-    virtual void discardImage(vtbackend::Image const& image) = 0;
-
     /// Arms (or disarms) a one-shot capture of the next rendered frame.
     /// @param where Where the frame goes. @see ScreenshotOutput.
     virtual void setScreenshotOutput(ScreenshotOutput where) = 0;

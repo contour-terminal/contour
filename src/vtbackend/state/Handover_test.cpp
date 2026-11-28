@@ -247,8 +247,12 @@ TEST_CASE("a restored terminal tells its listener what the restore changed", "[H
 
 TEST_CASE("an image fragment two cells share is one object after the handover", "[Handover]")
 {
-    auto const image = std::make_shared<Image>(
-        ImageId(1), ImageFormat::RGBA, Image::Data(16, 0), ImageSize { Width(2), Height(2) }, [](auto) {});
+    auto const image = std::make_shared<Image>(ImageId(1),
+                                               ImagePoolId(0),
+                                               ImageFormat::RGBA,
+                                               Image::Data(16, 0),
+                                               ImageSize { Width(2), Height(2) },
+                                               [](auto) {});
     auto const rasterized =
         std::make_shared<RasterizedImage>(image,
                                           ImageAlignment::TopStart,

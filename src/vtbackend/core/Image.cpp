@@ -5,6 +5,7 @@
 #include <crispy/StrongLRUHashtable.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <ranges>
 #include <utility>
@@ -51,12 +52,26 @@ ImageFragment::~ImageFragment()
     --ImageStats::get().fragments;
 }
 
-ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
+namespace
+{
+    /// Hands every pool the process creates an identity of its own.
+    ///
+    /// A counter rather than the pool's address: a closed tab's pool may be freed and a new tab's allocated
+    /// at the same address while the renderer still holds textures, or queued discards, for the old one.
+    /// @return The next pool identity, starting at 1 so that zero stays "no pool".
+    [[nodiscard]] ImagePoolId nextImagePoolId() noexcept
+    {
+        static auto counter = std::atomic<uint32_t> { 0 };
+        return ImagePoolId(counter.fetch_add(1, std::memory_order_relaxed) + 1);
+    }
+} // namespace
+
+ImagePool::ImagePool(ImageId nextImageId):
+    _poolId { nextImagePoolId() },
     _nextImageId { nextImageId },
     _imageNameToImageCache { crispy::StrongHashtableSize { 1024 },
                              crispy::LRUCapacity { 100 },
-                             "ImagePool name-to-image mappings" },
-    _onImageRemove { std::move(onImageRemove) }
+                             "ImagePool name-to-image mappings" }
 {
 }
 
@@ -421,25 +436,21 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
 
 shared_ptr<Image const> ImagePool::adopt(ImageId id, ImageFormat format, ImageSize size, Image::Data&& data)
 {
-    // The remover prunes the id index before the user's callback runs. It captures the
+    // The remover prunes the id index. It captures the
     // index by shared_ptr, never the pool: an image's last reference may outlive the
     // pool member order-wise, and it may drop on any thread.
     auto image = make_shared<Image>(
-        id, format, std::move(data), size, [index = _idIndex, remover = _onImageRemove](Image const* image) {
-            {
-                auto const _ = std::lock_guard { index->mutex };
-                // Prune only if this dying image still owns its slot. After the uint32
-                // id counter wraps, a live image may have re-taken this id via
-                // insert_or_assign (see create() below); its weak_ptr is unexpired, so
-                // erasing by id unconditionally would drop the LIVE entry. Our own slot's
-                // weak_ptr is already expired once the destructor's remover runs, so
-                // expired() precisely selects the entry to remove.
-                if (auto const it = index->images.find(image->id().value);
-                    it != index->images.end() && it->second.expired())
-                    index->images.erase(it);
-            }
-            if (remover)
-                remover(image);
+        id, _poolId, format, std::move(data), size, [index = _idIndex](Image const* image) {
+            auto const _ = std::lock_guard { index->mutex };
+            // Prune only if this dying image still owns its slot. After the uint32
+            // id counter wraps, a live image may have re-taken this id via
+            // insert_or_assign (see create() below); its weak_ptr is unexpired, so
+            // erasing by id unconditionally would drop the LIVE entry. Our own slot's
+            // weak_ptr is already expired once the destructor's remover runs, so
+            // expired() precisely selects the entry to remove.
+            if (auto const it = index->images.find(image->id().value);
+                it != index->images.end() && it->second.expired())
+                index->images.erase(it);
         });
     {
         auto const _ = std::lock_guard { _idIndex->mutex };
