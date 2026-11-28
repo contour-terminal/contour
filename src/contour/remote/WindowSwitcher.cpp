@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
+#include <contour/remote/PresencePlan.hpp>
 #include <contour/remote/WindowSwitcher.hpp>
 #include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -32,6 +33,17 @@ namespace
     constexpr auto SwitchSuperseded =
         std::string_view { "a newer switch of the window, or its close, ended it" };
     constexpr auto SwitchTimedOut = std::string_view { "it did not show the workspace in time" };
+    /// Why a switch the user cancelled ended.
+    constexpr auto SwitchCancelled = std::string_view { "the user cancelled it" };
+    /// Why a switch naming a workspace of a run of its daemon that has ended failed.
+    constexpr auto DaemonRestarted = std::string_view { "the daemon restarted" };
+
+    /// @param cause What ended a switch.
+    /// @return Why, for the log and the caller.
+    [[nodiscard]] std::string_view reasonOf(SupersedeCause cause) noexcept
+    {
+        return cause == SupersedeCause::UserCancelled ? SwitchCancelled : SwitchSuperseded;
+    }
 
     /// Why a switch that must land by a time (session::SwitchLandBy) was not started.
     constexpr auto SwitchTooLateText =
@@ -58,14 +70,18 @@ SwitchTimer qtSwitchTimer()
 
 WindowSwitcher::WindowSwitcher(session::TerminalSessionManager& sessions,
                                ISwitchHost& host,
+                               IObserverPool& pool,
                                std::unique_ptr<IWorkspaceLister> lister,
                                SwitchPicker picker,
-                               SwitchDeadline deadline):
+                               SwitchDeadline deadline,
+                               core::IRandom& random):
     _sessions(sessions),
     _host(host),
+    _pool(pool),
     _lister(std::move(lister)),
     _picker(std::move(picker)),
     _deadline(std::move(deadline)),
+    _random(random),
     _alive(std::make_shared<WindowSwitcher*>(this))
 {
 }
@@ -115,7 +131,7 @@ std::optional<vtworkspace::WorkspaceId> WindowSwitcher::shownHere(SameDaemon sam
 void WindowSwitcher::request(vtworkspace::WorkspaceId window,
                              session::SwitchTarget target,
                              session::SwitchMode mode,
-                             session::SwitchLandBy landBy,
+                             session::SwitchWaiter waiter,
                              session::SwitchCompletion done)
 {
     auto* const own = linkOf(window);
@@ -130,12 +146,16 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         done(std::unexpected(std::string { "this window has no daemon behind it" }));
         return;
     }
-    // A switch waiting for a tab in an empty workspace ends for a newer one (it is for the user to end,
-    // and a window must not stay locked by it); any other switch under way refuses it.
-    if (auto const busy = _busy.find(window.value); busy != _busy.end())
+    // The user's newer switch ends the one under way, whatever its stage: the last click wins. A program's
+    // ends only a switch waiting for a tab in an empty workspace (that is for the user to end, and a window
+    // must not stay locked by it); any other switch under way refuses it (supersessionOf()). A switch in
+    // place and an Open wait in slots of their own: a newer click of one kind never ends the other's, as a
+    // window opening elsewhere is not what a click in this one replaces.
+    if (auto const busy = _busy.find(slotOf(window, mode)); busy != _busy.end())
     {
-        auto const supersede = busy->second.supersede;
-        if (!supersede || supersede(SupersedeCause::NewerRequest) == Supersession::Kept)
+        // Copied: ending the switch erases its entry.
+        auto const endUnderWay = busy->second.supersede;
+        if (!endUnderWay || endUnderWay(newerRequestCause(waiter.landBy)) == Supersession::Kept)
         {
             done(std::unexpected(std::string { "a switch of this window is under way" }));
             return;
@@ -146,20 +166,52 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         .window = window,
         .target = std::move(target),
         .mode = mode,
-        .landBy = landBy,
+        .waiter = waiter,
         .done = std::move(done),
         .sameDaemon = destination.sameDaemon,
         .serial = _nextSerial++,
         .address = destination.address,
         .config = std::nullopt,
     };
-    _busy.insert_or_assign(window.value, Busy { .serial = request.serial, .supersede = {} });
+    // While it is resolved the request waits in one slot: the listing's answer and whatever ends it first
+    // take it, and the other finds it taken (a late listing then does nothing).
+    auto const slot = std::make_shared<std::optional<Request>>();
+    _busy.insert_or_assign(slotOf(window, mode),
+                           Busy { .serial = request.serial, .supersede = [this, slot](SupersedeCause cause) {
+                                     if (supersessionOf(cause, SwitchStage::Resolving) == Supersession::Kept)
+                                         return Supersession::Kept;
+                                     if (auto taken = std::exchange(*slot, std::nullopt))
+                                         cancel(*taken, std::string { reasonOf(cause) });
+                                     return Supersession::Ended;
+                                 } });
     if (!destination.config)
     {
         fail(request, destination.config.error());
         return;
     }
+    // A window's link dials as Attach to Host's does, listed or not: every dial may ask in the window that
+    // asked (a password host's prompt comes back with each reconnect), and a remote daemon is started if
+    // absent. The presence's first-dial-only transport is for its own observers' Connect.
     request.config.emplace(*std::move(destination.config));
+    // Another daemon the sidebar lists, connected: its observer holds the directory of every workspace, so
+    // nothing is listed -- and a workspace named in a run of it that has ended names nothing any more.
+    if (auto const section = connectedSectionOf(request))
+    {
+        if (request.target.instance != window::DaemonInstance {}
+            && section->instance != request.target.instance)
+        {
+            fail(request, std::string { DaemonRestarted });
+            return;
+        }
+        if (resolvesFromDirectory(request.target.workspace, section->directory))
+        {
+            auto const rows = workspaceRowsOf(section->directory, [&](uint64_t daemonWorkspace) {
+                return shownHere(SameDaemon::No, request.address, *own, daemonWorkspace);
+            });
+            resolve(std::move(request), rows);
+            return;
+        }
+    }
     // The window's own daemon: its connection holds the directory of every workspace, control ids and all, so
     // nothing is listed -- but for a workspace named by its control id on a daemon that states none.
     if (request.sameDaemon == SameDaemon::Yes)
@@ -176,19 +228,32 @@ void WindowSwitcher::request(vtworkspace::WorkspaceId window,
         }
     }
     auto list = ListTarget { .address = request.address, .transport = request.config->controller.transport };
-    _lister->list(std::move(list),
-                  [alive = std::weak_ptr { _alive }, request = std::move(request)](auto listed) mutable {
-                      auto const self = alive.lock();
-                      if (!self)
-                          return;
-                      auto& switcher = **self;
-                      if (!listed && listed.error().kind == ListFailureKind::Declined)
-                          switcher.decline(request, listed.error().reason);
-                      else if (!listed)
-                          switcher.fail(request, listed.error().reason);
-                      else
-                          switcher.resolveListed(std::move(request), *listed);
-                  });
+    slot->emplace(std::move(request));
+    _lister->list(std::move(list), [alive = std::weak_ptr { _alive }, slot](auto listed) mutable {
+        auto const self = alive.lock();
+        auto taken = std::exchange(*slot, std::nullopt);
+        // Ended meanwhile -- a newer click, a cancel, the window's close: the answer is nobody's.
+        if (!self || !taken)
+            return;
+        auto& switcher = **self;
+        if (!listed && listed.error().kind == ListFailureKind::Declined)
+            switcher.decline(*taken, listed.error().reason);
+        else if (!listed)
+            switcher.fail(*taken, listed.error().reason);
+        else
+            switcher.resolveListed(*std::move(taken), *listed);
+    });
+}
+
+std::optional<window::DaemonSection> WindowSwitcher::connectedSectionOf(Request const& request) const
+{
+    if (request.sameDaemon == SameDaemon::Yes
+        || request.address.kind == vthost::proto::SwitchDaemonKind::Same)
+        return std::nullopt;
+    auto section = _pool.listedSection(daemonRefOf(request.address, DaemonLinkId {}));
+    if (!section || section->state != window::DaemonLinkState::Connected)
+        return std::nullopt;
+    return section;
 }
 
 WindowSwitcher::Destination WindowSwitcher::destinationOf(DaemonLink& own,
@@ -280,6 +345,34 @@ void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
         failCreate(window, daemon, destination.config.error(), done);
         return;
     }
+    // The creation is the window's switch under way from now on, in the slot of its mode: the user's newer
+    // request or cancel ends it as one being resolved, and the window's close does. A workspace the daemon
+    // makes all the same stays listed, for the user to show or close.
+    auto const slot = slotOf(window, mode);
+    if (auto const busy = _busy.find(slot); busy != _busy.end())
+    {
+        // Copied: ending the switch erases its entry.
+        auto const endUnderWay = busy->second.supersede;
+        if (!endUnderWay || endUnderWay(newerRequestCause(session::UserSwitch.landBy)) == Supersession::Kept)
+        {
+            done(std::unexpected(std::string { "a switch of this window is under way" }));
+            return;
+        }
+    }
+    auto const serial = _nextSerial++;
+    auto const waiting = std::make_shared<session::SwitchCompletion>(std::move(done));
+    _busy.insert_or_assign(slot,
+                           Busy { .serial = serial, .supersede = [this, slot, waiting](SupersedeCause cause) {
+                                     if (supersessionOf(cause, SwitchStage::Resolving) == Supersession::Kept)
+                                         return Supersession::Kept;
+                                     _busy.erase(slot);
+                                     if (auto told = std::exchange(*waiting, {}))
+                                     {
+                                         attachLog()("switch: window {}: {}", slot.window, reasonOf(cause));
+                                         told(std::unexpected(std::string { reasonOf(cause) }));
+                                     }
+                                     return Supersession::Ended;
+                                 } });
     auto target =
         ListTarget { .address = destination.address, .transport = destination.config->controller.transport };
     _lister->create(
@@ -289,10 +382,17 @@ void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
          window,
          daemon = session::SwitchTarget { .kind = daemon.kind, .daemon = daemon.daemon, .workspace = {} },
          mode,
-         done = std::move(done)](auto created) mutable {
+         slot,
+         serial,
+         waiting](auto created) mutable {
             auto const self = alive.lock();
-            if (!self)
+            // Ended meanwhile: what the daemon made stays listed, and nothing is shown.
+            if (!self || !*waiting)
                 return;
+            auto done = std::exchange(*waiting, {});
+            if (auto const busy = (*self)->_busy.find(slot);
+                busy != (*self)->_busy.end() && busy->second.serial == serial)
+                (*self)->_busy.erase(busy);
             if (!created)
             {
                 (*self)->failCreate(window, daemon, created.error(), done);
@@ -300,7 +400,7 @@ void WindowSwitcher::createWorkspace(vtworkspace::WorkspaceId window,
             }
             // The new workspace, by the control id the daemon gave it: never mistaken for another.
             daemon.workspace = *created;
-            (*self)->request(window, std::move(daemon), mode, session::NoLandingDeadline, std::move(done));
+            (*self)->request(window, std::move(daemon), mode, session::UserSwitch, std::move(done));
         });
 }
 
@@ -420,12 +520,14 @@ void WindowSwitcher::resolve(Request request, std::vector<WorkspaceRow> const& r
                 if (request.mode == session::SwitchMode::Open)
                     if (auto* const controller = _sessions.controllerDisplaying(request.window))
                         controller->raiseAndActivate();
+                applyFocus(request.window, request.target.focus);
                 succeed(request, vthost::proto::SwitchOutcome::FocusedExisting);
             }
             else if constexpr (std::is_same_v<T, SwitchFocus>)
             {
                 if (auto* const controller = _sessions.controllerDisplaying(decided.window))
                     controller->raiseAndActivate();
+                applyFocus(decided.window, request.target.focus);
                 succeed(request, vthost::proto::SwitchOutcome::FocusedExisting);
             }
             else if constexpr (std::is_same_v<T, SwitchPick>)
@@ -452,7 +554,7 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
     auto const mode = request.mode;
     auto const sameDaemon = request.sameDaemon;
     auto const serial = request.serial;
-    auto const landBy = request.landBy;
+    auto const landBy = request.waiter.landBy;
     // Listing the target daemon's workspaces may have taken until the switch must have landed: one started
     // now would move a window nobody waits for any more.
     if (landBy && _deadline.clock.now() >= *landBy)
@@ -475,15 +577,25 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
             return;
         }
         auto selected = own->selectWorkspace(
-            workspace, [alive = std::weak_ptr { _alive }, take](std::expected<uint64_t, std::string> landed) {
+            workspace,
+            [alive = std::weak_ptr { _alive }, take, link = own->id()](
+                std::expected<uint64_t, std::string> landed) {
                 auto const self = alive.lock();
                 auto taken = take();
                 if (!self || !taken)
                     return;
-                if (landed)
-                    (*self)->succeed(*taken, vthost::proto::SwitchOutcome::Switched);
-                else
+                if (!landed)
+                {
                     (*self)->fail(*taken, landed.error());
+                    return;
+                }
+                // The window shows what it landed on in a local workspace of its own, which is not the one
+                // the request named it by: found by its link.
+                auto const links = (*self)->_host.switchableLinks();
+                auto const found = std::ranges::find(links, link, &DaemonLink::id);
+                auto const shown = found != links.end() ? (*found)->windowShowing(*landed) : std::nullopt;
+                (*self)->applyFocus(shown.value_or(taken->window), taken->target.focus);
+                (*self)->succeed(*taken, vthost::proto::SwitchOutcome::Switched);
             });
         if (!selected)
         {
@@ -492,7 +604,7 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
         }
         // Undone as a lost connection undoes it: the window's own workspace is selected again, and the link
         // tells the callback above, which fails the request.
-        armDeadline(window, serial, landBy, [this, window, take, landBy] {
+        armDeadline(slotOf(window, mode), serial, landBy, [this, window, take, landBy] {
             auto* const link = linkOf(window);
             if (link != nullptr && expiryOf(link->switchWait(), landBy) == Expiry::Disarmed)
                 return Expiry::Disarmed;
@@ -502,7 +614,7 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
                 fail(*taken, std::string { SwitchTimedOut });
             return Expiry::GaveUp;
         });
-        onSupersede(window, serial, [this, window, take](SupersedeCause cause) {
+        onSupersede(slotOf(window, mode), serial, [this, window, take](SupersedeCause cause) {
             return supersedeOwn(window, cause, take);
         });
         return;
@@ -529,10 +641,16 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
                 else
                     (*self)->handOver(*taken, *madeAs);
             },
+        // The new link activates the row's tab and pane as it first shows the workspace.
+        .focus = (*pending)->target.focus,
     };
-    *madeAs = _host.startSwitchLink(std::move(config)).id();
+    // A switch, or an Open, to a daemon the presence observes takes its observer over: no second connection,
+    // no listing, no prompt, and every workspace's status is there the moment the window lands. The presence
+    // observes a daemon only while no window of this process is on it; otherwise the link dials its own.
+    auto* const adopted = adoptLink(**pending, workspace, config);
+    *madeAs = adopted != nullptr ? adopted->id() : _host.startSwitchLink(std::move(config)).id();
     // The link is not wanted any more: it ends, telling nothing, and its selection goes with its connection.
-    armDeadline(window, serial, landBy, [this, madeAs, take, landBy] {
+    armDeadline(slotOf(window, mode), serial, landBy, [this, madeAs, take, landBy] {
         auto const links = _host.switchableLinks();
         auto const found = std::ranges::find(links, *madeAs, &DaemonLink::id);
         if (found != links.end() && expiryOf((*found)->switchWait(), landBy) == Expiry::Disarmed)
@@ -543,58 +661,151 @@ void WindowSwitcher::land(Request request, SwitchTo const& to)
             fail(*taken, std::string { SwitchTimedOut });
         return Expiry::GaveUp;
     });
-    onSupersede(window, serial, [this, madeAs, take](SupersedeCause cause) {
+    onSupersede(slotOf(window, mode), serial, [this, madeAs, take](SupersedeCause cause) {
         return supersedeLinked(*madeAs, cause, take);
     });
 }
 
-WindowSwitcher::Supersession WindowSwitcher::supersedeOwn(vtworkspace::WorkspaceId window,
-                                                          SupersedeCause cause,
-                                                          TakeRequest const& take)
+SwitchStage WindowSwitcher::stageOf(DaemonLink const* link)
+{
+    return link != nullptr && link->switchWait() == SwitchWait::ForFirstTab ? SwitchStage::WaitingForTab
+                                                                            : SwitchStage::Connecting;
+}
+
+Supersession WindowSwitcher::supersedeOwn(vtworkspace::WorkspaceId window,
+                                          SupersedeCause cause,
+                                          TakeRequest const& take)
 {
     auto* const link = linkOf(window);
-    if (cause == SupersedeCause::NewerRequest
-        && (link == nullptr || link->switchWait() != SwitchWait::ForFirstTab))
+    if (supersessionOf(cause, stageOf(link)) == Supersession::Kept)
         return Supersession::Kept;
     // Taken first: the link's callback then finds nothing to fail, and no notice is posted.
     auto taken = take();
+    auto const reason = std::string { reasonOf(cause) };
     if (link != nullptr)
-        link->cancelSwitch(window, std::string { SwitchSuperseded });
+        link->cancelSwitch(window, reason);
     if (taken)
-        cancel(*taken, std::string { SwitchSuperseded });
+        cancel(*taken, reason);
     return Supersession::Ended;
 }
 
-WindowSwitcher::Supersession WindowSwitcher::supersedeLinked(DaemonLinkId madeAs,
-                                                             SupersedeCause cause,
-                                                             TakeRequest const& take)
+Supersession WindowSwitcher::supersedeLinked(DaemonLinkId madeAs,
+                                             SupersedeCause cause,
+                                             TakeRequest const& take)
 {
     auto const links = _host.switchableLinks();
     auto const found = std::ranges::find(links, madeAs, &DaemonLink::id);
-    if (cause == SupersedeCause::NewerRequest
-        && (found == links.end() || (*found)->switchWait() != SwitchWait::ForFirstTab))
+    if (supersessionOf(cause, stageOf(found != links.end() ? *found : nullptr)) == Supersession::Kept)
         return Supersession::Kept;
     auto taken = take();
+    // An adopted link gives its observer back as it is abandoned (DaemonLink::abandon()).
     if (found != links.end())
         (*found)->abandon();
     if (taken)
-        cancel(*taken, std::string { SwitchSuperseded });
+        cancel(*taken, std::string { reasonOf(cause) });
     return Supersession::Ended;
 }
 
-void WindowSwitcher::onSupersede(vtworkspace::WorkspaceId window,
+void WindowSwitcher::onSupersede(SwitchSlot slot,
                                  uint64_t serial,
                                  std::function<Supersession(SupersedeCause)> supersede)
 {
-    if (auto const busy = _busy.find(window.value); busy != _busy.end() && busy->second.serial == serial)
+    if (auto const busy = _busy.find(slot); busy != _busy.end() && busy->second.serial == serial)
         busy->second.supersede = std::move(supersede);
+}
+
+void WindowSwitcher::supersede(SwitchSlot slot, SupersedeCause cause)
+{
+    // Copied: ending the switch erases its entry.
+    if (auto const busy = _busy.find(slot); busy != _busy.end() && busy->second.supersede)
+        std::ignore = std::function { busy->second.supersede }(cause);
 }
 
 void WindowSwitcher::windowClosed(vtworkspace::WorkspaceId window)
 {
-    // Copied: ending the switch erases its entry.
-    if (auto const busy = _busy.find(window.value); busy != _busy.end() && busy->second.supersede)
-        std::ignore = std::function { busy->second.supersede }(SupersedeCause::WindowClosed);
+    // Whatever the window waits on goes with it.
+    for (auto const mode: SwitchModes)
+        supersede(slotOf(window, mode), SupersedeCause::WindowClosed);
+}
+
+void WindowSwitcher::cancel(vtworkspace::WorkspaceId window, session::SwitchMode mode)
+{
+    supersede(slotOf(window, mode), SupersedeCause::UserCancelled);
+}
+
+void WindowSwitcher::applyFocus(vtworkspace::WorkspaceId window, session::LandingFocus const& focus)
+{
+    if (focus == session::LandingFocus {})
+        return;
+    if (auto* const controller = _sessions.controllerDisplaying(window))
+        controller->land(focus);
+}
+
+DaemonLink* WindowSwitcher::adoptLink(Request const& request, uint64_t workspace, DaemonLinkConfig& config)
+{
+    auto* const own = linkOf(request.window);
+    auto* const ownController = own != nullptr ? own->liveController() : nullptr;
+    // The area of the window that shows the workspace: the one that asked, for a switch in place; for a
+    // window of its own (Open), the profile's terminal size, which a dialled link's hello states too, else
+    // the asking window's, which the new one corrects once it is realized.
+    auto const askingArea = ownController != nullptr ? ownController->clientArea() : std::nullopt;
+    auto const area =
+        request.mode == session::SwitchMode::Open
+            ? config.controller.attachSettings
+                  .transform([](auto const& settings) -> vtpty::PageSize { return settings.pageSize; })
+                  .or_else([&] { return askingArea; })
+            : askingArea;
+    if (!area)
+        return nullptr;
+    auto const daemon = daemonRefOf(request.address, DaemonLinkId {});
+    auto adoption = _pool.adoptObserver(daemon, request.target.instance);
+    if (adoption.controller == nullptr)
+        return nullptr;
+    auto& observing = adoption.controller;
+    // The run the workspace is an id of: none for a new one, else the one asked for or the observer's.
+    auto const instance = [&]() -> uint64_t {
+        if (workspace == 0)
+            return 0;
+        if (request.target.instance.value != 0)
+            return request.target.instance.value;
+        return observing->daemonInstance().value_or(0);
+    }();
+    auto promotion = PromotionRequest {
+        .workspace = workspace,
+        .daemonInstance = instance,
+        .directoryFromSession = std::nullopt,
+        .area = *area,
+        .cell = ownController != nullptr ? ownController->lastStatedCell() : std::nullopt,
+        .creation = std::nullopt,
+    };
+    // One workspace per token: a re-ask after a dropped connection selects what the first ask made.
+    if (workspace == 0)
+    {
+        auto token = vthost::proto::CreationToken {};
+        _random.fill(token);
+        promotion.creation = token;
+    }
+    // Its later dials are the window's, as those of a link the switch would have dialled: they may ask in the
+    // window that jumped, every time.
+    auto interactive = config.controller.transport;
+    return &_host.adoptSwitchLink(std::move(config),
+                                  std::move(observing),
+                                  promotion,
+                                  std::move(interactive),
+                                  giveBackTo(daemon, adoption.handOff));
+}
+
+GiveBack WindowSwitcher::giveBackTo(window::DaemonRef daemon, HandOffId handOff) const
+{
+    // The switcher is destroyed before the presence and the links after both: a link that leaves its daemon
+    // once the switcher is gone stops its connection instead.
+    return [alive = std::weak_ptr { _alive }, daemon = std::move(daemon), handOff](
+               std::unique_ptr<NativeController> returned) {
+        if (auto const self = alive.lock())
+            (*self)->_pool.giveBack(daemon, handOff, std::move(returned));
+        else if (returned != nullptr)
+            returned->stop();
+    };
 }
 
 WindowSwitcher::Expiry WindowSwitcher::expiryOf(SwitchWait wait, session::SwitchLandBy landBy) noexcept
@@ -602,7 +813,7 @@ WindowSwitcher::Expiry WindowSwitcher::expiryOf(SwitchWait wait, session::Switch
     return wait == SwitchWait::ForFirstTab && !landBy ? Expiry::Disarmed : Expiry::GaveUp;
 }
 
-void WindowSwitcher::armDeadline(vtworkspace::WorkspaceId window,
+void WindowSwitcher::armDeadline(SwitchSlot slot,
                                  uint64_t serial,
                                  session::SwitchLandBy landBy,
                                  std::function<Expiry()> expire)
@@ -614,18 +825,18 @@ void WindowSwitcher::armDeadline(vtworkspace::WorkspaceId window,
                : _deadline.timeout;
     // Shared, so that the timer's own copy of what it fires copies a pointer, not what the switch undoes.
     auto const undo = std::make_shared<std::function<Expiry()>>(std::move(expire));
-    _deadline.timer(timeout, [alive = std::weak_ptr { _alive }, window, serial, undo] {
+    _deadline.timer(timeout, [alive = std::weak_ptr { _alive }, slot, serial, undo] {
         auto const self = alive.lock();
         if (!self)
             return;
         // Ended meanwhile, and maybe followed by another request of the same window.
-        auto const busy = (*self)->_busy.find(window.value);
+        auto const busy = (*self)->_busy.find(slot);
         if (busy == (*self)->_busy.end() || busy->second.serial != serial)
             return;
         // A switch waiting for a tab said so as its target's layout arrived
         // (DaemonLink::noteSwitchTargetSettled()).
         if ((*undo)() == Expiry::GaveUp)
-            attachLog()("switch: window {} gave up waiting for its target to show.", window.value);
+            attachLog()("switch: window {} gave up waiting for its target to show.", slot.window);
     });
 }
 
@@ -649,19 +860,46 @@ void WindowSwitcher::handOver(Request const& request, DaemonLinkId to)
         fail(request, adoptable.error());
         return;
     }
-    // Told first, while the window is still the old link's: a switch a program asked for is answered on the
-    // old link's connection, which the rebinding below ends.
-    succeed(request, vthost::proto::SwitchOutcome::Switched);
+    // A switch a program asked for is told first, while the window is still the old link's: it is answered on
+    // the old link's connection, which the rebinding below ends (runGuardedSwitch() says so on its request).
+    // The user's is told once it landed.
+    auto const told = request.waiter.told;
+    if (told == session::SwitchTold::BeforeLeaving)
+        succeed(request, vthost::proto::SwitchOutcome::Switched);
+    // The daemon left keeps the connection as the presence's observer while it stays listed and no other
+    // window is on it; else the connection ends with the link. Said before the rebinding below ends it.
+    if (auto const left = own->daemonRef())
+    {
+        auto const kind = _pool.wantsObserver(*left, own->id()) == ObserverWanted::Yes
+                              ? LeaveKind::KeepAsObserver
+                              : LeaveKind::End;
+        auto const handOff =
+            kind == LeaveKind::KeepAsObserver ? _pool.expectGiveBack(*left, own->id()) : HandOffId {};
+        own->leaveDaemon(kind, giveBackTo(*left, handOff));
+    }
     // Detach last: the old workspace stays in its daemon for whichever window selects it next, the window is
-    // the new link's, and the old link ends with it.
+    // the new link's (rebound before its old panes are detached), and the old link ends with it.
     own->switchedAway(request.window);
-    if (auto adopted = target->adoptWindow(request.window); !adopted)
-        errorLog()("switch: window {} stays as it was: {}", request.window.value, adopted.error());
+    auto adopted = target->adoptWindow(request.window);
+    switch (told)
+    {
+        case session::SwitchTold::OnceLanded:
+            // The window is the other daemon's now: what its completion runs on Switched runs there.
+            if (adopted)
+                succeed(request, vthost::proto::SwitchOutcome::Switched);
+            else
+                fail(request, adopted.error());
+            break;
+        case session::SwitchTold::BeforeLeaving:
+            if (!adopted)
+                errorLog()("switch: window {} stays as it was: {}", request.window.value, adopted.error());
+            break;
+    }
 }
 
 void WindowSwitcher::succeed(Request const& request, vthost::proto::SwitchOutcome outcome)
 {
-    _busy.erase(request.window.value);
+    _busy.erase(slotOf(request.window, request.mode));
     request.done(outcome);
 }
 
@@ -681,7 +919,7 @@ void WindowSwitcher::failCreate(vtworkspace::WorkspaceId window,
 
 void WindowSwitcher::cancel(Request const& request, std::string const& reason)
 {
-    _busy.erase(request.window.value);
+    _busy.erase(slotOf(request.window, request.mode));
     // Not a fault, and nobody to tell in the window: a newer switch or the window's close ended it.
     attachLog()("switch: window {}: {}", request.window.value, reason);
     request.done(std::unexpected(reason));
@@ -689,7 +927,7 @@ void WindowSwitcher::cancel(Request const& request, std::string const& reason)
 
 void WindowSwitcher::fail(Request const& request, std::string const& reason)
 {
-    _busy.erase(request.window.value);
+    _busy.erase(slotOf(request.window, request.mode));
     auto const text =
         std::format(SwitchFailedText,
                     session::daemonPhrase(request.address.kind, request.address.name, "this daemon"),
@@ -702,7 +940,7 @@ void WindowSwitcher::fail(Request const& request, std::string const& reason)
 
 void WindowSwitcher::decline(Request const& request, std::string const& reason)
 {
-    _busy.erase(request.window.value);
+    _busy.erase(slotOf(request.window, request.mode));
     auto const text =
         std::format(SwitchDeclinedText,
                     session::daemonPhrase(request.address.kind, request.address.name, "this daemon"),

@@ -65,6 +65,16 @@ KitDialog {
         root._answer(root.prompt.rejectOutcome, root.prompt.rejectAnswer);
     }
 
+    /// Gives the prompt shown the keyboard: its secret field, else the dialog; nothing when none is shown.
+    function takeFocus() {
+        if (!root.visible)
+            return;
+        if (root.prompt.isSecret === true)
+            secretField.forceActiveFocus();
+        else
+            root.forceActiveFocus();
+    }
+
     /// Dismisses the prompt shown, as Cancel does; nothing when none is.
     function cancel() {
         root._reject();

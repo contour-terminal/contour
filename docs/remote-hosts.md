@@ -138,7 +138,16 @@ with `SSH_ASKPASS` set to Contour itself, so that anything ssh needs to ask you 
 window you attach from.
 
 On the remote side, `contour daemon --stdio` reaches your daemon there — starting it if none runs, the
-same way a local `contour client` does — and relays the session between it and ssh.
+same way a local `contour client` does — and relays the session between it and ssh. The workspace
+sidebar, which watches a listed host in the background, runs `contour daemon --stdio --no-start` in
+batch mode instead (a host's `remote_command:` followed by `--no-start`): it never asks you anything and
+never starts a daemon, and a host that needs a password or whose daemon is not running says so in its
+row until you connect to it. The relay says in its first line that it honoured `--no-start`; a host whose
+relay does not -- a Contour too old for the flag, or a `remote_command:` that does not pass it on -- is listed
+as too old rather than watched. Connect asks for what the login needs, in the window you clicked in, but
+starts no daemon either; and once connected, a reconnect after the connection dropped asks nothing again. A
+`tls://` host is watched in the background only once its certificate is known (pinned, or checked against its
+`tls_ca`); until then its row says Needs you and offers Connect, which asks to trust it.
 
 ### Requirements
 
@@ -188,6 +197,7 @@ Contour reads what ssh reports and says what to do. The messages, and the fix fo
 | `ssh could not reach ssh://me@homepc: …` | The name does not resolve, nothing answers on the port, or there is no route. ssh's own words follow. | Check the name, the port and the network (VPN, Tailscale). Contour retries this on its own while a window waits. |
 | `Contour was not found on ssh://me@homepc by a non-interactive ssh login …` | `contour` is not installed there, or not on the non-interactive `PATH`. | Install it, or set `remote_command:` to its full path (see above). |
 | `Contour on ssh://me@homepc is too old for ssh attach …` | The remote Contour has no `contour daemon --stdio`. | Upgrade Contour on the remote machine. |
+| `Contour on ssh://me@homepc is too old to be watched in the background …` | The remote Contour has `contour daemon --stdio` but no `--no-start`, which the sidebar needs to watch the host without starting its daemon, or the host's `remote_command:` does not pass `--no-start` on to it. The row says Too old and is not tried again in the background. | Upgrade Contour on the remote machine, or have the `remote_command:` pass its trailing flags on; then click the row's Connect. |
 | `ssh://me@homepc: daemon did not start within 5 seconds.` (or another reason) | The remote relay ran, but could not reach or start the daemon there. | Run `ssh me@homepc contour daemon --stdio` in a terminal and read what it says; check the daemon's log on that machine. |
 | `ssh://me@homepc printed more than 64 KiB before Contour answered …` | A login script on the remote machine prints output on non-interactive logins. | Make `.bashrc` / profile scripts quiet when not interactive (e.g. wrap output in `[[ $- == *i* ]] && …`). A short banner is skipped; only a long one fails. |
 | `ssh to ssh://me@homepc ended before Contour answered (exit code N): …` | ssh ended for a reason Contour does not recognize. | Run `ssh me@homepc contour daemon --stdio` in a terminal to see the whole output. Contour retries this one too. |

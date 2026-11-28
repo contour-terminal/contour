@@ -108,6 +108,9 @@ class TestApp
     ///                it refuse.
     /// @param gitProbe What looks up the git state of the in-process workspaces; null for none, as the
     ///                fixture's files are not this machine's disk.
+    /// @param presence What the test replaces of the presence of the listed daemons: which it lists, how it
+    ///                dials and makes their observers. Production's by default, which lists no daemon of a
+    ///                test.
     explicit TestApp(
         std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
         std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
@@ -120,7 +123,8 @@ class TestApp
         contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
         std::unique_ptr<contour::platform::IShellRcEditor> shellRcEditor = nullptr,
         contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other,
-        std::unique_ptr<vthost::IGitStatusProbe> gitProbe = nullptr):
+        std::unique_ptr<vthost::IGitStatusProbe> gitProbe = nullptr,
+        contour::remote::PresenceOverrides presence = {}):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(
@@ -151,7 +155,8 @@ class TestApp
             scriptedStartupLister(),
             std::move(gitProbe),
             // test_main made the QApplication before any test app.
-            contour::platform::ApplicationReadiness::State::Ready)
+            contour::platform::ApplicationReadiness::State::Ready,
+            std::move(presence))
     {
         parseTerminalVerb();
     }

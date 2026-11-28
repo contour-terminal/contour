@@ -3609,6 +3609,11 @@ TEST_CASE("a host page swaps its SSH and TLS groups with the address, and says w
     CHECK_FALSE(groupShown(fx, window::SettingsGroup::HostTls));
     CHECK(groupShown(fx, window::SettingsGroup::HostSessions));
     CHECK(required(fx.controlOf("transport")).property("text").toString() == "SSH");
+    // Whether the sidebar lists the host is a switch, off until the host says otherwise.
+    CHECK(required(fx.controlOf("show_in_sidebar")).property("checked").toBool() == false);
+    REQUIRE(fx.controller->setHostField("show_in_sidebar", true).has_value());
+    fx.settle();
+    CHECK(required(fx.controlOf("show_in_sidebar")).property("checked").toBool());
     CHECK(required(fx.fieldOf("remote_command")).property("placeholderText").toString()
           == "contour daemon --stdio");
     CHECK(required(fx.byName("attachHostButton")).property("enabled").toBool());

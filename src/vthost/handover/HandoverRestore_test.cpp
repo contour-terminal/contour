@@ -962,3 +962,74 @@ TEST_CASE("a pseudoconsole that cannot be adopted is closed, and its program's h
     CloseHandle(unnamed.native());
 }
 #endif
+
+#ifndef _WIN32
+namespace
+{
+/// @return What @p live's ledger states of @p session; a quiet entry when it holds none.
+[[nodiscard]] PaneAttention attentionOf(LiveHost const& live, vtworkspace::SessionId session)
+{
+    for (auto const& [id, attention]: live.host.paneAttention())
+        if (id == session.value)
+            return attention;
+    return {};
+}
+} // namespace
+
+TEST_CASE("a restored host continues the ledger's serials", "[vthost][handover][threading][daemon-attention]")
+{
+    auto old = oneSession();
+    auto const id = old->host.sessionIds().front();
+    old->host.hostedSession(id)->terminal().writeToScreen("\a");
+    REQUIRE(old->eventually([&] { return attentionOf(*old, id).bell == proto::PaneBell::Rang; }));
+    // What a window saw crosses too.
+    REQUIRE(old->host.markPaneSeen(id.value, SeenSerials { .statusGeneration = 7 })
+            == AttentionChange::Changed);
+    auto const before = old->host.paneAttention();
+    auto const last = old->host.attentionLastSerial();
+    REQUIRE(last > 0);
+
+    auto image = handOver(std::move(old));
+    CHECK(image.attention.lastSerial == last);
+    auto const live = takeOver(std::move(image));
+    CHECK(live->host.attentionLastSerial() == last);
+    CHECK(live->host.paneAttention() == before);
+
+    // The next raise takes a serial no window holds yet.
+    live->host.hostedSession(id)->terminal().writeToScreen("\a");
+    REQUIRE(live->eventually([&] { return attentionOf(*live, id).bellSerial > last; }));
+    CHECK(attentionOf(*live, id).seenStatusGeneration == 7);
+}
+
+TEST_CASE("a restored host selects what a promotion's token made before the upgrade",
+          "[vthost][handover][threading][observer]")
+{
+    auto old = oneSession();
+    auto* const workspace = old->host.createWorkspace();
+    REQUIRE(workspace != nullptr);
+    auto const made = workspace->id();
+    auto token = proto::CreationToken {};
+    token.fill(std::byte { 0x5A });
+    old->host.rememberWorkspaceMadeFor(
+        { .token = token, .workspace = made, .maker = ConnectionId { .endpoint = "native", .index = 3 } });
+
+    // Through the codec, as the exec carries it.
+    auto const encoded = encodeHandover(handOver(std::move(old)));
+    auto image = decodeHandover(encoded);
+    REQUIRE(image.has_value());
+    REQUIRE(image->madeForTokens.size() == 1);
+    CHECK(image->madeForTokens.front().workspace == made.value);
+    auto const live = takeOver(*std::move(image));
+
+    // A re-ask after the upgrade selects the workspace the first ask made, by its token; the connection that
+    // asked ended at the exec, and names none of the new image's.
+    auto const remembered = live->host.workspaceMadeFor(token);
+    REQUIRE(remembered.has_value());
+    CHECK(remembered->workspace == made);
+    CHECK(remembered->maker == ConnectionId {});
+    // Another token made nothing.
+    auto other = token;
+    other.back() = std::byte { 0 };
+    CHECK_FALSE(live->host.workspaceMadeFor(other).has_value());
+}
+#endif

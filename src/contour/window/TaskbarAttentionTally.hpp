@@ -88,7 +88,8 @@ struct WindowWaiting
 }
 
 /// Counts the tabs of @p directory that wait for the user, as tallyWaitingTabs() counts a window's own: a tab
-/// waits when its panes' program status earns it the Blocked badge, which shows whatever the user has seen.
+/// waits when its panes' program status earns it the Blocked badge, which shows whatever the user has seen,
+/// or when a pane whose flags its daemon keeps (FlagSource::Daemon) rang a bell no window saw yet.
 /// @param directory Every workspace a daemon window can list.
 /// @param except The workspace not to count -- the one the window displays, whose tabs it counts itself;
 ///        none to count every one.
@@ -106,8 +107,13 @@ struct WindowWaiting
             auto records = std::vector<vtbackend::ProgramStatusRecord> {};
             for (auto const& pane: tab.panes)
                 records.insert(records.end(), pane.status.begin(), pane.status.end());
+            // A daemon's bell is unseen for every window until one saw it, as the tab strip shows it.
+            auto const rang = std::ranges::any_of(tab.panes, [](DirectoryPane const& pane) {
+                return pane.flagSource == FlagSource::Daemon && pane.bell == vthost::proto::PaneBell::Rang;
+            });
             // Program status cannot produce a Bell, so NeedsYou here is exactly Blocked, which ignores Seen.
-            if (urgencyOf(badgeFor(records, AllRecordsSeen).kind, StatusSeen::Seen) == Urgency::NeedsYou)
+            if (rang
+                || urgencyOf(badgeFor(records, AllRecordsSeen).kind, StatusSeen::Seen) == Urgency::NeedsYou)
                 ++waiting;
         }
     }

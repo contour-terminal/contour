@@ -139,6 +139,16 @@ enum class Capability : uint8_t
     /// in WorkspaceMeta's colour field, in full and as a delta on each change. Without it a client does not
     /// send the PDU, and the daemon states no colour to it, so an older client's metadata is what it was.
     WorkspaceColor = 33,
+    /// The daemon owns the panes' attention: it states each pane's flags and their serials
+    /// (PaneAttentionState), a client acknowledges what it showed (MarkSeen) and names the panes it shows in
+    /// ReportFocus. Without it a client keeps attention to itself, as before, and the daemon sends no such
+    /// PDU.
+    DaemonAttention = 34,
+    /// The peer serves or speaks the observer role: a hello of ConnectionRole::Observe lists the daemon's
+    /// workspaces and is told their layout, metadata, pane summaries and attention without showing any of
+    /// them, and a viewer may become an observer (ObserveOnly). A daemon without it reads the role as
+    /// Control.
+    Observe = 35,
 };
 
 /// One row of the table naming a Capability.
@@ -181,6 +191,8 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::LaunchFirstTab, .name = "launch-first-tab" },
     CapabilityRow { .capability = Capability::Names, .name = "names" },
     CapabilityRow { .capability = Capability::WorkspaceColor, .name = "workspace-color" },
+    CapabilityRow { .capability = Capability::DaemonAttention, .name = "daemon-attention" },
+    CapabilityRow { .capability = Capability::Observe, .name = "observe" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.
@@ -206,6 +218,17 @@ struct CapabilitySet
 /// @param b Second set.
 /// @return The common idents, sorted and de-duplicated.
 [[nodiscard]] CapabilitySet intersect(CapabilitySet const& a, CapabilitySet const& b);
+
+/// What both ends must share for a connection to observe (ConnectionRole::Observe): the role itself, the
+/// daemon's selection it follows, and the workspace metadata its sidebar lists. An Observe hello sharing less
+/// is refused, and a viewer sharing less is neither demoted by the daemon nor asks to be.
+inline constexpr auto ObserverCapabilities =
+    std::array { Capability::Observe, Capability::DaemonFollow, Capability::WorkspaceMeta };
+
+/// Tells whether a connection sharing @p shared can observe.
+/// @param shared What both ends offered.
+/// @return true if @p shared holds every ObserverCapabilities entry.
+[[nodiscard]] bool sharesObserving(CapabilitySet const& shared);
 
 /// The outcome of a successful handshake.
 struct Negotiated

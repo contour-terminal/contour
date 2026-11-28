@@ -19,6 +19,23 @@
 namespace contour::cli
 {
 
+std::string remoteCommandOf(config::HostEntry const& host, RemoteStart remoteStart)
+{
+    switch (remoteStart)
+    {
+        case RemoteStart::IfAbsent:
+            return host.remoteCommand.empty() ? std::string { vthost::DefaultRemoteCommand }
+                                              : host.remoteCommand;
+        case RemoteStart::Never:
+            if (host.remoteCommand.empty())
+                return std::string { vthost::NoStartRemoteCommand };
+            // The user's command ends in the relay's own flags: it is told not to start a daemon as the
+            // default one is.
+            return std::format("{} {}", host.remoteCommand, vthost::NoStartFlag);
+    }
+    return host.remoteCommand.empty() ? std::string { vthost::DefaultRemoteCommand } : host.remoteCommand;
+}
+
 std::expected<std::string, std::string> readPinnedCa(core::platform::FileSystem const& fileSystem,
                                                      std::filesystem::path const& path,
                                                      std::string_view origin)
@@ -35,12 +52,14 @@ namespace
     [[nodiscard]] HostTransport sshHostTransport(std::string label,
                                                  config::HostEntry const& host,
                                                  std::shared_ptr<vthost::IStdioSpawner> spawner,
-                                                 SshPrompting prompting)
+                                                 SshPrompting prompting,
+                                                 RemoteStart remoteStart)
     {
-        auto target =
-            vthost::SshTarget { .user = host.url.user, .host = host.url.host, .port = host.url.port };
-        if (!host.remoteCommand.empty())
-            target.remoteCommand = host.remoteCommand;
+        auto target = vthost::SshTarget { .user = host.url.user,
+                                          .host = host.url.host,
+                                          .port = host.url.port,
+                                          .remoteCommand = remoteCommandOf(host, remoteStart),
+                                          .remoteStart = remoteStart };
         auto const prompts = prompting.broker ? SshPrompts::Askpass : SshPrompts::Batch;
         return HostTransport {
             .factory = std::make_shared<vthost::SshTransportFactory>(std::move(target),
@@ -125,12 +144,14 @@ std::expected<HostTransport, std::string> makeHostTransport(std::string label,
                                                             core::platform::FileSystem const& fileSystem,
                                                             std::shared_ptr<vthost::IStdioSpawner> spawner,
                                                             SshPrompting prompting,
-                                                            TlsTrust tls)
+                                                            TlsTrust tls,
+                                                            RemoteStart remoteStart)
 {
     switch (host.url.scheme)
     {
         case config::HostScheme::Ssh:
-            return sshHostTransport(std::move(label), host, std::move(spawner), std::move(prompting));
+            return sshHostTransport(
+                std::move(label), host, std::move(spawner), std::move(prompting), remoteStart);
         case config::HostScheme::Tls:
             return tlsHostTransport(
                 std::move(label), host, fileSystem, spawner, prompting.broker, std::move(tls));

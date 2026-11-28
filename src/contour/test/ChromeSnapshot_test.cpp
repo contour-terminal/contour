@@ -624,6 +624,7 @@ void checkSwitcherScript(contour::test::snapshot::ChromeSnapshotScene const& sce
             break;
         case SnapshotScript::SwitcherRowMenu:
         case SnapshotScript::SwitcherHover: CHECK(has("docs")); break;
+        case SnapshotScript::SwitcherDaemonMenu: CHECK(has("home")); break;
         default: FAIL("not a switcher script"); break;
     }
 }
@@ -774,7 +775,77 @@ void checkSidebarColourScript(contour::test::snapshot::ChromeSnapshotScene const
             break;
     }
 }
+/// Checks a script of the sidebar's daemon sections: the window's daemon heads the tree, another daemon is
+/// listed unless the script hid it, and no chip names a daemon in the sidebar's head or the band.
+void checkDaemonSectionsScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                               contour::test::snapshot::SnapshotVariant const& variant,
+                               QQuickItem const& content)
+{
+    using namespace contour::test::snapshot;
+    auto const& row = scriptRow(variant.script);
+    static_cast<void>(checkSidebarScript(scene, variant));
+    // The toast's scene hid starfive as Hide from Sidebar does: the Hidden row names it too.
+    auto const hiddenStarfive = variant.script == SnapshotScript::DaemonHiddenToast;
+    if (row.sections == SnapshotSections::Hidden)
+        CHECK(contour::test::itemsNamed(content, QStringLiteral("sidebarRow")).back()->property("title")
+              == (hiddenStarfive ? QStringLiteral("3 hidden daemons") : QStringLiteral("2 hidden daemons")));
+    if (variant.script == SnapshotScript::DaemonHiddenToast)
+    {
+        auto const* toast = scene.root().findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        auto const* undo = toast->findChild<QQuickItem*>(QStringLiteral("toastAction"));
+        REQUIRE(undo != nullptr);
+        CHECK(undo->isVisible());
+    }
+    // The tree names the window's daemon in its heading row; no chip names it in the sidebar's
+    // head or the band, and the switcher is a control of the title row.
+    auto titles = QStringList {};
+    for (auto const* listed: contour::test::itemsNamed(content, QStringLiteral("sidebarRow")))
+        if (listed->isVisible())
+            titles << listed->property("title").toString();
+    CHECK(titles.contains(QStringLiteral("work")));
+    auto const other = row.sections == SnapshotSections::Narrow ? QStringLiteral("build-farm-eu-west-2")
+                                                                : QStringLiteral("starfive");
+    CHECK(titles.contains(other) == (row.sections != SnapshotSections::NeedsMeEmpty && !hiddenStarfive));
+    CHECK(contour::test::itemsNamed(content, QStringLiteral("sidebarDaemonChip")).empty());
+    CHECK(contour::test::itemsNamed(content, QStringLiteral("headerSidebarDaemonChip")).empty());
+    auto const switchers =
+        contour::test::itemsNamed(content, QStringLiteral("sidebarSwitcherButton")).size()
+        + contour::test::itemsNamed(content, QStringLiteral("headerSidebarSwitcherButton")).size();
+    CHECK(switchers >= 1U);
+    if (row.sections == SnapshotSections::NeedsMeEmpty)
+    {
+        auto const empty = contour::test::itemsNamed(content, QStringLiteral("sidebarEmptyState"));
+        REQUIRE(empty.size() == 1);
+        CHECK(empty.front()->isVisible());
+    }
+}
+
 } // namespace
+
+TEST_CASE("The other daemon's rows leave the window's daemon heading the sidebar at every host's type size "
+          "(offscreen)",
+          "[contour][gui][qml][snapshot][sidebar]")
+{
+    using namespace contour::test::snapshot;
+    // The Terminal row's rows are cells of the edition's font, whose size is the host's: macOS sets
+    // Native2026 a point larger (Config.cpp's Native2026FontSize). The picture must not depend on which.
+    constexpr auto HostPointSizes = std::array { qreal { 12 }, qreal { 13 } };
+    for (auto const& variant: snapshotMatrix(std::array { contour::config::ChromeStyle::Terminal }))
+    {
+        if (scriptRow(variant.script).sections != SnapshotSections::OtherDaemonRows
+            || variant.edition != contour::config::DefaultsEdition::Native2026
+            || variant.appearance != vtbackend::ColorPreference::Dark)
+            continue;
+        for (auto const pointSize: HostPointSizes)
+        {
+            INFO(snapshotFileName(variant) << " at " << pointSize << " pt");
+            auto scene = ChromeSnapshotScene { variant, pointSize };
+            scene.show();
+            checkDaemonSectionsScript(scene, variant, *scene.window().contentItem());
+        }
+    }
+}
 
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
           "[contour][gui][qml][snapshot]")
@@ -1287,6 +1358,13 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SidebarHiddenChip:
                 static_cast<void>(checkSidebarScript(scene, variant));
                 break;
+            case SnapshotScript::LocationChipPending: {
+                static_cast<void>(checkSidebarScript(scene, variant));
+                // The sidebar hidden, the chip in the band says where the jump goes.
+                auto const chips = visibleItemsNamed(content, QStringLiteral("workspaceChip"));
+                REQUIRE(chips == 1);
+                break;
+            }
             case SnapshotScript::SidebarChipDropdown: {
                 static_cast<void>(checkSidebarScript(scene, variant));
                 // The dropdown is the full switcher, hanging below the chip.
@@ -1306,6 +1384,7 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::SwitcherNoMatch:
             case SnapshotScript::SwitcherDiscovering:
             case SnapshotScript::SwitcherRowMenu:
+            case SnapshotScript::SwitcherDaemonMenu:
             case SnapshotScript::SwitcherHover: checkSwitcherScript(scene, variant.script); break;
             case SnapshotScript::DaemonLocal:
             case SnapshotScript::DaemonLocalSingleTab: {
@@ -1362,6 +1441,27 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 // It hangs from build's row, not from a tab strip the sidebar placement does not draw.
                 CHECK(flyout->property("parent").value<QQuickItem*>()->property("title").toString()
                       == QStringLiteral("build"));
+                break;
+            }
+            case SnapshotScript::SidebarTwoDaemons:
+            case SnapshotScript::SidebarDaemonNeedsInput:
+            case SnapshotScript::SidebarDaemonNotRunning:
+            case SnapshotScript::SidebarDaemonConnecting:
+            case SnapshotScript::SidebarDaemonReconnecting:
+            case SnapshotScript::SidebarDaemonTooOld:
+            case SnapshotScript::SidebarPendingRow:
+            case SnapshotScript::SidebarNeedsMeEmpty:
+            case SnapshotScript::SidebarDaemonNarrow:
+            case SnapshotScript::SidebarDaemonMenu:
+            case SnapshotScript::SidebarOtherDaemonWorkspaceMenu:
+            case SnapshotScript::SidebarOtherDaemonTabMenu:
+            case SnapshotScript::SidebarOtherDaemonPaneMenu:
+            case SnapshotScript::SidebarHiddenMenu:
+            case SnapshotScript::DaemonHiddenToast:
+            case SnapshotScript::SidebarDaemonMenuLive:
+            case SnapshotScript::SidebarHostNotRunning:
+            case SnapshotScript::SidebarHostNotRunningMenu: {
+                checkDaemonSectionsScript(scene, variant, content);
                 break;
             }
             case SnapshotScript::QuickTerminal: {
@@ -1448,7 +1548,8 @@ TEST_CASE("The sidebar scripts on the rows this process draws (offscreen)",
         scene.show();
         CHECK(scene.diagnostics().isEmpty());
         auto const divider = checkSidebarScript(scene, variant);
-        if (!divider)
+        // The narrow script shows the sidebar at its narrowest on purpose.
+        if (!divider || scriptRow(variant.script).sections == SnapshotSections::Narrow)
             continue;
         // The divider column is where the sidebar ends: the same on every script of a row and edition, and on
         // the Terminal row a whole number of cells from the window's edge.

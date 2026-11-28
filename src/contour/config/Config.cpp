@@ -2446,7 +2446,8 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
     };
 
     if (!hostNode.IsMap())
-        return skip("expected a map of url, token_file, tls_ca, identity_file, remote_command and profile");
+        return skip("expected a map of url, token_file, tls_ca, identity_file, remote_command, profile and "
+                    "show_in_sidebar");
     auto const urlText = scalar("url");
     if (!urlText)
         return skip("it has no url");
@@ -2461,7 +2462,17 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
         .identityFile = path("identity_file"),
         .remoteCommand = scalar("remote_command").value_or(std::string {}),
         .profile = scalar("profile").value_or(std::string {}),
+        .showInSidebar = false,
     };
+    // A value that is no boolean is reported, and the host still loads, unlisted.
+    if (auto const show = hostNode["show_in_sidebar"]; show)
+    {
+        auto const listed = show.IsScalar() ? parseShowInSidebar(show.Scalar()) : std::nullopt;
+        if (listed)
+            host.showInSidebar = *listed;
+        else
+            errorLog()("Host '{}': show_in_sidebar must be true or false; the host is not listed.", name);
+    }
     return host;
 }
 
@@ -5551,9 +5562,11 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::SwitchToWorkspace>(action)
             || holds_alternative<actions::OpenWorkspace>(action)
-            || holds_alternative<actions::MoveTabToWorkspace>(action))
+            || holds_alternative<actions::MoveTabToWorkspace>(action)
+            || holds_alternative<actions::ShowHiddenDaemon>(action))
         {
-            // Like SwitchToTab: "which workspace?" has no default, and positions count from 1.
+            // Like SwitchToTab: "which workspace?" -- or which hidden daemon -- has no default, and positions
+            // count from 1.
             if (auto index = node["index"]; index && index.IsScalar())
                 if (auto const value = index.as<uint32_t>(); value >= 1)
                 {
@@ -5561,6 +5574,8 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                         return actions::SwitchToWorkspace { value };
                     if (holds_alternative<actions::MoveTabToWorkspace>(action))
                         return actions::MoveTabToWorkspace { value };
+                    if (holds_alternative<actions::ShowHiddenDaemon>(action))
+                        return actions::ShowHiddenDaemon { value };
                     return actions::OpenWorkspace { value };
                 }
             return std::nullopt;

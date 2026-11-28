@@ -76,6 +76,10 @@ struct SettingsControllerServices
     std::function<std::optional<std::filesystem::path>(std::string const& title,
                                                        std::filesystem::path const& start)>
         chooseFile {};
+    /// Told the name of a saved host whose page changed its "Show in sidebar" switch, once that is staged, so
+    /// that a sidebar choice made for it at runtime gives way to what its page now says. Editing any other
+    /// field keeps that choice. Null tells nobody.
+    std::function<void(std::string const& host)> hostListingEdited {};
 };
 
 /// The editable bridge between the GUI settings page and the configuration.
@@ -790,8 +794,15 @@ class SettingsController: public QObject
     [[nodiscard]] std::expected<void, config::SettingsError> hostDraftWritable() const;
     /// The transport the host draft's address names, or the one it last named while it names none.
     [[nodiscard]] std::optional<config::HostScheme> hostDraftScheme() const;
+    /// Whether an edit staged changed the host's "Show in sidebar" switch.
+    enum class ListingEdit : uint8_t
+    {
+        Unchanged = 0,
+        Changed, ///< It did: SettingsServices::hostListingEdited is told once the draft is staged.
+    };
     /// Stages the host draft's side file, unless the draft has a problem the loader would refuse.
-    [[nodiscard]] std::expected<void, config::SettingsError> stageHostDraft();
+    /// @param listing Whether the edit staged changed the "Show in sidebar" switch.
+    [[nodiscard]] std::expected<void, config::SettingsError> stageHostDraft(ListingEdit listing);
     /// Opens @p draft as the editable host draft named @p name, staged as a new side file when it is usable.
     [[nodiscard]] std::expected<QString, config::SettingsError> openNewHost(std::string const& name,
                                                                             config::HostDraft draft);

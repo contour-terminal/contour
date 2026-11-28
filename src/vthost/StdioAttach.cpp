@@ -32,7 +32,10 @@ namespace
     }
 } // namespace
 
-int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& connect, RelayConfig relay)
+int runStdioAttach(std::shared_ptr<IByteStream> client,
+                   DaemonConnector const& connect,
+                   RelayConfig relay,
+                   RelayNoStart noStart)
 {
     auto daemon = connect();
     if (!daemon)
@@ -41,7 +44,7 @@ int runStdioAttach(std::shared_ptr<IByteStream> client, DaemonConnector const& c
         client->closeWrite();
         return EXIT_FAILURE;
     }
-    if (!writeLine(*client, StdioPreambleReady))
+    if (!writeLine(*client, stdioPreambleReady(noStart)))
         return EXIT_FAILURE;
     switch (runStdioRelay(std::move(client), *std::move(daemon), relay))
     {
@@ -62,8 +65,12 @@ DaemonConnector makeLocalDaemonConnector(std::filesystem::path socketPath,
     return [socketPath = std::move(socketPath), &spawner, starter = std::shared_ptr { std::move(starter) }]()
                -> std::expected<std::shared_ptr<IByteStream>, std::string> {
         if (spawner.probe(socketPath) == DaemonPresence::Absent)
+        {
+            if (!starter)
+                return std::unexpected { std::string { StdioDaemonAbsentMessage } };
             if (auto const started = starter->start(); !started)
                 return std::unexpected { started.error() };
+        }
         return connectUnixStream(nativeSocketPath(socketPath));
     };
 }

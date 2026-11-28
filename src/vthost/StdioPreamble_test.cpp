@@ -14,6 +14,7 @@ using vthost::PreambleReady;
 using vthost::PreambleRefused;
 using vthost::PreambleScan;
 using vthost::PreambleTrailing;
+using vthost::RelayNoStart;
 using vthost::scanPreamble;
 using vthost::StdioPreambleScanLimit;
 
@@ -34,7 +35,8 @@ struct ScanRow
     if (actual.index() != expected.index())
         return false;
     if (auto const* ready = std::get_if<PreambleReady>(&actual))
-        return ready->skipped == std::get<PreambleReady>(expected).skipped;
+        return ready->skipped == std::get<PreambleReady>(expected).skipped
+               && ready->noStart == std::get<PreambleReady>(expected).noStart;
     if (auto const* refused = std::get_if<PreambleRefused>(&actual))
         return refused->message == std::get<PreambleRefused>(expected).message
                && refused->skipped == std::get<PreambleRefused>(expected).skipped;
@@ -56,6 +58,19 @@ struct ScanRow
           PreambleRefused { .message = "daemon did not start within 5 seconds.", .skipped = 0 } },
         { "half an error line", "contour-stdio 1 error: daemon did", PreambleIncomplete {} },
         { "a byte after the ready line", "contour-stdio 1 ready\nX", PreambleTrailing { .extra = 1 } },
+        { "a relay that honoured --no-start",
+          "contour-stdio 1 ready no-start\n",
+          PreambleReady { .skipped = 0, .noStart = RelayNoStart::Honoured } },
+        { "half a ready line stating --no-start", "contour-stdio 1 ready no-st", PreambleIncomplete {} },
+        { "a word this client does not know, beside no-start",
+          "contour-stdio 1 ready later no-start\n",
+          PreambleReady { .skipped = 0, .noStart = RelayNoStart::Honoured } },
+        { "a word this client does not know alone",
+          "contour-stdio 1 ready later\n",
+          PreambleReady { .skipped = 0, .noStart = RelayNoStart::Unstated } },
+        { "a byte after the no-start ready line",
+          "contour-stdio 1 ready no-start\nX",
+          PreambleTrailing { .extra = 1 } },
         { "too much junk", junk, PreambleOverflow {} },
         { "too much junk, then a partial preamble", junk + "contour-st", PreambleOverflow {} },
         { "as much junk as allowed, then a partial preamble",

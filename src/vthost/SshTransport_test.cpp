@@ -4,6 +4,7 @@
 
 #include <core/async/Task.hpp>
 #include <core/async/WhenAll.hpp>
+#include <core/cli/CLI.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoAwaitable.hpp>
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <format>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -318,8 +320,7 @@ struct SshFixture
 /// @return Every SshFailure.
 [[nodiscard]] auto allSshFailures()
 {
-    return std::views::iota(std::uint8_t { 0 },
-                            static_cast<std::uint8_t>(std::to_underlying(SshFailure::Cancelled) + 1))
+    return std::views::iota(std::uint8_t { 0 }, static_cast<std::uint8_t>(vthost::SshFailureCount))
            | std::views::transform([](std::uint8_t value) { return static_cast<SshFailure>(value); });
 }
 
@@ -424,6 +425,11 @@ TEST_CASE("classifySshFailure", "[vthost][ssh]")
         { .stderrTail = "Unexpected argument \"--stdio\".",
           .exitCode = 1,
           .expected = SshFailure::RemoteContourTooOld },
+        // A Contour that has `--stdio` but predates `--no-start`: told apart from an ssh that ended for no
+        // reason, which is retried.
+        { .stderrTail = "Unexpected argument \"--no-start\".",
+          .exitCode = 1,
+          .expected = SshFailure::RemoteContourCannotSkipStart },
         { .stderrTail = "", .exitCode = 127, .expected = SshFailure::RemoteContourMissing },
         { .stderrTail = "", .exitCode = 255, .expected = SshFailure::NoPreamble },
         { .stderrTail = "", .exitCode = std::nullopt, .expected = SshFailure::NoPreamble },
@@ -434,6 +440,34 @@ TEST_CASE("classifySshFailure", "[vthost][ssh]")
         INFO(row.stderrTail);
         CHECK(vthost::classifySshFailure(row.stderrTail, row.exitCode) == row.expected);
     }
+}
+
+TEST_CASE("a remote contour without the relay's flags is told apart in its parser's own words",
+          "[vthost][ssh]")
+{
+    // The remote's stderr as `core::cli::App` prints it: `<app>: <ParseError::message>`, the message made
+    // here by the vendored parser itself from a grammar that lacks the flag, so a change of its wording
+    // fails this test rather than turning a too-old remote into a retried login.
+    auto const refusal = [](core::cli::OptionList options) {
+        auto const grammar = core::cli::Command {
+            .name = "contour",
+            .children = core::cli::CommandList { core::cli::Command { .name = "daemon",
+                                                                      .options = std::move(options) } },
+        };
+        auto const parsed = core::cli::parse(grammar, { "contour", "daemon", "--stdio", "--no-start" });
+        REQUIRE_FALSE(parsed.has_value());
+        return std::format("contour: {}\n", parsed.error().message);
+    };
+    auto const stdioOption =
+        core::cli::Option { .name = std::string_view { "stdio" }, .v = core::cli::Value { false } };
+
+    auto const withoutStdio = refusal({});
+    INFO(withoutStdio);
+    CHECK(vthost::classifySshFailure(withoutStdio, 1) == SshFailure::RemoteContourTooOld);
+
+    auto const withoutNoStart = refusal({ stdioOption });
+    INFO(withoutNoStart);
+    CHECK(vthost::classifySshFailure(withoutNoStart, 1) == SshFailure::RemoteContourCannotSkipStart);
 }
 
 TEST_CASE("every ssh failure has a message naming the host", "[vthost][ssh]")
@@ -547,13 +581,38 @@ TEST_CASE("ssh failures retry only when retrying can help", "[vthost][ssh]")
     {
         INFO(static_cast<int>(failure));
         auto const expected = failure == SshFailure::HostUnreachable || failure == SshFailure::NoPreamble
+                                      || failure == SshFailure::RemoteDaemonAbsent
                                   ? TransportRetry::Transient
                                   : TransportRetry::Permanent;
         auto const kind = vthost::sshTransportError(failure, { .target = target, .detail = "x" }).kind;
         CHECK(vthost::retryOf(kind) == expected);
-        // The remote relay starts its daemon itself: an absent one is never this transport's answer.
-        CHECK(kind != TransportErrorKind::DaemonAbsent);
+        // The remote relay starts its daemon itself unless told not to: only then is an absent one this
+        // transport's answer.
+        CHECK((kind == TransportErrorKind::DaemonAbsent) == (failure == SshFailure::RemoteDaemonAbsent));
     }
+}
+
+TEST_CASE("a remote Contour too old for what is asked is said so and not retried", "[vthost][ssh]")
+{
+    auto const target = SshTarget { .user = "me", .host = "homepc", .port = std::nullopt };
+    for (auto const failure: { SshFailure::RemoteContourTooOld, SshFailure::RemoteContourCannotSkipStart })
+    {
+        INFO(static_cast<int>(failure));
+        auto const error = vthost::sshTransportError(failure, { .target = target, .detail = "x" });
+        CHECK(error.kind == TransportErrorKind::RemoteProgramTooOld);
+        CHECK(vthost::retryOf(error.kind) == TransportRetry::Permanent);
+        CHECK(error.message.contains("too old"));
+    }
+}
+
+TEST_CASE("classifyRelayRefusal tells an absent daemon from any other refusal", "[vthost][ssh]")
+{
+    CHECK(vthost::classifyRelayRefusal(vthost::StdioDaemonAbsentMessage) == SshFailure::RemoteDaemonAbsent);
+    CHECK(vthost::classifyRelayRefusal(std::string { vthost::StdioDaemonAbsentMessage } + " at /run/x")
+          == SshFailure::RemoteDaemonAbsent);
+    CHECK(vthost::classifyRelayRefusal("daemon did not start within 5 seconds.")
+          == SshFailure::RemoteRelayError);
+    CHECK(vthost::classifyRelayRefusal("") == SshFailure::RemoteRelayError);
 }
 
 TEST_CASE("ssh connect succeeds after login noise", "[vthost][ssh]")
@@ -572,6 +631,49 @@ TEST_CASE("ssh connect succeeds after login noise", "[vthost][ssh]")
     REQUIRE(fixture.spawner->spawned.size() == 1);
     CHECK(fixture.spawner->spawned.front() == vthost::sshArguments(fixture.target, SshPromptMode::Batch));
     CHECK(factory.describe() == "ssh://me@homepc");
+}
+
+// Final review M3: a remote command that drops --no-start -- a wrapper that runs the relay without it --
+// reads as a relay that cannot skip the start, never as a daemon watched in the background.
+TEST_CASE("ssh connect told not to start a daemon refuses a relay that does not say it honoured that",
+          "[vthost][ssh]")
+{
+    // The relay ran without the flag (the wrapper dropped it): its ready line states nothing.
+    {
+        auto fixture = SshFixture {};
+        fixture.target.remoteCommand = "my-wrapper --no-start";
+        fixture.target.remoteStart = vthost::RemoteStart::Never;
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReady }));
+
+        auto factory = fixture.factory();
+        auto const connection = fixture.loop.blockOn(factory.connect(fixture.loop));
+        REQUIRE_FALSE(connection.has_value());
+        CHECK(connection.error().kind == TransportErrorKind::RemoteProgramTooOld);
+        CHECK(connection.error().message.contains("remote_command"));
+        CHECK(state->terminated == 1);
+    }
+    // The relay got it: its ready line says so.
+    {
+        auto fixture = SshFixture {};
+        fixture.target.remoteStart = vthost::RemoteStart::Never;
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReadyNoStart }));
+
+        auto factory = fixture.factory();
+        auto const connection = fixture.loop.blockOn(factory.connect(fixture.loop));
+        INFO((connection ? std::string {} : connection.error().message));
+        CHECK(connection.has_value());
+    }
+    // An attach that may start one takes either ready line.
+    {
+        auto fixture = SshFixture {};
+        auto [remote, state] = fixture.prepare();
+        fixture.loop.blockOn(writeText(remote.get(), std::string { vthost::StdioPreambleReadyNoStart }));
+
+        auto factory = fixture.factory();
+        CHECK(fixture.loop.blockOn(factory.connect(fixture.loop)).has_value());
+    }
 }
 
 TEST_CASE("ssh connect names a refused login and the command to run once", "[vthost][ssh]")
@@ -618,6 +720,21 @@ TEST_CASE("ssh connect passes the relay's error through", "[vthost][ssh]")
     REQUIRE_FALSE(connection.has_value());
     CHECK(connection.error().kind == TransportErrorKind::Refused);
     CHECK(connection.error().message.contains("daemon did not start within 5 seconds."));
+    CHECK(state->terminated == 1);
+}
+
+TEST_CASE("ssh connect reads a relay that started no daemon as an absent daemon", "[vthost][ssh]")
+{
+    auto fixture = SshFixture {};
+    auto [remote, state] = fixture.prepare();
+    fixture.loop.blockOn(
+        writeText(remote.get(), vthost::stdioPreambleError(vthost::StdioDaemonAbsentMessage)));
+
+    auto factory = fixture.factory();
+    auto const connection = fixture.loop.blockOn(factory.connect(fixture.loop));
+    REQUIRE_FALSE(connection.has_value());
+    CHECK(connection.error().kind == TransportErrorKind::DaemonAbsent);
+    CHECK(connection.error().message.contains("homepc"));
     CHECK(state->terminated == 1);
 }
 

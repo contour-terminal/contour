@@ -218,6 +218,8 @@ class MainWindowControllerMock: public QAbstractListModel
     /// A daemon window's daemon, as the chip names it; empty falls back to the attached host. Says nothing of
     /// what serves the window: that is `daemonHosting`.
     QString daemonName {};
+    /// The daemon a jump from the sidebar connects to, as the chip says it; empty while none is.
+    QString pendingDaemon {};
     /// What serves the window, as TerminalSessionManager::hostingOf() answers it: set by a test beside the
     /// name (setDaemon(), rebindHost() or setHosting()), never worked out from it.
     window::DaemonHosting daemonHosting = window::DaemonHosting::InProcess;
@@ -336,6 +338,8 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::showAbout(): asks the window for its About dialog.
     Q_INVOKABLE void showAbout() { emit aboutRequested(); }
+    /// Mirrors WindowController::cancelSidebarJump(): the sidebar's host is asked to end its jump.
+    Q_INVOKABLE void cancelSidebarJump() { _sidebar.cancelJump(); }
     /// Mirrors WindowController::dropPayloadOf(): nothing here is a node drag.
     Q_INVOKABLE [[nodiscard]] int dropPayloadOf(QString const&) const { return 0; }
     /// Mirrors WindowController::dropZoneAt(): nothing is a drop target here.
@@ -643,6 +647,8 @@ class MainWindowControllerMock: public QAbstractListModel
     [[nodiscard]] FakeDirectorySource& sidebarSource() noexcept { return _sidebarSource; }
     /// @return The fake window the sidebar asks things of.
     [[nodiscard]] FakeSidebarHost& sidebarHost() noexcept { return _sidebarHost; }
+    /// @return The other daemons the sidebar lists; a test sets them, then calls changed().
+    [[nodiscard]] FakeDaemonSections& sidebarSections() noexcept { return _sidebarSections; }
     /// When the sidebar's clock stands.
     static constexpr auto SidebarEpoch =
         std::chrono::system_clock::time_point { std::chrono::seconds { 1'000'000 } };
@@ -735,20 +741,35 @@ class MainWindowControllerMock: public QAbstractListModel
     }
     /// Mirrors WindowController::closeConfirmation(): the table's wording, with the counts the mock's scene
     /// knows nothing of left at zero.
-    Q_INVOKABLE [[nodiscard]] QVariantMap closeConfirmation(
-        int kind, quint64 /*workspace*/, quint64 /*tab*/, QString const& label, QString const& program) const
+    Q_INVOKABLE [[nodiscard]] QVariantMap closeConfirmation(QVariant const& node,
+                                                            QString const& label,
+                                                            QString const& program) const
     {
-        auto const text = contour::window::closeDialogText(
-            static_cast<contour::window::CloseKind>(kind),
-            { .label = label.toStdString(), .tabs = 0, .panes = 0, .program = program.toStdString() });
+        auto const closing = closeNodeOf(node);
+        if (!closing)
+            return {};
+        auto const text = contour::window::closeDialogText(closing->kind,
+                                                           { .label = label.toStdString(),
+                                                             .tabs = 0,
+                                                             .panes = 0,
+                                                             .program = program.toStdString(),
+                                                             .daemon = {} });
         return { { QStringLiteral("heading"), QString::fromStdString(text.heading) },
                  { QStringLiteral("message"), QString::fromStdString(text.message) },
                  { QStringLiteral("acceptText"), QString::fromStdString(text.acceptText) } };
     }
     /// Mirrors WindowController::confirmClose(): records the answer.
-    Q_INVOKABLE void confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane)
+    Q_INVOKABLE void confirmClose(QVariant const& node)
     {
-        confirmedCloses.push_back({ kind, workspace, tab, pane });
+        if (auto const closing = closeNodeOf(node))
+            confirmedCloses.push_back(*closing);
+    }
+    /// @return The close node @p node carries; none for anything else.
+    [[nodiscard]] static std::optional<window::CloseNode> closeNodeOf(QVariant const& node)
+    {
+        if (node.metaType() != QMetaType::fromType<window::CloseNode>())
+            return std::nullopt;
+        return node.value<window::CloseNode>();
     }
     /// Mirrors WindowController::newWorkspace(): counts the request.
     Q_INVOKABLE void newWorkspace() { ++newWorkspaces; }
@@ -777,12 +798,26 @@ class MainWindowControllerMock: public QAbstractListModel
     [[nodiscard]] bool isWorkspaceDropdownOpen() const { return _switcher && _switcherAnchor.has_value(); }
     /// Mirrors WindowController::openSidebarFilter().
     Q_INVOKABLE void openSidebarFilter() { emit sidebarFilterRequested(); }
+    /// Mirrors WindowController::toggleSidebarNeedsMe(): a hidden sidebar is shown, narrowed; a shown one
+    /// flips its scope.
+    Q_INVOKABLE void toggleSidebarNeedsMe()
+    {
+        ++needsMeToggles;
+        if (_sidebarVisibility != config::SidebarVisibility::Shown)
+        {
+            toggleSidebar();
+            _sidebar.setScope(config::SidebarScope::NeedsMe);
+            return;
+        }
+        _sidebar.setScope(window::toggledScope(_sidebar.scope()));
+    }
+    int needsMeToggles = 0; ///< How often the Needs-me control or its action asked.
     /// Mirrors WindowController::beginSidebarDrag(): the payload a workspace, tab or pane row carries, as the
     /// sidebar's own host would name it (a tab by its panes' keys, a pane by its own); empty out of range.
     Q_INVOKABLE [[nodiscard]] QString beginSidebarDrag(int row) const
     {
         auto const& rows = _sidebar.rows();
-        if (row < 0 || static_cast<std::size_t>(row) >= rows.size())
+        if (!_sidebar.isOwnRow(row))
             return {};
         auto const& key = rows[static_cast<std::size_t>(row)].key;
         auto drag = window::NodeDrag {};
@@ -809,6 +844,8 @@ class MainWindowControllerMock: public QAbstractListModel
                 drag.payload = window::DropPayload::Pane;
                 drag.sessions = { key.pane.value };
                 return window::writeNodeDrag(drag);
+            case window::SidebarRowKind::Daemon:
+            case window::SidebarRowKind::Hidden: break; // not dragged
         }
         return {};
     }
@@ -816,21 +853,13 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::toggleMaximized(): counts the request, as a title-bar double-click makes it.
     Q_INVOKABLE void toggleMaximized() { ++maximizeToggles; }
 
-    std::vector<int> savedSidebarWidths {};           ///< Every setSidebarWidth() width, in order.
-    int sidebarToggles = 0;                           ///< How often toggleSidebar() ran.
-    int maximizeToggles = 0;                          ///< How often toggleMaximized() ran.
-    int newWorkspaces = 0;                            ///< How often newWorkspace() ran.
-    std::optional<QRectF> workspaceDropdownAnchor;    ///< What showWorkspaceDropdown() was last asked.
-    std::vector<quint64> confirmedWorkspaceCloses {}; ///< Every confirmCloseWorkspace() workspace, in order.
-    /// One confirmClose() answer: the kind, the workspace, the tab and the pane.
-    struct ConfirmedClose
-    {
-        int kind = 0;
-        quint64 workspace = 0;
-        quint64 tab = 0;
-        quint64 pane = 0;
-    };
-    std::vector<ConfirmedClose> confirmedCloses {}; ///< Every confirmClose() answer, in order.
+    std::vector<int> savedSidebarWidths {};            ///< Every setSidebarWidth() width, in order.
+    int sidebarToggles = 0;                            ///< How often toggleSidebar() ran.
+    int maximizeToggles = 0;                           ///< How often toggleMaximized() ran.
+    int newWorkspaces = 0;                             ///< How often newWorkspace() ran.
+    std::optional<QRectF> workspaceDropdownAnchor;     ///< What showWorkspaceDropdown() was last asked.
+    std::vector<quint64> confirmedWorkspaceCloses {};  ///< Every confirmCloseWorkspace() workspace, in order.
+    std::vector<window::CloseNode> confirmedCloses {}; ///< Every confirmClose() answer's node, in order.
     // }}}
 
     std::vector<int> tabMenuPicks {};     ///< Every tab menu pick, in order.
@@ -874,9 +903,12 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::sidebarFilterRequested().
     void sidebarFilterRequested();
     void workspaceRenameRequested();
-    void sidebarCloseConfirmationRequested(
-        int kind, quint64 workspace, quint64 tab, quint64 pane, QString const& label, QString const& program);
-    void closeWorkspaceConfirmationRequested(quint64 workspace,
+    /// Mirrors WindowController::sidebarCloseConfirmationRequested().
+    void sidebarCloseConfirmationRequested(QVariant const& node,
+                                           QString const& label,
+                                           QString const& program);
+    /// Mirrors WindowController::closeWorkspaceConfirmationRequested().
+    void closeWorkspaceConfirmationRequested(QVariant const& node,
                                              QString const& workspaceLabel,
                                              QString const& program);
 
@@ -911,6 +943,7 @@ class MainWindowControllerMock: public QAbstractListModel
             .band = band.band,
             .centre = band.centre,
             .sidebar = sidebarWidth() > 0 ? window::SidebarShown::Yes : window::SidebarShown::No,
+            .pendingDaemon = pendingDaemon.toStdString(),
         };
     }
 
@@ -940,14 +973,20 @@ class MainWindowControllerMock: public QAbstractListModel
     /// @see setNativeMaximizeVisual.
     platform::CaptionButtonVisual _nativeMaximizeVisual = platform::CaptionButtonVisual::Rest;
     platform::NullAnnouncer _noticeAnnouncer;
-    window::NoticeModel _notices { noticeClock, _noticeAnnouncer, [](window::NoticeAction) {} };
+    window::NoticeModel _notices { noticeClock,
+                                   _noticeAnnouncer,
+                                   [](window::NoticeAction, std::string const&) {} };
     // The sidebar's window, in the order the model needs them built.
     FakeDirectorySource _sidebarSource;
     FakeSidebarHost _sidebarHost { &_sidebarSource };
+    FakeDaemonSections
+        _sidebarSections; ///< The other daemons the sidebar lists; none until a test sets them.
     window::TabAttention _sidebarAttention;
     core::platform::ManualWallClock _sidebarClock { SidebarEpoch };
     platform::NullAnnouncer _sidebarAnnouncer;
-    window::SidebarModel _sidebar { _sidebarHost, _sidebarAttention, _sidebarClock, _sidebarAnnouncer };
+    window::SidebarModel _sidebar {
+        _sidebarHost, _sidebarSections, _sidebarAttention, _sidebarClock, _sidebarAnnouncer
+    };
     config::SidebarVisibility _sidebarVisibility = config::SidebarVisibility::Hidden;
     int _sidebarUnits = 0;
     config::TabPlacement _tabPlacement = config::TabPlacement::Top;

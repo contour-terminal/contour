@@ -16,6 +16,7 @@
 #include <contour/session/InProcessDirectory.hpp>
 #include <contour/session/NodeDragSession.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/session/WindowSwitching.hpp>
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/ChromeKeys.hpp>
 #include <contour/window/CloseDialogTable.hpp>
@@ -23,6 +24,7 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
 #include <contour/window/LocationChipModel.hpp>
+#include <contour/window/LocationHistory.hpp>
 #include <contour/window/MenuRouting.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
@@ -75,6 +77,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <boxed-cpp/boxed.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 class QScreen;
@@ -125,6 +128,17 @@ inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSur
 
 /// @return The production NoticeAnnouncerFactory: Qt's accessibility announcements (platform::QtAnnouncer).
 [[nodiscard]] NoticeAnnouncerFactory qtNoticeAnnouncer();
+
+namespace detail::tags
+{
+    struct NavigationSerial
+    {
+    };
+} // namespace detail::tags
+
+/// Numbers a window's requests to its directory source to select a workspace for what waits there (a jump, a
+/// row's action): a refusal of one request ends what that request was made for, and nothing a later one set.
+using NavigationSerial = boxed::boxed<uint64_t, detail::tags::NavigationSerial>;
 
 /// Per-OS-window Qt/QML adapter over one vtworkspace::Workspace.
 ///
@@ -380,7 +394,7 @@ class WindowController:
     /// follows (TerminalSessionManager::bindWindow).
     /// @param source The source; borrowed, and it must outlive its use here, or be replaced first.
     /// A jump, a row action or a follow that waited for the old source is given up.
-    void setDirectorySource(IWorkspaceDirectorySource* source) noexcept;
+    void setDirectorySource(IWorkspaceDirectorySource* source);
 
     /// When @p workspace is one of several this window owns and holds no tab, ends it: the window shows the
     /// next owned one first, if it was showing this, and the manager forgets the workspace
@@ -656,6 +670,13 @@ class WindowController:
     /// What Enter in the tree and the row's accessibility press action both do.
     /// @param row The row.
     Q_INVOKABLE void activateSidebarRow(int row);
+    /// Activates the first row the sidebar's filter left (SidebarModel::activateFirstMatch()), and, when it
+    /// showed a row of this window's own, hands the keyboard to the terminal: Return in the filter field, and
+    /// Shift+Return for a window of its own.
+    /// @param mode A JumpMode's underlying value (SidebarRows.JumpMode).
+    /// @return What it did, a SidebarRows.RowActivation's underlying value: Unfiltered asks the tree to take
+    ///         the keyboard, as nothing narrows it and there is no match to go to.
+    Q_INVOKABLE int activateSidebarFirstMatch(int mode);
 
     /// Gives keyboard focus to the active pane's display and ends the chrome's hold on it: what is due when a
     /// popup over this window closes, which leaves no window holding the keyboard.
@@ -669,23 +690,25 @@ class WindowController:
     /// @param workspace The workspace's id, as the window's directory lists it (DirectoryWorkspace::id).
     Q_INVOKABLE void confirmCloseWorkspace(quint64 workspace);
     /// What the close confirmation says for a node (window::closeDialogText): the wording of its kind's
-    /// table row, with the count of what ends with it taken from the directory.
-    /// @param kind A window::CloseKind as an int.
-    /// @param workspace The node's workspace id.
-    /// @param tab The node's tab id; 0 for a workspace.
+    /// table row, with the count of what ends with it taken from the directory of the node's daemon.
+    /// @param node The window::CloseNode the confirmation was asked with
+    /// (sidebarCloseConfirmationRequested(),
+    ///        closeWorkspaceConfirmationRequested()).
     /// @param label The node's name; empty when it has none.
     /// @param program The running program, where known; empty otherwise.
-    /// @return `{ heading, message, acceptText }`; an empty map for an unknown kind.
-    [[nodiscard]] Q_INVOKABLE QVariantMap closeConfirmation(
-        int kind, quint64 workspace, quint64 tab, QString const& label, QString const& program) const;
-    /// Closes the node the user confirmed closing, as sidebarCloseConfirmationRequested() asked. The node is
-    /// named by its ids, so a close acts on the row the menu was opened on, not on what the window shows; one
-    /// that is gone already closes nothing.
-    /// @param kind A window::CloseKind as an int.
-    /// @param workspace The node's workspace id.
-    /// @param tab The node's tab id; 0 for a workspace.
-    /// @param pane The node's pane key; 0 for a workspace or a tab.
-    Q_INVOKABLE void confirmClose(int kind, quint64 workspace, quint64 tab, quint64 pane);
+    /// @return `{ heading, message, acceptText }`; an empty map for a value that is no close node.
+    [[nodiscard]] Q_INVOKABLE QVariantMap closeConfirmation(QVariant const& node,
+                                                            QString const& label,
+                                                            QString const& program) const;
+    /// Closes the node the user confirmed closing. The node names its row whole, daemon and run included, so
+    /// a close acts on the row the question was asked about -- the window's own, or another daemon's there --
+    /// not on what the window shows now; one that is gone already closes nothing.
+    /// @param node The window::CloseNode the confirmation was asked with.
+    Q_INVOKABLE void confirmClose(QVariant const& node);
+    /// @param workspace A workspace of the daemon (or process) this window is on now, by its id.
+    /// @return The close node a confirmation of closing it is asked with
+    /// (closeWorkspaceConfirmationRequested()).
+    [[nodiscard]] QVariant ownWorkspaceCloseNode(uint64_t workspace) const;
     // }}}
     /// Asks the QML to open this window's "save layout as" name prompt (the keyboard/palette entry point
     /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
@@ -729,22 +752,18 @@ class WindowController:
     /// application's color, only the user's own choice.
     /// @param index The tab's row in this window.
     Q_INVOKABLE void resetTabColor(int index);
-    /// Colours tab @p tab on the user's behalf, by id, without showing it: the sidebar's colour picker hands
-    /// its choice here. On its daemon for a window a daemon serves (TerminalSessionManager::colorTab()).
-    /// @param tab The tab's id, as the window's directory lists it.
-    /// @param color The colour the user picked.
-    Q_INVOKABLE void setTabColorOf(quint64 tab, QColor const& color);
-    /// Drops the user's colour from tab @p tab, by id, without showing it; as resetTabColor() otherwise.
-    /// @param tab The tab's id, as the window's directory lists it.
-    Q_INVOKABLE void resetTabColorOf(quint64 tab);
-    /// Colours workspace @p workspace on the user's behalf, shown or not, without showing it: the sidebar's
-    /// colour picker hands its choice here (TerminalSessionManager::setWorkspaceColor).
-    /// @param workspace The workspace's id, as the window's directory lists it.
-    /// @param color The colour the user picked.
-    Q_INVOKABLE void setWorkspaceColor(quint64 workspace, QColor const& color);
-    /// Takes workspace @p workspace's colour away, shown or not, without showing it.
-    /// @param workspace The workspace's id, as the window's directory lists it.
-    Q_INVOKABLE void resetWorkspaceColor(quint64 workspace);
+    /// Colours the workspace or tab of a sidebar row on the user's behalf, shown or not, without showing it:
+    /// the sidebar's colour picker hands its choice here. The row is named whole, daemon and run included,
+    /// so the pick colours the row the picker was opened for: the window's own here
+    /// (TerminalSessionManager::setWorkspaceColor(), colorTab()), another daemon's there.
+    /// @param row The window::SidebarRowKey the picker was opened with (workspaceColorPickRequested(),
+    ///        sidebarTabColorPickRequested()); nothing for a value that is no workspace or tab row.
+    /// @param color The colour the user picked; nothing for an invalid one.
+    Q_INVOKABLE void setRowColor(QVariant const& row, QColor const& color);
+    /// Takes the colour of a sidebar row's workspace or tab away, as setRowColor() colours it; a tab falls
+    /// back to the colour its program gave it, if any.
+    /// @param row The window::SidebarRowKey the picker was opened with.
+    Q_INVOKABLE void resetRowColor(QVariant const& row);
     Q_INVOKABLE void closeTabAtIndex(int index);
     Q_INVOKABLE void closeOtherTabs(int index);
     Q_INVOKABLE void closeTabsToRight(int index);
@@ -1411,6 +1430,14 @@ class WindowController:
     /// (sidebarFilterRequested()): what every filter button and the FilterWorkspaces action do.
     Q_INVOKABLE void openSidebarFilter();
 
+    /// Narrows the sidebar to what needs the user, or lists everything again (SidebarModel::setScope()): what
+    /// the sidebar's Needs-me control and the ToggleSidebarNeedsMe action do. A hidden sidebar is shown, and
+    /// narrowed. The scope is the window's, kept in memory.
+    Q_INVOKABLE void toggleSidebarNeedsMe();
+    /// Ends a jump the sidebar started that is still under way, leaving the window as it was
+    /// (SidebarModel::cancelJump()): the CancelSwitch action. Nothing while none is under way.
+    Q_INVOKABLE void cancelSidebarJump();
+
     /// @return The other workspaces' roll-up, an Urgency's underlying value.
     [[nodiscard]] int otherWorkspacesUrgency() const noexcept { return _sidebar->otherWorkspacesUrgency(); }
     /// @return Whether the keyboard is in the sidebar's tree.
@@ -1435,10 +1462,31 @@ class WindowController:
     /// selected first; a daemon's selection lands later, and the tab and pane are shown then
     /// (completePendingJump()). Nothing when no pane asks for the user.
     void jumpToNextAttention();
+    /// Goes back one recorded place (the JumpBack action): skips places whose daemon run, workspace or tab is
+    /// gone (placeStillExists()), and the place the window is on. A place of the window's own daemon is shown
+    /// here -- its workspace selected, then its tab with its own active pane -- ending a jump to another
+    /// daemon still under way; another daemon's is jumped to, replacing one under way. A jump back that is
+    /// refused, fails or is cancelled puts its place back. Records nothing, and ends a run of attention
+    /// jumps. When no place is left, says so in a brief notice (nowhereToGoBackNotice()).
+    void jumpBack();
+    /// @return Whether jumpBack() would go somewhere: a recorded place is still there, and is not where the
+    ///         window is (the Window menu's Jump Back row).
+    [[nodiscard]] bool canJumpBack() const;
+    /// @param cause Why the window switches.
+    /// @param done What the switch's requester is told; empty for nothing.
+    /// @return @p done, recording this window's landing with @p cause when it switched: from where it is now
+    ///         to where it is once told so. Nothing is recorded for a window gone by then.
+    [[nodiscard]] session::SwitchCompletion recordingCompletion(HistoryCause cause,
+                                                                session::SwitchCompletion done);
     /// Shows @p target wherever it is: its workspace is selected first (a daemon's selection lands later, and
     /// the tab and pane are shown then), and it is counted as seen once shown. Replaces a pending jump.
     /// @param target The pane to show.
     void jumpToPane(PaneKey target);
+    /// Activates what a jump from another window or daemon names, once this window shows its workspace: the
+    /// pane (jumpToPane()), or, for a tab alone, the tab with its own active pane. Nothing for neither, or
+    /// for a tab the directory does not list.
+    /// @param focus The tab and pane.
+    void land(session::LandingFocus const& focus);
     /// Shows @p workspace because the user picked it (a sidebar row): selects it, and gives up a pending
     /// jump, row action or follow, as the user went elsewhere.
     /// @param workspace The workspace's id, as the window's directory lists it.
@@ -1451,6 +1499,14 @@ class WindowController:
     void completePendingJump();
     /// Forgets the jump that waits for a workspace to be shown: it was refused, or is not wanted.
     void cancelPendingJump() noexcept;
+    /// @return The window's latest request to its directory source to select a workspace: what a refusal of
+    ///         that request, answered later, names (cancelPendingJumpOf()).
+    [[nodiscard]] NavigationSerial navigationSerial() const noexcept { return _navigationSerial; }
+    /// Forgets what waits for a workspace to be shown (as cancelPendingJump() does) only if it waits for the
+    /// request @p navigation: a refusal of an earlier request, which a newer navigation replaced, leaves what
+    /// that one set.
+    /// @param navigation The refused request, as navigationSerial() named it as it was made.
+    void cancelPendingJumpOf(NavigationSerial navigation) noexcept;
     /// @return Whether a jump waits for its workspace to be shown.
     [[nodiscard]] bool jumpPending() const noexcept { return _pendingJump.has_value(); }
     /// @return Whether a sidebar action waits for a workspace to be shown, or for its pane to appear in it.
@@ -1714,15 +1770,18 @@ class WindowController:
     /// Requests that the tab at @p index open its color picker. Per-window, exactly like
     /// tabTitleEditRequested: the delegate whose row matches @p index opens its TabColorFlyout.
     void tabColorPickRequested(int index);
-    /// Requests that the sidebar open its colour picker over workspace @p workspace's row: "Custom…" in a
-    /// workspace menu's "Workspace Color", or the SetWorkspaceColor action naming no colour.
-    /// @param workspace The workspace's id, as the window's directory lists it.
-    void workspaceColorPickRequested(quint64 workspace);
-    /// Requests that the sidebar open its colour picker over tab row @p row: "Custom…" in a sidebar tab
-    /// menu's "Tab Color". The sidebar's own, as a sidebar placement draws no tab strip to hang one from.
-    /// @param row The tab's row in the sidebar's model.
-    /// @param tab The tab's id, which the picker's choice colours (setTabColorOf()).
-    void sidebarTabColorPickRequested(int row, quint64 tab);
+    /// Requests that the sidebar open its colour picker over a workspace's row: "Custom…" in a workspace
+    /// menu's "Workspace Color", or the SetWorkspaceColor action naming no colour. The picker holds @p key
+    /// and hands it back with the pick (setRowColor()); the window keeps nothing of it.
+    /// @param row The row's index in the sidebar's model, which the picker hangs from.
+    /// @param key The row's window::SidebarRowKey: whose daemon's workspace the pick colours.
+    void workspaceColorPickRequested(int row, QVariant const& key);
+    /// Requests that the sidebar open its colour picker over a tab's row: "Custom…" in a sidebar tab menu's
+    /// "Tab Color", or the SetTabColor action naming no colour where no tab strip is drawn. As
+    /// workspaceColorPickRequested() otherwise.
+    /// @param row The row's index in the sidebar's model, which the picker hangs from.
+    /// @param key The row's window::SidebarRowKey: whose daemon's tab the pick colours.
+    void sidebarTabColorPickRequested(int row, QVariant const& key);
     /// Requests that this window show its About dialog.
     void aboutRequested();
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
@@ -1806,22 +1865,20 @@ class WindowController:
     /// @param tab The tab's vtworkspace::TabId value.
     void closeTabConfirmationWithdrawn(quint64 tab);
     /// A close from the sidebar's menu always asks first, whatever runs in the node: QML shows the one
-    /// confirmation dialog, worded by closeConfirmation(), and calls confirmClose() on the destructive
-    /// button.
-    /// @param kind A window::CloseKind as an int.
-    /// @param workspace The node's workspace id.
-    /// @param tab The node's tab id; 0 for a workspace.
-    /// @param pane The node's pane key; 0 for a workspace or a tab.
+    /// confirmation dialog, worded by closeConfirmation(), and calls confirmClose() with @p node on the
+    /// destructive button. The dialog holds the node; the window keeps nothing of the question.
+    /// @param node The window::CloseNode: the kind of close and the menu's row, whole.
     /// @param label The row's title.
     /// @param program The program the row's status is about; empty when unknown.
-    void sidebarCloseConfirmationRequested(
-        int kind, quint64 workspace, quint64 tab, quint64 pane, QString const& label, QString const& program);
+    void sidebarCloseConfirmationRequested(QVariant const& node,
+                                           QString const& label,
+                                           QString const& program);
     /// Closing a workspace may end running programs, so the window asks first (the same question as for a
-    /// tab, over every pane of the workspace); a dialog calls confirmCloseWorkspace() on "Close".
-    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// tab, over every pane of the workspace), with the dialog the sidebar's closes use.
+    /// @param node The window::CloseNode of the workspace (ownWorkspaceCloseNode()).
     /// @param workspaceLabel The workspace's label; empty when it has none.
     /// @param program The running program's name; empty when no pane could name one.
-    void closeWorkspaceConfirmationRequested(quint64 workspace,
+    void closeWorkspaceConfirmationRequested(QVariant const& node,
                                              QString const& workspaceLabel,
                                              QString const& program);
     void activeSessionChanged();
@@ -2098,13 +2155,34 @@ class WindowController:
     WindowId _windowId;
     vtworkspace::WorkspaceId _displayed;                   ///< The workspace the tab strip lists.
     IWorkspaceDirectorySource* _directorySource = nullptr; ///< @see directorySource
+    /// A landing the back stack records once it happened (LocationHistory::landed()).
+    struct PendingLanding
+    {
+        std::optional<SidebarTarget> from;       ///< Where the window was as it asked.
+        SidebarTarget to;                        ///< Where it goes.
+        HistoryCause cause = HistoryCause::Jump; ///< Why it goes there.
+    };
+    /// Shows @p target as jumpToPane() does, and records @p landing once it is shown.
+    /// @param target The pane to show.
+    /// @param landing What the back stack records then; none for nothing.
+    void navigateToPane(PaneKey target, std::optional<PendingLanding> landing);
+    /// Shows @p workspace as showWorkspace() does, then runs @p shown once the window shows it.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// @param shown What runs once it is shown; empty for nothing. Never run for a selection refused, or
+    /// given
+    ///        up for a newer navigation.
+    /// @return As showWorkspace().
+    [[nodiscard]] SelectResult navigateToWorkspace(uint64_t workspace, std::function<void()> shown);
     /// The pane a jump waits to show, and the directory workspace it selected for it.
     struct PendingJump
     {
-        PaneKey pane;       ///< The pane to show.
-        uint64_t workspace; ///< The directory's id of the workspace holding it.
+        PaneKey pane;                          ///< The pane to show.
+        uint64_t workspace;                    ///< The directory's id of the workspace holding it.
+        std::optional<PendingLanding> landing; ///< What the back stack records once it is shown.
     };
-    /// Counts the directory's entry for @p key as seen, as far as the daemon's flags go (the serials).
+    /// Counts the directory's entry for @p key as seen: in this window's ledger, as far as an older daemon's
+    /// flags go (the serials), or at the daemon that keeps the pane's flags, when it states something of
+    /// the pane unseen.
     void noteDirectoryPaneSeenByKey(PaneKey key);
     std::optional<PendingJump> _pendingJump; ///< The jump whose workspace is being selected.
     /// A pane moved into a new workspace of the daemon's, which the window shows once it is listed.
@@ -2130,6 +2208,18 @@ class WindowController:
         std::function<RowActionOutcome()> run; ///< What to do once it is.
     };
     std::optional<PendingRowAction> _pendingRowAction;
+    /// The latest request to the directory source to select a workspace for what waits (@see
+    /// navigationSerial()).
+    NavigationSerial _navigationSerial {};
+    /// Asks the directory source to select @p workspace for what waits now, as a request of its own
+    /// (@see navigationSerial()). The source must be set.
+    /// @param workspace The directory's id of the workspace.
+    /// @return What the source answered.
+    [[nodiscard]] SelectResult selectForPending(uint64_t workspace);
+    /// @return The workspace a request of the window's is selecting for what waits there: a jump's, else a
+    /// row
+    ///         action's; none when nothing waits.
+    [[nodiscard]] std::optional<uint64_t> selectingWorkspace() const noexcept;
     /// The sidebar row an action is being run for, while it runs (goToSidebarPane() reads it).
     std::optional<SidebarRowKey> _sidebarActionRow;
     /// The row the sidebar's menu was last opened over.
@@ -2137,19 +2227,78 @@ class WindowController:
     /// The tabs that menu offered, by id: a Move to Tab row resolves by them, not by the places as they are
     /// now.
     std::vector<OfferedTab> _sidebarMenuTabs;
+    /// The daemons the Hidden row's menu offered, in its order: a Show resolves by them, not by the Hidden
+    /// row as it is now.
+    std::vector<DaemonRef> _sidebarMenuHidden;
     QPointF _sidebarMenuAnchor; ///< Where that menu was asked for, in window coordinates.
     /// Runs @p run once the directory shows @p workspace: now when it does, else after selecting it. A @p run
     /// that is Waiting (its pane is not there yet) stays pending, as a jump does, until the layout lands;
-    /// showing the workspace without it ends the wait (cancelPendingJump()).
+    /// showing the workspace without it ends the wait (cancelPendingJump()). A newer navigation: a jump or an
+    /// action still waiting for its workspace is given up, and with it a switch elsewhere it asked for.
     /// @param workspace The directory's id of the workspace.
     /// @param run What to do.
-    void afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run);
+    /// @return Requested when it ran or waits; Refused when the window has no source, or its source refused
+    ///         the selection.
+    [[nodiscard]] SelectResult afterShowing(uint64_t workspace, std::function<RowActionOutcome()> run);
     /// Runs @p action for sidebar row @p row: by the row's id, leaving the window where it is, where the
     /// action has such a form (Mark seen, Rename, Move, Close Workspace), else on what the window shows, once
     /// the row is shown.
     void runSidebarAction(SidebarRowKey const& row, actions::Action const& action);
     /// Runs @p action on what the window shows, once @p row is shown (the tail of runSidebarAction()).
     void runSidebarActionShown(SidebarRowKey const& row, actions::Action const& action);
+    /// @return What runs @p action on what the window shows once @p row's workspace is (afterShowing()).
+    [[nodiscard]] std::function<RowActionOutcome()> shownRowAction(SidebarRowKey const& row,
+                                                                   actions::Action const& action);
+    /// @return Whether @p row is of the window's own daemon (or the window has none), or of another one.
+    [[nodiscard]] command::RowOrigin rowOriginOf(SidebarRowKey const& row) const;
+    /// @return Whether @p row, one of the window's own daemon, was read from the run that daemon serves now:
+    ///         not one a restart ended, whose ids the new run may give to other nodes.
+    [[nodiscard]] bool isOfOwnRunNow(SidebarRowKey const& row) const;
+    /// @return The window's own directory as its source lists it now; the empty one while it has no source.
+    [[nodiscard]] WorkspaceDirectory directoryNow() const;
+    /// @return Every daemon's section as the window lists it, the window's own (@p own) with @p directory.
+    [[nodiscard]] std::vector<DaemonSection> sectionsOf(OwnDaemon const& own,
+                                                        WorkspaceDirectory directory) const;
+    /// @return The sections a place of the back stack is looked up in: every daemon listed, the window's own
+    ///         among them with @p directory; for a window with no daemon, @p directory alone.
+    [[nodiscard]] std::vector<DaemonSection> placesOf(WorkspaceDirectory directory) const;
+    /// @return The window's own place of @p workspace and, if named, its @p tab; none while the window shows
+    ///         no workspace.
+    [[nodiscard]] std::optional<SidebarTarget> ownPlaceOf(uint64_t workspace,
+                                                          std::optional<uint64_t> tab) const;
+    /// @return The place of @p pane in the window's own directory; none for a pane it does not list.
+    [[nodiscard]] std::optional<SidebarTarget> ownPlaceOfPane(PaneKey pane) const;
+    /// @return The window's own place of sidebar row @p row; none for a daemon or Hidden row.
+    [[nodiscard]] std::optional<SidebarTarget> ownPlaceOfRow(SidebarRowKey const& row) const;
+    /// @return The landing from where the window is now to @p to, for @p cause; none for no @p to.
+    [[nodiscard]] std::optional<PendingLanding> landingTo(std::optional<SidebarTarget> to,
+                                                          HistoryCause cause) const;
+    /// Records @p landing, which happened; nothing for none.
+    void recordLanding(std::optional<PendingLanding> const& landing);
+    /// @return Where jumpToNextAttention() goes now (nextAttention()): from the target of a jump under way,
+    /// or
+    ///         the window's own pane whose workspace is being selected, or else the active pane. The empty
+    ///         daemon names a pane of a window with no daemon. None when no pane asks for the user, or the
+    ///         window has no directory source.
+    [[nodiscard]] std::optional<SidebarTarget> nextAttentionTarget() const;
+    /// @return Whether a place of the back stack is still there (placeStillExists()), in every daemon's
+    ///         section as the window lists it now.
+    [[nodiscard]] std::function<bool(SidebarTarget const&)> placeStillThere() const;
+    /// Jumps to another daemon's @p row, then runs @p action there once it landed: in this window, or in the
+    /// window that showed the row already (command::OtherDaemonRoute::JumpFirst).
+    void jumpThenRun(SidebarRowKey const& row, actions::Action const& action);
+    /// @return The section @p daemon is listed by now; none for one not listed.
+    [[nodiscard]] std::optional<DaemonSection> sectionOf(DaemonRef const& daemon) const;
+    /// Colours @p row's workspace, or clears its colour: the window's own here, another daemon's there.
+    /// Nothing for an own row of a run that has ended.
+    void colorSidebarWorkspace(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color);
+    /// Colours @p row's tab, or clears its colour: the window's own here, another daemon's there. Nothing for
+    /// an own row of a run that has ended.
+    void colorSidebarTab(SidebarRowKey const& row, std::optional<vtbackend::RGBColor> color);
+    /// Opens the sidebar's colour picker over @p row, which a pick then colours: the request for its kind.
+    void requestColorPick(SidebarRowKey const& row);
+    /// Colours, or clears the colour of, the workspace or tab of the row @p row carries (setRowColor()).
+    void colorRow(QVariant const& row, std::optional<vtbackend::RGBColor> color);
     /// Asks, through sidebarCloseConfirmationRequested(), whether to close the node @p key stands for.
     void askToClose(CloseKind kind, SidebarRowKey const& key);
     /// Builds and presents the menu of sidebar row @p row.
@@ -2167,6 +2316,16 @@ class WindowController:
     std::unique_ptr<LocationChipModel> _chip;     ///< The location chip's surface; built with the sidebar.
     std::vector<vtworkspace::WorkspaceId> _owned; ///< Every workspace of this window; @see ownedWorkspaces
     TabAttention _attention;                      ///< This window's seen-state, by PaneKey.
+    /// The marks of each listed pane whose flags a daemon keeps (FlagSource::Daemon), by PaneKey value, as
+    /// the directory last listed them: what the tab strip reads for those panes instead of @ref _attention.
+    std::unordered_map<uint64_t, SessionAttention> _daemonMarks;
+    /// Takes the daemon's marks from the directory (@ref _daemonMarks), and repaints the tab badges when they
+    /// changed.
+    void refreshDaemonMarks();
+    /// @param session A pane's session.
+    /// @return The marks its tab's badge reads: the daemon's where it keeps the pane's flags, this window's
+    ///         ledger's otherwise.
+    [[nodiscard]] SessionAttention marksOfSession(vtworkspace::SessionId session) const;
     /// Shows the ssh prompts of the attaches this window started; attached to the app's router for the
     /// window's whole life.
     std::unique_ptr<PromptHost> _promptHost;
@@ -2387,6 +2546,8 @@ class WindowController:
     // This window's toast and banner, timed by _clock.
     NoticeModel _notices;
     // The sidebar's window-facing half and its model; the model is declared last, as it uses the rest.
+    /// The places this window left through a recorded landing (JumpBack).
+    LocationHistory _history { LocationHistoryCapacity };
     std::unique_ptr<SidebarHost> _sidebarHost;
     std::unique_ptr<SidebarModel> _sidebar;
     QPointer<SwitcherController> _switcher; ///< The switcher presented; null for none.

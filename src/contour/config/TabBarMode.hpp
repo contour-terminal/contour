@@ -43,6 +43,17 @@ enum class SidebarVisibility : uint8_t
 /// Number of @c SidebarVisibility enumerators, derived from the last one.
 inline constexpr size_t SidebarVisibilityCount = static_cast<size_t>(SidebarVisibility::Shown) + 1;
 
+/// Which rows the workspace sidebar lists.
+enum class SidebarScope : uint8_t
+{
+    All = 0, //!< Every daemon, workspace, tab and pane.
+    NeedsMe, //!< Only the rows on the path to a pane that needs the user, the displayed tab and a pending
+             //!< jump.
+};
+
+/// Number of @c SidebarScope enumerators, derived from the last one.
+inline constexpr size_t SidebarScopeCount = static_cast<size_t>(SidebarScope::NeedsMe) + 1;
+
 /// How a coloured tab shows its colour on its sidebar rows (`sidebar.tab_color`).
 /// @note Exposed to QML as an @c int through WindowController::sidebarTabColorStyle, which
 ///       UiStyleProvider::sidebarTabColor converts back; SidebarRow.qml takes 0 (Tint) without a controller.

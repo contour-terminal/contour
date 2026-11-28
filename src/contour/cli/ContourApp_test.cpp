@@ -245,6 +245,21 @@ TEST_CASE("ContourApp: daemon --stdio refuses --listen-tcp", "[contour][cli][dae
     CHECK(out.text().empty());
 }
 
+TEST_CASE("ContourApp: daemon --no-start needs --stdio", "[contour][cli][daemon]")
+{
+    // Refused before anything is served: a daemon this process became would have nothing to not start.
+    auto const temp = core::testing::ScopedTempDir { "contour-no-start" };
+    auto const socket = core::pathToUtf8(temp.path() / "s" / "control");
+    auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+    auto argv = std::array<char const*, 5> { "contour", "daemon", "--socket", socket.c_str(), "--no-start" };
+
+    auto const out = StreamCapture { std::cout };
+    auto const err = StreamCapture { std::cerr };
+    CHECK(app.run(static_cast<int>(argv.size()), argv.data()) == EXIT_FAILURE);
+    CHECK(err.text().contains("contour daemon: --no-start applies to --stdio only"));
+    CHECK(out.text().empty());
+}
+
 namespace
 {
 

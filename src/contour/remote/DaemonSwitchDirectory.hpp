@@ -6,8 +6,8 @@
 /// workspace of each daemon a window is on -- all from caches that refresh() renews off the GUI thread.
 
 #include <contour/cli/DaemonDiscovery.hpp>
-#include <contour/platform/OffThreadJobs.hpp>
 #include <contour/remote/DaemonLinkHost.hpp>
+#include <contour/remote/DaemonPresence.hpp>
 #include <contour/remote/SwitchPlan.hpp>
 #include <contour/remote/WorkspaceLister.hpp>
 #include <contour/session/SwitchDirectory.hpp>
@@ -46,20 +46,21 @@ struct LinkedDaemon
 /// Answers, on the GUI thread, which daemons the windows here are on; the application asks its links.
 using LinkedDaemons = std::function<std::vector<LinkedDaemon>()>;
 
-/// The application's session::SwitchDirectory.
+/// The application's session::SwitchDirectory, on top of the application's DaemonPresence.
 ///
-/// localDaemons() answers what the last local discovery found, hostsShownHere() the saved hosts the windows
-/// here are on, and workspacesOf() the daemon's full workspace list as its `workspace.list` last answered it
-/// (hidden and left ones included), with the asking window's own marked from what its link shows now. Nothing
-/// it answers waits: refresh() starts the discovery on a thread of its own and each daemon's listing through
-/// the lister, and their answers replace the caches as they arrive. GUI thread only.
+/// localDaemons() answers what the presence's one discovery last found, daemonRing() the daemons the presence
+/// lists, hostsShownHere() the saved hosts the windows here are on, and workspacesOf() the daemon's full
+/// workspace list as its `workspace.list` last answered it (hidden and left ones included), with the asking
+/// window's own marked from what its link shows now. Nothing it answers waits: refresh() refreshes the
+/// presence and starts each daemon's listing through the lister, whose answers replace the cache as they
+/// arrive. GUI thread only.
 class DaemonSwitchDirectory final: public session::SwitchDirectory
 {
   public:
-    /// @param discovery Finds the local daemons; run off the GUI thread. Shared with the Connect picker.
+    /// @param presence What is listed, and what discovery found. Borrowed: it must outlive the directory.
     /// @param lister Lists a daemon's workspaces.
     /// @param linked Which daemons the windows here are on.
-    DaemonSwitchDirectory(std::shared_ptr<cli::IDaemonDiscovery> discovery,
+    DaemonSwitchDirectory(DaemonPresence& presence,
                           std::unique_ptr<IWorkspaceLister> lister,
                           LinkedDaemons linked);
     ~DaemonSwitchDirectory() override;
@@ -70,39 +71,27 @@ class DaemonSwitchDirectory final: public session::SwitchDirectory
 
     [[nodiscard]] std::vector<cli::DiscoveredDaemon> localDaemons() const override;
     [[nodiscard]] std::vector<std::string> hostsShownHere() const override;
+    [[nodiscard]] std::vector<session::SwitchTarget> daemonRing() const override;
     [[nodiscard]] std::vector<session::KnownWorkspace> workspacesOf(
         vtworkspace::WorkspaceId window) const override;
     void refresh() override;
     void refreshDiscovery() override;
 
   private:
-    /// Whether a discovery runs now: a refresh meanwhile starts none.
-    enum class Discovery : uint8_t
-    {
-        Idle = 0,
-        Running,
-    };
-
-    /// @return What @p daemon's workspaces are cached under: its address, or for one no switch can name
-    ///         (`--connect-tcp`) its link.
+    /// @return What @p daemon's workspaces are cached under: its DaemonRef's value -- for one no switch can
+    ///         name (`--connect-tcp`), its link's.
     [[nodiscard]] static std::string cacheKeyOf(LinkedDaemon const& daemon);
 
-    void startDiscovery();
     void startListing(LinkedDaemon const& daemon);
 
-    std::shared_ptr<cli::IDaemonDiscovery> _discovery;
+    DaemonPresence& _presence;
     LinkedDaemons _linked;
-    /// What the last discovery found; empty until one answered.
-    std::vector<cli::DiscoveredDaemon> _localDaemons;
     /// Each daemon's workspaces, by cacheKeyOf(), as its last listing answered.
     std::map<std::string, std::vector<vtcontrol::WorkspaceInfo>> _workspaces;
     /// The daemons, by cacheKeyOf(), whose listing is under way: a refresh meanwhile does not ask them again.
     std::set<std::string> _listing;
-    Discovery _discoveryState = Discovery::Idle;
     /// Destroyed before everything its answers touch: nothing answers into a directory going away.
     std::unique_ptr<IWorkspaceLister> _lister;
-    /// The discoveries under way, their answers told back here; destroyed (joined) first.
-    platform::OffThreadJobs _jobs;
 };
 
 } // namespace contour::remote

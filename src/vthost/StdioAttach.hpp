@@ -12,6 +12,7 @@
 #include <string>
 
 #include <vthost/ByteStream.hpp>
+#include <vthost/StdioPreamble.hpp>
 
 namespace vthost
 {
@@ -29,18 +30,23 @@ using DaemonConnector = std::function<std::expected<std::shared_ptr<IByteStream>
 /// @param client This process's stdio (makeProcessStdioStream()).
 /// @param connect Reaches the daemon.
 /// @param relay The relay's configuration: how long the daemon has to answer the client.
+/// @param noStart Honoured for a relay told not to start a daemon (`--no-start`), whose @p connect starts
+///        none: its ready line says so (StdioPreambleReadyNoStart).
 /// @return EXIT_SUCCESS after the daemon side ended; EXIT_FAILURE after writing an error preamble, or
 ///         when the relay failed, or the daemon sent nothing in time (logged as such).
 [[nodiscard]] int runStdioAttach(std::shared_ptr<IByteStream> client,
                                  DaemonConnector const& connect,
-                                 RelayConfig relay = {});
+                                 RelayConfig relay = {},
+                                 RelayNoStart noStart = RelayNoStart::Unstated);
 
 /// The production connector: when no daemon serves @p socketPath, @p starter starts one; then a
 /// blocking connect to its native socket (`nativeSocketPath(socketPath)`).
 /// @param socketPath The daemon's control socket.
 /// @param spawner Asks whether a daemon serves (DaemonSpawner::probe()); not owned, outlives the connector.
 /// @param starter Phase 2's `chooseDaemonStarter(...)`: a registered user service when there is one,
-///        else spawn-on-demand from the staged per-version binary. Owned by the connector.
+///        else spawn-on-demand from the staged per-version binary. Owned by the connector. Null never starts
+///        one (`--no-start`): when none serves, the connector fails with @ref StdioDaemonAbsentMessage,
+///        which the client reads as an absent daemon.
 /// @return The connector.
 [[nodiscard]] DaemonConnector makeLocalDaemonConnector(std::filesystem::path socketPath,
                                                        DaemonSpawner& spawner,

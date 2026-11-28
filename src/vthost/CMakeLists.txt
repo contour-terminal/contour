@@ -127,6 +127,8 @@ add_library(vthost STATIC
     ServiceControl_launchd.hpp
     ServiceControl_systemd.cpp
     ServiceControl_systemd.hpp
+    AttentionLedger.cpp
+    AttentionLedger.hpp
     Linger.cpp
     Linger.hpp
     ServiceControl_win32.cpp
@@ -406,9 +408,11 @@ if(VTHOST_TESTING)
         IdleExitWatcher_test.cpp
         LastSessionWatcher_test.cpp
         NativeSession_test.cpp
+        NativeSessionObserver_test.cpp
         PduPump_test.cpp
         ServiceControl_launchd_test.cpp
         ServiceControl_systemd_test.cpp
+        AttentionLedger_test.cpp
         Linger_test.cpp
         ServiceControl_test.cpp
         SocketFileListener_test.cpp
@@ -436,6 +440,7 @@ if(VTHOST_TESTING)
         testing/FaultyFileSystem.hpp
         testing/RecordedTranscripts.hpp
         testing/ControlHarness.hpp
+        testing/NativeSessionHarness.hpp
         testing/FakeCommandRunner.hpp
         testing/FakeDaemonControl.hpp
         testing/FakeExtensionHosting.hpp
@@ -502,7 +507,7 @@ if(VTHOST_TESTING)
         tmux/TmuxClientModel_test.cpp
         tmux/TmuxGateway_test.cpp
     )
-    target_link_libraries(vthost_test vthost core::net_tls glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
+    target_link_libraries(vthost_test vthost core::cli core::net_tls glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
     if(NOT WIN32)
         # A daemon behind a real PTY keeper, out of the test binary itself (`--keeper`, `--keeper-serve`).
         add_library(vthost_keeper_harness STATIC testing/KeeperFixture.cpp testing/KeeperFixture.hpp)

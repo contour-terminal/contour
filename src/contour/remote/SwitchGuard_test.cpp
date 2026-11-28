@@ -56,16 +56,16 @@ class RecordingSwitching final: public contour::session::WindowSwitching
         vtworkspace::WorkspaceId window;
         SwitchTarget target;
         contour::session::SwitchMode mode {};
-        contour::session::SwitchLandBy landBy; ///< When it must have landed by.
+        contour::session::SwitchWaiter waiter; ///< Who waits for it: until when, and told when.
     };
 
     void request(vtworkspace::WorkspaceId window,
                  SwitchTarget target,
                  contour::session::SwitchMode mode,
-                 contour::session::SwitchLandBy landBy,
+                 contour::session::SwitchWaiter waiter,
                  contour::session::SwitchCompletion done) override
     {
-        requests.push_back({ .window = window, .target = std::move(target), .mode = mode, .landBy = landBy });
+        requests.push_back({ .window = window, .target = std::move(target), .mode = mode, .waiter = waiter });
         done(outcome);
     }
 
@@ -362,7 +362,9 @@ TEST_CASE("runGuardedSwitch has an allowed switch land before the daemon gives u
     rig.answer(PermissionDecision::Allow, PermissionMemory::Once);
 
     REQUIRE(rig.switching.requests.size() == 1);
-    CHECK(rig.switching.requests.front().landBy == arrival + 20s - contour::remote::SwitchReplyMargin);
+    CHECK(rig.switching.requests.front().waiter.landBy == arrival + 20s - contour::remote::SwitchReplyMargin);
+    // The program is answered on the connection it asked on, which a switch to another daemon ends.
+    CHECK(rig.switching.requests.front().waiter.told == contour::session::SwitchTold::BeforeLeaving);
 }
 
 // Review (PR 4, M7): the wait a daemon states was taken as it came, up to 49 days from another host.

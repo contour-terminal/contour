@@ -249,6 +249,10 @@ struct SwitcherWorld
     std::vector<SwitcherCreated> created;
     std::vector<SwitcherRan> ran;
     std::function<void()> onRan; ///< What running a sidebar menu row does besides being recorded.
+    /// Whether the sidebar lists each daemon, by DaemonRef value; a daemon not in here has no toggle.
+    std::map<std::string, window::SidebarListingChoice> listings;
+    /// Each setListed(), in order.
+    std::vector<std::pair<window::DaemonRef, window::SidebarListingChoice>> listingsSet;
     /// Each start's job instead of the real one's, when set: a test's GatedStart.
     std::function<std::function<std::expected<cli::NamedDaemonStart, std::string>()>()> startJob;
     std::vector<std::string> startedNames;
@@ -335,6 +339,17 @@ struct SwitcherWorld
                     ran.push_back({ workspace, action });
                     if (onRan)
                         onRan();
+                },
+            .listingOf =
+                [this](window::DaemonRef const& daemon) -> std::optional<window::SidebarListingChoice> {
+                if (auto const found = listings.find(daemon.value); found != listings.end())
+                    return found->second;
+                return std::nullopt;
+            },
+            .setListed =
+                [this](window::DaemonRef const& daemon, window::SidebarListingChoice choice) {
+                    listingsSet.emplace_back(daemon, choice);
+                    listings[daemon.value] = choice;
                 },
         };
     }

@@ -19,6 +19,8 @@ Control {
     property string detail
     /// The optional leading glyph. Empty: none.
     property string glyph
+    /// The label of the toast's action button (Hide's "Undo"). Empty: no button.
+    property string actionText
     /// Whether the toast is showing. QML-facing, so a host binds it directly.
     property bool shown: false
     /// The glyph's colour: the text's unless the glyph is a mark with an ink of its own.
@@ -26,6 +28,13 @@ Control {
     /// The elevation it lifts itself by: e2 as a transient notice; a host showing it as a steady state
     /// in its own surface may lower it.
     property var elevation: chromeStyle.elevation.e2
+
+    /// The user took the action (actionText).
+    signal actionTriggered()
+
+    /// Whether the keyboard is on the action button: a host holds the toast meanwhile, as it does a hovered
+    /// one, so a user who tabbed to it does not lose it to the timeout.
+    readonly property bool actionFocused: actionButton.activeFocus
 
     /// Its height: the toast's by default; a pill of another extent (the link pill) sets its own.
     property real extent: chromeStyle.size.toast
@@ -49,6 +58,7 @@ Control {
     readonly property real restImplicitWidth: leftPadding + rightPadding
                                               + (root.glyph.length > 0 ? Math.ceil(glyphLabel.implicitWidth) + spacing : 0)
                                               + (root.detail.length > 0 ? spacing + Math.ceil(detailLabel.implicitWidth) : 0)
+                                              + (root.actionText.length > 0 ? spacing + Math.ceil(actionButton.implicitWidth) : 0)
 
     /// How far the toast slides from while entering; zero when motion is reduced.
     readonly property real enterOffset: chromeStyle.motion.travel
@@ -123,6 +133,38 @@ Control {
             textFormat: Text.PlainText
             font: root.textFont
             color: chromeStyle.colors.toastText
+        }
+
+        // The action (Hide's "Undo"): a button on the toast's fill, set apart from its words at rest -- a
+        // fill on the native rows, brackets on the Terminal row (chromeStyle.buttonWords) -- with the kit's
+        // hover and pressed steps, inverse video on the Terminal row. Its words are the toast's, so its tooltip
+        // would say nothing more.
+        ToolbarButton {
+            id: actionButton
+            objectName: "toastAction"
+            visible: root.actionText.length > 0
+            Layout.alignment: Qt.AlignVCenter
+            // Inside the pill's own height: a step in from its edges where the toast has steps, its one row on
+            // the Terminal row.
+            extent: Math.max(root.extent - chromeStyle.space.s2 - chromeStyle.space.s2, Math.min(root.extent, actionMetrics.height))
+            implicitWidth: chromeStyle.snapToCells(actionMetrics.advanceWidth + chromeStyle.space.s4 + chromeStyle.space.s4)
+            glyph: chromeStyle.buttonWords(root.actionText)
+            glyphFont: root.textFont
+            glyphColor: chromeStyle.colors.toastText
+            restFill: chromeStyle.colors.toastActionFill
+            hoverFill: chromeStyle.colors.toastActionHoverFill
+            pressedFill: chromeStyle.colors.toastActionPressedFill
+            activeGlyphColor: chromeStyle.colors.toastActionActiveInk
+            accessibleName: root.actionText
+            toolTipText: ""
+            activeFocusOnTab: true
+            onClicked: root.actionTriggered()
+
+            TextMetrics {
+                id: actionMetrics
+                font: root.textFont
+                text: actionButton.glyph
+            }
         }
 
         Label {

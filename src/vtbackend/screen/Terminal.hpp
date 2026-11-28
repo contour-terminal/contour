@@ -698,6 +698,12 @@ class Terminal: public IStatusLinePublishTarget
         /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
+        /// As screenUpdated(), for a batch of output the parser just applied (Terminal::writeToScreen(), the
+        /// PTY's reads), raised on the thread that parses -- with no lock held -- once the batch is whole:
+        /// the one notification that tells of new output, every other screenUpdated() a change of another
+        /// kind (a vi motion, a mark, a preedit, a mirror's frame). A listener that does not tell the two
+        /// apart need not override it.
+        virtual void screenWritten() { screenUpdated(); }
         /// When the next kitty animation frame of the page on display is due moved (@see
         /// Terminal::kittyAnimationDue). Raised under renderBufferUpdated()'s rules, which it forwards to by
         /// default: a display re-reads nextRender() on it, and a host that renders nothing itself (the
@@ -3610,6 +3616,9 @@ class Terminal: public IStatusLinePublishTarget
     ///                  rows went.
     void rowsDropped(LineCount pageShift);
     void screenUpdated();
+    /// As screenUpdated(), for a batch of output the parser applied: the listener hears
+    /// Events::screenWritten().
+    void screenWritten();
     /// As screenUpdated(), for a mirror's full replay: the listener hears Events::screenReplayed().
     void screenReplayed();
     /// As screenUpdated(), for a kitty animation frame tick() advanced: the listener hears

@@ -354,6 +354,9 @@ class NativeClient final
     /// Told that a piece of a snapshot still being received arrived: the daemon is delivering, however long
     /// the whole takes. A frontend waiting for its first session counts that as headway, not as silence.
     using SnapshotProgressHandler = std::function<void()>;
+    /// Told what the daemon's attention ledger states of one pane (Capability::DaemonAttention): of every
+    /// pane once after the hello, then of each pane whose state changed.
+    using PaneAttentionHandler = std::function<void(proto::PaneAttentionState const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -399,6 +402,20 @@ class NativeClient final
         /// first, and is sent with the proof; a client with a token sends it at once, as a daemon that asks
         /// for no key sends no challenge to wait for.
         std::shared_ptr<IClientKeySource> keySource = {};
+        /// What the connection is to the daemon: a window's attach, or an observer listing its workspaces
+        /// without showing one (proto::ConnectionRole::Observe, which a daemon serves only when it shares
+        /// proto::Capability::Observe).
+        proto::ConnectionRole role = proto::ConnectionRole::Attach;
+    };
+
+    /// Whether the daemon took this client in the role its hello stated.
+    enum class RoleAcceptance : uint8_t
+    {
+        Accepted = 0, ///< Taken as asked, or not answered yet.
+        /// An Observe hello answered by a daemon that does not share proto::Capability::Observe: it read the
+        /// role as Control. The client ends as after a refusal (connected() stays false); redialling such a
+        /// daemon cannot observe it either.
+        ObserveUnsupported,
     };
 
     /// @param loop The event loop everything runs on.
@@ -430,6 +447,8 @@ class NativeClient final
     /// @param onWorkspaceMeta Told what the daemon states of each workspace besides its layout
     ///        (Capability::WorkspaceMeta).
     /// @param onSnapshotProgress Told of each piece of a snapshot that is not yet whole.
+    /// @param onPaneAttention Told what the daemon's attention ledger states of each pane
+    ///        (Capability::DaemonAttention).
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -448,7 +467,8 @@ class NativeClient final
                  PaneSummaryHandler onPaneSummary = {},
                  RaiseRoleHandler onRaiseRole = {},
                  WorkspaceMetaHandler onWorkspaceMeta = {},
-                 SnapshotProgressHandler onSnapshotProgress = {});
+                 SnapshotProgressHandler onSnapshotProgress = {},
+                 PaneAttentionHandler onPaneAttention = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -529,15 +549,38 @@ class NativeClient final
     ///         nothing was written, unless the daemon shares Capability::DaemonFollow.
     /// @param directoryFrom The session of the pane asking for a new workspace (@p workspace 0): the new
     ///        workspace's first shell starts in its working directory. Ignored for any other workspace.
+    /// @param creation The token of a promotion asking for a new workspace (@p workspace 0), which the daemon
+    ///        makes once per token (proto::SelectWorkspace::creationToken). Ignored for any other workspace.
     std::optional<uint64_t> selectWorkspace(uint64_t workspace,
-                                            std::optional<uint64_t> directoryFrom = std::nullopt);
+                                            std::optional<uint64_t> directoryFrom = std::nullopt,
+                                            std::optional<proto::CreationToken> creation = std::nullopt);
 
     /// Tells the daemon whether this connection's window has the user's focus, from which it decides which
-    /// window raises for a bell or a notification.
+    /// window raises for a bell or a notification, and which panes the window shows: a pane a focused window
+    /// shows is watched, and raises nothing for attention.
     /// @param focus The window's focus now.
+    /// @param shownSessions The sessions of the panes the window shows; sent only to a daemon sharing
+    ///        Capability::DaemonAttention, as any other ignores them.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
     ///         Capability::DaemonFollow.
-    [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus);
+    [[nodiscard]] Delivery reportFocus(proto::WindowFocus focus, std::span<uint64_t const> shownSessions);
+
+    /// Tells the daemon the window showed @p session and saw its attention up to @p seen: the daemon clears
+    /// what that covers and tells every window.
+    /// @param session The pane's session.
+    /// @param seen The serials and the status generation the window saw.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares
+    ///         Capability::DaemonAttention.
+    [[nodiscard]] Delivery sendMarkSeen(uint64_t session, proto::SeenSerials seen);
+
+    /// Asks the daemon to demote this connection to an observer (proto::ObserveOnly): it shows no workspace
+    /// from then on, and every pane reaches it as a summary. The selection reads as none at once, and a
+    /// layout batch the daemon ended before it read the request states no selection here: only the batch
+    /// answering it (with Capability::LayoutBatch) and those after it do.
+    /// @param cause Why: a demotion, or the answer to a promotion withdrawn meanwhile, whose workspace the
+    ///        daemon may then take back.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::Observe.
+    [[nodiscard]] Delivery observeOnly(proto::ObserveCause cause = proto::ObserveCause::Demoted);
 
     /// Asks the daemon to open the first tab of the workspace this connection selects, which holds none (a
     /// launch that named it).
@@ -675,6 +718,10 @@ class NativeClient final
     /// @return All mirrored screens, keyed by session id.
     [[nodiscard]] std::map<uint64_t, RemoteScreen> const& screens() const noexcept { return _screens; }
 
+    /// Drops every mirrored screen, and the image fetches that would fill one: what a connection that mirrors
+    /// no session -- an observer, its window's last pane unbound -- keeps no longer. Reactor thread only.
+    void forgetScreens() noexcept;
+
     /// @return True once the ServerHello agreed on a version this client speaks.
     [[nodiscard]] bool connected() const noexcept { return _negotiated.has_value(); }
 
@@ -687,6 +734,14 @@ class NativeClient final
     /// reason (proto::describe phrases that). Empty unless the daemon refused; run() then ends.
     /// @return The refusal.
     [[nodiscard]] std::optional<proto::HandshakeRefusal> const& refusal() const noexcept { return _refusal; }
+
+    /// @return What the connection is to the daemon now: the hello's role until observeOnly() or a promotion
+    ///         (a select an observer made, once the batch answering that select states a selection) changed
+    ///         it.
+    [[nodiscard]] proto::ConnectionRole role() const noexcept { return _role; }
+
+    /// @return Whether the daemon took the role the hello stated; Accepted until it answered.
+    [[nodiscard]] RoleAcceptance roleAcceptance() const noexcept { return _roleAcceptance; }
 
     /// @return refusal() in words for the user; when the daemon asked for a key, with the fingerprints that
     ///         were offered and a pointer to `identity_file`. Empty while there is no refusal.
@@ -817,6 +872,13 @@ class NativeClient final
     /// @param self The NativeClient.
     static void handshakeExpired(void* self);
 
+    /// @return Whether the daemon turned the hello away: refused it, or did not take it in its role. The
+    ///         connection ends either way.
+    [[nodiscard]] bool isTurnedAway() const noexcept
+    {
+        return _refusal.has_value() || _roleAcceptance != RoleAcceptance::Accepted;
+    }
+
     /// Records what the daemon's ServerHello negotiated, or why it did not; only the first counts.
     /// @param hello The daemon's answer to this client's ClientHello.
     void handleServerHello(proto::ServerHello const& hello);
@@ -865,6 +927,7 @@ class NativeClient final
     RaiseRoleHandler _onRaiseRole;
     WorkspaceMetaHandler _onWorkspaceMeta;
     SnapshotProgressHandler _onSnapshotProgress;
+    PaneAttentionHandler _onPaneAttention;
     /// When run() began: what the elapsed times of the attach log count from.
     core::platform::SteadyTimePoint _attachStartedAt {};
     /// Whether the first whole snapshot has been logged, once per connection.
@@ -882,6 +945,12 @@ class NativeClient final
     proto::RaiseRole _raiseRole = proto::RaiseRole::Quiet; ///< @see raiseRole()
     HandshakeHandler _onHandshake;                         ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
+    /// The sessions each workspace's layout names, by workspace, as the daemon last stated them: a screen of
+    /// a session none of them names once a batch ends is gone with it (forgetUnlaidScreens()).
+    std::map<uint64_t, std::set<uint64_t>> _layoutSessions;
+    /// Drops the screens of the sessions no layout names any more: a long-lived connection, an observer's
+    /// above all, keeps no screen of every session that ever said something.
+    void forgetUnlaidScreens();
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.
     std::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> _pendingImages;
@@ -890,13 +959,23 @@ class NativeClient final
     uint64_t _nextSerial = 1;
     /// The EditTabs the daemon has not served yet, laid over its pushes (Capability::TabEditAcks).
     PendingTabEdits _pendingEdits;
-    vtbackend::HostIdentity _daemonIdentity;          ///< @see daemonIdentity()
-    std::string _daemonRelease;                       ///< @see daemonRelease()
-    uint64_t _daemonInstance = 0;                     ///< @see daemonInstance()
-    std::optional<RestoredCounts> _restoredCounts {}; ///< @see restoredCounts()
-    uint64_t _selectedWorkspace = 0;                  ///< @see selectedWorkspace()
-    std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
-    std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
+    vtbackend::HostIdentity _daemonIdentity;                   ///< @see daemonIdentity()
+    std::string _daemonRelease;                                ///< @see daemonRelease()
+    uint64_t _daemonInstance = 0;                              ///< @see daemonInstance()
+    std::optional<RestoredCounts> _restoredCounts {};          ///< @see restoredCounts()
+    uint64_t _selectedWorkspace = 0;                           ///< @see selectedWorkspace()
+    std::optional<proto::Negotiated> _negotiated;              ///< @see negotiated()
+    std::optional<proto::HandshakeRefusal> _refusal;           ///< @see refusal()
+    RoleAcceptance _roleAcceptance = RoleAcceptance::Accepted; ///< @see roleAcceptance()
+    /// What the connection is to the daemon now: the hello's role, Observe after observeOnly(), Attach once
+    /// the batch answering an observer's select (a promotion) states a selection. @see role()
+    proto::ConnectionRole _role = _handshake.role;
+    /// The serial of the select an observer sent (a promotion), until the batch answering it: that batch, not
+    /// any other stating a selection, makes the connection an attach.
+    std::optional<uint64_t> _promotionSerial;
+    /// The serial of the ObserveOnly sent, until the batch answering it: a batch ended before it states the
+    /// selection the connection gave up, which is not adopted.
+    std::optional<uint64_t> _demotionSerial;
     LivenessTracker _liveness;               ///< When the daemon last spoke, and whether it was probed.
     std::optional<std::string> _lossReason;  ///< @see lossReason()
     std::optional<std::string> _upgradingTo; ///< @see upgradingTo()

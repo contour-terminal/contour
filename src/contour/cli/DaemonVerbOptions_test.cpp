@@ -150,6 +150,10 @@ TEST_CASE("every daemon option round-trips through the options record", "[cli][d
     {
         options.auth = "key";
     }
+    SECTION("no-start")
+    {
+        options.noStart = OptionFlag::Given;
+    }
     SECTION("an empty value in a non-empty record")
     {
         options.socket = "x";
@@ -190,6 +194,7 @@ TEST_CASE("every daemon option round-trips through the options record, all at on
         .logFile = "o",
         .authorizedKeys = "p",
         .auth = "q",
+        .noStart = OptionFlag::Given,
     };
     CHECK(roundTripped(launchOf(options)) == launchOf(options));
 }
@@ -308,7 +313,7 @@ TEST_CASE("the daemon's options are read from the parsed command line", "[cli][d
                              "authorized-keys",
                              "auth" })
         parameters.values[std::string { "contour.daemon." } + name] = std::string {};
-    for (auto const* name: { "background", "stdio", "in-place", "exit-with-last-session" })
+    for (auto const* name: { "background", "stdio", "in-place", "exit-with-last-session", "no-start" })
         parameters.values[std::string { "contour.daemon." } + name] = false;
     parameters.values["contour.daemon.name"] = std::string { "lab" };
     parameters.values["contour.daemon.lifecycle"] = std::string { "persistent" };
@@ -330,17 +335,20 @@ TEST_CASE("a relaunched daemon repeats no option meant for one process", "[cli][
     given.background = OptionFlag::Given;
     given.stdio = OptionFlag::Given;
     given.inPlace = OptionFlag::Given;
+    given.noStart = OptionFlag::Given;
     auto const launch = DaemonLaunch::restore(given, "/tmp/contour-test/relaunch.sock");
 
     auto const relaunched = launch.relaunched();
     CHECK(relaunched.given().handover.empty());
     CHECK(relaunched.given().background == OptionFlag::Absent);
     CHECK(relaunched.given().stdio == OptionFlag::Absent);
+    CHECK(relaunched.given().noStart == OptionFlag::Absent);
     // Everything else is the launch's, unchanged.
     auto expected = given;
     expected.handover.clear();
     expected.background = OptionFlag::Absent;
     expected.stdio = OptionFlag::Absent;
+    expected.noStart = OptionFlag::Absent;
     CHECK(relaunched.given() == expected);
     CHECK(relaunched.socketPath() == launch.socketPath());
     // The launch itself is left as it was.

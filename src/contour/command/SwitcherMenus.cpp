@@ -44,9 +44,25 @@ std::vector<SwitcherMenuRow> buildSwitcherRowMenu(SwitcherRowMenuState const& st
     auto separator = ContextMenuEntry {};
     separator.kind = ContextMenuEntryKind::Separator;
     rows.emplace_back(std::move(separator));
-    for (auto& entry: buildWorkspaceMenu(state.workspace))
+    // The leading choices already open it in a new window, by the switcher's own rules: the sidebar's row for
+    // that is left out.
+    auto workspace = state.workspace;
+    workspace.open = OpenOffer::NotOffered;
+    for (auto& entry: buildWorkspaceMenu(workspace))
         rows.emplace_back(std::move(entry));
     return rows;
+}
+
+std::vector<SwitcherMenuRow> buildSwitcherDaemonMenu(SwitcherDaemonMenuState const& state)
+{
+    if (!state.listing)
+        return {};
+    return { SwitcherChoiceRow { .choice = SwitcherMenuChoice::ShowInSidebar,
+                                 .title = "Show in Sidebar",
+                                 .shortcut = {},
+                                 .availability = RowAvailability::Enabled,
+                                 .check = *state.listing == SidebarListing::Listed ? RowCheck::Checked
+                                                                                   : RowCheck::Unchecked } };
 }
 
 } // namespace contour::command

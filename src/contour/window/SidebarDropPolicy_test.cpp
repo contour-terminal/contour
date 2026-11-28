@@ -270,3 +270,17 @@ TEST_CASE("SidebarDropPolicy.a_host_short_of_node_moves_refuses_what_it_cannot_m
     CHECK(sidebarRefusalOf(HostMoves::Tabs) == MoveRefusal::OldDaemon);
     CHECK(sidebarRefusalOf(HostMoves::Nodes) == MoveRefusal::None);
 }
+
+TEST_CASE("SidebarDropPolicy.daemon_and_hidden_rows_take_no_drop", "[sidebar]")
+{
+    for (auto const kind: { SidebarRowKind::Daemon, SidebarRowKind::Hidden })
+    {
+        auto const rows = std::vector { rowOf(kind, 0, 0, 0) };
+        for (auto const& dragged: { AWorkspace, ATab, APane })
+            for (auto const y: { 0.1, 0.5, 0.9 })
+            {
+                CHECK(describe(resolveSidebarDrop(rows, 0, y, dragged)) == "refuse");
+                CHECK(sidebarDropIndicator(rows, 0, y, dragged) == DropIndicator::Refused);
+            }
+    }
+}

@@ -130,7 +130,7 @@ enum class KeyCondition : uint8_t
     NestedFilterEmpty,  ///< Nested, and nothing is typed.
     CaretEndOnDrillRow, ///< The caret is at the end, on a Daemon, New Daemon… or All daemons… row.
     CaretStartNested,   ///< The caret is at the start, nested.
-    WorkspaceRow,       ///< A workspace row is selected.
+    MenuRow,            ///< A row with a menu is selected: a workspace's, or a daemon's ("Show in Sidebar").
     NewWindowRow,       ///< A row that can open in a new window is selected.
 };
 
@@ -208,11 +208,11 @@ inline constexpr auto SwitcherKeyRows = std::array {
                      .command = SwitcherCommand::ClearFilter },
     SwitcherKeyRow { .key = SwitcherKey::Menu,
                      .modifier = SwitcherKeyModifier::None,
-                     .when = KeyCondition::WorkspaceRow,
+                     .when = KeyCondition::MenuRow,
                      .command = SwitcherCommand::OpenRowMenu },
     SwitcherKeyRow { .key = SwitcherKey::F10,
                      .modifier = SwitcherKeyModifier::Shift,
-                     .when = KeyCondition::WorkspaceRow,
+                     .when = KeyCondition::MenuRow,
                      .command = SwitcherCommand::OpenRowMenu },
 };
 
@@ -242,7 +242,9 @@ inline constexpr auto SwitcherKeyRows = std::array {
         case KeyCondition::NestedFilterEmpty: return empty && isNested(context);
         case KeyCondition::CaretEndOnDrillRow: return atEnd && onDrillRow;
         case KeyCondition::CaretStartNested: return atStart && isNested(context);
-        case KeyCondition::WorkspaceRow: return context.selected == SwitcherRowKind::Workspace;
+        case KeyCondition::MenuRow:
+            return context.selected == SwitcherRowKind::Workspace
+                   || context.selected == SwitcherRowKind::Daemon;
         case KeyCondition::NewWindowRow: return rule.newWindow == OpensInNewWindow::Yes;
     }
     return false;

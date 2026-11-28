@@ -755,6 +755,33 @@ TEST_CASE("a focus report bumps that connection's focus serial", "[vthost][host]
     CHECK(serialOf(h.client) == first);
 }
 
+TEST_CASE("a focus report that restates a window's focus takes no role from a window focused since",
+          "[vthost][host][focus]")
+{
+    // A focused window restates its focus whenever the panes it shows change. Such a report, still on its way
+    // over the window's own connection while the user focuses another window, is no focus move: it arrives
+    // after the other window's and must not take the raise role back.
+    auto h = HostHarness {};
+    h.host.noteClientAttached(&h.client);
+    h.host.noteClientAttached(&h.otherClient);
+    auto const serialOf = [&](StubClient const& client) {
+        auto const views = h.host.connectionViews();
+        return views[&client == &h.client ? 0 : 1].focusSerial;
+    };
+    h.host.noteFocus(h.client, vthost::proto::WindowFocus::Focused);
+    h.host.noteFocus(h.otherClient, vthost::proto::WindowFocus::Focused);
+    auto const other = serialOf(h.otherClient);
+    REQUIRE(other > serialOf(h.client));
+
+    h.host.noteFocus(h.client, vthost::proto::WindowFocus::Focused);
+    CHECK(serialOf(h.client) < other);
+
+    // Focused again after losing it, the window is focused last.
+    h.host.noteFocus(h.client, vthost::proto::WindowFocus::Unfocused);
+    h.host.noteFocus(h.client, vthost::proto::WindowFocus::Focused);
+    CHECK(serialOf(h.client) > other);
+}
+
 TEST_CASE("connectionViews lists the attached clients in attach order with what each selects",
           "[vthost][host][selection]")
 {
@@ -6317,3 +6344,104 @@ TEST_CASE("a hosted session of a build without Qt decodes PNG images with libpng
     CHECK(fragment->rasterizedImage().image().size()
           == vtbackend::ImageSize { vtbackend::Width(2), vtbackend::Height(2) });
 }
+
+// {{{ daemon attention
+namespace
+{
+/// Records what the host states of each pane's attention, in the order it does.
+class AttentionRecorder final: public vthost::SessionStreamEvents
+{
+  public:
+    void paneAttentionChanged(uint64_t session, vthost::PaneAttention const& attention) override
+    {
+        told.emplace_back(session, attention);
+    }
+
+    std::vector<std::pair<uint64_t, vthost::PaneAttention>> told;
+};
+
+/// Turns @p loop until nothing it was posted is left.
+void drainHost(core::net::EventLoop& loop)
+{
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 20))
+        std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+}
+} // namespace
+
+TEST_CASE("SessionHost.attention.watched_pane", "[vthost][host][daemon-attention]")
+{
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    auto const session = h.host.model().workspace(h.host.workspaceId())->activeTab()->rootPane()->session();
+    auto recorder = AttentionRecorder {};
+    h.host.subscribeStream(&recorder);
+    auto window = SelectingClient {};
+    window.id = vthost::ConnectionId { .endpoint = "test", .index = 1 };
+    h.host.noteClientAttached(&window);
+    auto const shown = std::vector { session.value };
+
+    SECTION("a bell outside the watched set is noted and told")
+    {
+        h.host.terminal(session)->writeToScreen("\a");
+        drainHost(h.loop);
+        REQUIRE_FALSE(recorder.told.empty());
+        CHECK(recorder.told.back().first == session.value);
+        CHECK(recorder.told.back().second.bell == vthost::proto::PaneBell::Rang);
+    }
+    SECTION("an unfocused window's shown pane is not watched")
+    {
+        h.host.noteShown(window.id, vthost::proto::WindowFocus::Unfocused, shown);
+        CHECK_FALSE(h.host.isWatched(session.value));
+    }
+    SECTION("a pane entering the watched set is cleared, and bells there mark nothing")
+    {
+        h.host.terminal(session)->writeToScreen("\a");
+        drainHost(h.loop);
+        REQUIRE(recorder.told.back().second.bell == vthost::proto::PaneBell::Rang);
+        auto const serial = h.host.attentionLastSerial();
+
+        h.host.noteShown(window.id, vthost::proto::WindowFocus::Focused, shown);
+        CHECK(h.host.isWatched(session.value));
+        CHECK(recorder.told.back().second.bell == vthost::proto::PaneBell::Silent);
+        auto const toldBefore = recorder.told.size();
+
+        h.host.terminal(session)->writeToScreen("\a");
+        drainHost(h.loop);
+        CHECK(recorder.told.size() == toldBefore);
+        CHECK(h.host.attentionLastSerial() == serial);
+    }
+    SECTION("a detached window's report stops watching")
+    {
+        h.host.noteShown(window.id, vthost::proto::WindowFocus::Focused, shown);
+        REQUIRE(h.host.isWatched(session.value));
+        h.host.noteClientDetached(&window, vthost::DetachKind::Closed);
+        CHECK_FALSE(h.host.isWatched(session.value));
+    }
+    SECTION("a later report replaces the connection's earlier one")
+    {
+        h.host.noteShown(window.id, vthost::proto::WindowFocus::Focused, shown);
+        h.host.noteShown(window.id, vthost::proto::WindowFocus::Focused, {});
+        CHECK_FALSE(h.host.isWatched(session.value));
+    }
+    SECTION("a MarkSeen of a session the host does not hold changes nothing")
+    {
+        auto const unknown = session.value + 1000;
+        CHECK(h.host.markPaneSeen(unknown, vthost::SeenSerials { .statusGeneration = 4 })
+              == vthost::AttentionChange::Unchanged);
+        CHECK(std::ranges::none_of(h.host.paneAttention(),
+                                   [unknown](auto const& entry) { return entry.first == unknown; }));
+    }
+    SECTION("a closed pane leaves the ledger")
+    {
+        REQUIRE(std::ranges::any_of(h.host.paneAttention(),
+                                    [&](auto const& entry) { return entry.first == session.value; }));
+        h.host.closeSession(session);
+        drainHost(h.loop);
+        CHECK(std::ranges::none_of(h.host.paneAttention(),
+                                   [&](auto const& entry) { return entry.first == session.value; }));
+    }
+
+    h.host.noteClientDetached(&window, vthost::DetachKind::Closed);
+    h.host.unsubscribeStream(&recorder);
+}
+// }}}

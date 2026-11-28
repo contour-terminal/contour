@@ -36,6 +36,7 @@ struct LocationChipInputs
     BarPresence band = BarPresence::Hidden;        ///< Whether the title band shows.
     BarCentre centre = BarCentre::Empty;           ///< What the band's middle holds.
     SidebarShown sidebar = SidebarShown::No;       ///< Whether the workspace sidebar shows.
+    std::string pendingDaemon {}; ///< The daemon a jump from the sidebar connects to; empty while none is.
 
     [[nodiscard]] bool operator==(LocationChipInputs const&) const = default;
 };
@@ -53,6 +54,10 @@ class LocationChipModel: public QObject
     /// Whether the chip names the workspace too: false for a host that is no daemon (a tmux attach), whose
     /// chip is the host alone, with its dot and state (DaemonHostingPolicies).
     Q_PROPERTY(bool workspaceShown READ workspaceShown NOTIFY surfaceChanged)
+    /// Whether the sidebar's title row carries the switcher control: a daemon's window, whose tree names the
+    /// daemon in a heading row (DaemonHostingPolicy::sidebar). A tmux window's chip opens the switcher
+    /// instead.
+    Q_PROPERTY(bool switcherControlShown READ switcherControlShown NOTIFY surfaceChanged)
     /// Whether the status dot (on the Terminal row, its glyph) shows: the model's call, hidden without a
     /// daemon.
     Q_PROPERTY(bool dotShown READ dotShown NOTIFY surfaceChanged)
@@ -73,6 +78,9 @@ class LocationChipModel: public QObject
     /// What a screen reader adds to the chip's name: the connection's state, another workspace's news, and
     /// whether the switcher is open.
     Q_PROPERTY(QString accessibleDescription READ accessibleDescription NOTIFY accessibilityChanged)
+    /// Whether a jump from the sidebar into another daemon is under way: the chip says where it goes, and a
+    /// click on it cancels the jump (the CancelSwitch action). A QML-facing bool, as QML switches on it.
+    Q_PROPERTY(bool jumpPending READ jumpPending NOTIFY surfaceChanged)
 
   public:
     /// @param inputs The chip's state at construction.
@@ -102,6 +110,7 @@ class LocationChipModel: public QObject
     [[nodiscard]] QString place() const;
     [[nodiscard]] QString daemonName() const;
     [[nodiscard]] bool workspaceShown() const noexcept;
+    [[nodiscard]] bool switcherControlShown() const noexcept;
     [[nodiscard]] bool dotShown() const noexcept { return _dotShown; }
     [[nodiscard]] int connectionState() const noexcept;
     [[nodiscard]] QString stateGlyph() const;
@@ -110,6 +119,7 @@ class LocationChipModel: public QObject
     [[nodiscard]] QString accessibleName() const;
     [[nodiscard]] QString daemonAccessibleName() const;
     [[nodiscard]] QString accessibleDescription() const;
+    [[nodiscard]] bool jumpPending() const noexcept { return !_inputs.pendingDaemon.empty(); }
 
   signals:
     /// Where the chip shows changed: the band, its centre, what serves the window or the sidebar's
@@ -122,6 +132,9 @@ class LocationChipModel: public QObject
     void accessibilityChanged();
 
   private:
+    /// @return The connection state the dot and the state's words show: a connection under way while a jump
+    ///         is, else the window's own link's.
+    [[nodiscard]] HostChipState shownState() const noexcept;
     /// @return The chip's texts at every fit step, as the QML list `steps` reads.
     [[nodiscard]] QVariantList buildSteps() const;
 

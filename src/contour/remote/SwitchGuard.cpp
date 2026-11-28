@@ -26,7 +26,9 @@ namespace
             request.window,
             request.target,
             session::SwitchMode::Switch,
-            landBy,
+            // The program is answered on the connection it asked on, which a switch to another daemon ends:
+            // told before the window leaves it.
+            session::SwitchWaiter { .landBy = landBy, .told = session::SwitchTold::BeforeLeaving },
             [done = std::move(done)](std::expected<vthost::proto::SwitchOutcome, std::string> outcome) {
                 if (outcome)
                     done(*outcome, {});

@@ -154,6 +154,7 @@ struct Fixture
     actions::ActionList ranActions; ///< What Settings ran as the app's own commands.
     std::optional<std::filesystem::path> chosenFile; ///< What the file dialog answers; nullopt cancels.
     std::vector<std::string> fileDialogTitles;       ///< The title of each file dialog asked for.
+    std::vector<std::string> editedHosts; ///< Each host Settings said its Show in sidebar switch changed for.
 
     explicit Fixture(std::string_view yaml,
                      std::shared_ptr<display::IGpuInventory const> gpus = nullptr,
@@ -199,6 +200,7 @@ struct Fixture
                         fileDialogTitles.push_back(title);
                         return chosenFile;
                     },
+                .hostListingEdited = [this](std::string const& host) { editedHosts.push_back(host); },
             },
             colorPreference);
         QObject::connect(controller.get(),
@@ -5473,7 +5475,7 @@ TEST_CASE("SettingsController: a host's rows follow its address", "[settings][ho
     fx.openSideHost("starfive", "url: ssh://me@starfive\nprofile: remote\n");
 
     CHECK(keysOf(fx.controller->hostFields())
-          == QStringList { "url", "transport", "remote_command", "profile" });
+          == QStringList { "url", "transport", "remote_command", "profile", "show_in_sidebar" });
     auto const command = rowWithKey(fx.controller->hostFields(), "remote_command");
     CHECK(command.value("placeholder").toString() == "contour daemon --stdio");
     CHECK(command.value("value").toString().isEmpty());
@@ -5486,7 +5488,8 @@ TEST_CASE("SettingsController: a host's rows follow its address", "[settings][ho
     // Typed over to a tls:// address, the SSH group gives way to TLS, and nothing else is required.
     REQUIRE(fx.controller->setHostField("url", "tls://starfive:7297").has_value());
     CHECK(keysOf(fx.controller->hostFields())
-          == QStringList { "url", "transport", "token_file", "tls_ca", "identity_file", "profile" });
+          == QStringList {
+              "url", "transport", "token_file", "tls_ca", "identity_file", "profile", "show_in_sidebar" });
     CHECK(rowWithKey(fx.controller->hostFields(), "transport").value("value").toString() == "TLS");
     CHECK(rowWithKey(fx.controller->hostFields(), "token_file").value("problem").toString().isEmpty());
     CHECK(rowWithKey(fx.controller->hostFields(), "tls_ca").value("placeholder").toString()
@@ -5682,3 +5685,53 @@ TEST_CASE("SettingsController: hosts are read-only under gui_config_locked", "[s
 }
 
 // }}}
+
+TEST_CASE("SettingsController: only the host's Show in sidebar switch clears its runtime sidebar choice",
+          "[settings][hosts]")
+{
+    auto fx = Fixture(HostsConfig);
+    fx.openSideHost("starfive", "url: ssh://me@starfive\n");
+    fx.editedHosts.clear();
+
+    // Any other field keeps what the sidebar was told at runtime.
+    fx.controller->commitHostField("profile", QStringLiteral("remote"));
+    fx.controller->commitHostField("url", QStringLiteral("ssh://me@starfive:2222"));
+    CHECK(fx.editedHosts.empty());
+
+    fx.controller->commitHostField("show_in_sidebar", false);
+    CHECK(fx.editedHosts == std::vector<std::string> { "starfive" });
+
+    // The switch set to what it already says changes nothing.
+    fx.editedHosts.clear();
+    fx.controller->commitHostField("show_in_sidebar", false);
+    CHECK(fx.editedHosts.empty());
+
+    // A draft with a problem stages nothing, so nobody is told.
+    fx.controller->commitHostField("url", QStringLiteral("starfive:22"));
+    fx.controller->commitHostField("show_in_sidebar", true);
+    CHECK(fx.editedHosts.empty());
+}
+
+TEST_CASE("SettingsController: show_in_sidebar is a switch on the host page", "[settings][hosts]")
+{
+    auto fx = Fixture(HostsConfig);
+    fx.openSideHost("starfive", "url: ssh://me@starfive\n");
+
+    auto const row = rowWithKey(fx.controller->hostFields(), "show_in_sidebar");
+    REQUIRE_FALSE(row.isEmpty());
+    CHECK(row.value("controlName").toString() == "switch");
+    CHECK(row.value("type").toString() == "bool");
+    CHECK(row.value("value").typeId() == QMetaType::Bool);
+    CHECK_FALSE(row.value("value").toBool());
+
+    REQUIRE(fx.controller->setHostField("show_in_sidebar", true).has_value());
+    CHECK(rowWithKey(fx.controller->hostFields(), "show_in_sidebar").value("value").toBool());
+    fx.fire();
+    CHECK(hostFileOf(fx, "starfive")->showInSidebar == "true");
+    CHECK(fx.cfg.hosts.value().at("starfive").showInSidebar);
+
+    REQUIRE(fx.controller->setHostField("show_in_sidebar", false).has_value());
+    fx.fire();
+    CHECK(hostFileOf(fx, "starfive")->showInSidebar == "false");
+    CHECK_FALSE(fx.cfg.hosts.value().at("starfive").showInSidebar);
+}

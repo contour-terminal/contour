@@ -181,12 +181,16 @@ constexpr auto OtherModifier = SwitcherKeyModifier::Other;
                   .context = chip(TopEmpty, SwitcherScope::OneDaemon),
                   .expected = Close },
         KeyCase { .key = Escape, .modifier = NoModifier, .context = TopEmpty, .expected = Close },
-        // Menu and Shift+F10 open a workspace row's menu.
+        // Menu and Shift+F10 open a workspace row's menu, and a daemon row's (Show in Sidebar).
         KeyCase { .key = Menu, .modifier = NoModifier, .context = TopEmpty, .expected = OpenRowMenu },
         KeyCase { .key = F10, .modifier = Shift, .context = TopEmpty, .expected = OpenRowMenu },
         KeyCase { .key = F10,
                   .modifier = Shift,
                   .context = on(TopEmpty, SwitcherRowKind::Daemon),
+                  .expected = OpenRowMenu },
+        KeyCase { .key = Menu,
+                  .modifier = NoModifier,
+                  .context = on(TopEmpty, SwitcherRowKind::NewDaemon),
                   .expected = None },
         KeyCase { .key = F10, .modifier = NoModifier, .context = TopEmpty, .expected = None },
         // Nothing selected: no row's menu opens, and Shift+Return is Return.

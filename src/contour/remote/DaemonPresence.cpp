@@ -1,0 +1,994 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <contour/Logging.hpp>
+#include <contour/remote/DaemonPresence.hpp>
+#include <contour/remote/ElsewhereRaise.hpp>
+#include <contour/remote/NativeController.hpp>
+#include <contour/remote/WindowWire.hpp>
+#include <contour/window/TaskbarAttentionTally.hpp>
+
+#include <core/Assert.hpp>
+
+#include <QtCore/QObject>
+
+#include <algorithm>
+#include <format>
+#include <iterator>
+#include <ranges>
+#include <set>
+#include <tuple>
+#include <utility>
+
+namespace contour::remote
+{
+
+namespace
+{
+    using vthost::client::ConnectionState;
+    using window::DaemonLinkState;
+
+    /// @return Whether a connection in @p state has given up and dials nothing more by itself.
+    [[nodiscard]] bool hasGivenUp(ConnectionState state) noexcept
+    {
+        return state == ConnectionState::Failed || state == ConnectionState::Refused;
+    }
+
+    /// @return The tab @p tab of @p directory; null for none.
+    [[nodiscard]] window::DirectoryTab const* tabOf(window::WorkspaceDirectory const& directory,
+                                                    window::TabRef tab)
+    {
+        auto const workspace =
+            std::ranges::find(directory.workspaces, tab.workspace, &window::DirectoryWorkspace::id);
+        if (workspace == directory.workspaces.end())
+            return nullptr;
+        auto const found = std::ranges::find(workspace->tabs, tab.tab, &window::DirectoryTab::id);
+        return found != workspace->tabs.end() ? &*found : nullptr;
+    }
+
+    /// @return The daemons @p links are on.
+    [[nodiscard]] std::set<window::DaemonRef> windowsOnOf(std::vector<WindowLinkView> const& links)
+    {
+        return std::ranges::to<std::set>(links | std::views::transform(&WindowLinkView::daemon));
+    }
+
+    /// @return Whether @p daemon is of @p kind.
+    [[nodiscard]] bool isOfKind(window::DaemonRef const& daemon, window::DaemonRefKind kind)
+    {
+        auto const parsed = window::parseDaemonRef(daemon);
+        return parsed && parsed->first == kind;
+    }
+
+    /// @return Whether a listing choice can be kept for @p daemon: not for a `link:` one, which is named by a
+    ///         link of this run, so a choice kept for it would name another daemon in the next one.
+    [[nodiscard]] bool keepsListingChoice(window::DaemonRef const& daemon)
+    {
+        return window::parseDaemonRef(daemon) && !isOfKind(daemon, window::DaemonRefKind::Link);
+    }
+
+    /// @return The session the daemon names tab @p tab of @p directory by (it takes any of the tab's); none
+    ///         for a tab that is gone or has no session.
+    [[nodiscard]] std::optional<uint64_t> sessionNamingTab(window::WorkspaceDirectory const& directory,
+                                                           window::TabRef tab)
+    {
+        if (auto const* const found = tabOf(directory, tab); found != nullptr && !found->panes.empty())
+            return found->panes.front().key.value;
+        return std::nullopt;
+    }
+} // namespace
+
+std::string daemonNameOf(window::DaemonRef const& daemon)
+{
+    auto const parsed = window::parseDaemonRef(daemon);
+    if (!parsed)
+        return daemon.value;
+    auto const& [kind, name] = *parsed;
+    switch (kind)
+    {
+        case window::DaemonRefKind::Local:
+        case window::DaemonRefKind::Host: return std::string { name };
+        case window::DaemonRefKind::Link: break;
+    }
+    return std::format("link {}", name);
+}
+
+std::vector<WindowLinkView> mergedLinks(std::vector<WindowLinkView> links)
+{
+    auto const isLink = [](window::DaemonRef const& daemon) {
+        return isOfKind(daemon, window::DaemonRefKind::Link);
+    };
+    // Decided before any is renamed: the name a run goes by is its first link's that is not a `link:` one,
+    // else the least `link:` name.
+    auto names = std::map<window::DaemonInstance, window::DaemonRef> {};
+    for (auto const& link: links)
+    {
+        if (link.instance == window::DaemonInstance {})
+            continue; // the daemon has not said which run it is
+        auto const [named, inserted] = names.try_emplace(link.instance, link.daemon);
+        if (!inserted && isLink(named->second) && (!isLink(link.daemon) || link.daemon < named->second))
+            named->second = link.daemon;
+    }
+    for (auto& link: links)
+        if (isLink(link.daemon))
+            if (auto const named = names.find(link.instance); named != names.end())
+                link.daemon = named->second;
+    return links;
+}
+
+NativeController::Config observerConfigOf(NativeController::Config config,
+                                          vthost::client::BackoffSchedule backoff)
+{
+    config.role = vthost::proto::ConnectionRole::Observe;
+    config.backoff = backoff;
+    config.resumeFallback = NativeController::ResumeFallback::Nothing;
+    config.switchRequests = NativeController::SwitchRequests::Answered;
+    return config;
+}
+
+DaemonPresence::DaemonPresence(PresenceDeps deps): _deps(std::move(deps))
+{
+}
+
+DaemonPresence::~DaemonPresence() = default;
+
+void DaemonPresence::settingsChanged()
+{
+    _settings.reset();
+    refresh();
+}
+
+void DaemonPresence::shutdown()
+{
+    _lifecycle = Lifecycle::ShutDown;
+    _listed.clear();
+    for (auto& observer: _observers | std::views::values)
+        detach(observer);
+    _observers.clear();
+    // Each was asked to stop above, so their detaches run side by side: waited for here, one after another.
+    for (auto const& controller: std::exchange(_retired, {}))
+        controller->stop();
+    notify();
+}
+
+ListingSettings const& DaemonPresence::settings()
+{
+    if (!_settings)
+        _settings = _deps.settings();
+    return *_settings;
+}
+
+std::vector<WindowLinkView> DaemonPresence::windowLinks() const
+{
+    return mergedLinks(_deps.windowLinks());
+}
+
+void DaemonPresence::refresh()
+{
+    if (_lifecycle == Lifecycle::ShutDown)
+        return;
+    // Taken before reconcile(): an observer it dials now is not dialled again by the discovery it asks.
+    if (_deps.visibility() == AppVisibility::Visible)
+        _stuckAtRefresh = stuckLocals();
+    startDiscovery();
+    reconcile();
+    if (_deps.visibility() == AppVisibility::Visible)
+    {
+        // What was not redialled while no window was visible is now.
+        for (auto& [daemon, observer]: _observers)
+            if (observer.controller && hasGivenUp(observer.controller->connectionState())
+                && isRetryable(observer))
+                scheduleRedial(daemon, observer);
+        armRefresh();
+    }
+    notify();
+}
+
+void DaemonPresence::linkSetChanged()
+{
+    // A link just started is not attached yet: its daemon's observer feeds the section until it is, and
+    // linkChanged() stops it once the link's windows are on the daemon.
+    reconcile();
+    notify();
+}
+
+void DaemonPresence::linkChanged()
+{
+    // Most changes are a link's directory: what is listed is decided again only when the daemons the links
+    // are on changed, which is what the listing depends on.
+    auto const links = windowLinks();
+    if (windowsOnOf(links) != _windowsOn)
+        reconcile(links);
+    notify();
+}
+
+void DaemonPresence::processFocusChanged(window::WindowFocusState focus)
+{
+    _focus = wireFocusOf(focus);
+    for (auto const& observer: _observers | std::views::values)
+        announceFocus(observer);
+}
+
+std::vector<cli::DiscoveredDaemon> DaemonPresence::localDaemons() const
+{
+    return _discovered.value_or(std::vector<cli::DiscoveredDaemon> {});
+}
+
+std::vector<window::DaemonRef> DaemonPresence::listed() const
+{
+    return std::ranges::to<std::vector>(_listed | std::views::transform(&ListedDaemon::daemon));
+}
+
+Adoption DaemonPresence::adoptObserver(window::DaemonRef const& daemon, window::DaemonInstance instance)
+{
+    auto const found = _observers.find(daemon);
+    auto const listed = std::ranges::find(_listed, daemon, &ListedDaemon::daemon);
+    if (found == _observers.end() || !found->second.controller
+        || found->second.controller->connectionState() != ConnectionState::Connected
+        || listed == _listed.end())
+        return {};
+    // An observer of another run than the window's target names would show another daemon's workspace ids.
+    auto const running = window::DaemonInstance { found->second.controller->daemonInstance().value_or(0) };
+    if (instance != window::DaemonInstance {} && running != instance)
+        return {};
+    // What the section reads until the window's link feeds it: the run and workspaces the observer holds, so
+    // that the rows stay, and the jump's marks with them; Connecting, as the jump is.
+    auto lastKnown = sectionOf(*listed, windowLinks());
+    lastKnown.state = DaemonLinkState::Connecting;
+    lastKnown.reason.clear();
+    auto adopted = std::move(found->second.controller);
+    // Its receiver goes with the entry: nothing of the presence listens to it any more.
+    _observers.erase(found);
+    return Adoption { .controller = std::move(adopted),
+                      .handOff = markHandOff(daemon, HandOff::Adopting, std::move(lastKnown)) };
+}
+
+HandOffId DaemonPresence::expectGiveBack(window::DaemonRef const& daemon, DaemonLinkId from)
+{
+    attachLog()("presence: {} comes back from link {}", daemon.value, from.value);
+    // Read while the leaving link still feeds it: what the section shows until the connection is back.
+    auto lastKnown = listedSection(daemon).value_or(window::DaemonSection {});
+    lastKnown.daemon = daemon;
+    lastKnown.shownElsewhere.clear();
+    return markHandOff(daemon, HandOff::Returning, std::move(lastKnown));
+}
+
+HandOffId DaemonPresence::markHandOff(window::DaemonRef const& daemon,
+                                      HandOff kind,
+                                      window::DaemonSection lastKnown)
+{
+    auto const id = HandOffId { _nextHandOff++ };
+    _handOffs.insert_or_assign(
+        id, HandOffMark { .daemon = daemon, .kind = kind, .lastKnown = std::move(lastKnown) });
+    return id;
+}
+
+DaemonPresence::HandOffMark const* DaemonPresence::handOffOf(window::DaemonRef const& daemon) const
+{
+    // The newest: the one drawn last speaks for the connection as it stands now.
+    auto const marks = _handOffs | std::views::values | std::views::reverse;
+    auto const found = std::ranges::find(marks, daemon, &HandOffMark::daemon);
+    return found != marks.end() ? &*found : nullptr;
+}
+
+ObserverWanted DaemonPresence::wantsObserver(window::DaemonRef const& daemon, DaemonLinkId leaving) const
+{
+    // A `link:` daemon has no observer: only the window on it reaches it (observerTransport()).
+    if (!isListed(daemon) || isOfKind(daemon, window::DaemonRefKind::Link))
+        return ObserverWanted::No;
+    auto const others = windowLinks();
+    auto const otherIsOn = std::ranges::any_of(
+        others, [&](WindowLinkView const& link) { return link.daemon == daemon && link.link != leaving; });
+    return otherIsOn ? ObserverWanted::No : ObserverWanted::Yes;
+}
+
+std::optional<window::DaemonSection> DaemonPresence::listedSection(window::DaemonRef const& daemon) const
+{
+    auto const found = std::ranges::find(_listed, daemon, &ListedDaemon::daemon);
+    if (found == _listed.end())
+        return std::nullopt;
+    return sectionOf(*found, windowLinks());
+}
+
+void DaemonPresence::giveBack(window::DaemonRef const& daemon,
+                              HandOffId handOff,
+                              std::unique_ptr<NativeController> demoted)
+{
+    // Whatever comes back, the window no longer holds the daemon's connection in this hand-over.
+    auto const cleared = _handOffs.erase(handOff) != 0;
+    if (!demoted)
+    {
+        // Nothing came back: the daemon is observed again as any listed one is -- decided again only when
+        // this hand-over was what kept it from that. A link that ends otherwise is a change of the link set,
+        // decided again there; one stopped as the application quits dials nothing.
+        if (cleared)
+        {
+            reconcile();
+            notify();
+        }
+        return;
+    }
+    // Stopping it, or keeping it as an observer, would end the panes still bound under their window.
+    Require(!demoted->bindsPanes());
+    auto const links = windowLinks();
+    auto const windowIsOn = std::ranges::contains(links, daemon, &WindowLinkView::daemon);
+    auto const found = _observers.find(daemon);
+    auto const hasObserver = found != _observers.end() && found->second.controller != nullptr;
+    auto const keep = _lifecycle == Lifecycle::Running
+                      && demoted->connectionState() == ConnectionState::Connected
+                      && demoted->role() == vthost::proto::ConnectionRole::Observe && !windowIsOn
+                      && isListed(daemon) && !hasObserver;
+    // From now on it dials as any observer does: asking no one, starting no daemon, and recording why a
+    // dial failed.
+    auto recorder = std::shared_ptr<FailureRecordingTransport> {};
+    if (keep)
+        if (auto transport = _deps.observerTransport(daemon))
+            recorder = std::make_shared<FailureRecordingTransport>(*std::move(transport));
+    if (!recorder || !demoted->demote(recorder))
+    {
+        retire(std::move(demoted));
+        return;
+    }
+    auto& observer = _observers[daemon];
+    observer = Observer {};
+    observer.controller = std::move(demoted);
+    observer.recorder = std::move(recorder);
+    watch(daemon, observer);
+    announceFocus(observer);
+    notify();
+}
+
+std::vector<window::DaemonSection> DaemonPresence::sections() const
+{
+    auto const links = windowLinks();
+    return std::ranges::to<std::vector>(_listed | std::views::transform([&](ListedDaemon const& daemon) {
+                                            return sectionOf(daemon, links);
+                                        }));
+}
+
+window::DaemonSection DaemonPresence::sectionOf(ListedDaemon const& daemon,
+                                                std::vector<WindowLinkView> const& links) const
+{
+    auto section = window::DaemonSection {};
+    section.daemon = daemon.daemon;
+    section.locality = daemon.locality;
+    section.name = daemonNameOf(daemon.daemon);
+
+    if (auto const first = std::ranges::find(links, daemon.daemon, &WindowLinkView::daemon);
+        first != links.end())
+    {
+        // Any of the window links: they read the same daemon.
+        section.instance = first->instance;
+        section.name = first->name.empty() ? section.name : first->name;
+        section.state = first->state;
+        section.directory = first->directory;
+        section.feed = window::SectionFeed::WindowLink;
+        for (auto const& link: links)
+            if (link.daemon == daemon.daemon)
+                section.shownElsewhere.insert(link.shownWorkspaces.begin(), link.shownWorkspaces.end());
+    }
+    else if (auto const found = _observers.find(daemon.daemon); found != _observers.end())
+    {
+        auto const& observer = found->second;
+        section.feed = window::SectionFeed::Observer;
+        if (observer.refusal)
+        {
+            section.state = observer.refusal->state;
+            section.reason = observer.refusal->reason;
+        }
+        else if (auto const* const controller = observer.controller.get())
+        {
+            section.instance = window::DaemonInstance { controller->daemonInstance().value_or(0) };
+            section.directory = controller->directory();
+            auto const lastFailure = observer.recorder ? observer.recorder->lastFailure()
+                                                       : std::optional<vthost::TransportErrorKind> {};
+            section.state =
+                linkStateOf(controller->connectionState(), lastFailure, controller->observeSupport());
+            // A dial that may pass is tried again: the row says so rather than that it failed.
+            if (hasGivenUp(controller->connectionState()) && isRetryable(observer))
+                section.state = DaemonLinkState::Reconnecting;
+            else if (section.state == DaemonLinkState::Failed || section.state == DaemonLinkState::NeedsInput)
+                section.reason = controller->failure();
+        }
+    }
+    else if (auto const* const mark = handOffOf(daemon.daemon))
+    {
+        // A window holds the daemon's connection on its way in or out: no link and no observer feeds the
+        // section meanwhile, so it reads what was last known, keeping its rows and the run they are of.
+        section.instance = mark->lastKnown.instance;
+        section.name = mark->lastKnown.name.empty() ? section.name : mark->lastKnown.name;
+        section.state = mark->lastKnown.state;
+        section.reason = mark->lastKnown.reason;
+        section.directory = mark->lastKnown.directory;
+        // The window's switch holds the connection: its row offers nothing this process could end or seek
+        // again, as for any window's link (a Cancel here would end no connect, a Connect would dial twice).
+        section.feed = window::SectionFeed::WindowLink;
+    }
+
+    // A local daemon discovery no longer finds serving is not running, unless a live link knows better.
+    if (daemon.locality == window::DaemonLocality::Local && _discovered && !isRunningLocal(daemon.daemon))
+        section.state = window::precedenceOf(section.state, DaemonLinkState::NotRunning);
+    return section;
+}
+
+void DaemonPresence::connect(window::DaemonRef const& daemon, vtworkspace::WorkspaceId askingWindow)
+{
+    // A daemon whose connection a window holds on its way in or out is connected already: a second dial would
+    // only be stopped again, after it may have asked for a password.
+    if (!isListed(daemon) || _windowsOn.contains(daemon) || handOffOf(daemon) != nullptr)
+        return;
+    if (auto const parsed = window::parseDaemonRef(daemon);
+        !parsed || parsed->first == window::DaemonRefKind::Link)
+        return;
+    auto& observer = _observers[daemon];
+    observer.redials = 0;
+    observer.hold = Hold::None;
+    _awaitingStart.erase(daemon);
+    auto transport = _deps.interactiveTransport(daemon, askingWindow);
+    if (transport)
+        launch(daemon, observer, *std::move(transport));
+    else
+        refuse(observer, std::move(transport.error()));
+    notify();
+}
+
+void DaemonPresence::disconnect(window::DaemonRef const& daemon)
+{
+    auto const found = _observers.find(daemon);
+    if (found == _observers.end() || !found->second.controller
+        || found->second.controller->connectionState() != ConnectionState::Connecting)
+        return;
+    // The observer stays, holding nothing: the section reads Not connected, and neither a redial nor a
+    // refresh dials it again; connect() does.
+    auto& observer = found->second;
+    detach(observer);
+    observer.recorder.reset();
+    observer.redial = RedialState::Idle;
+    observer.liveness = LocalLiveness::Unknown;
+    observer.hold = Hold::UserDisconnected;
+    notify();
+}
+
+void DaemonPresence::start(window::DaemonRef const& daemon)
+{
+    auto const parsed = window::parseDaemonRef(daemon);
+    if (!parsed || parsed->first != window::DaemonRefKind::Local || !isListed(daemon)
+        || handOffOf(daemon) != nullptr)
+        return;
+    // Dialled afresh once discovery finds it serving: not before, which would find it absent.
+    if (auto const found = _observers.find(daemon); found != _observers.end())
+    {
+        retire(std::move(found->second.controller));
+        _observers.erase(found);
+    }
+    _awaitingStart.insert(daemon);
+    _deps.startDaemon(daemon);
+    notify();
+}
+
+void DaemonPresence::remove(window::DaemonRef const& daemon)
+{
+    _removed.insert(daemon.value);
+    reconcile();
+    notify();
+}
+
+void DaemonPresence::setListed(window::DaemonRef const& daemon, window::SidebarListingChoice choice)
+{
+    // A `link:` daemon's window being on it lists it anyway.
+    if (!keepsListingChoice(daemon))
+        return;
+    // A Show the configuration makes already is not written: Undo of a Hide then leaves no choice behind.
+    auto const configured = configuredListing(daemon);
+    _deps.updateListing([&](config::SidebarDaemons& daemons) {
+        switch (choice)
+        {
+            case window::SidebarListingChoice::Listed:
+                if (configured == window::SidebarListingChoice::Unlisted)
+                    daemons.shown.insert(daemon.value);
+                daemons.hidden.erase(daemon.value);
+                break;
+            case window::SidebarListingChoice::Unlisted:
+                // The mirror: a Hide the configuration makes already is not written either, so showing and
+                // hiding such a host again leaves no Hide -- and no Hidden row -- behind.
+                if (configured == window::SidebarListingChoice::Listed)
+                    daemons.hidden.insert(daemon.value);
+                daemons.shown.erase(daemon.value);
+                break;
+        }
+    });
+    // Listing a daemon takes back its Remove of this run: it is the user's newer word on it.
+    if (choice == window::SidebarListingChoice::Listed)
+        _removed.erase(daemon.value);
+    _settings.reset();
+    reconcile();
+    notify();
+}
+
+std::vector<window::HiddenDaemon> DaemonPresence::hiddenDaemons() const
+{
+    return _hidden;
+}
+
+std::optional<window::SidebarListingChoice> DaemonPresence::listingOf(window::DaemonRef const& daemon)
+{
+    if (!keepsListingChoice(daemon) || _windowsOn.contains(daemon))
+        return std::nullopt;
+    // What was chosen, not what is shown: with no window on a daemon nothing is shown, yet the choices stand.
+    if (_removed.contains(daemon.value))
+        return window::SidebarListingChoice::Unlisted;
+    return chosenListing(settings(), daemon, configuredListing(daemon));
+}
+
+window::SidebarListingChoice DaemonPresence::configuredListing(window::DaemonRef const& daemon)
+{
+    auto const parsed = window::parseDaemonRef(daemon);
+    if (!parsed || parsed->first == window::DaemonRefKind::Local)
+        return window::SidebarListingChoice::Listed;
+    auto const& hosts = settings().hosts;
+    auto const host =
+        std::ranges::find_if(hosts, [&](auto const& entry) { return entry.first == parsed->second; });
+    return host != hosts.end() ? host->second : window::SidebarListingChoice::Unlisted;
+}
+
+void DaemonPresence::renameWorkspace(window::DaemonRef const& daemon,
+                                     window::DaemonInstance instance,
+                                     uint64_t workspace,
+                                     std::string name)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        std::ignore = controller->requestRemoteRenameWorkspace(workspace, name);
+}
+
+void DaemonPresence::renameTab(window::DaemonRef const& daemon,
+                               window::DaemonInstance instance,
+                               window::TabRef tab,
+                               std::string name)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        if (auto const session = sessionNamingTab(controller->directory(), tab))
+            std::ignore = controller->requestRemoteTabRename(*session, name);
+}
+
+void DaemonPresence::setWorkspaceColor(window::DaemonRef const& daemon,
+                                       window::DaemonInstance instance,
+                                       uint64_t workspace,
+                                       std::optional<vtbackend::RGBColor> color)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        std::ignore = controller->requestRemoteWorkspaceColor(workspace, color);
+}
+
+void DaemonPresence::closeTab(window::DaemonRef const& daemon,
+                              window::DaemonInstance instance,
+                              window::TabRef tab)
+{
+    auto* const controller = controllerFor(daemon, instance);
+    if (controller == nullptr)
+        return;
+    auto const directory = controller->directory();
+    if (auto const* const found = tabOf(directory, tab))
+        for (auto const& pane: found->panes)
+            controller->requestClosePane(pane.key.value);
+}
+
+void DaemonPresence::setTabColor(window::DaemonRef const& daemon,
+                                 window::DaemonInstance instance,
+                                 window::TabRef tab,
+                                 std::optional<vtbackend::RGBColor> color)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        if (auto const session = sessionNamingTab(controller->directory(), tab))
+            std::ignore = controller->requestRemoteTabColor(*session, color);
+}
+
+void DaemonPresence::closePane(window::DaemonRef const& daemon,
+                               window::DaemonInstance instance,
+                               window::PaneKey pane)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        controller->requestClosePane(pane.value);
+}
+
+void DaemonPresence::closeWorkspace(window::DaemonRef const& daemon,
+                                    window::DaemonInstance instance,
+                                    uint64_t workspace)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        std::ignore = controller->requestRemoteCloseWorkspace(workspace);
+}
+
+void DaemonPresence::markSeen(window::DaemonRef const& daemon,
+                              window::DaemonInstance instance,
+                              window::PaneKey pane,
+                              window::PaneSeen seen)
+{
+    if (auto* const controller = controllerFor(daemon, instance))
+        controller->markSeen(pane.value, wireSeenOf(seen));
+}
+
+window::SectionsSubscription DaemonPresence::onChanged(std::function<void()> changed)
+{
+    return _subscribers.subscribe(std::move(changed));
+}
+
+void DaemonPresence::reconcile()
+{
+    reconcile(windowLinks());
+}
+
+void DaemonPresence::reconcile(std::vector<WindowLinkView> const& links)
+{
+    if (_lifecycle == Lifecycle::ShutDown)
+        return;
+    _windowsOn = windowsOnOf(links);
+    // A window that adopted a daemon's observer and is attached feeds its section now: the hand-over is done.
+    std::erase_if(_handOffs, [this](auto const& entry) {
+        return entry.second.kind == HandOff::Adopting && _windowsOn.contains(entry.second.daemon);
+    });
+    if (_windowsOn.empty())
+    {
+        // With no window on a daemon nothing is listed: the settings are not even read.
+        _listed.clear();
+        _hidden.clear();
+    }
+    else
+    {
+        auto running = std::vector<std::string> {};
+        if (_discovered)
+            std::ranges::transform(*_discovered, std::back_inserter(running), &cli::DiscoveredDaemon::label);
+        auto const inputs = PresenceInputs {
+            .runningLocal = std::move(running),
+            .seenLocalThisRun = _seenLocal,
+            .settings = settings(),
+            .removedThisRun = _removed,
+            .windowsOn = std::ranges::to<std::vector>(_windowsOn),
+        };
+        _listed = listedDaemons(inputs);
+        _hidden = remote::hiddenDaemons(inputs, _listed);
+    }
+    for (auto const& daemon: _listed)
+        if (auto const parsed = window::parseDaemonRef(daemon.daemon);
+            parsed && parsed->first == window::DaemonRefKind::Local)
+            _seenLocal.emplace(parsed->second);
+
+    // An observer is wanted only for a listed daemon no window link is on. One a hand-over will bring back
+    // counts as wanted: none is started meanwhile, but one already there -- an earlier link's connection,
+    // given back while a later one is still on its way -- stays, rather than being retired to be dialled
+    // again.
+    auto const wanted = [&](window::DaemonRef const& daemon) {
+        return isListed(daemon) && !_windowsOn.contains(daemon) && !_awaitingStart.contains(daemon);
+    };
+    auto const unwanted = std::ranges::to<std::vector>(
+        _observers | std::views::keys
+        | std::views::filter([&](window::DaemonRef const& daemon) { return !wanted(daemon); }));
+    for (auto const& daemon: unwanted)
+    {
+        retire(std::move(_observers.at(daemon).controller));
+        _observers.erase(daemon);
+    }
+    for (auto const& daemon: _listed)
+        if (wanted(daemon.daemon) && handOffOf(daemon.daemon) == nullptr
+            && !_observers.contains(daemon.daemon))
+            startObserver(daemon.daemon, _observers[daemon.daemon]);
+    pruneRetired();
+}
+
+void DaemonPresence::startObserver(window::DaemonRef const& daemon, Observer& observer)
+{
+    auto transport = _deps.observerTransport(daemon);
+    if (transport)
+        launch(daemon, observer, *std::move(transport));
+    else
+        refuse(observer, std::move(transport.error()));
+}
+
+void DaemonPresence::refuse(Observer& observer, DialRefusal refusal)
+{
+    detach(observer);
+    observer.refusal = std::move(refusal);
+    observer.liveness = LocalLiveness::Unknown;
+}
+
+void DaemonPresence::announceFocus(Observer const& observer) const
+{
+    if (_focus && observer.controller)
+        observer.controller->reportShown(*_focus, {});
+}
+
+void DaemonPresence::launch(window::DaemonRef const& daemon,
+                            Observer& observer,
+                            std::shared_ptr<vthost::ITransportFactory> transport)
+{
+    detach(observer);
+    if (_lifecycle == Lifecycle::ShutDown)
+        return;
+    observer.recorder = std::make_shared<FailureRecordingTransport>(std::move(transport));
+    observer.controller = _deps.makeObserver(daemon, observer.recorder, _deps.redialBackoff);
+    if (!observer.controller)
+    {
+        observer.refusal =
+            DialRefusal { .state = DaemonLinkState::Failed, .reason = "no observer could be made" };
+        return;
+    }
+    observer.refusal.reset();
+    observer.redial = RedialState::Idle;
+    observer.liveness = LocalLiveness::Unknown;
+    watch(daemon, observer);
+    announceFocus(observer);
+    observer.controller->startConnecting();
+}
+
+void DaemonPresence::watch(window::DaemonRef const& daemon, Observer& observer)
+{
+    observer.receiver = std::make_unique<QObject>();
+    auto* const controller = observer.controller.get();
+    QObject::connect(
+        controller,
+        &NativeController::connectionStateChanged,
+        observer.receiver.get(),
+        [this, daemon, controller] { observerStateChanged(daemon, controller); },
+        Qt::QueuedConnection);
+    QObject::connect(
+        controller,
+        &NativeController::directoryChanged,
+        observer.receiver.get(),
+        [this, daemon, controller] {
+            raiseFor(daemon, *controller);
+            notify();
+        },
+        Qt::QueuedConnection);
+    // Its daemon's waiting tabs count in this process only while it holds the raise role (notify()).
+    QObject::connect(
+        controller, &NativeController::raiseRoleChanged, observer.receiver.get(), [this] { notify(); });
+}
+
+void DaemonPresence::observerStateChanged(window::DaemonRef const& daemon, NativeController const* controller)
+{
+    auto const found = _observers.find(daemon);
+    if (found == _observers.end() || found->second.controller.get() != controller)
+        return;
+    auto& observer = found->second;
+    auto const state = controller->connectionState();
+    if (state == ConnectionState::Connected)
+    {
+        observer.redials = 0;
+        observer.liveness = LocalLiveness::Served;
+    }
+    else if (hasGivenUp(state))
+    {
+        // Gone after it served: what a discovery that finds it serving again answers, however soon that is.
+        if (observer.liveness == LocalLiveness::Served && observer.recorder
+            && observer.recorder->lastFailure() == vthost::TransportErrorKind::DaemonAbsent)
+            observer.liveness = LocalLiveness::GaveUpAbsent;
+        if (isRetryable(observer))
+            scheduleRedial(daemon, observer);
+        // A local daemon whose observer gave up may have stopped: a discovery says so soon, and a later one
+        // that finds it serving again dials it once more.
+        if (isOfKind(daemon, window::DaemonRefKind::Local))
+            startDiscovery();
+    }
+    notify();
+}
+
+void DaemonPresence::scheduleRedial(window::DaemonRef const& daemon, Observer& observer)
+{
+    // While no window is visible nothing is redialled: refresh() schedules it once one is.
+    if (observer.redial == RedialState::Scheduled || _deps.visibility() != AppVisibility::Visible)
+        return;
+    observer.redial = RedialState::Scheduled;
+    auto const delay = vthost::client::backoffDelay(_deps.redialBackoff, ++observer.redials);
+    _deps.refreshTimer(
+        delay, [alive = std::weak_ptr { _alive }, this, daemon, controller = observer.controller.get()] {
+            if (alive.lock())
+                redial(daemon, controller);
+        });
+}
+
+void DaemonPresence::redial(window::DaemonRef const& daemon, NativeController const* controller)
+{
+    auto const found = _observers.find(daemon);
+    if (found == _observers.end() || found->second.controller.get() != controller
+        || !hasGivenUp(controller->connectionState()))
+        return;
+    startObserver(daemon, found->second);
+    notify();
+}
+
+void DaemonPresence::detach(Observer& observer)
+{
+    observer.receiver.reset();
+    retire(std::move(observer.controller));
+}
+
+void DaemonPresence::retire(std::unique_ptr<NativeController> controller)
+{
+    if (!controller)
+        return;
+    controller->stopInBackground([] {});
+    _retired.push_back(std::move(controller));
+    pruneRetired();
+}
+
+void DaemonPresence::pruneRetired()
+{
+    std::erase_if(_retired, [](auto const& controller) {
+        return !controller->isWindingDown() && !controller->bindsPanes();
+    });
+}
+
+void DaemonPresence::startDiscovery()
+{
+    if (_discovery == Discovery::Running)
+        return;
+    _discovery = Discovery::Running;
+    // Off the GUI thread: each socket is probed.
+    _jobs.run([discovery = _deps.discovery] { return discovery->discover(); },
+              [this](std::vector<cli::DiscoveredDaemon> found) {
+                  _discovery = Discovery::Idle;
+                  // A daemon start() started is dialled once it is found serving.
+                  std::erase_if(_awaitingStart, [&](window::DaemonRef const& daemon) {
+                      auto const parsed = window::parseDaemonRef(daemon);
+                      return parsed
+                             && std::ranges::contains(found, parsed->second, &cli::DiscoveredDaemon::label);
+                  });
+                  _discovered = std::move(found);
+                  // Only a periodic refresh's: the discovery a giving-up observer asks for (watch()) would
+                  // otherwise dial it again at once, and so on.
+                  auto const stuck = std::exchange(_stuckAtRefresh, {});
+                  reconcile();
+                  redialRestartedLocals(stuck);
+                  notify();
+              });
+}
+
+void DaemonPresence::armRefresh()
+{
+    if (_refreshArm == RefreshArm::Armed)
+        return;
+    _refreshArm = RefreshArm::Armed;
+    _deps.refreshTimer(PresenceRefreshInterval, [alive = std::weak_ptr { _alive }, this] {
+        if (!alive.lock())
+            return;
+        _refreshArm = RefreshArm::Idle;
+        // While no window is visible nothing is refreshed, and nothing re-armed: refresh() arms it again.
+        // The settings are read again: another process may have changed the listing choices.
+        if (_deps.visibility() == AppVisibility::Visible)
+            settingsChanged();
+    });
+}
+
+void DaemonPresence::raiseFor(window::DaemonRef const& daemon, NativeController& controller) const
+{
+    // Handed out only while the daemon has no viewer and picked this process's observer (spec §2): each once,
+    // across every process observing the daemon.
+    auto const raised = controller.takeRaised();
+    if (raised.empty())
+        return;
+    auto const notices = _deps.elsewhereNotices();
+    auto const raising =
+        RaisingDaemon { .daemon = daemon,
+                        .instance = window::DaemonInstance { controller.daemonInstance().value_or(0) },
+                        .name = daemonNameOf(daemon) };
+    if (raiseElsewhere(raised, controller.directory(), notices, raising) == RingBell::Yes)
+        _deps.ringLastFocusedWindow(notices.bell);
+}
+
+void DaemonPresence::recountObservedWaiting()
+{
+    // A daemon a window is on has no observer: its window counts its tabs. One observed by several processes
+    // counts in the one that raises for it, as its alerts come from there (spec §8).
+    auto waiting = 0u;
+    for (auto const& observer: _observers | std::views::values)
+        if (observer.controller && observer.controller->raiseRole() == vthost::proto::RaiseRole::Raise)
+            waiting += window::tabsWaitingIn(observer.controller->directory(), std::nullopt);
+    if (std::exchange(_observedWaiting, waiting) != waiting)
+        _deps.observedWaitingChanged(waiting);
+}
+
+void DaemonPresence::notify()
+{
+    recountObservedWaiting();
+    // Once shut down, the application is going: a sidebar told now would rebuild after the windows' world
+    // is gone.
+    if (_lifecycle == Lifecycle::ShutDown)
+        return;
+    _subscribers.notify();
+}
+
+std::vector<window::DaemonRef> DaemonPresence::stuckLocals() const
+{
+    auto stuck = std::vector<window::DaemonRef> {};
+    for (auto const& [daemon, observer]: _observers)
+        if (isRedialledByRefresh(daemon, observer))
+            stuck.push_back(daemon);
+    return stuck;
+}
+
+void DaemonPresence::redialRestartedLocals(std::span<window::DaemonRef const> stuck)
+{
+    // A local daemon known to have gone, whose observer gave up, and that serves now -- started again outside
+    // Contour, perhaps before any discovery saw it gone -- is dialled again, as an observer dials: never
+    // prompting, never starting a daemon. So is one found serving whose observer read Too old or Not running:
+    // it may have been upgraded or started meanwhile, and the discovery each periodic refresh asks dials it
+    // again while a window is visible, a unix socket dial asking nothing and starting nothing.
+    auto const visible = _deps.visibility() == AppVisibility::Visible;
+    for (auto& [daemon, observer]: _observers)
+    {
+        // One the user disconnected is dialled again by Connect alone, even once its daemon restarted.
+        if (!isOfKind(daemon, window::DaemonRefKind::Local) || observer.hold == Hold::UserDisconnected)
+            continue;
+        auto const idle =
+            observer.refusal || !observer.controller || hasGivenUp(observer.controller->connectionState());
+        if (idle && !isRunningLocal(daemon))
+            observer.liveness = LocalLiveness::GaveUpAbsent;
+        else if (idle && observer.liveness == LocalLiveness::GaveUpAbsent)
+            startObserver(daemon, observer);
+        else if (visible && std::ranges::contains(stuck, daemon) && isRedialledByRefresh(daemon, observer))
+            startObserver(daemon, observer);
+    }
+}
+
+bool DaemonPresence::isRunningLocal(window::DaemonRef const& daemon) const
+{
+    auto const parsed = window::parseDaemonRef(daemon);
+    return parsed && parsed->first == window::DaemonRefKind::Local && _discovered
+           && std::ranges::contains(*_discovered, parsed->second, &cli::DiscoveredDaemon::label);
+}
+
+bool DaemonPresence::isListed(window::DaemonRef const& daemon) const
+{
+    return std::ranges::contains(_listed, daemon, &ListedDaemon::daemon);
+}
+
+bool DaemonPresence::isRetryable(Observer const& observer)
+{
+    if (!observer.controller || !observer.recorder
+        || observer.controller->observeSupport() == ObserveSupport::TooOld)
+        return false;
+    // The transport's failure says most. A connection it made that the daemon did not take says the rest:
+    // one never answered (Protocol) may be answered later, one refused (Refused) will not be.
+    auto const failure =
+        observer.recorder->lastFailure().or_else([&] { return observer.controller->failureKind(); });
+    return failure && !linkStateOfFailure(*failure);
+}
+
+bool DaemonPresence::isRedialledByRefresh(window::DaemonRef const& daemon, Observer const& observer) const
+{
+    if (!isOfKind(daemon, window::DaemonRefKind::Local) || !isRunningLocal(daemon)
+        || observer.hold == Hold::UserDisconnected)
+        return false;
+    auto const state = [&]() -> std::optional<DaemonLinkState> {
+        if (observer.refusal)
+            return observer.refusal->state;
+        // An observer that holds nothing and was refused nothing has nothing a refresh could redial.
+        auto const* const controller = observer.controller.get();
+        if (controller == nullptr)
+            return std::nullopt;
+        // A daemon that read the observer's hello as a control one ended the connection: too old, whatever
+        // state the connection ended in.
+        if (controller->observeSupport() == ObserveSupport::TooOld)
+            return DaemonLinkState::TooOld;
+        if (!hasGivenUp(controller->connectionState()))
+            return std::nullopt;
+        return linkStateOf(controller->connectionState(),
+                           observer.recorder ? observer.recorder->lastFailure()
+                                             : std::optional<vthost::TransportErrorKind> {},
+                           controller->observeSupport());
+    }();
+    return state == DaemonLinkState::TooOld || state == DaemonLinkState::NotRunning;
+}
+
+NativeController* DaemonPresence::controllerFor(window::DaemonRef const& daemon,
+                                                window::DaemonInstance instance) const
+{
+    if (!isListed(daemon))
+        return nullptr;
+    for (auto const& link: windowLinks())
+        if (link.daemon == daemon && link.controller != nullptr)
+            return link.instance == instance ? link.controller : nullptr;
+    auto const found = _observers.find(daemon);
+    if (found == _observers.end() || !found->second.controller)
+        return nullptr;
+    auto* const controller = found->second.controller.get();
+    return controller->daemonInstance().value_or(0) == instance.value ? controller : nullptr;
+}
+
+} // namespace contour::remote

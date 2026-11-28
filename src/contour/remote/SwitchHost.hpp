@@ -5,9 +5,19 @@
 /// What a remote::WindowSwitcher needs from the application; light, so that the composition root can
 /// implement it without including the switcher.
 
+#include <contour/remote/DaemonLinkHost.hpp>
+
 #include <expected>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include <vtworkspace/Primitives.hpp>
+
+namespace vthost
+{
+class ITransportFactory;
+}
 
 namespace contour::remote
 {
@@ -15,6 +25,7 @@ namespace contour::remote
 class DaemonLink;
 struct DaemonLinkConfig;
 struct DaemonAddress;
+struct PromotionRequest;
 
 /// What a WindowSwitcher needs from the application: its links, and new ones made to a daemon it names.
 class ISwitchHost
@@ -42,6 +53,20 @@ class ISwitchHost
     /// @param config What it is built with.
     /// @return The link, owned by the application.
     virtual DaemonLink& startSwitchLink(DaemonLinkConfig config) = 0;
+
+    /// Makes a link around an observer the presence handed over (DaemonLink::adopt()), as startSwitchLink()
+    /// makes one that dials.
+    /// @param config Its locality, address, upkeep and askpass route (linkConfigFor()), and its arrival.
+    /// @param observing The connected observer; never null.
+    /// @param request What it is promoted to show.
+    /// @param interactive What its later dials go through.
+    /// @param giveBack Where its connection goes as it leaves the daemon; told exactly once.
+    /// @return The link, owned by the application.
+    virtual DaemonLink& adoptSwitchLink(DaemonLinkConfig config,
+                                        std::unique_ptr<NativeController> observing,
+                                        PromotionRequest request,
+                                        std::shared_ptr<vthost::ITransportFactory> interactive,
+                                        GiveBack giveBack) = 0;
 };
 
 } // namespace contour::remote

@@ -39,6 +39,12 @@ PromptHost::Open const* PromptHost::current() const
     return _open.empty() ? nullptr : &_open.front();
 }
 
+void PromptHost::raise()
+{
+    if (current() != nullptr)
+        emit raiseRequested();
+}
+
 QVariantMap PromptHost::pendingPrompt() const
 {
     auto const* const open = current();

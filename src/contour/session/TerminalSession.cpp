@@ -969,21 +969,43 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 void TerminalSession::screenUpdated()
 {
     ZoneScoped;
-    // The parser thread, maybe under the state lock: while the link pill shows, the page under it may have
-    // filled where it stands, so QML is asked to place it again -- posted, and only while it shows.
-    if (_linkTargetVisibility.load(std::memory_order_relaxed) == LinkPillVisibility::Shown)
-        requestOverlayClearanceRefresh();
-    // Ahead of the display check: the tab badge's unseen-output dot is for the sessions that have no
-    // display -- a background tab's panes are not loaded at all. A tmux pane's capture-pane refill arrives
-    // as bytes like any other, so its device says where what the parser just read came from. A batch that
-    // wrote only to the host-writable status line (a prompt's clock, a program's own status) left the page
-    // as it was, which is no news; a mirror parses nothing, and its host made that call already.
+    // Not output, on whichever thread it was raised -- a vi motion or mark, a preedit, a status line's
+    // refresh on the GUI thread: only the parser's batches are (screenWritten()), so that a change made here
+    // while the parser writes neither takes that batch's news nor makes news of its own. A mirror parses
+    // nothing: each of its frames is its host's output, and its host made that call already.
+    if (_hosting == SessionHosting::Remote)
+        noteOutputForTab(parsedOutputOrigin());
+    followScreenChange();
+}
+
+void TerminalSession::screenWritten()
+{
+    ZoneScoped;
+    // The parser thread, maybe under the state lock. Ahead of the display check: the tab badge's
+    // unseen-output dot is for the sessions that have no display -- a background tab's panes are not loaded
+    // at all. A batch that wrote only to the host-writable status line (a prompt's clock, a program's own
+    // status) left the page as it was, which is no news.
     auto const pageOutput = _terminal.mainDisplayOutputCount();
     if (_hosting == SessionHosting::Remote
-        || std::exchange(_notedMainDisplayOutput, pageOutput) != pageOutput)
-        noteOutputForTab(_terminal.device().lastReadOrigin() == vtpty::ReadOrigin::Replay
-                             ? window::OutputOrigin::Resync
-                             : window::OutputOrigin::Live);
+        || _notedMainDisplayOutput.exchange(pageOutput, std::memory_order_relaxed) != pageOutput)
+        noteOutputForTab(parsedOutputOrigin());
+    followScreenChange();
+}
+
+window::OutputOrigin TerminalSession::parsedOutputOrigin() const
+{
+    // A tmux pane's capture-pane refill arrives as bytes like any other, so its device says where what the
+    // parser just read came from.
+    return _terminal.device().lastReadOrigin() == vtpty::ReadOrigin::Replay ? window::OutputOrigin::Resync
+                                                                            : window::OutputOrigin::Live;
+}
+
+void TerminalSession::followScreenChange()
+{
+    // While the link pill shows, the page under it may have filled where it stands, so QML is asked to place
+    // it again -- posted, and only while it shows.
+    if (_linkTargetVisibility.load(std::memory_order_relaxed) == LinkPillVisibility::Shown)
+        requestOverlayClearanceRefresh();
     askAboutInterruptionOffer();
     repaintChangedScreen();
 }
@@ -7339,9 +7361,24 @@ bool TerminalSession::operator()(actions::FilterWorkspaces)
     return onWindowOf(*_manager, *this, &window::WindowController::openSidebarFilter);
 }
 
+bool TerminalSession::operator()(actions::ToggleSidebarNeedsMe)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::toggleSidebarNeedsMe);
+}
+
+bool TerminalSession::operator()(actions::CancelSwitch)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::cancelSidebarJump);
+}
+
 bool TerminalSession::operator()(actions::JumpToNextAttention)
 {
     return onWindowOf(*_manager, *this, &window::WindowController::jumpToNextAttention);
+}
+
+bool TerminalSession::operator()(actions::JumpBack)
+{
+    return onWindowOf(*_manager, *this, &window::WindowController::jumpBack);
 }
 
 bool TerminalSession::operator()(actions::MarkSeen)

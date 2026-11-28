@@ -370,6 +370,19 @@ namespace
     {
         return std::to_underlying(PduType::SetWorkspaceColor);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(PaneAttentionState const&) noexcept
+    {
+        return std::to_underlying(PduType::PaneAttentionState);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(MarkSeen const&) noexcept
+    {
+        return std::to_underlying(PduType::MarkSeen);
+    }
+
+    [[nodiscard]] constexpr uint64_t tagOf(ObserveOnly const&) noexcept
+    {
+        return std::to_underlying(PduType::ObserveOnly);
+    }
 
     [[nodiscard]] constexpr uint64_t tagOf(AuthChallenge const&) noexcept
     {
@@ -454,11 +467,18 @@ namespace
             encodeSessionSettings(out, *settings);
     }
 
+    /// Encodes @p values as decodeVector() reads a list of varints back: the count, then each value.
+    template <typename T>
+    void encodeVarints(Writer& out, std::span<T const> values)
+    {
+        out.varint(values.size());
+        for (auto const value: values)
+            out.varint(value);
+    }
+
     void encodeCapabilities(Writer& out, CapabilitySet const& capabilities)
     {
-        out.varint(capabilities.idents.size());
-        for (auto const ident: capabilities.idents)
-            out.varint(ident);
+        encodeVarints(out, std::span { capabilities.idents });
     }
 
     void encodeVersionRange(Writer& out, VersionRange versions)
@@ -792,13 +812,8 @@ namespace
             out.u16(entry.offsetColumn);
         }
 
-        out.varint(pdu.setModes.size());
-        for (auto const mode: pdu.setModes)
-            out.varint(mode);
-
-        out.varint(pdu.setAnsiModes.size());
-        for (auto const mode: pdu.setAnsiModes)
-            out.varint(mode);
+        encodeVarints(out, std::span { pdu.setModes });
+        encodeVarints(out, std::span { pdu.setAnsiModes });
 
         out.u8(pdu.titleChanged);
         out.string(pdu.title);
@@ -1049,6 +1064,9 @@ namespace
     {
         out.varint(pdu.causeSerial);
         out.varint(pdu.selected);
+        // Zeros on every batch but a promotion's answer: a field appended after them must find them written.
+        out.varint(pdu.restoredWorkspaces);
+        out.varint(pdu.restoredTabs);
     }
 
     void encodeBody(Writer& out, UpgradeDaemon const& pdu)
@@ -1073,6 +1091,13 @@ namespace
 
     void encodeBody(Writer&, Goodbye const&)
     {
+    }
+
+    void encodeBody(Writer& out, ObserveOnly const& pdu)
+    {
+        // A demotion's body stays empty, as before the cause was stated.
+        if (pdu.cause != ObserveCause::Demoted)
+            out.u8(std::to_underlying(pdu.cause));
     }
 
     void encodeBody(Writer& out, OpenFirstTab const& pdu)
@@ -1115,13 +1140,24 @@ namespace
     void encodeBody(Writer& out, SelectWorkspace const& pdu)
     {
         out.varint(pdu.workspace);
-        if (pdu.directoryFromSession)
-            out.varint(*pdu.directoryFromSession);
+        // A creation token follows the directory, which must then be written, if only as the 0 that names
+        // none; and a written directory is always followed by whether a token comes, so a field appended
+        // later has a fixed place to follow.
+        auto const token = pdu.workspace == 0 ? pdu.creationToken : std::nullopt;
+        if (!pdu.directoryFromSession && !token)
+            return;
+        out.varint(pdu.directoryFromSession.value_or(0));
+        out.u8(token ? 1 : 0);
+        if (token)
+            out.bytes(*token);
     }
 
     void encodeBody(Writer& out, ReportFocus const& pdu)
     {
         out.u8(std::to_underlying(pdu.focus));
+        // Appended after the focus, and always written (a count of 0 when none): an older daemon reads the
+        // focus alone and leaves the rest unread, and a field appended later has a fixed place to follow.
+        encodeVarints(out, std::span { pdu.shownSessions });
     }
 
     void encodeBody(Writer& out, AuthChallenge const& pdu)
@@ -1154,6 +1190,21 @@ namespace
         FinishedHasDuration = 0b10,
     };
 
+    /// One FinishedCommand, as PaneSummary and PaneAttentionState carry it: its presence mask, the optionals
+    /// it announces, then the command line.
+    void encodeFinishedCommand(Writer& out, FinishedCommand const& finished)
+    {
+        auto mask = uint8_t { 0 };
+        mask |= finished.exitCode ? FinishedHasExitCode : 0;
+        mask |= finished.durationMs ? FinishedHasDuration : 0;
+        out.u8(mask);
+        if (finished.exitCode)
+            out.svarint(*finished.exitCode);
+        if (finished.durationMs)
+            out.varint(*finished.durationMs);
+        out.string(finished.commandLine);
+    }
+
     void encodeBody(Writer& out, PaneSummary const& pdu)
     {
         out.varint(pdu.session);
@@ -1170,17 +1221,7 @@ namespace
         if (pdu.cwd)
             out.string(pdu.cwd->path);
         if (pdu.finished)
-        {
-            auto finishedMask = uint8_t { 0 };
-            finishedMask |= pdu.finished->exitCode ? FinishedHasExitCode : 0;
-            finishedMask |= pdu.finished->durationMs ? FinishedHasDuration : 0;
-            out.u8(finishedMask);
-            if (pdu.finished->exitCode)
-                out.svarint(*pdu.finished->exitCode);
-            if (pdu.finished->durationMs)
-                out.varint(*pdu.finished->durationMs);
-            out.string(pdu.finished->commandLine);
-        }
+            encodeFinishedCommand(out, *pdu.finished);
         if (!pdu.notifications.empty())
         {
             out.varint(pdu.notifications.size());
@@ -1275,6 +1316,41 @@ namespace
     {
         out.varint(pdu.workspace);
         encodeWorkspaceColor(out, pdu.color);
+    }
+
+    /// The presence bits of a PaneAttentionState's optionals, in the order its fields follow the mask.
+    enum PaneAttentionPresence : uint8_t
+    {
+        AttentionHasFinished = 0b01,
+        AttentionHasFinishedAt = 0b10,
+    };
+
+    void encodeBody(Writer& out, PaneAttentionState const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(std::to_underlying(pdu.activity));
+        out.varint(pdu.activitySerial);
+        out.u8(std::to_underlying(pdu.bell));
+        out.varint(pdu.bellSerial);
+        out.varint(pdu.finishedSerial);
+        out.varint(pdu.seenStatusGeneration);
+        auto mask = uint8_t { 0 };
+        mask |= pdu.finished ? AttentionHasFinished : 0;
+        mask |= pdu.finishedAtUnixMs ? AttentionHasFinishedAt : 0;
+        out.u8(mask);
+        if (pdu.finished)
+            encodeFinishedCommand(out, *pdu.finished);
+        if (pdu.finishedAtUnixMs)
+            out.svarint(*pdu.finishedAtUnixMs);
+    }
+
+    void encodeBody(Writer& out, MarkSeen const& pdu)
+    {
+        out.varint(pdu.session);
+        out.varint(pdu.seen.activity);
+        out.varint(pdu.seen.bell);
+        out.varint(pdu.seen.finished);
+        out.varint(pdu.seen.statusGeneration);
     }
 
     void encodeBody(Writer& out, SwitchRequest const& pdu)
@@ -1495,8 +1571,7 @@ namespace
         auto role = uint8_t {};
         if (!assign(in.u8(), role, error))
             return false;
-        pdu.role = role == std::to_underlying(ConnectionRole::Attach) ? ConnectionRole::Attach
-                                                                      : ConnectionRole::Control;
+        pdu.role = enumOrElse(role, ConnectionRole::Observe, ConnectionRole::Control);
         return true;
     }
 
@@ -2349,6 +2424,12 @@ namespace
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.causeSerial, error) || !assign(in.varint(), pdu.selected, error))
             return std::unexpected(error);
+        // A sender from before the restore counts, or a batch that states none, ends here. A count of
+        // workspaces without its tabs is a truncated body.
+        if (in.remaining() != 0
+            && (!assign(in.varint(), pdu.restoredWorkspaces, error)
+                || !assign(in.varint(), pdu.restoredTabs, error)))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -2443,6 +2524,19 @@ namespace
         return Goodbye {};
     }
 
+    DecodeResult decodeObserveOnly(Reader& in)
+    {
+        // A sender from before the cause states none: a demotion. A cause this daemon does not know is one.
+        auto pdu = ObserveOnly {};
+        auto error = DecodeError {};
+        auto cause = uint8_t { 0 };
+        if (in.remaining() != 0 && !assign(in.u8(), cause, error))
+            return std::unexpected(error);
+        if (cause == std::to_underlying(ObserveCause::Withdrawn))
+            pdu.cause = ObserveCause::Withdrawn;
+        return pdu;
+    }
+
     DecodeResult decodeOpenFirstTab(Reader& in)
     {
         auto pdu = OpenFirstTab {};
@@ -2465,6 +2559,21 @@ namespace
                 return std::unexpected(error);
             pdu.directoryFromSession = session;
         }
+        // A sender from before the token ends here; one after it says whether a token follows.
+        auto carriesToken = uint8_t { 0 };
+        if (in.remaining() != 0 && !assign(in.u8(), carriesToken, error))
+            return std::unexpected(error);
+        if (carriesToken != 0)
+        {
+            auto const token = in.bytes(std::tuple_size_v<CreationToken>);
+            if (!token)
+                return std::unexpected(token.error());
+            pdu.creationToken.emplace();
+            std::ranges::copy(*token, pdu.creationToken->begin());
+            // Written as 0 only to make room for the token: no session has that id.
+            if (pdu.directoryFromSession == uint64_t { 0 })
+                pdu.directoryFromSession = std::nullopt;
+        }
         return pdu;
     }
 
@@ -2477,6 +2586,12 @@ namespace
             return std::unexpected(error);
         // A state a newer peer knows is the weaker claim: the window does not have the focus.
         pdu.focus = enumOrElse(focus, WindowFocus::Focused, WindowFocus::Unfocused);
+        // Appended by a later version; an older sender's body ends before it, which names no shown pane.
+        if (in.remaining() != 0)
+            if (auto const decoded =
+                    decodeVector(in, pdu.shownSessions, [](Reader& reader) { return reader.varint(); });
+                !decoded)
+                return std::unexpected(decoded.error());
         return pdu;
     }
 
@@ -2696,6 +2811,49 @@ namespace
         auto pdu = SetWorkspaceColor {};
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.workspace, error) || !decodeWorkspaceColor(in, pdu.color, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodePaneAttentionState(Reader& in)
+    {
+        auto pdu = PaneAttentionState {};
+        auto error = DecodeError {};
+        auto activity = uint8_t { 0 };
+        auto bell = uint8_t { 0 };
+        auto mask = uint8_t { 0 };
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), activity, error)
+            || !assign(in.varint(), pdu.activitySerial, error) || !assign(in.u8(), bell, error)
+            || !assign(in.varint(), pdu.bellSerial, error) || !assign(in.varint(), pdu.finishedSerial, error)
+            || !assign(in.varint(), pdu.seenStatusGeneration, error) || !assign(in.u8(), mask, error))
+            return std::unexpected(error);
+        // A state a newer peer knows still asks for attention.
+        pdu.activity = enumOrElse(activity, OutputActivity::Output, OutputActivity::Output);
+        pdu.bell = enumOrElse(bell, PaneBell::Rang, PaneBell::Rang);
+        if ((mask & AttentionHasFinished) != 0)
+        {
+            auto finished = FinishedCommand {};
+            if (!decodeFinishedCommand(in, finished, error))
+                return std::unexpected(error);
+            pdu.finished = std::move(finished);
+        }
+        if ((mask & AttentionHasFinishedAt) != 0)
+        {
+            auto finishedAt = int64_t { 0 };
+            if (!assign(in.svarint(), finishedAt, error))
+                return std::unexpected(error);
+            pdu.finishedAtUnixMs = finishedAt;
+        }
+        return pdu;
+    }
+
+    DecodeResult decodeMarkSeen(Reader& in)
+    {
+        auto pdu = MarkSeen {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.seen.activity, error)
+            || !assign(in.varint(), pdu.seen.bell, error) || !assign(in.varint(), pdu.seen.finished, error)
+            || !assign(in.varint(), pdu.seen.statusGeneration, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -2968,6 +3126,9 @@ namespace
         DecodeRow { PduType::Goodbye, decodeGoodbye },
         DecodeRow { PduType::OpenFirstTab, decodeOpenFirstTab },
         DecodeRow { PduType::SetWorkspaceColor, decodeSetWorkspaceColor },
+        DecodeRow { PduType::PaneAttentionState, decodePaneAttentionState },
+        DecodeRow { PduType::MarkSeen, decodeMarkSeen },
+        DecodeRow { PduType::ObserveOnly, decodeObserveOnly },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

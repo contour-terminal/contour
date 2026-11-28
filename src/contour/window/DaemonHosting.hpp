@@ -47,6 +47,13 @@ enum class SwitcherReach : uint8_t
     OwnWorkspacesOnly ///< The window's own workspaces alone, whatever was asked.
 };
 
+/// Where the window's sidebar names its daemon, which decides whether its title row carries the switcher.
+enum class SidebarNaming : uint8_t
+{
+    None = 0,   ///< No daemon to name (in process), or a host that is no daemon, which its chip names.
+    HeadingRow, ///< The daemon's heading row in the tree; the switcher is a control in the title row.
+};
+
 /// One row of the hosting-policy table: what a kind of hosting means for the chrome that names it and the
 /// switcher it opens.
 struct DaemonHostingPolicy
@@ -55,6 +62,7 @@ struct DaemonHostingPolicy
     ChipNaming naming;     ///< Whether the chip names a daemon, and so where it may show (see below).
     ChipSegments segments; ///< What a chip that names a daemon says beside it.
     SwitcherReach reach;   ///< How far the switcher the window opens reaches.
+    SidebarNaming sidebar; ///< Where the sidebar names the daemon, and so whether it has a switcher control.
 };
 
 /// The policy of every hosting, indexed by @c DaemonHosting. The one place the chrome and the switcher read
@@ -67,15 +75,18 @@ inline constexpr std::array<DaemonHostingPolicy, DaemonHostingCount> DaemonHosti
     DaemonHostingPolicy { .hosting = DaemonHosting::InProcess,
                           .naming = ChipNaming::WorkspaceOnly,
                           .segments = ChipSegments::DaemonAndWorkspace,
-                          .reach = SwitcherReach::OwnWorkspacesOnly },
+                          .reach = SwitcherReach::OwnWorkspacesOnly,
+                          .sidebar = SidebarNaming::None },
     DaemonHostingPolicy { .hosting = DaemonHosting::Daemon,
                           .naming = ChipNaming::NamesDaemon,
                           .segments = ChipSegments::DaemonAndWorkspace,
-                          .reach = SwitcherReach::AsAsked },
+                          .reach = SwitcherReach::AsAsked,
+                          .sidebar = SidebarNaming::HeadingRow },
     DaemonHostingPolicy { .hosting = DaemonHosting::OtherHost,
                           .naming = ChipNaming::NamesDaemon,
                           .segments = ChipSegments::DaemonOnly,
-                          .reach = SwitcherReach::AsAsked },
+                          .reach = SwitcherReach::AsAsked,
+                          .sidebar = SidebarNaming::None },
 };
 
 static_assert(enumValuesAreDense(DaemonHostingPolicies, &DaemonHostingPolicy::hosting),

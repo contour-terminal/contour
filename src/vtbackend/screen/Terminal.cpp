@@ -703,7 +703,7 @@ void Terminal::runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse)
     }
 
     if (!batchedRendering)
-        screenUpdated();
+        screenWritten();
 }
 
 void Terminal::resolveKittyPlaceholders()
@@ -5951,6 +5951,12 @@ void Terminal::screenUpdated()
 {
     if (markScreenChanged() == ScreenNotification::Due)
         _eventListener.screenUpdated();
+}
+
+void Terminal::screenWritten()
+{
+    if (markScreenChanged() == ScreenNotification::Due)
+        _eventListener.screenWritten();
 }
 
 void Terminal::screenReplayed()

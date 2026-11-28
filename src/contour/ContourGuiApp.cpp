@@ -53,6 +53,7 @@
 #include <contour/platform/SecureInput.hpp>
 #include <contour/remote/DaemonLink.hpp>
 #include <contour/remote/DaemonSwitchDirectory.hpp>
+#include <contour/remote/ElsewhereRaise.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/remote/TmuxController.hpp>
@@ -516,7 +517,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              window::BootstrapPromptFactory bootstrapPromptFactory,
                              std::unique_ptr<remote::IWorkspaceLister> startupLister,
                              std::unique_ptr<vthost::IGitStatusProbe> workspaceGitProbe,
-                             platform::ApplicationReadiness::State applicationAtStart):
+                             platform::ApplicationReadiness::State applicationAtStart,
+                             remote::PresenceOverrides presence):
     ContourApp { env, display::makeImageDecoder() },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _exitEventLoop { exitEventLoop ? std::move(exitEventLoop)
@@ -566,6 +568,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _captionButtons(appearanceServices.caption()),
     _framePlatform(appearanceServices.framePlatform),
     _dragEndProbe(std::move(dragEndProbe)),
+    _daemonPresence(makeDaemonPresence(std::move(presence))),
     // The real switcher unless a test injected its double. Built on the manager not yet constructed, which it
     // does not use until a request: the cyclic wiring of the manager and what it dispatches to.
     _windowSwitching(windowSwitching
@@ -573,10 +576,13 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                          : std::make_unique<remote::WindowSwitcher>(
                                _sessionManager,
                                *this,
+                               // A jump to a daemon the presence observes takes its observer over.
+                               *_daemonPresence,
                                remote::makeControlWorkspaceLister(SwitchListingTimeout),
                                // A pick is the switcher popup, scoped to the daemon; it re-enters the switch.
                                [this](remote::SwitchPickRequest const& pick) { return showSwitchPick(pick); },
-                               _switchDeadline)),
+                               _switchDeadline,
+                               core::systemRandom())),
     _switchDirectory(switchDirectory ? std::move(switchDirectory) : makeSwitchDirectory()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
@@ -712,6 +718,10 @@ ContourGuiApp::~ContourGuiApp()
         _askpassBroker->shutdown();
     // A link stopped below may wait for a QApplication that will not come now.
     _applicationReadiness->abandon();
+    // Its observers' reactors end here, while every member they may reach still exists: the members
+    // declared after the presence are destroyed before it is. First, so that a link stopped below, giving its
+    // connection back with nothing, has the presence dial no observer as the application quits.
+    _daemonPresence->shutdown();
     // While the session manager they release their windows from still exists: the links outlive it.
     for (auto const& link: _daemonLinks)
         link->stop();
@@ -1140,6 +1150,7 @@ remote::DaemonLink& ContourGuiApp::startDaemonLink(remote::DaemonLinkConfig conf
         remote::DaemonLinkId { _nextDaemonLinkId++ }, std::move(config), *this, _sessionManager));
     // The first link to a daemon is the one to take back what it restores after a restart.
     remote::passOnLaunchResume(switchableLinks());
+    _daemonPresence->linkSetChanged();
     return link;
 }
 
@@ -1156,6 +1167,11 @@ void ContourGuiApp::linkEnded()
     remote::passOnLaunchResume(switchableLinks());
     // Not from inside the link, which is still running the call that ended it.
     QMetaObject::invokeMethod(this, [this] { destroyEndedLinks(); }, Qt::QueuedConnection);
+}
+
+void ContourGuiApp::linkChanged(remote::DaemonLink& /*link*/)
+{
+    _daemonPresence->linkChanged();
 }
 
 remote::DaemonLinkConfig ContourGuiApp::daemonLinkConfig(std::shared_ptr<vthost::ITransportFactory> transport,
@@ -1230,9 +1246,7 @@ std::expected<remote::DaemonLinkConfig, std::string> ContourGuiApp::linkConfigFo
             // not this client's to restart or upgrade from the badge -- _restartDaemon and _upgradeDaemon
             // serve the launch's daemon alone, and a restart relaunches this process onto that one -- unless
             // its socket is the launch's (which --socket and $CONTOUR_MUX may move off the label's).
-            auto const controlPath =
-                vthost::muxSocketPath(vthost::daemonNameFromOption(daemon.name),
-                                      cli::resolveSocketOption("", _config.daemon.value().socket));
+            auto const controlPath = localDaemonSocket(daemon.name);
             auto config =
                 daemonLinkConfig(std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr),
                                  {},
@@ -1264,6 +1278,29 @@ remote::DaemonLink& ContourGuiApp::startSwitchLink(remote::DaemonLinkConfig conf
 {
     // Awaited by nobody: it tells the switch that started it how it landed.
     return startDaemonLink(std::move(config));
+}
+
+remote::DaemonLink& ContourGuiApp::adoptSwitchLink(remote::DaemonLinkConfig config,
+                                                   std::unique_ptr<remote::NativeController> observing,
+                                                   remote::PromotionRequest request,
+                                                   std::shared_ptr<vthost::ITransportFactory> interactive,
+                                                   remote::GiveBack giveBack)
+{
+    if (config.address.kind == vthost::proto::SwitchDaemonKind::Host)
+        _hostsReached.insert(config.address.name);
+    auto& link =
+        *_daemonLinks.emplace_back(remote::DaemonLink::adopt(remote::DaemonLinkId { _nextDaemonLinkId++ },
+                                                             std::move(config),
+                                                             std::move(observing),
+                                                             request,
+                                                             std::move(interactive),
+                                                             std::move(giveBack),
+                                                             *this,
+                                                             _sessionManager));
+    // As startDaemonLink(): the first link to a daemon takes back what a restart of it restores.
+    remote::passOnLaunchResume(switchableLinks());
+    _daemonPresence->linkSetChanged();
+    return link;
 }
 
 void ContourGuiApp::startWindowLink(remote::DaemonLinkConfig config)
@@ -1299,9 +1336,13 @@ remote::ElsewhereNotices ContourGuiApp::elsewhereNotices()
 void ContourGuiApp::destroyEndedLinks()
 {
     // A link whose closed windows still hold a pane waits: it asks again as its last pane lets it go.
-    // Each window's drift badge reads its own link's model (WindowController::daemonDrift).
-    std::erase_if(_daemonLinks,
-                  [this](auto const& link) { return link->isFinished() && _awaitedLinkId != link->id(); });
+    // Each window's drift badge reads its own link's model (WindowController::daemonDrift). Taken out before
+    // any is destroyed: a link's destructor tells its give-back, which may walk the links.
+    remote::destroyWhere(_daemonLinks, [this](auto const& link) {
+        return link->isFinished() && _awaitedLinkId != link->id();
+    });
+    // Queued from linkEnded(), so never while the app is destroyed: a link stopped then starts no observer.
+    _daemonPresence->linkSetChanged();
 }
 
 std::expected<vthost::client::DaemonUpgradeSuccess, vthost::client::DaemonUpgradeFailure> ContourGuiApp::
@@ -1433,12 +1474,14 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::openHost(st
                                                                               std::string const& nameOrUrl,
                                                                               askpass::AskpassRouteId route,
                                                                               cli::SshPrompts prompting,
-                                                                              std::string daemonFingerprint)
+                                                                              std::string daemonFingerprint,
+                                                                              cli::RemoteStart remoteStart)
 {
     auto host = config::resolveHost(configPath, nameOrUrl);
     if (!host)
         return std::unexpected { host.error() };
-    return transportOf(nameOrUrl, *std::move(host), route, prompting, std::move(daemonFingerprint));
+    return transportOf(
+        nameOrUrl, *std::move(host), route, prompting, std::move(daemonFingerprint), remoteStart);
 }
 
 void ContourGuiApp::showBootstrapPrompt()
@@ -1532,7 +1575,8 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
     config::HostEntry host,
     askpass::AskpassRouteId route,
     cli::SshPrompts prompting,
-    std::string daemonFingerprint)
+    std::string daemonFingerprint,
+    cli::RemoteStart remoteStart)
 {
     // A saved host by its name, an ad-hoc one by its URL, canonically spelled.
     auto label = nameOrUrl.contains("://") ? config::toString(host.url) : nameOrUrl;
@@ -1550,7 +1594,8 @@ std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf
                cli::TlsTrust { .knownDaemons = &_knownDaemons,
                                .pinPrompt = pinPromptFor(route, prompting),
                                .daemonFingerprint = std::move(daemonFingerprint),
-                               .sshAgentEndpoint = core::net::defaultSshAgentEndpoint(processEnvironment()) })
+                               .sshAgentEndpoint = core::net::defaultSshAgentEndpoint(processEnvironment()) },
+               remoteStart)
         .transform([&](cli::HostTransport transport) {
             return OpenedHost { .entry = std::move(host), .transport = std::move(transport) };
         });
@@ -1838,8 +1883,15 @@ namespace
     }
 } // namespace
 
+void ContourGuiApp::endGuiRun()
+{
+    _daemonPresence->shutdown();
+}
+
 void ContourGuiApp::releaseHosting()
 {
+    // Before any link stops: a stopped link waiting to give its connection back has the presence dial none.
+    endGuiRun();
     // Released before the QApplication was made, the hosting will never have one: a link's ssh attempt that
     // waits for it to serve its prompts gives up. After it was made, this does nothing.
     _applicationReadiness->abandon();
@@ -2856,6 +2908,8 @@ void ContourGuiApp::onConfigurationReloaded()
     // Every link states the reloaded session settings to its daemon, not only the launch's.
     for (auto const& link: _daemonLinks)
         link->onConfigurationReloaded();
+    // The saved hosts, and whether each is listed, may have changed.
+    _daemonPresence->settingsChanged();
     // The app's Settings reads the configuration the reload replaced; built on first use, so maybe not yet.
     if (_settingsController)
         _settingsController->refresh();
@@ -3632,6 +3686,16 @@ int ContourGuiApp::terminalGuiAction()
         });
     }
     refreshLauncherMenu();
+    // What the sidebars list is looked at again as the application comes to the front; and the daemons no
+    // window is on are told which process the user focused last, which raises for them.
+    connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+        auto const active = state == Qt::ApplicationActive;
+        _daemonPresence->processFocusChanged(active ? window::WindowFocusState::Focused
+                                                    : window::WindowFocusState::Unfocused);
+        // Read afresh: another process may have changed what is listed meanwhile.
+        if (active)
+            _daemonPresence->settingsChanged();
+    });
     // A process that only asks where to connect has no terminal to slide down, and its hotkey would race the
     // process it starts.
     if (firstWindow() == FirstWindow::Terminal)
@@ -3692,6 +3756,9 @@ int ContourGuiApp::terminalGuiAction()
     // so it is unit-testable without the event loop. NB: sequenced explicitly — passing exec() as an
     // argument alongside _exitStatus would read _exitStatus before the loop populated it.
     auto const loopResult = QApplication::exec();
+    // At once, before the waits below run queued work: a link handing its connection back as its windows go
+    // must find the presence shut down, or it dials an observer as the application quits.
+    endGuiRun();
     // A probe the app quit before has the last word too: a closed window or an ended session is not a run.
     if (_latencyProbeRequest && !_latencyProbeExitCode)
         _latencyProbeExitCode = endUnfinishedLatencyProbe();
@@ -4053,6 +4120,20 @@ window::SettingsController& ContourGuiApp::settingsController()
                         return std::nullopt;
                     return std::filesystem::path { chosen.toStdWString() };
                 },
+                // A host page's Show in sidebar switch decides again whether it is listed: the runtime choice
+                // gives way.
+                .hostListingEdited =
+                    [this](std::string const& host) {
+                        if (auto const saved = guiState()->update([&](config::GuiState& state) {
+                                config::forgetDaemonChoice(state.sidebarDaemons,
+                                                           window::hostDaemonRef(host).value);
+                            });
+                            !saved)
+                            errorLog()("Could not forget the sidebar choice for {}: {}.",
+                                       host,
+                                       config::describe(saved.error()));
+                        _daemonPresence->settingsChanged();
+                    },
             },
             _colorPreference);
         // A hotkey the desktop refused at startup, before this existed.
@@ -4451,9 +4532,187 @@ std::shared_ptr<cli::IDaemonDiscovery> ContourGuiApp::localDaemonDiscovery()
 std::unique_ptr<session::SwitchDirectory> ContourGuiApp::makeSwitchDirectory()
 {
     return std::make_unique<remote::DaemonSwitchDirectory>(
-        localDaemonDiscovery(), remote::makeControlWorkspaceLister(SwitchListingTimeout), [this] {
+        *_daemonPresence, remote::makeControlWorkspaceLister(SwitchListingTimeout), [this] {
             return linkedDaemons();
         });
+}
+
+std::unique_ptr<remote::DaemonPresence> ContourGuiApp::makeDaemonPresence(remote::PresenceOverrides overrides)
+{
+    // Every dial reads the configuration and the windows as they are then.
+    auto dialing = remote::PresenceTransportDeps {
+        .savedHost = [this](std::string const& host) -> config::HostEntry const* {
+            auto const& hosts = _config.hosts.value();
+            auto const found = hosts.find(host);
+            return found != hosts.end() ? &found->second : nullptr;
+        },
+        .openHost =
+            [this](std::string const& host,
+                   config::HostEntry const& entry,
+                   askpass::AskpassRouteId route,
+                   cli::SshPrompts prompts,
+                   cli::RemoteStart remoteStart) {
+                return transportOf(host, entry, route, prompts, {}, remoteStart)
+                    .transform([](OpenedHost opened) { return std::move(opened.transport); });
+            },
+        .localSocketOf = [this](std::string const& label) { return localDaemonSocket(label); },
+        .knownDaemons = &_knownDaemons,
+        .routeOf = [this](vtworkspace::WorkspaceId window) -> askpass::AskpassRouteId {
+            auto const* const owner = _sessionManager.controllerOwning(window);
+            return owner != nullptr ? owner->windowId().value : askpass::AnyWindow;
+        },
+    };
+    auto makeObserver =
+        overrides.makeObserver
+            ? std::move(overrides.makeObserver)
+            : remote::ObserverFactory { [this](window::DaemonRef const& daemon,
+                                               std::shared_ptr<vthost::ITransportFactory> transport,
+                                               vthost::client::BackoffSchedule backoff) {
+                  // A window may adopt it, keeping its configuration for life (remote::observerConfigOf()).
+                  auto config = remote::observerConfigOf(daemonLinkConfig(std::move(transport),
+                                                                          {},
+                                                                          {},
+                                                                          window::DaemonLocality::Remote,
+                                                                          remote::DaemonAddress {})
+                                                             .controller,
+                                                         backoff);
+                  attachLog()("presence: observing {}", daemon.value);
+                  return std::make_unique<remote::NativeController>(std::move(config));
+              } };
+    return std::make_unique<remote::DaemonPresence>(remote::PresenceDeps {
+        .discovery = overrides.discovery ? std::move(overrides.discovery) : localDaemonDiscovery(),
+        .settings =
+            overrides.settings ? std::move(overrides.settings) : [this] {
+                auto settings = remote::ListingSettings {};
+                for (auto const& [name, entry]: _config.hosts.value())
+                    settings.hosts.emplace_back(name,
+                                                entry.showInSidebar ? window::SidebarListingChoice::Listed
+                                                                    : window::SidebarListingChoice::Unlisted);
+                if (auto const state = guiState()->load())
+                {
+                    settings.shownByUser = state->sidebarDaemons.shown;
+                    settings.hiddenByUser = state->sidebarDaemons.hidden;
+                }
+                return settings;
+            },
+        .observerTransport = overrides.observerTransport
+                                 ? std::move(overrides.observerTransport)
+                                 : remote::ObserverDial { [dialing](window::DaemonRef const& daemon) {
+                                       return remote::observerTransport(daemon, dialing);
+                                   } },
+        .interactiveTransport =
+            [dialing](window::DaemonRef const& daemon, vtworkspace::WorkspaceId askingWindow) {
+                return remote::interactiveTransport(daemon, askingWindow, dialing);
+            },
+        .makeObserver = std::move(makeObserver),
+        .windowLinks = overrides.windowLinks ? std::move(overrides.windowLinks)
+                                             : std::function<std::vector<remote::WindowLinkView>()> {
+                                                   [this] { return windowLinkViews(); } },
+        .refreshTimer = overrides.refreshTimer ? std::move(overrides.refreshTimer) : remote::qtSwitchTimer(),
+        .visibility =
+            [] {
+                if (qGuiApp == nullptr)
+                    return remote::AppVisibility::Hidden;
+                auto const windows = QGuiApplication::topLevelWindows();
+                return std::ranges::any_of(windows,
+                                           [](QWindow const* window) {
+                                               return window->isVisible()
+                                                      && window->visibility() != QWindow::Minimized;
+                                           })
+                           ? remote::AppVisibility::Visible
+                           : remote::AppVisibility::Hidden;
+            },
+        .startDaemon =
+            [this](window::DaemonRef const& daemon) {
+                auto const parsed = window::parseDaemonRef(daemon);
+                if (!parsed || parsed->first != window::DaemonRefKind::Local)
+                    return;
+                _presenceJobs.run(
+                    namedDaemonStart(std::string { parsed->second }),
+                    [this, daemon](std::expected<cli::NamedDaemonStart, std::string> const& started) {
+                        if (!started)
+                            errorLog()("Could not start {}: {}", daemon.value, started.error());
+                        _daemonPresence->refresh();
+                    });
+            },
+        .updateListing =
+            [this](std::function<void(config::SidebarDaemons&)> const& change) {
+                if (auto const saved =
+                        guiState()->update([&](config::GuiState& state) { change(state.sidebarDaemons); });
+                    !saved)
+                    errorLog()("Could not remember the sidebar's daemons: {}.",
+                               config::describe(saved.error()));
+            },
+        .elsewhereNotices = [this] { return elsewhereNotices(); },
+        .ringLastFocusedWindow =
+            [this](config::Bell const& bell) {
+                if (auto* const controller = _sessionManager.applicationController())
+                    remote::ringWindowBell(*controller, bell);
+            },
+        .observedWaitingChanged = [this](unsigned waiting) { _sessionManager.setObservedWaiting(waiting); },
+    });
+}
+
+std::vector<remote::WindowLinkView> ContourGuiApp::windowLinkViews()
+{
+    auto views = std::vector<remote::WindowLinkView> {};
+    for (auto const& link: _daemonLinks)
+    {
+        auto* const controller = link->liveController();
+        // A link still connecting, given up, stopped or ended is on no daemon a window here shows.
+        if (!link->isAttached() || controller == nullptr)
+            continue;
+        auto view = remote::WindowLinkView {
+            .link = link->id(),
+            .daemon = remote::daemonRefOf(link->address(), link->id()),
+            .instance = window::DaemonInstance { controller->daemonInstance().value_or(0) },
+            .name = std::string { link->hostLabel() },
+            .locality = link->daemonLocality(),
+            .directory = link->directory(),
+            .state = remote::linkStateOf(
+                controller->connectionState(), std::nullopt, controller->observeSupport()),
+            .shownWorkspaces = {},
+            .controller = controller,
+        };
+        for (auto const window: _sessionManager.windowsBoundTo(*link))
+            if (auto const workspace = link->workspaceOf(window))
+                view.shownWorkspaces.insert(*workspace);
+        views.push_back(std::move(view));
+    }
+    return views;
+}
+
+std::filesystem::path ContourGuiApp::localDaemonSocket(std::string const& label) const
+{
+    return vthost::muxSocketPath(vthost::daemonNameFromOption(label),
+                                 cli::resolveSocketOption("", _config.daemon.value().socket));
+}
+
+std::function<std::expected<cli::NamedDaemonStart, std::string>()> ContourGuiApp::namedDaemonStart(
+    std::string const& label)
+{
+    // Read here, on the GUI thread; the job holds copies, and a start of its own, so it outlives nothing it
+    // uses.
+    auto const socket = localDaemonSocket(label);
+    auto options = vthost::DaemonSpawnOptions {
+        .filter = {},
+        .logFile = {},
+        .configPath = core::platform::normalizePath(_config.configFile),
+        .profileName = {},
+        .sizePolicy = _config.daemon.value().sizePolicy,
+    };
+    return [start = std::make_shared<LocalDaemonStart>(
+                processEnvironment(), fileSystem(), programPath(), _daemonEnvironment),
+            placement = _processPlacement,
+            socket,
+            options = std::move(options)] {
+        return cli::startNamedDaemon(socket,
+                                     { .spawner = *start->spawner,
+                                       .binary = *start->binary,
+                                       .placement = *placement,
+                                       .options = options,
+                                       .timeout = NamedDaemonStartTimeout });
+    };
 }
 
 std::vector<remote::LinkedDaemon> ContourGuiApp::linkedDaemons()
@@ -4602,43 +4861,21 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             },
         .request =
             [this](vtworkspace::WorkspaceId window, session::SwitchTarget target, session::SwitchMode mode) {
+                auto done = session::SwitchCompletion {
+                    [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
+                        if (!outcome)
+                            attachLog()("switch from the switcher failed: {}", outcome.error());
+                    }
+                };
+                // A switcher pick is a place the window can go back to (JumpBack).
                 _windowSwitching->request(
                     window,
                     std::move(target),
                     mode,
-                    session::NoLandingDeadline,
-                    [](std::expected<vthost::proto::SwitchOutcome, std::string> const& outcome) {
-                        if (!outcome)
-                            attachLog()("switch from the switcher failed: {}", outcome.error());
-                    });
+                    session::UserSwitch,
+                    sessionsManager().recordingSwitchCompletion(window, mode, std::move(done)));
             },
-        .startDaemon =
-            [this](std::string const& label) {
-                // Read here, on the GUI thread; the job holds copies, and a start of its own, so it outlives
-                // nothing it uses.
-                auto const socket =
-                    vthost::muxSocketPath(vthost::daemonNameFromOption(label),
-                                          cli::resolveSocketOption("", _config.daemon.value().socket));
-                auto options = vthost::DaemonSpawnOptions {
-                    .filter = {},
-                    .logFile = {},
-                    .configPath = core::platform::normalizePath(_config.configFile),
-                    .profileName = {},
-                    .sizePolicy = _config.daemon.value().sizePolicy,
-                };
-                return [start = std::make_shared<LocalDaemonStart>(
-                            processEnvironment(), fileSystem(), programPath(), _daemonEnvironment),
-                        placement = _processPlacement,
-                        socket,
-                        options = std::move(options)] {
-                    return cli::startNamedDaemon(socket,
-                                                 { .spawner = *start->spawner,
-                                                   .binary = *start->binary,
-                                                   .placement = *placement,
-                                                   .options = options,
-                                                   .timeout = NamedDaemonStartTimeout });
-                };
-            },
+        .startDaemon = [this](std::string const& label) { return namedDaemonStart(label); },
         .createWorkspace =
             [this](vtworkspace::WorkspaceId window,
                    session::SwitchTarget const& daemon,
@@ -4666,6 +4903,11 @@ window::SwitcherServices ContourGuiApp::switcherServices()
             [this](vtworkspace::WorkspaceId window, uint64_t workspace, actions::Action const& action) {
                 if (auto* const controller = _sessionManager.controllerDisplaying(window))
                     controller->runWorkspaceMenuAction(workspace, action);
+            },
+        .listingOf = [this](window::DaemonRef const& daemon) { return _daemonPresence->listingOf(daemon); },
+        .setListed =
+            [this](window::DaemonRef const& daemon, window::SidebarListingChoice choice) {
+                _daemonPresence->setListed(daemon, choice);
             },
     };
 }

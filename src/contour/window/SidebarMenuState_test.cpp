@@ -148,3 +148,141 @@ TEST_CASE("a workspace's menu state is its place, the count, and what its only t
     CHECK_FALSE(unlisted.color.has_value());
     CHECK(unlisted.coloring == contour::command::MenuColoring::Unavailable);
 }
+
+TEST_CASE("a daemon row's menu state mirrors its buttons", "[sidebarmenu]")
+{
+    auto daemonRow =
+        [](DaemonRef daemon, DaemonLinkState state, DaemonLocality locality, RowPending pending) {
+            auto row = SidebarRow {};
+            row.key = SidebarRowKey { .kind = SidebarRowKind::Daemon,
+                                      .daemon = std::move(daemon),
+                                      .instance = {},
+                                      .workspace = 0,
+                                      .tab = 0,
+                                      .pane = {} };
+            row.linkState = state;
+            row.locality = locality;
+            row.link = DaemonRowLink::Observer;
+            row.pending = pending;
+            return row;
+        };
+    auto const verbsOf = [](SidebarRow const& row) {
+        auto const buttons = daemonRowButtons(daemonRowFactsOf(row), row.pending);
+        auto verbs = std::array<contour::command::DaemonRowVerb, 2> {};
+        std::ranges::transform(buttons, verbs.begin(), [](DaemonRowButton button) {
+            switch (button)
+            {
+                case DaemonRowButton::None: return contour::command::DaemonRowVerb::None;
+                case DaemonRowButton::Connect: return contour::command::DaemonRowVerb::Connect;
+                case DaemonRowButton::Start: return contour::command::DaemonRowVerb::Start;
+                case DaemonRowButton::Cancel: return contour::command::DaemonRowVerb::Cancel;
+                case DaemonRowButton::Remove: return contour::command::DaemonRowVerb::Remove;
+            }
+            return contour::command::DaemonRowVerb::None;
+        });
+        return verbs;
+    };
+    using contour::command::DaemonRowVerb;
+    using contour::command::OpenOffer;
+    constexpr auto OtherDaemon = contour::command::RowOrigin::OtherDaemon;
+
+    auto const stopped =
+        daemonRow(localDaemonRef("work"), DaemonLinkState::NotRunning, DaemonLocality::Local, RowPending::No);
+    auto const stoppedState = sidebarDaemonMenuStateOf(stopped, OtherDaemon);
+    CHECK(stoppedState.verbs == std::array { DaemonRowVerb::Start, DaemonRowVerb::Remove });
+    CHECK(stoppedState.verbs == verbsOf(stopped));
+    // A window opened on a daemon that is not running could only fail to show.
+    CHECK(stoppedState.open == OpenOffer::NotOffered);
+
+    auto const connecting = daemonRow(
+        hostDaemonRef("starfive"), DaemonLinkState::Connecting, DaemonLocality::Remote, RowPending::No);
+    CHECK(sidebarDaemonMenuStateOf(connecting, OtherDaemon).verbs == verbsOf(connecting));
+    CHECK(sidebarDaemonMenuStateOf(connecting, OtherDaemon).verbs[0] == DaemonRowVerb::Cancel);
+    CHECK(sidebarDaemonMenuStateOf(connecting, OtherDaemon).cancels
+          == contour::command::DaemonCancelTarget::Connect);
+    CHECK(sidebarDaemonMenuStateOf(connecting, OtherDaemon).open == OpenOffer::Offered);
+
+    auto const jumping = daemonRow(
+        hostDaemonRef("starfive"), DaemonLinkState::Connected, DaemonLocality::Remote, RowPending::Yes);
+    CHECK(sidebarDaemonMenuStateOf(jumping, OtherDaemon).verbs
+          == std::array { DaemonRowVerb::Cancel, DaemonRowVerb::None });
+    CHECK(sidebarDaemonMenuStateOf(jumping, OtherDaemon).cancels
+          == contour::command::DaemonCancelTarget::Jump);
+
+    // Hide from Sidebar: only for a daemon no window of this process is on, and never for a link.
+    CHECK(sidebarDaemonMenuStateOf(connecting, OtherDaemon).hide == contour::command::HideOffer::Offered);
+    for (auto const link: { DaemonRowLink::OwnWindow, DaemonRowLink::OtherWindow })
+    {
+        auto onIt = connecting;
+        onIt.link = link;
+        CHECK(sidebarDaemonMenuStateOf(onIt, OtherDaemon).hide == contour::command::HideOffer::NotOffered);
+    }
+    CHECK(sidebarDaemonMenuStateOf(
+              daemonRow(linkDaemonRef(4), DaemonLinkState::Connected, DaemonLocality::Remote, RowPending::No),
+              OtherDaemon)
+              .hide
+          == contour::command::HideOffer::NotOffered);
+
+    // Open in New Window, by the daemon's state: offered wherever a window on it could show -- a host not
+    // running among them, as a switch to a host starts its daemon there (this machine's is started by its
+    // row, above).
+    for (auto const state: { DaemonLinkState::TooOld, DaemonLinkState::Failed })
+        CHECK(sidebarDaemonMenuStateOf(
+                  daemonRow(hostDaemonRef("starfive"), state, DaemonLocality::Remote, RowPending::No),
+                  OtherDaemon)
+                  .open
+              == OpenOffer::NotOffered);
+    for (auto const state: { DaemonLinkState::NotConnected,
+                             DaemonLinkState::Connected,
+                             DaemonLinkState::Reconnecting,
+                             DaemonLinkState::NeedsInput,
+                             DaemonLinkState::NotRunning })
+        CHECK(sidebarDaemonMenuStateOf(
+                  daemonRow(hostDaemonRef("starfive"), state, DaemonLocality::Remote, RowPending::No),
+                  OtherDaemon)
+                  .open
+              == OpenOffer::Offered);
+
+    // A daemon no switch can name: reached by a link, or none at all.
+    auto const linked =
+        daemonRow(linkDaemonRef(3), DaemonLinkState::Connected, DaemonLocality::Remote, RowPending::No);
+    CHECK(sidebarDaemonMenuStateOf(linked, OtherDaemon).open == OpenOffer::NotOffered);
+    CHECK(openOfferOf(DaemonRef {}) == OpenOffer::NotOffered);
+    CHECK(openOfferOf(hostDaemonRef("starfive")) == OpenOffer::Offered);
+
+    // New Workspace: made on the window's own daemon whatever it is; on another, where a window could open.
+    using contour::command::NewWorkspaceOffer;
+    constexpr auto Own = contour::command::RowOrigin::Own;
+    CHECK(sidebarDaemonMenuStateOf(connecting, OtherDaemon).newWorkspace == NewWorkspaceOffer::Offered);
+    CHECK(sidebarDaemonMenuStateOf(stopped, OtherDaemon).newWorkspace == NewWorkspaceOffer::NotOffered);
+    CHECK(sidebarDaemonMenuStateOf(linked, OtherDaemon).newWorkspace == NewWorkspaceOffer::NotOffered);
+    CHECK(sidebarDaemonMenuStateOf(linked, Own).newWorkspace == NewWorkspaceOffer::Offered);
+}
+
+TEST_CASE("an other daemon's workspace menu state counts that daemon's workspaces", "[sidebarmenu]")
+{
+    auto build = workspace(5, "build");
+    build.color = vtbackend::RGBColor { 0x29, 0x80, 0xB9 };
+    auto const section = WorkspaceDirectory { .workspaces = { workspace(4, "api"), build, workspace(6) },
+                                              .selected = std::nullopt };
+    auto const palette = std::array { vtbackend::RGBColor { 0xC0, 0x39, 0x2B } };
+    auto const row = SidebarRowKey { .kind = SidebarRowKind::Workspace,
+                                     .daemon = hostDaemonRef("starfive"),
+                                     .instance = DaemonInstance { 9 },
+                                     .workspace = 5,
+                                     .tab = 0,
+                                     .pane = {} };
+    auto const state = otherDaemonWorkspaceMenuStateOf(section, row, palette);
+    CHECK(state.position == 1);
+    CHECK(state.count == 3);
+    CHECK(state.color == build.color);
+    // An observed daemon keeps the workspace's colour (spec §2).
+    CHECK(state.coloring == contour::command::MenuColoring::Available);
+    CHECK(state.origin == contour::command::RowOrigin::OtherDaemon);
+    CHECK(state.open == contour::command::OpenOffer::Offered);
+    CHECK(std::ranges::equal(state.palette, palette));
+    // Whose row it is: another daemon's, unless the window is on it or on none.
+    CHECK(rowOriginOf(row.daemon, localDaemonRef("main")) == contour::command::RowOrigin::OtherDaemon);
+    CHECK(rowOriginOf(row.daemon, row.daemon) == contour::command::RowOrigin::Own);
+    CHECK(rowOriginOf(row.daemon, std::nullopt) == contour::command::RowOrigin::Own);
+}

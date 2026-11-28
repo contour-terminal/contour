@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/window/DaemonSection.hpp>
+#include <contour/window/PaneKey.hpp>
+
 #include <core/platform/Clock.hpp>
 
 #include <cstdint>
@@ -76,12 +79,24 @@ using WorkspaceTarget =
     return WorkspaceNamed { .spec = std::string { spec } };
 }
 
+/// What a switch's window activates once it shows the workspace: the row's tab, and its pane.
+struct LandingFocus
+{
+    std::optional<uint64_t> tab;         ///< The daemon's tab id; none for the workspace's active tab.
+    std::optional<window::PaneKey> pane; ///< The pane; none for the tab's active pane.
+    bool operator==(LandingFocus const&) const = default;
+};
+
 /// Where a switch goes: a daemon (same, local label or saved host) and optionally one of its workspaces.
 struct SwitchTarget
 {
     vthost::proto::SwitchDaemonKind kind {}; ///< Same, Label or Host.
     std::string daemon;                      ///< The label or host name; empty for Same.
     WorkspaceTarget workspace {};            ///< Which of its workspaces; AnyWorkspace to decide.
+    LandingFocus focus {};                   ///< What the window activates once it shows the workspace.
+    /// The run of the daemon the workspace was named in; 0 for unknown (a program's switch). A switch naming
+    /// a run the daemon is no longer on fails: a restarted daemon may reuse the id for another workspace.
+    window::DaemonInstance instance {};
     bool operator==(SwitchTarget const&) const = default;
 };
 
@@ -99,8 +114,26 @@ struct SwitchTarget
 /// more.
 using SwitchLandBy = std::optional<core::platform::SteadyTimePoint>;
 
-/// No time a switch must land by: one the user drives from the GUI waits for nobody.
-inline constexpr auto NoLandingDeadline = SwitchLandBy {};
+/// When a switch to another daemon tells its completion that it switched.
+enum class SwitchTold : uint8_t
+{
+    /// Once the window is rebound to the daemon it switched to: a completion that acts in the window finds it
+    /// there, and a window that cannot be rebound fails the switch instead.
+    OnceLanded = 0,
+    /// Before the window leaves its daemon: the answer goes out on the connection it was asked on, which the
+    /// switch ends.
+    BeforeLeaving,
+};
+
+/// Who waits for a switch, as the request states it: until when, and when it is told.
+struct SwitchWaiter
+{
+    SwitchLandBy landBy;                      ///< When it must have landed by; none for the user's.
+    SwitchTold told = SwitchTold::OnceLanded; ///< When its completion is told it switched.
+};
+
+/// The user, driving a switch from the GUI: no time to land by, told once the window landed.
+inline constexpr auto UserSwitch = SwitchWaiter {};
 
 /// Called once when a switch request finished, or failed with the reason.
 using SwitchCompletion = std::function<void(std::expected<vthost::proto::SwitchOutcome, std::string>)>;
@@ -120,19 +153,52 @@ class WindowSwitching
     /// @param window The window asking.
     /// @param target Where to go.
     /// @param mode Replace this window's workspace or open a new window.
-    /// @param landBy When it must have landed by: one that cannot start before is refused, and one that has
-    ///        not landed by then gives up.
+    /// @param waiter Who waits for it: until when -- one that cannot start before is refused, and one that
+    ///        has not landed by then gives up -- and when @p done is told it switched.
     /// @param done Runs once on the GUI thread with the outcome or the failure reason.
     virtual void request(vtworkspace::WorkspaceId window,
                          SwitchTarget target,
                          SwitchMode mode,
-                         SwitchLandBy landBy,
+                         SwitchWaiter waiter,
                          SwitchCompletion done) = 0;
+
+    /// Creates a workspace labelled @p label on @p daemon, then switches @p window to it or opens it; never
+    /// blocks. Fails by default: a window with no switching service makes no workspace elsewhere.
+    /// @param window The window asking.
+    /// @param daemon The daemon; its workspace spec is not read.
+    /// @param label The new workspace's label; empty for none.
+    /// @param mode Switch the window, or open a new one.
+    /// @param done Told how the switch went, or why no workspace was made.
+    virtual void createWorkspace(vtworkspace::WorkspaceId window,
+                                 SwitchTarget const& daemon,
+                                 std::string label,
+                                 SwitchMode mode,
+                                 SwitchCompletion done)
+    {
+        std::ignore = window;
+        std::ignore = daemon;
+        std::ignore = mode;
+        // By value for the overrides, which keep them; this one consumes them all the same.
+        [[maybe_unused]] auto const dropped = std::move(label);
+        auto const tell = std::move(done);
+        tell(std::unexpected(std::string { "no workspace can be made there from this window" }));
+    }
 
     /// Told by the manager that @p window closed: a switch of it still under way ends, as cancelled. Nothing
     /// by default.
     /// @param window The window's workspace, as request() named it.
     virtual void windowClosed(vtworkspace::WorkspaceId window) { std::ignore = window; }
+
+    /// Ends @p window's switch of @p mode under way as the user cancelled it: the window stays as it was, and
+    /// the switch's completion is told it was cancelled. A switch of the other mode goes on. Nothing by
+    /// default, and nothing while none is under way.
+    /// @param window The window's workspace, as request() named it.
+    /// @param mode Which of its switches: the one in place, or an Open.
+    virtual void cancel(vtworkspace::WorkspaceId window, SwitchMode mode)
+    {
+        std::ignore = window;
+        std::ignore = mode;
+    }
 };
 
 } // namespace contour::session

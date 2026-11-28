@@ -265,3 +265,25 @@ TEST_CASE("a tls host is refused where there is no file to pin daemons in", "[co
     REQUIRE_FALSE(transport.has_value());
     CHECK(transport.error().contains("pinned daemons"));
 }
+
+TEST_CASE("a custom remote_command is told not to start a daemon as the default one is", "[contour][hosts]")
+{
+    using contour::cli::remoteCommandOf;
+    using contour::cli::RemoteStart;
+    auto host =
+        HostEntry { .url = HostUrl { .scheme = HostScheme::Ssh, .user = {}, .host = "homepc", .port = {} },
+                    .tokenFile = {},
+                    .tlsCa = {},
+                    .identityFile = {},
+                    .remoteCommand = {},
+                    .profile = {} };
+
+    CHECK(remoteCommandOf(host, RemoteStart::IfAbsent) == vthost::DefaultRemoteCommand);
+    CHECK(remoteCommandOf(host, RemoteStart::Never) == vthost::NoStartRemoteCommand);
+
+    // A background observer must never start the daemon, whatever the host runs: else its relay starts one
+    // that exits idle, and the next look logs in again to start it again.
+    host.remoteCommand = "/opt/contour/bin/contour daemon --stdio";
+    CHECK(remoteCommandOf(host, RemoteStart::IfAbsent) == "/opt/contour/bin/contour daemon --stdio");
+    CHECK(remoteCommandOf(host, RemoteStart::Never) == "/opt/contour/bin/contour daemon --stdio --no-start");
+}

@@ -258,3 +258,43 @@ TEST_CASE("WorkspaceDirectory: a workspace, a tab and a pane's tab are looked up
     CHECK(sessionsOf(directory.workspaces[0].tabs) == std::vector<uint64_t> { 1000, 1001, 1002 });
     CHECK(sessionsOf({}).empty());
 }
+
+TEST_CASE("clearFlags resets a pane's attention flags and keeps the rest", "[workspace-directory][attention]")
+{
+    auto record = vtbackend::ProgramStatusRecord {};
+    record.id = "build";
+    auto status = PaneStatus {
+        .title = "vim",
+        .cwd = "/src",
+        .status = { record },
+        .activity = vthost::proto::OutputActivity::Output,
+        .bell = vthost::proto::PaneBell::Rang,
+        .finished = vthost::proto::FinishedCommand { .exitCode = 1 },
+        .activitySerial = 3,
+        .bellSerial = 4,
+        .finishedSerial = 5,
+        .finishedAt = std::chrono::system_clock::time_point {} + std::chrono::seconds { 1 },
+        .seenStatusGeneration = 6,
+        .flagSource = FlagSource::Daemon,
+        .attention = AttentionKnowledge::Stated,
+    };
+
+    clearFlags(status);
+
+    // Kept.
+    CHECK(status.title == "vim");
+    CHECK(status.cwd == "/src");
+    CHECK(status.status.size() == 1);
+    // Reset.
+    auto const none = PaneStatus {};
+    CHECK(status.activity == none.activity);
+    CHECK(status.bell == none.bell);
+    CHECK(status.finished == none.finished);
+    CHECK(status.activitySerial == none.activitySerial);
+    CHECK(status.bellSerial == none.bellSerial);
+    CHECK(status.finishedSerial == none.finishedSerial);
+    CHECK(status.finishedAt == none.finishedAt);
+    CHECK(status.seenStatusGeneration == none.seenStatusGeneration);
+    CHECK(status.flagSource == none.flagSource);
+    CHECK(status.attention == none.attention);
+}

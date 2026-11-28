@@ -16,8 +16,6 @@
 /// (vthost::proto::EngineOperation, which contour::remote::toWireOperation pins to this one) and its row in
 /// the host's own table (vthost::SessionHost).
 
-#include <contour/config/ActionsFwd.hpp>
-
 #include <vtbackend/core/ColorPalette.hpp>
 
 #include <array>
@@ -29,6 +27,16 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+
+namespace contour::actions
+{
+// The four actions the table below names, declared and not defined (Actions.hpp defines them). Only these:
+// the whole of ActionsFwd.hpp would forward-declare names that other namespaces define too.
+struct ClearHistoryAndReset;
+struct ClearToPrompt;
+struct SoftReset;
+struct WriteScreen;
+} // namespace contour::actions
 
 namespace contour::session
 {

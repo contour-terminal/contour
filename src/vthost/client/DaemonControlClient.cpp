@@ -109,6 +109,7 @@ namespace
             case TransportErrorKind::Unreachable:
             case TransportErrorKind::Refused:
             case TransportErrorKind::RemoteProgramMissing:
+            case TransportErrorKind::RemoteProgramTooOld:
             case TransportErrorKind::ProgramNotFound:
             case TransportErrorKind::Protocol:
             case TransportErrorKind::Cancelled:

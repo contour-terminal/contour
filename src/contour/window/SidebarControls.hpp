@@ -3,8 +3,9 @@
 
 /// @file
 /// What the workspace sidebar's own buttons look like on each sidebar look: the toggle that hides and shows
-/// it, the button that makes a workspace, and the one that opens its filter. Pure and Qt-free, so the
-/// provider, the QML and the tests read the same rows.
+/// it, the button that makes a workspace, the one that opens its filter, the one that opens the daemon and
+/// workspace switcher, and the one that narrows it to what needs the user. Pure and Qt-free, so the provider,
+/// the QML and the tests read the same rows.
 ///
 /// A look that stands in a bar of themed icons (the ContourLinux header bar) names a freedesktop icon and the
 /// bundled copy drawn where the theme lacks it; a look with its own symbol set (macOS, Fluent) draws the
@@ -30,10 +31,14 @@ enum class SidebarControl : uint8_t
     Toggle = 0,   ///< Hides and shows the sidebar.
     NewWorkspace, ///< Makes a workspace.
     Filter,       ///< Opens the filter field over the tree.
+    Switcher,     ///< Opens the daemon and workspace switcher below itself: a daemon's window only.
+    /// Lists only what needs the user, and everything again: a toggle. Never `!`, which the tree's rows
+    /// already spend on "waiting".
+    NeedsMe,
 };
 
 /// Number of @c SidebarControl enumerators, derived from the last one.
-inline constexpr size_t SidebarControlCount = static_cast<size_t>(SidebarControl::Filter) + 1;
+inline constexpr size_t SidebarControlCount = static_cast<size_t>(SidebarControl::NeedsMe) + 1;
 
 /// What a control does with a pane or a tab dropped on it.
 enum class SidebarControlDrop : uint8_t
@@ -57,7 +62,7 @@ struct SidebarControlFace
 struct SidebarControlRow
 {
     config::SidebarLook look = config::SidebarLook::SourceList;   ///< The look the row describes.
-    std::array<SidebarControlFace, SidebarControlCount> faces {}; ///< Toggle, NewWorkspace, Filter.
+    std::array<SidebarControlFace, SidebarControlCount> faces {}; ///< Indexed by SidebarControl.
 };
 
 namespace detail
@@ -67,6 +72,9 @@ namespace detail
     inline constexpr auto NewWorkspaceIcon =
         std::string_view { "qrc:/contour/icons/folder-new-symbolic.svg" };
     inline constexpr auto FilterIcon = std::string_view { "qrc:/contour/icons/view-filter-symbolic.svg" };
+    // A swap, two opposed arrows, on every look (the Terminal row's ⇄): never a jump or redo arrow.
+    inline constexpr auto SwitcherIcon = std::string_view { "qrc:/contour/icons/view-swap-symbolic.svg" };
+    inline constexpr auto NeedsMeIcon = std::string_view { "qrc:/contour/icons/flag-symbolic.svg" };
 } // namespace detail
 
 /// The controls of every look, in SidebarLook order.
@@ -77,29 +85,39 @@ inline constexpr auto SidebarControlRows = std::array {
         .look = config::SidebarLook::SourceList,
         .faces = { SidebarControlFace { .bundledIcon = detail::ToggleIcon },
                    SidebarControlFace { .glyph = "+", .drop = SidebarControlDrop::NewWorkspace },
-                   SidebarControlFace { .bundledIcon = detail::FilterIcon } } },
+                   SidebarControlFace { .bundledIcon = detail::FilterIcon },
+                   SidebarControlFace { .bundledIcon = detail::SwitcherIcon },
+                   SidebarControlFace { .bundledIcon = detail::NeedsMeIcon } } },
     // Fluent: the navigation pane's own toggle (GlobalNavigationButton, three lines) and a funnel; the row
     // has no main menu for the lines to be mistaken for. The "+" heads the footer, as a pane footer item.
     SidebarControlRow {
         .look = config::SidebarLook::NavigationPane,
         .faces = { SidebarControlFace { .bundledIcon = detail::PaneToggleIcon },
                    SidebarControlFace { .glyph = "+", .drop = SidebarControlDrop::NewWorkspace },
-                   SidebarControlFace { .bundledIcon = detail::FilterIcon } } },
+                   SidebarControlFace { .bundledIcon = detail::FilterIcon },
+                   SidebarControlFace { .bundledIcon = detail::SwitcherIcon },
+                   SidebarControlFace { .bundledIcon = detail::NeedsMeIcon } } },
     // ContourLinux: themed symbolic icons in the header bar, like its other items (HeaderBarItems).
-    SidebarControlRow { .look = config::SidebarLook::HeaderPane,
-                        .faces = { SidebarControlFace { .iconName = "sidebar-show-symbolic",
-                                                        .bundledIcon = detail::ToggleIcon },
-                                   SidebarControlFace { .iconName = "folder-new-symbolic",
-                                                        .bundledIcon = detail::NewWorkspaceIcon,
-                                                        .drop = SidebarControlDrop::NewWorkspace },
-                                   SidebarControlFace { .iconName = "view-filter-symbolic",
-                                                        .bundledIcon = detail::FilterIcon } } },
-    // Terminal: one cell each.
+    SidebarControlRow {
+        .look = config::SidebarLook::HeaderPane,
+        .faces = { SidebarControlFace { .iconName = "sidebar-show-symbolic",
+                                        .bundledIcon = detail::ToggleIcon },
+                   SidebarControlFace { .iconName = "folder-new-symbolic",
+                                        .bundledIcon = detail::NewWorkspaceIcon,
+                                        .drop = SidebarControlDrop::NewWorkspace },
+                   SidebarControlFace { .iconName = "view-filter-symbolic",
+                                        .bundledIcon = detail::FilterIcon },
+                   SidebarControlFace { .iconName = "view-swap-symbolic",
+                                        .bundledIcon = detail::SwitcherIcon },
+                   SidebarControlFace { .iconName = "flag-symbolic", .bundledIcon = detail::NeedsMeIcon } } },
+    // Terminal: one cell each. Needs-me is a flag: `!` is the rows' "waiting".
     SidebarControlRow {
         .look = config::SidebarLook::CellTree,
         .faces = { SidebarControlFace { .glyph = "☰" },
                    SidebarControlFace { .glyph = "+", .drop = SidebarControlDrop::NewWorkspace },
-                   SidebarControlFace { .glyph = "/" } } },
+                   SidebarControlFace { .glyph = "/" },
+                   SidebarControlFace { .glyph = "⇄" },
+                   SidebarControlFace { .glyph = "⚑" } } },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, SidebarControlRows.size()),
@@ -128,8 +146,9 @@ static_assert(std::ranges::all_of(SidebarControlRows,
 
 /// The action each control runs, indexed by SidebarControl: the same on every look. Its tooltip names the
 /// chord that action is bound to at the time, and a key binding of it does what a click does.
-inline constexpr auto SidebarControlCommands =
-    std::array<std::string_view, SidebarControlCount> { "ToggleSidebar", "NewWorkspace", "FilterWorkspaces" };
+inline constexpr auto SidebarControlCommands = std::array<std::string_view, SidebarControlCount> {
+    "ToggleSidebar", "NewWorkspace", "FilterWorkspaces", "ShowSwitcher", "ToggleSidebarNeedsMe"
+};
 
 /// @param control A control.
 /// @return The name of the action it runs (SidebarControlCommands).
@@ -139,7 +158,7 @@ inline constexpr auto SidebarControlCommands =
 }
 
 /// @param control A control.
-/// @return The name QML reads it by: "toggle", "newWorkspace" or "filter".
+/// @return The name QML reads it by: "toggle", "newWorkspace", "filter", "switcher" or "needsMe".
 [[nodiscard]] constexpr std::string_view sidebarControlName(SidebarControl control) noexcept
 {
     switch (control)
@@ -147,8 +166,38 @@ inline constexpr auto SidebarControlCommands =
         case SidebarControl::Toggle: return "toggle";
         case SidebarControl::NewWorkspace: return "newWorkspace";
         case SidebarControl::Filter: return "filter";
+        case SidebarControl::Switcher: return "switcher";
+        case SidebarControl::NeedsMe: return "needsMe";
     }
     return "toggle";
+}
+
+/// Which of the title row's controls stand while its room is short: under 160 px (18 cells on the Terminal
+/// row) the Needs-me control goes first, then the switcher; the filter, the toggle and the new-workspace
+/// button never do.
+enum class SidebarControlFit : uint8_t
+{
+    All = 0,    ///< Every control stands.
+    NoNeedsMe,  ///< The Needs-me control gives way.
+    NoSwitcher, ///< The switcher gives way too.
+};
+
+/// @param available  The width the row's controls may take.
+/// @param perControl What one control takes, its gap included.
+/// @param shown      How many controls want to stand, the two that give way among them.
+/// @return Which give way: as few as leave the rest inside @p available.
+[[nodiscard]] constexpr SidebarControlFit sidebarControlFitOf(double available,
+                                                              double perControl,
+                                                              std::size_t shown) noexcept
+{
+    auto const fits = [&](std::size_t count) {
+        return static_cast<double>(count) * perControl <= available;
+    };
+    if (fits(shown))
+        return SidebarControlFit::All;
+    if (shown > 0 && fits(shown - 1))
+        return SidebarControlFit::NoNeedsMe;
+    return SidebarControlFit::NoSwitcher;
 }
 
 } // namespace contour::window

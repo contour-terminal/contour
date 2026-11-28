@@ -139,6 +139,44 @@ enum class SnapshotScript : uint8_t
     SidebarWorkspaceColorPicker, //!< sidebar-workspace-tint with the colour picker open over billing's row.
     SidebarTreeCompact,          //!< sidebar-tree under `row_spacing: compact` (sidebar-tree is comfortable).
     SidebarTabColorPicker,       //!< sidebar-tab-tint with the tab colour picker open over build's row.
+    SidebarTwoDaemons,           //!< sidebar-tree on `work` beside `starfive`: two section headings.
+    SidebarDaemonNeedsInput,     //!< The same with starfive's link waiting for the user.
+    SidebarDaemonNotRunning,     //!< The same with starfive found but not serving.
+    SidebarDaemonConnecting,     //!< The same with starfive connecting.
+    SidebarDaemonReconnecting,   //!< The same with starfive reconnecting, its workspaces last known.
+    SidebarDaemonTooOld,         //!< The same with starfive too old for this client.
+    SidebarPendingRow,           //!< The same with a jump under way to starfive's ci workspace.
+    SidebarNeedsMeEmpty,         //!< sidebar-tree under the Needs-me scope with nothing that needs the user.
+    /// sidebar-daemon-not-running at the sidebar's narrowest, starfive under a long name: the daemon row as
+    /// it gives way (its words gone, its name elided in the middle, its buttons icons).
+    SidebarDaemonNarrow,
+    /// sidebar-pending-row with the sidebar hidden: the location chip back in the band, saying where the jump
+    /// goes.
+    LocationChipPending,
+    /// sidebar-daemon-not-running with starfive's row menu open, as the Menu key opens it: Open in New
+    /// Window, then its buttons' Start and Remove.
+    SidebarDaemonMenu,
+    /// starfive's ci workspace row's menu, as the Menu key opens it: what runs on another daemon's row.
+    SidebarOtherDaemonWorkspaceMenu,
+    /// starfive's build tab row's menu: Open, Color, Rename, Close Tab, the splits; no move.
+    SidebarOtherDaemonTabMenu,
+    /// starfive's tests pane row's menu: Go to Pane, Open, Mark Seen, the splits, Close Pane; no move.
+    SidebarOtherDaemonPaneMenu,
+    /// The sidebar's Hidden row, last, "2 hidden daemons", its menu open: Show home, Show vega.
+    SidebarHiddenMenu,
+    /// The toast Hide from Sidebar shows: "starfive hidden from the sidebar", with its Undo.
+    DaemonHiddenToast,
+    /// The switcher, the home daemon row's menu open: the Show in Sidebar check box, checked.
+    SwitcherDaemonMenu,
+    /// sidebar-two-daemons with starfive's row menu open, starfive connected and observed: Open in New
+    /// Window, New Workspace, then Hide from Sidebar.
+    SidebarDaemonMenuLive,
+    /// sidebar-two-daemons with starfive a saved host found not running: its row offers Connect, which finds
+    /// the daemon once it runs and never starts it.
+    SidebarHostNotRunning,
+    /// sidebar-host-not-running with starfive's row menu open: Open in New Window (a switch to a host starts
+    /// its daemon there), New Workspace, Connect, then Hide from Sidebar.
+    SidebarHostNotRunningMenu,
 };
 
 /// What the workspace sidebar of a script shows.
@@ -150,6 +188,29 @@ enum class SnapshotSidebar : uint8_t
     Collapsed, //!< Shown, every workspace row folded.
     TopTabs,   //!< Shown, with the tabs on top.
     Hidden,    //!< Hidden: the chip in the band stands for it.
+};
+
+/// Which daemons the workspace sidebar lists as sections beside the window's own.
+enum class SnapshotSections : uint8_t
+{
+    None = 0,     //!< No daemon behind the window: its own workspaces alone, under no heading.
+    TwoDaemons,   //!< `work` (the window's, connected) and `starfive`, connected, with one workspace.
+    NeedsInput,   //!< The same, starfive's link waiting for the user.
+    NotRunning,   //!< The same, starfive found but not serving.
+    Connecting,   //!< The same, starfive connecting.
+    Reconnecting, //!< The same, starfive reconnecting: its workspace last known.
+    TooOld,       //!< The same, starfive too old for this client.
+    /// The same, starfive a saved host found not running (NotRunning's starfive is this machine's).
+    HostNotRunning,
+    Pending,      //!< TwoDaemons, a jump under way to starfive's ci workspace.
+    NeedsMeEmpty, //!< `work` alone under the Needs-me scope, nothing needing the user.
+    /// NotRunning, starfive under a long name, the sidebar at its narrowest.
+    Narrow,
+    /// TwoDaemons, starfive's build tab of two panes (build, tests), its rows unfolded; billing lists only
+    /// claude and build beside them, so the window's daemon heading stays in view at every host's type size.
+    OtherDaemonRows,
+    /// TwoDaemons, and the local home and the saved host vega hidden by the user: the Hidden row last.
+    Hidden,
 };
 
 /// What a script colours in the workspace sidebar.
@@ -229,6 +290,13 @@ enum class ScriptAction : uint8_t
     HoverSidebarRow, //!< build's sidebar row given a long status, the pointer resting on it: its hover card.
     OpenWorkspaceColorPicker,  //!< The sidebar's colour picker over billing's row, as Custom… opens it.
     OpenSidebarTabColorPicker, //!< The sidebar's tab colour picker over build's row, as its Custom… opens it.
+    OpenSidebarDaemonMenu,     //!< starfive's daemon row menu, opened under the row as the Menu key opens it.
+    OpenOtherDaemonWorkspaceMenu, //!< starfive's ci workspace row's menu, opened under the row.
+    OpenOtherDaemonTabMenu,       //!< starfive's build tab row's menu, opened under the row.
+    OpenOtherDaemonPaneMenu,      //!< starfive's tests pane row's menu, opened under the row.
+    OpenSidebarHiddenMenu,        //!< The Hidden row's menu, opened under the row as Return opens it.
+    ShowHiddenToast,              //!< The window posts the toast Hide from Sidebar shows, with its Undo.
+    SwitcherDaemonMenu, //!< The switcher, the home daemon row's menu opened as the Menu key opens it.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -548,6 +616,7 @@ struct SnapshotScriptRow
     SnapshotButtons buttons = SnapshotButtons::Desktop;    ///< Where the desktop puts the buttons.
     SnapshotSidebar sidebar = SnapshotSidebar::None;       ///< What the workspace sidebar shows.
     SnapshotSidebarColor sidebarColor = SnapshotSidebarColor::None; ///< What the sidebar shows coloured.
+    SnapshotSections sections = SnapshotSections::None; ///< The daemons the sidebar lists as sections.
     /// How a coloured tab shows on its sidebar rows (`sidebar.tab_color`).
     config::SidebarTabColorStyle tabColorStyle = config::SidebarTabColorStyle::Tint;
     /// How a coloured workspace shows in the sidebar (`sidebar.workspace_color`).
@@ -2431,6 +2500,113 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenSidebarTabColorPicker,
                         .sidebar = SnapshotSidebar::Tree,
                         .sidebarColor = SnapshotSidebarColor::Tabs },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarTwoDaemons,
+                        .name = "sidebar-two-daemons",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::TwoDaemons },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonNeedsInput,
+                        .name = "sidebar-daemon-needs-input",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NeedsInput },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonNotRunning,
+                        .name = "sidebar-daemon-not-running",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NotRunning },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonConnecting,
+                        .name = "sidebar-daemon-connecting",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Connecting },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonReconnecting,
+                        .name = "sidebar-daemon-reconnecting",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Reconnecting },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonTooOld,
+                        .name = "sidebar-daemon-too-old",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::TooOld },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarPendingRow,
+                        .name = "sidebar-pending-row",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Pending },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarNeedsMeEmpty,
+                        .name = "sidebar-needs-me-empty",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NeedsMeEmpty },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonNarrow,
+                        .name = "sidebar-daemon-narrow",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Narrow },
+    SnapshotScriptRow { .script = SnapshotScript::LocationChipPending,
+                        .name = "location-chip-pending",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Hidden,
+                        .sections = SnapshotSections::Pending },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonMenu,
+                        .name = "sidebar-daemon-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarDaemonMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::NotRunning },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarOtherDaemonWorkspaceMenu,
+                        .name = "sidebar-other-daemon-menus-workspace",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenOtherDaemonWorkspaceMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::OtherDaemonRows },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarOtherDaemonTabMenu,
+                        .name = "sidebar-other-daemon-menus-tab",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenOtherDaemonTabMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::OtherDaemonRows },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarOtherDaemonPaneMenu,
+                        .name = "sidebar-other-daemon-menus-pane",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenOtherDaemonPaneMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::OtherDaemonRows },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHiddenMenu,
+                        .name = "sidebar-hidden-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarHiddenMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Hidden },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonHiddenToast,
+                        .name = "daemon-hidden-toast",
+                        .tabCount = 3,
+                        .action = ScriptAction::ShowHiddenToast,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::Hidden },
+    SnapshotScriptRow { .script = SnapshotScript::SwitcherDaemonMenu,
+                        .name = "switcher-daemon-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::SwitcherDaemonMenu },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarDaemonMenuLive,
+                        .name = "sidebar-daemon-menu-live",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarDaemonMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::TwoDaemons },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHostNotRunning,
+                        .name = "sidebar-host-not-running",
+                        .tabCount = 3,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::HostNotRunning },
+    SnapshotScriptRow { .script = SnapshotScript::SidebarHostNotRunningMenu,
+                        .name = "sidebar-host-not-running-menu",
+                        .tabCount = 3,
+                        .action = ScriptAction::OpenSidebarDaemonMenu,
+                        .sidebar = SnapshotSidebar::Tree,
+                        .sections = SnapshotSections::HostNotRunning },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

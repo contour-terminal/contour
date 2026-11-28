@@ -13,12 +13,14 @@
 #include <vector>
 
 using contour::config::FileGuiStateStore;
+using contour::config::forgetDaemonChoice;
 using contour::config::GuiState;
 using contour::config::GuiStateError;
 using contour::config::GuiStateFileName;
 using contour::config::NewDefaultsOffer;
 using contour::config::SettingsWindowState;
 using contour::config::ShellKind;
+using contour::config::SidebarDaemons;
 using contour::config::WindowShowState;
 
 namespace
@@ -353,4 +355,36 @@ TEST_CASE("GuiState sidebar prefs read what they can", "[config][guistate][sideb
     CHECK(loaded->sidebar->visibility == SidebarVisibility::Shown);
     CHECK_FALSE(loaded->sidebar->widthPx.has_value());
     CHECK_FALSE(loaded->sidebar->widthCells.has_value());
+}
+
+TEST_CASE("GuiStateStore: the GUI state keeps shown and hidden daemons across a restart",
+          "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "window_hint: wide\n");
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    REQUIRE(store.save(GuiState {}).has_value());
+    CHECK_FALSE(fileSystem.readFile(stateFile()).value().contains("sidebar_daemons")); // empty: no key
+
+    auto const daemons = SidebarDaemons { .shown = { "host:a" }, .hidden = { "local:work" } };
+    REQUIRE(store.update([&](GuiState& state) { state.sidebarDaemons = daemons; }).has_value());
+    auto const written = fileSystem.readFile(stateFile()).value_or(std::string {});
+    INFO(written);
+    CHECK(written.contains("sidebar_daemons"));
+    CHECK(written.contains("window_hint: wide")); // an unknown sibling survives
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->sidebarDaemons == daemons);
+
+    REQUIRE(store.update([](GuiState& state) { state.sidebarDaemons = {}; }).has_value());
+    CHECK_FALSE(fileSystem.readFile(stateFile()).value().contains("sidebar_daemons"));
+}
+
+TEST_CASE("GuiStateStore: forgetting a daemon's choice removes it from both sets", "[config][guistate]")
+{
+    auto daemons = SidebarDaemons { .shown = { "host:a", "host:b" }, .hidden = { "host:a", "local:work" } };
+    forgetDaemonChoice(daemons, "host:a");
+    CHECK(daemons == SidebarDaemons { .shown = { "host:b" }, .hidden = { "local:work" } });
+    forgetDaemonChoice(daemons, "host:none");
+    CHECK(daemons == SidebarDaemons { .shown = { "host:b" }, .hidden = { "local:work" } });
 }

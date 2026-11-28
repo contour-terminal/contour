@@ -83,6 +83,13 @@ enum class InputProtection : std::uint8_t
     On,      ///< The user's read-only lock holds.
 };
 
+/// Whether a jump of the window (Next Needing Me, Jump Back) would go somewhere now.
+enum class JumpAvailability : std::uint8_t
+{
+    Unavailable = 0, ///< It would do nothing: nowhere to go, or the window has no directory to go in.
+    Available,       ///< It goes somewhere.
+};
+
 /// The world, as the menu bar needs to see it.
 struct MenuBarState
 {
@@ -99,11 +106,15 @@ struct MenuBarState
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always; ///< Mode in force.
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;          ///< Placement in force.
     config::SidebarVisibility sidebar = config::SidebarVisibility::Hidden; ///< Whether the sidebar shows.
-    std::string activeProfile {};                                          ///< The active pane's profile.
-    std::vector<std::string> profileNames {};                              ///< Configured profiles, sorted.
-    std::vector<std::string> hostNames {};                                 ///< Saved hosts, sorted.
-    std::vector<std::string> layoutNames {};                               ///< Saved layouts, sorted.
+    /// Which rows the sidebar lists: all, or only what needs the user (the View menu's checked row).
+    config::SidebarScope sidebarScope = config::SidebarScope::All;
+    std::string activeProfile {};                             ///< The active pane's profile.
+    std::vector<std::string> profileNames {};                 ///< Configured profiles, sorted.
+    std::vector<std::string> hostNames {};                    ///< Saved hosts, sorted.
+    std::vector<std::string> layoutNames {};                  ///< Saved layouts, sorted.
     DaemonSwitching switching = DaemonSwitching::Unavailable; ///< Whether the window has a daemon to switch.
+    JumpAvailability nextAttention = JumpAvailability::Unavailable; ///< Whether a pane needs the user.
+    JumpAvailability jumpBack = JumpAvailability::Unavailable; ///< Whether a place is left to go back to.
     /// The palette's "Switch to daemon" commands for this window (the SwitchToDaemon ones of
     /// DaemonCommandSource): every other local daemon and saved host. One source, so the menu and the palette
     /// cannot list different daemons. Each row is titled by its Command::argument.
@@ -149,8 +160,10 @@ inline constexpr std::array MenuReachabilityExemptions {
         .action = "FilterWorkspaces",
         .reason = "reached from the palette, key bindings and the sidebar's filter button" },
     MenuReachabilityExemption {
-        .action = "JumpToNextAttention",
-        .reason = "reached from the palette and key bindings; it needs the attention ledger" },
+        .action = "CancelSwitch",
+        .reason =
+            "reached from the palette, key bindings, the location chip and the Cancel of the daemon row "
+            "the jump goes into" },
     MenuReachabilityExemption { .action = "MarkSeen",
                                 .reason =
                                     "reached from the palette, key bindings and the sidebar's row menus" },
@@ -186,6 +199,23 @@ inline constexpr std::array MenuReachabilityExemptions {
     MenuReachabilityExemption {
         .action = "MoveToNewWorkspace",
         .reason = "reached from the palette, key bindings and the sidebar's pane and tab menus" },
+    MenuReachabilityExemption { .action = "OpenInNewWindow",
+                                .reason = "a row of every sidebar row's menu, which knows which row" },
+    MenuReachabilityExemption { .action = "ConnectDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "StartDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "RemoveDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "HideDaemon",
+                                .reason =
+                                    "a row of the sidebar's daemon row menu, which knows which daemon" },
+    MenuReachabilityExemption { .action = "ShowHiddenDaemon",
+                                .reason =
+                                    "a row of the sidebar's Hidden row menu, which knows which daemon" },
     MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
                                 .reason = "it is the Escape of a focused block, which a row would need the "
                                           "focus to run" },

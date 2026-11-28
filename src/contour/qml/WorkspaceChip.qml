@@ -121,8 +121,9 @@ Item {
         return Math.max(...root.chip.stateGlyphs.map(glyph => root._span(fontMetrics, glyph)))
     }
 
-    // What the chip needs at one fit step: what stays whatever fits (the ends, the caret and the marker) and
-    // the dot, the daemon, the state and the workspace as that step says them. The dot (of a chip that names a
+    // What the chip needs at one fit step: what stays whatever fits (the ends, the caret -- but for a jump's,
+    // whose click cancels rather than drops down -- and the marker) and the dot, the daemon, the state and the
+    // workspace as that step says them. The dot (of a chip that names a
     // daemon) and the marker are counted as shown, whether or not they are, so the widths -- and the band's
     // allocation made of them -- move with neither the connection nor another workspace's news.
     function _widthAt(step) {
@@ -131,7 +132,8 @@ Item {
         const workspace = step.workspace
         let width = root.bracketed ? root._span(fontMetrics, chromeStyle.chipOpenGlyph + chromeStyle.chipCloseGlyph)
                                    : 2 * chromeStyle.space.s5
-        width += caret.leftPadding + root._span(strongMetrics, chromeStyle.menuGlyph)
+        if (!root.jumpPending)
+            width += caret.leftPadding + root._span(strongMetrics, chromeStyle.menuGlyph)
         width += root.gap + (root.bracketed ? chromeStyle.badgeHeight : chromeStyle.size.badge)
         let leading = false
         if (root.chip.daemonName !== "") {
@@ -145,6 +147,9 @@ Item {
         if (status !== "")
             width += root.gap + root._span(fontMetrics, status)
         if (root.namesDaemonOnly)
+            return width
+        // A jump's chip, connecting elsewhere, names no workspace: no separator and no label.
+        if (root.jumpPending)
             return width
         if (daemon !== "")
             width += root.gap + root._span(fontMetrics, chromeStyle.breadcrumbGlyph)
@@ -166,7 +171,13 @@ Item {
         }
     }
 
-    onClicked: if (root.controller && root.controller.showWorkspaceDropdown)
+    /// Whether a jump from the sidebar into another daemon is under way: the chip says where it goes, and a
+    /// click on it cancels the jump, as the CancelSwitch action does.
+    readonly property bool jumpPending: !!root.chip && root.chip.jumpPending
+
+    onClicked: if (root.jumpPending && root.controller && root.controller.cancelSidebarJump)
+        root.controller.cancelSidebarJump()
+    else if (root.controller && root.controller.showWorkspaceDropdown)
         root.controller.showWorkspaceDropdown(root.dropdownAnchor())
 
     implicitWidth: row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5)
@@ -201,10 +212,11 @@ Item {
              : root.colors.chipFill
     }
 
-    // What a click does, with the chord that does the same: the window's switcher opens centred from the key.
+    // What a click does, with the chord that does the same: the window's switcher opens centred from the key;
+    // while a jump is under way, the click cancels it, as CancelSwitch does.
     KitToolTipHost {
         text: root.step.tooltip ?? ""
-        shortcutCommand: "ShowSwitcher"
+        shortcutCommand: root.jumpPending ? "CancelSwitch" : "ShowSwitcher"
         toolTipName: "workspaceChipToolTip"
     }
 
@@ -280,7 +292,7 @@ Item {
 
         Text {
             objectName: "workspaceChipSeparator"
-            visible: root.daemonText !== "" && !root.namesDaemonOnly
+            visible: root.daemonText !== "" && !root.namesDaemonOnly && !root.jumpPending
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             leftPadding: root.gap
@@ -292,7 +304,7 @@ Item {
 
         Text {
             objectName: "workspaceChipLabel"
-            visible: !root.namesDaemonOnly
+            visible: !root.namesDaemonOnly && !root.jumpPending
             anchors.verticalCenter: parent.verticalCenter
             Accessible.ignored: true
             // The room after whatever leads: the dot or the daemon segment.
@@ -304,10 +316,12 @@ Item {
         }
 
         // The pop-up button's caret, a step after the name, the same one that parts the chip's other segments (a
-        // cell on the Terminal row).
+        // cell on the Terminal row). None on a jump's chip: a click there cancels the jump, and drops nothing
+        // down.
         Text {
             id: caret
             objectName: "workspaceChipCaret"
+            visible: !root.jumpPending
             anchors.verticalCenter: parent.verticalCenter
             leftPadding: root.gap
             Accessible.ignored: true

@@ -29,10 +29,11 @@ enum class HostPageRow : uint8_t
     TlsCa,
     IdentityFile,
     Profile,
+    ShowInSidebar,
 };
 
 /// How many rows a host's page has.
-inline constexpr std::size_t HostPageRowCount = static_cast<std::size_t>(HostPageRow::Profile) + 1;
+inline constexpr std::size_t HostPageRowCount = static_cast<std::size_t>(HostPageRow::ShowInSidebar) + 1;
 
 /// One row of a host's page.
 struct HostPageRowInfo
@@ -117,6 +118,18 @@ inline constexpr auto HostPageRows = std::array {
                       .group = SettingsGroup::HostSessions,
                       .control = SettingsControl::PopUp,
                       .field = config::HostField::Profile,
+                      .onlyFor = std::nullopt },
+    HostPageRowInfo { .row = HostPageRow::ShowInSidebar,
+                      .key = "show_in_sidebar",
+                      .label = "Show in sidebar",
+                      .help =
+                          "Lists the host's daemon in the workspace sidebar, connected or not. Contour then "
+                          "logs in to it in the background: it never asks for a password itself, but your "
+                          "SSH agent may (a pinentry, 1Password, a security key's touch).",
+                      .placeholder = {},
+                      .group = SettingsGroup::HostSessions,
+                      .control = SettingsControl::Switch,
+                      .field = config::HostField::ShowInSidebar,
                       .onlyFor = std::nullopt },
 };
 

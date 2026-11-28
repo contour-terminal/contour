@@ -49,6 +49,18 @@ using vtworkspace::Tab;
 using vtworkspace::TabId;
 using vtworkspace::WorkspaceId;
 
+proto::FinishedCommand finishedCommandOf(vtbackend::CommandBlockSummary const& block)
+{
+    return proto::FinishedCommand {
+        .exitCode = block.exitCode,
+        .durationMs = block.duration.transform([](auto duration) {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+        }),
+        .commandLine = block.commandLine.display(),
+    };
+}
+
 // ---------------------------------------------------------------------------
 // HostGitLookups
 
@@ -574,6 +586,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _nextSessionId(config.firstSessionId),
     _extensions(std::move(config.extensions)),
     _announcedStatusPatience(config.announcedStatusPatience),
+    _activityMarkInterval(config.activityMarkInterval),
     _extensionControl(vtcontrol::nullControlApi()),
     _objects(std::move(config.uuids)),
     _tabNameMirror(_objects.onNameChanged(
@@ -852,7 +865,14 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
             _loop.post([this, id] { armAnimationTick(id); });
         },
         /*onBell=*/
-        [this, id] { postStreamEvent(id, &SessionStreamEvents::sessionBell); },
+        [this, id] {
+            postFromPump([this, id] {
+                if (!_sessions.contains(id.value))
+                    return;
+                noteBellAttention(id);
+                fanOutStream(&SessionStreamEvents::sessionBell, id);
+            });
+        },
         /*onNotify=*/
         [this, id](std::string title, std::string body, std::optional<vtbackend::DisplayOccasion> occasion) {
             postStreamEvent(
@@ -878,6 +898,10 @@ std::unique_ptr<HostedSession> SessionHost::makeHostedSession(SessionId id,
                     tellDirectoryIfMoved(id);
                     return;
                 }
+                if (std::holds_alternative<ProgramStatusChangedSignal>(signal))
+                    noteStatusAttention(id);
+                else if (auto const* finished = std::get_if<CommandBlockFinishedSignal>(&signal))
+                    noteFinishedAttention(id, finished->summary);
                 for (auto* observer: _streamSubscribers)
                     observer->sessionSignal(id, signal);
                 // A finished command (it may have switched branch or committed) is when the workspace showing
@@ -910,6 +934,7 @@ void SessionHost::installSession(std::unique_ptr<HostedSession> session)
     }
     auto const id = session->id();
     _sessions.emplace(id.value, std::move(session));
+    _attention.track(id.value);
     tellStructure(&StructureEvents::sessionCreated, id);
     // Its directory is the process's until its shell reports one.
     armForegroundPoll();
@@ -1163,15 +1188,43 @@ SessionHost::RealizedWorkspace SessionHost::realizeRestoredWorkspace(WorkspaceId
 std::optional<RestoredCounts> SessionHost::takeRestoreAnnouncement(
     std::function<bool(uint64_t)> const& follows)
 {
-    auto const restored = std::exchange(_restoreAnnouncement, {});
-    auto counts = RestoredCounts {};
-    for (auto const& entry:
-         restored | std::views::filter([&](auto const& w) { return follows(w.workspace); }))
-    {
-        ++counts.workspaces;
-        counts.tabs += entry.tabs;
-    }
+    auto const counts = countRestored(takeRestoreEntries(follows));
     return counts.workspaces > 0 ? std::optional { counts } : std::nullopt;
+}
+
+std::vector<RestoredWorkspace> SessionHost::takeRestoreEntries(std::function<bool(uint64_t)> const& follows)
+{
+    // Handed over once, whatever @p follows names: what it does not is told to no one.
+    auto const restored = std::exchange(_restoreAnnouncement, {});
+    return std::ranges::to<std::vector>(
+        restored | std::views::filter([&](auto const& w) { return follows(w.workspace); }));
+}
+
+void SessionHost::returnRestoreAnnouncement(std::vector<RestoredWorkspace> entries)
+{
+    // Ahead of anything held meanwhile, so the announcement keeps the snapshot's order.
+    _restoreAnnouncement.insert(_restoreAnnouncement.begin(), entries.begin(), entries.end());
+}
+
+std::optional<SessionHost::MadeForToken> SessionHost::workspaceMadeFor(
+    proto::CreationToken const& token) const
+{
+    auto const made = std::ranges::find(_madeForTokens, token, &MadeForToken::token);
+    if (made == _madeForTokens.end())
+        return std::nullopt;
+    // One that ended -- closed, or its last tab gone -- is no longer there to select.
+    auto const* workspace = _model.workspace(made->workspace);
+    if (workspace == nullptr || workspace->tabCount() == 0)
+        return std::nullopt;
+    return *made;
+}
+
+void SessionHost::rememberWorkspaceMadeFor(MadeForToken made)
+{
+    std::erase_if(_madeForTokens, [&made](MadeForToken const& entry) { return entry.token == made.token; });
+    _madeForTokens.push_back(std::move(made));
+    while (_madeForTokens.size() > PromotionTokenMemory)
+        _madeForTokens.pop_front();
 }
 
 std::vector<SessionId> SessionHost::takeUnrestoredScreens(std::function<bool(SessionId)> const& follows)
@@ -1214,6 +1267,7 @@ void SessionHost::onSessionScreenUpdated(SessionId session)
         hosted->second->requestStatusLineRepaint();
     typeInitialInputAtPrompt(session);
     clearInterruptionOnNextCommand(session);
+    noteOutputAttention(session);
     for (auto* observer: _streamSubscribers)
         observer->sessionScreenUpdated(session);
 }
@@ -1469,12 +1523,72 @@ void SessionHost::noteClientAttached(SessionStreamEvents* client)
         refreshAllWorkspaceGit();
 }
 
+void SessionHost::noteObserverAttached(SessionStreamEvents* observer)
+{
+    if (std::ranges::contains(_observers, observer))
+        return;
+    _observers.push_back(observer);
+    settleRaiseRole();
+    // An observer lists every workspace in its sidebar: bring their git state up to date, as for a follower.
+    if (observer->followsDaemon())
+        refreshAllWorkspaceGit();
+}
+
+void SessionHost::noteObserverPromoted(SessionStreamEvents* observer)
+{
+    // Counted as an attached client by the plan the promotion runs next, which settles the role.
+    if (std::erase(_observers, observer) == 0)
+        return;
+    // Its stream subscription repainted no indicator row, taken while it showed no screen; it is to now.
+    refreshHostDrawnStatusLines();
+}
+
+void SessionHost::noteClientDemoted(SessionStreamEvents* client)
+{
+    // Leaves as a window that said it closes does: its workspace is free at once.
+    if (!leaveAttachedClients(client, DetachKind::Closed))
+        return;
+    forgetShownReport(*client);
+    forgetClientArea(client);
+    // It told itself Quiet, so a role it held is no longer held: settled anew below, among observers too.
+    if (_raiseHolder == std::optional { client->connectionId() })
+        _raiseHolder.reset();
+    _observers.push_back(client);
+    settleRaiseRole();
+    abandonSwitchesOf(client->connectionId());
+}
+
 void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKind kind)
 {
-    auto const counted = std::erase(_attachedClients, client) != 0;
-    if (!counted)
+    // A window that is gone watches nothing.
+    forgetShownReport(*client);
+    // An observer selects nothing, so leaves no workspace and was asked no switch: only the role moves on.
+    if (std::erase(_observers, client) != 0)
+    {
+        _focusSerials.erase(client);
+        _focusedClients.erase(client);
+        settleRaiseRole();
+        return;
+    }
+    if (!leaveAttachedClients(client, kind))
         return;
     _focusSerials.erase(client);
+    _focusedClients.erase(client);
+    settleRaiseRole();
+    abandonSwitchesOf(client->connectionId());
+}
+
+void SessionHost::forgetShownReport(SessionStreamEvents const& client)
+{
+    std::erase_if(_shownReports, [gone = client.connectionId()](ShownReport const& report) {
+        return report.client == gone;
+    });
+}
+
+bool SessionHost::leaveAttachedClients(SessionStreamEvents const* client, DetachKind kind)
+{
+    if (std::erase(_attachedClients, client) == 0)
+        return false;
     _selectionSeen.erase(client);
     noteLeft(client->selectedWorkspace());
     // A window that said it closes leaves its workspace free at once, a hold from an earlier drop of the same
@@ -1492,9 +1606,12 @@ void SessionHost::noteClientDetached(SessionStreamEvents const* client, DetachKi
             }
         }
     }
-    settleRaiseRole();
+    return true;
+}
+
+void SessionHost::abandonSwitchesOf(ConnectionId const& gone)
+{
     // A switch asked of a window that is gone will never be answered.
-    auto const gone = client->connectionId();
     auto abandoned = std::vector<uint32_t> {};
     for (auto const& [request, pending]: _pendingSwitches)
         if (pending->client == gone)
@@ -1532,11 +1649,180 @@ uint64_t SessionHost::leftAt(uint64_t workspace) const noexcept
 
 void SessionHost::noteFocus(SessionStreamEvents const& client, proto::WindowFocus focus)
 {
-    if (!std::ranges::contains(_attachedClients, &client))
+    if (!std::ranges::contains(_attachedClients, &client) && !std::ranges::contains(_observers, &client))
         return;
-    if (focus == proto::WindowFocus::Focused)
+    // Only gaining focus stamps the window. A window restates its focus whenever the panes it shows change
+    // (noteShown), and such a report, still on its way over the window's own connection while the user
+    // focuses another one, would otherwise arrive after that one's and take the role back.
+    if (focus == proto::WindowFocus::Focused && _focusedClients.insert(&client).second)
         _focusSerials[&client] = ++_focusCounter;
+    else if (focus == proto::WindowFocus::Unfocused)
+        _focusedClients.erase(&client);
     settleRaiseRole();
+}
+
+void SessionHost::noteShown(ConnectionId const& client,
+                            proto::WindowFocus focus,
+                            std::span<uint64_t const> shownSessions)
+{
+    // Which panes become watched is read before the report replaces the connection's last one.
+    auto entering = std::vector<uint64_t> {};
+    if (focus == proto::WindowFocus::Focused)
+        for (auto const session: shownSessions)
+            if (!isWatched(session))
+                entering.push_back(session);
+    auto const report = ShownReport { .client = client,
+                                      .focus = focus,
+                                      .sessions = { shownSessions.begin(), shownSessions.end() } };
+    if (auto const held = std::ranges::find(_shownReports, client, &ShownReport::client);
+        held != _shownReports.end())
+        *held = report;
+    else
+        _shownReports.push_back(report);
+    // The user looks at it now: what it raised is seen, and no window has to say so.
+    for (auto const session: entering)
+        clearAttention(session);
+}
+
+bool SessionHost::isWatched(uint64_t session) const
+{
+    return std::ranges::any_of(_shownReports, [session](ShownReport const& report) {
+        return report.focus == proto::WindowFocus::Focused && std::ranges::contains(report.sessions, session);
+    });
+}
+
+AttentionChange SessionHost::markPaneSeen(uint64_t session, SeenSerials seen)
+{
+    // Only a pane this host holds has an entry to clear; a session id from a window is not trusted to
+    // name one.
+    if (!_sessions.contains(session))
+        return AttentionChange::Unchanged;
+    auto const change = _attention.markSeen(session, seen);
+    tellAttention(session, change);
+    return change;
+}
+
+void SessionHost::noteOutputAttention(SessionId session)
+{
+    auto* const backing = terminal(session);
+    if (backing == nullptr)
+        return;
+    auto& mark = _outputMarks[session.value];
+    // A program that only rewrote its status line changed nothing the user would see in the pane. Counted
+    // while watched too, so that output the user saw is not marked once the pane is left.
+    if (mark.look(backing->mainDisplayOutputCount()) == OutputReach::StatusLineOnly)
+        return;
+    if (isWatched(session.value))
+        return;
+    if (mark.mark(_loop.clock().now(), _activityMarkInterval) == MarkPace::TooSoon)
+    {
+        // Owed a trailing mark only once the last one was cleared: output still flagged is news already.
+        if (auto const* const attention = _attention.of(session.value);
+            attention != nullptr && attention->activity == proto::OutputActivity::Output)
+            mark.held = HeldOutput::None;
+        else
+            armTrailingOutputMark();
+        return;
+    }
+    tellAttention(session.value, _attention.noteOutput(session.value));
+}
+
+void SessionHost::armTrailingOutputMark()
+{
+    auto earliest = std::optional<core::platform::SteadyTimePoint> {};
+    for (auto const& mark: _outputMarks | std::views::values)
+        if (auto const due = mark.trailingDue(_activityMarkInterval); due && (!earliest || *due < *earliest))
+            earliest = due;
+    if (!earliest
+        || (_trailingOutputMark && !_trailingOutputMark->settled() && _trailingOutputMarkDue <= earliest))
+        return;
+    _trailingOutputMarkDue = earliest;
+    _trailingOutputMark.emplace(_loop, *earliest, &markTrailingOutput, this);
+}
+
+void SessionHost::markTrailingOutput(void* host)
+{
+    auto& self = *static_cast<SessionHost*>(host);
+    // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
+    self._trailingOutputMark.reset();
+    self._trailingOutputMarkDue.reset();
+    auto const now = self._loop.clock().now();
+    auto due = std::vector<uint64_t> {};
+    for (auto const& [session, mark]: self._outputMarks)
+        if (auto const at = mark.trailingDue(self._activityMarkInterval); at && *at <= now)
+            due.push_back(session);
+    for (auto const session: due)
+    {
+        auto& mark = self._outputMarks[session];
+        if (self.isWatched(session))
+        {
+            mark.held = HeldOutput::None; // the user is looking at it
+            continue;
+        }
+        if (mark.mark(now, self._activityMarkInterval) == MarkPace::Marked)
+            self.tellAttention(session, self._attention.noteOutput(session));
+    }
+    self.armTrailingOutputMark();
+}
+
+void SessionHost::noteBellAttention(SessionId session)
+{
+    if (!isWatched(session.value))
+        tellAttention(session.value, _attention.noteBell(session.value));
+}
+
+void SessionHost::noteFinishedAttention(SessionId session, vtbackend::CommandBlockSummary const& block)
+{
+    if (!isWatched(session.value))
+        tellAttention(session.value,
+                      _attention.noteFinished(session.value, finishedCommandOf(block), _clocks.wall.now()));
+}
+
+void SessionHost::noteStatusAttention(SessionId session)
+{
+    // A Done or an Error the user watches appear is seen as it appears.
+    if (isWatched(session.value))
+        tellAttention(session.value,
+                      _attention.markSeen(session.value,
+                                          SeenSerials { .statusGeneration = statusGenerationOf(session) }));
+}
+
+void SessionHost::clearAttention(uint64_t session)
+{
+    if (!_sessions.contains(session))
+        return;
+    auto const last = _attention.lastSerial();
+    tellAttention(
+        session,
+        _attention.markSeen(session,
+                            SeenSerials { .activity = last,
+                                          .bell = last,
+                                          .finished = last,
+                                          .statusGeneration = statusGenerationOf(SessionId { session }) }));
+}
+
+uint64_t SessionHost::statusGenerationOf(SessionId session)
+{
+    auto* const backing = terminal(session);
+    if (backing == nullptr)
+        return 0;
+    auto const guard = std::lock_guard { std::as_const(*backing) };
+    auto newest = uint64_t { 0 };
+    for (auto const& record: backing->programStatus().records())
+        newest = std::max(newest, record.generation);
+    return newest;
+}
+
+void SessionHost::tellAttention(uint64_t session, AttentionChange change)
+{
+    if (change == AttentionChange::Unchanged)
+        return;
+    if (auto const* attention = _attention.of(session))
+    {
+        // A copy: an observer that marks the pane seen as it is told changes the ledger's entry.
+        auto const state = *attention;
+        fanOutStream(&SessionStreamEvents::paneAttentionChanged, session, state);
+    }
 }
 
 std::optional<ConnectionId> SessionHost::clipboardTargetOf(vtworkspace::SessionId session) const
@@ -1550,8 +1836,12 @@ std::optional<ConnectionId> SessionHost::clipboardTargetOf(vtworkspace::SessionI
 
 std::optional<ConnectionId> SessionHost::raiseHolderNow() const
 {
-    auto const views = connectionViews();
-    return raiseHolder(views);
+    // An observer raises only while no window that shows a workspace can: it is attached last, often, and
+    // focused when the user looks at its list, which must not take the role from a window showing panes.
+    if (auto const views = connectionViews(); !views.empty())
+        return raiseHolder(views);
+    auto const observers = viewsOf(_observers);
+    return raiseHolder(observers);
 }
 
 void SessionHost::settleRaiseRole()
@@ -1563,11 +1853,13 @@ void SessionHost::settleRaiseRole()
     auto const tell = [this](std::optional<ConnectionId> const& connection, proto::RaiseRole role) {
         if (!connection)
             return;
-        if (auto const found = std::ranges::find_if(
-                _attachedClients,
-                [&](SessionStreamEvents const* client) { return client->connectionId() == *connection; });
-            found != _attachedClients.end())
+        auto const named = [&](SessionStreamEvents const* client) {
+            return client->connectionId() == *connection;
+        };
+        if (auto const found = std::ranges::find_if(_attachedClients, named); found != _attachedClients.end())
             (*found)->raiseRoleChanged(role);
+        else if (auto const observer = std::ranges::find_if(_observers, named); observer != _observers.end())
+            (*observer)->raiseRoleChanged(role);
     };
     tell(previous, proto::RaiseRole::Quiet);
     tell(holder, proto::RaiseRole::Raise);
@@ -1598,9 +1890,14 @@ std::unordered_set<uint64_t> SessionHost::shownForAttach() const
 
 std::vector<ConnectionView> SessionHost::connectionViews() const
 {
+    return viewsOf(_attachedClients);
+}
+
+std::vector<ConnectionView> SessionHost::viewsOf(std::span<SessionStreamEvents* const> clients) const
+{
     // A client that is never told its role, nor asked to switch, must not hold either.
     return std::ranges::to<std::vector>(
-        _attachedClients
+        clients
         | std::views::filter([](SessionStreamEvents const* client) { return client->followsDaemon(); })
         | std::views::transform([this](SessionStreamEvents const* client) {
               auto const stamped = _focusSerials.find(client);
@@ -2171,6 +2468,8 @@ void SessionHost::eraseSession(uint64_t session)
     // Before the terminal it ticks: no frame timer outlives its session.
     _animationTicks.erase(session);
     _endWaits.erase(session);
+    _attention.forget(session);
+    _outputMarks.erase(session);
     _sessions.erase(session);
     tellStructure(&StructureEvents::sessionClosed, SessionId { session });
 }
@@ -2342,8 +2641,12 @@ void SessionHost::subscribeStream(SessionStreamEvents* observer)
 {
     _streamSubscribers.push_back(observer);
     // Nothing repainted the rows while no client was attached: one attaching is handed them current.
-    if (!observer->mirrorsScreens())
-        return;
+    if (observer->mirrorsScreens())
+        refreshHostDrawnStatusLines();
+}
+
+void SessionHost::refreshHostDrawnStatusLines()
+{
     for (auto const& [id, session]: _sessions)
         if (session->indicatorRowIsHostDrawn())
             refreshStatusLine(*session);
@@ -2386,11 +2689,16 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
     //
     // The order is settlePicks()' precondition: the picks before are taken first, then the client's
     // refinements and area go and the area is re-resolved, so the picks after are the final ones.
-    auto const before = snapshotPicks(observer);
-    forgetClientRefinements(observer);
-    _clientAreas.erase(observer);
+    forgetClientArea(observer);
+}
+
+void SessionHost::forgetClientArea(SessionStreamEvents* client)
+{
+    auto const before = snapshotPicks(client);
+    forgetClientRefinements(client);
+    _clientAreas.erase(client);
     // The departed client's cell stops counting too; with nobody left, the host keeps the cell it learned.
-    _clientCells.erase(observer);
+    _clientCells.erase(client);
     auto const area = resolveAuthoritativeArea();
     std::ignore = resizingWithCellPixelSize([&] { return settlePicks(area, before); });
 }

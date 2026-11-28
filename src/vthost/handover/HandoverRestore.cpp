@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iterator>
@@ -102,8 +103,20 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
             _objects.bind(_workspace, _objects.mint());
     }
 
+    // Before any session is adopted, each of which gets a quiet entry only where the image has none: what the
+    // panes raised and what windows saw of it carries on, and no serial a window holds is handed out again.
+    auto attention = std::vector<std::pair<uint64_t, PaneAttention>> {};
+    for (auto const& pane: image.attention.panes)
+        attention.emplace_back(pane.session, pane.attention);
+    _attention = AttentionLedger::restored(image.attention.lastSerial, attention);
+
     for (auto& session: image.sessions)
         adoptHandoverSession(session);
+
+    // An entry of a session that was not adopted names nothing.
+    for (auto const& [session, pane]: _attention.entries())
+        if (!_sessions.contains(session))
+            _attention.forget(session);
 
     // A leaf whose session could not be adopted shows nothing, and nothing would ever close it.
     for (auto const session: leafSessionsOf(image.tree))
@@ -112,6 +125,17 @@ std::expected<void, HandoverError> SessionHost::restoreHandover(HandoverImage im
                 _model.closePane(workspace->id(), tab->id(), leaf->id());
 
     discardEmptyWorkspaces();
+
+    // A promotion asked again across the upgrade selects what its first ask made, while that is still there
+    // (workspaceMadeFor()). The connection that asked ended at the exec: the entry names none of this
+    // image's.
+    for (auto const& made: image.madeForTokens)
+    {
+        auto token = proto::CreationToken {};
+        std::ranges::transform(made.token, token.begin(), [](uint8_t b) { return std::byte { b }; });
+        rememberWorkspaceMadeFor(
+            { .token = token, .workspace = vtworkspace::WorkspaceId { made.workspace }, .maker = {} });
+    }
 
     // Each session crossed with the scrollback limit its terminal was built with, which its state restored:
     // the configuration this image loaded applies to it now, before any client sees it, as a reload would.

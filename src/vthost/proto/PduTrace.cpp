@@ -71,9 +71,20 @@ namespace
         EnumName { .value = RaiseRole::Raise, .name = "raise" },
     };
 
+    constexpr auto ConnectionRoleNames = std::array {
+        EnumName { .value = ConnectionRole::Attach, .name = "attach" },
+        EnumName { .value = ConnectionRole::Control, .name = "control" },
+        EnumName { .value = ConnectionRole::Observe, .name = "observe" },
+    };
+
     constexpr auto ActivityNames = std::array {
         EnumName { .value = OutputActivity::None, .name = "none" },
         EnumName { .value = OutputActivity::Output, .name = "output" },
+    };
+
+    constexpr auto BellNames = std::array {
+        EnumName { .value = PaneBell::Silent, .name = "silent" },
+        EnumName { .value = PaneBell::Rang, .name = "rang" },
     };
 
     /// @return @p finished as ` finished=exit:0,ms:120`, with only the numbers it states -- never the command
@@ -213,7 +224,7 @@ namespace
                            formatCapabilities(value.capabilities),
                            value.token.empty() ? "no" : "yes",
                            value.sessionSettings ? "yes" : "no",
-                           value.role == ConnectionRole::Control ? "control" : "attach",
+                           nameIn(ConnectionRoleNames, value.role),
                            value.clientArea
                                ? std::format("{}x{}", value.clientArea->columns, value.clientArea->lines)
                                : std::string { "none" },
@@ -589,7 +600,13 @@ namespace
                    "LayoutBatchEnd",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<LayoutBatchEnd>(pdu);
-                       return std::format("cause={} selected={}", value.causeSerial, value.selected);
+                       if (value.restoredWorkspaces == 0 && value.restoredTabs == 0)
+                           return std::format("cause={} selected={}", value.causeSerial, value.selected);
+                       return std::format("cause={} selected={} restored={}/{}",
+                                          value.causeSerial,
+                                          value.selected,
+                                          value.restoredWorkspaces,
+                                          value.restoredTabs);
                    } },
         TraceRow { PduType::SetSplitOrientation,
                    "SetSplitOrientation",
@@ -617,6 +634,7 @@ namespace
                    } },
         TraceRow { PduType::PanesReprojected, "PanesReprojected", nullptr },
         TraceRow { PduType::Goodbye, "Goodbye", nullptr },
+        TraceRow { PduType::ObserveOnly, "ObserveOnly", nullptr },
         TraceRow { PduType::OpenFirstTab,
                    "OpenFirstTab",
                    +[](DecodedPdu const& pdu) {
@@ -657,15 +675,24 @@ namespace
                    "SelectWorkspace",
                    +[](DecodedPdu const& pdu) {
                        auto const& select = std::get<SelectWorkspace>(pdu);
-                       return select.directoryFromSession ? std::format("workspace={} from={}",
-                                                                        select.workspace,
-                                                                        *select.directoryFromSession)
-                                                          : std::format("workspace={}", select.workspace);
+                       auto text = select.directoryFromSession
+                                       ? std::format("workspace={} from={}",
+                                                     select.workspace,
+                                                     *select.directoryFromSession)
+                                       : std::format("workspace={}", select.workspace);
+                       if (select.creationToken)
+                           text += " once";
+                       return text;
                    } },
         TraceRow { PduType::ReportFocus,
                    "ReportFocus",
                    +[](DecodedPdu const& pdu) {
-                       return std::format("focus={}", nameIn(FocusNames, std::get<ReportFocus>(pdu).focus));
+                       auto const& value = std::get<ReportFocus>(pdu);
+                       return std::format("focus={}{}",
+                                          nameIn(FocusNames, value.focus),
+                                          value.shownSessions.empty()
+                                              ? std::string {}
+                                              : std::format(" shown={}", value.shownSessions.size()));
                    } },
         TraceRow { PduType::NotifyRole,
                    "NotifyRole",
@@ -731,6 +758,35 @@ namespace
                        auto const& value = std::get<SetWorkspaceColor>(pdu);
                        return std::format(
                            "workspace={} {}", value.workspace, formatWorkspaceColor(value.color));
+                   } },
+        TraceRow { PduType::PaneAttentionState,
+                   "PaneAttentionState",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<PaneAttentionState>(pdu);
+                       // The serials run activity/bell/finished, as MarkSeen hands them back.
+                       return std::format(
+                           "session={} activity={} bell={}{}{} serials={}/{}/{} status-seen={}",
+                           value.session,
+                           nameIn(ActivityNames, value.activity),
+                           nameIn(BellNames, value.bell),
+                           formatFinished(value.finished),
+                           value.finishedAtUnixMs ? std::format(" at={}", *value.finishedAtUnixMs)
+                                                  : std::string {},
+                           value.activitySerial,
+                           value.bellSerial,
+                           value.finishedSerial,
+                           value.seenStatusGeneration);
+                   } },
+        TraceRow { PduType::MarkSeen,
+                   "MarkSeen",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MarkSeen>(pdu);
+                       return std::format("session={} seen={}/{}/{} status-seen={}",
+                                          value.session,
+                                          value.seen.activity,
+                                          value.seen.bell,
+                                          value.seen.finished,
+                                          value.seen.statusGeneration);
                    } },
     };
 

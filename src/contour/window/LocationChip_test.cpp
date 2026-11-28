@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -180,10 +181,11 @@ TEST_CASE("locationChip.translation", "[LocationChip]")
 
 TEST_CASE("locationChip.stateGlyph", "[LocationChip]")
 {
-    CHECK(daemonStateGlyph(HostChipState::Connected) == "●");
-    CHECK(daemonStateGlyph(HostChipState::Reconnecting) == "◑");
-    CHECK(daemonStateGlyph(HostChipState::Disconnected) == "✕");
-    CHECK(daemonStateGlyph(HostChipState::NeedsAttention) == "!");
+    for (auto const i: std::views::iota(size_t { 0 }, HostChipStateCount))
+    {
+        auto const state = HostChipState(i);
+        CHECK(daemonStateGlyph(state) == hostChipLook(state).glyph);
+    }
 }
 
 TEST_CASE("locationChip.toolTip", "[LocationChip]")
@@ -207,11 +209,12 @@ TEST_CASE("locationChip.place", "[LocationChip]")
     using P = LocationChipPlace;
     struct Row
     {
-        BarPresence band;
-        BarCentre centre;
-        DaemonHosting hosting;
-        SidebarShown sidebar;
-        LocationChipPlace expected;
+        BarPresence band {};
+        BarCentre centre {};
+        DaemonHosting hosting {};
+        SidebarShown sidebar {};
+        LocationChipPlace expected {};
+        HostChipState state = HostChipState::Connected;
     };
     constexpr auto Daemon = DaemonHosting::Daemon;
     constexpr auto None = DaemonHosting::InProcess;
@@ -220,20 +223,32 @@ TEST_CASE("locationChip.place", "[LocationChip]")
     constexpr auto On = SidebarShown::Yes;
     constexpr auto Shown = BarPresence::Shown;
     constexpr auto Hidden = BarPresence::Hidden;
+    constexpr auto Reconnecting = HostChipState::Reconnecting;
+    constexpr auto Disconnected = HostChipState::Disconnected;
+    constexpr auto NeedsAttention = HostChipState::NeedsAttention;
     auto const rows = std::array {
-        // A daemon's chip follows the band's centre.
+        // A daemon's chip follows the band's centre while no sidebar shows.
         Row { Shown, BarCentre::ChipAndTabs, Daemon, Off, P::Band },
         Row { Shown, BarCentre::Tabs, Daemon, Off, P::Band },
         Row { Shown, BarCentre::Title, Daemon, Off, P::Band },
         Row { Shown, BarCentre::Empty, Daemon, Off, P::Band },
         Row { BarPresence::Pinned, BarCentre::Tabs, Daemon, Off, P::Band },
         Row { BarPresence::RevealOnEdge, BarCentre::Title, Daemon, Off, P::Band },
-        Row { Shown, BarCentre::Breadcrumb, Daemon, On, P::Sidebar },
-        // The sidebar's head holds the daemon only while the sidebar shows; hidden, the band does.
         Row { Shown, BarCentre::Breadcrumb, Daemon, Off, P::Band },
-        // With no band the sidebar names the daemon, or nothing does.
-        Row { Hidden, BarCentre::Tabs, Daemon, On, P::Sidebar },
+        Row { Shown, BarCentre::Breadcrumb, Daemon, Off, P::Band, Reconnecting },
         Row { Hidden, BarCentre::Tabs, Daemon, Off, P::None },
+        // With the sidebar shown, the tree's heading row names the daemon, so the chip shows nowhere...
+        Row { Shown, BarCentre::Breadcrumb, Daemon, On, P::None },
+        Row { Shown, BarCentre::Tabs, Daemon, On, P::None },
+        Row { Shown, BarCentre::Title, Daemon, On, P::None },
+        Row { Hidden, BarCentre::Tabs, Daemon, On, P::None },
+        // ... until the window's own link is down: then the band says so, whatever its centre.
+        Row { Shown, BarCentre::Breadcrumb, Daemon, On, P::Band, Reconnecting },
+        Row { Shown, BarCentre::Breadcrumb, Daemon, On, P::Band, Disconnected },
+        Row { Shown, BarCentre::Tabs, Daemon, On, P::Band, NeedsAttention },
+        Row { BarPresence::Pinned, BarCentre::Title, Daemon, On, P::Band, Reconnecting },
+        // With no band the tree's heading says it alone.
+        Row { Hidden, BarCentre::Tabs, Daemon, On, P::None, Reconnecting },
         // Without a daemon (in-process) only the workspace-chip centre shows.
         Row { Shown, BarCentre::ChipAndTabs, None, Off, P::Band },
         Row { Shown, BarCentre::Tabs, None, Off, P::None },
@@ -246,13 +261,34 @@ TEST_CASE("locationChip.place", "[LocationChip]")
         Row { Shown, BarCentre::ChipAndTabs, OtherHost, Off, P::Band },
         Row { Shown, BarCentre::Tabs, OtherHost, Off, P::Band },
         Row { Shown, BarCentre::Title, OtherHost, Off, P::Band },
-        Row { Shown, BarCentre::Breadcrumb, OtherHost, On, P::Sidebar },
         Row { Shown, BarCentre::Breadcrumb, OtherHost, Off, P::Band },
-        Row { Hidden, BarCentre::Tabs, OtherHost, On, P::Sidebar },
         Row { Hidden, BarCentre::Tabs, OtherHost, Off, P::None },
     };
     for (auto const& row: rows)
-        CHECK(locationChipPlace(row.band, row.centre, row.hosting, row.sidebar) == row.expected);
+    {
+        INFO("band " << static_cast<int>(row.band) << ", centre " << static_cast<int>(row.centre)
+                     << ", hosting " << static_cast<int>(row.hosting) << ", sidebar "
+                     << static_cast<int>(row.sidebar) << ", state " << static_cast<int>(row.state));
+        CHECK(locationChipPlace(row.band, row.centre, row.hosting, row.sidebar, row.state) == row.expected);
+    }
+}
+
+TEST_CASE("a tmux window keeps its chip in the sidebar", "[LocationChip]")
+{
+    // A tmux attach has no daemon row to name its host in the tree: its chip heads the sidebar, whatever its
+    // connection says.
+    for (auto const state: std::views::iota(size_t { 0 }, HostChipStateCount)
+                               | std::views::transform([](size_t i) { return HostChipState(i); }))
+    {
+        INFO("state " << static_cast<int>(state));
+        CHECK(
+            locationChipPlace(
+                BarPresence::Shown, BarCentre::Breadcrumb, DaemonHosting::OtherHost, SidebarShown::Yes, state)
+            == LocationChipPlace::Sidebar);
+        CHECK(locationChipPlace(
+                  BarPresence::Hidden, BarCentre::Tabs, DaemonHosting::OtherHost, SidebarShown::Yes, state)
+              == LocationChipPlace::Sidebar);
+    }
 }
 
 TEST_CASE("locationChip.placeName", "[LocationChip]")
@@ -343,6 +379,11 @@ TEST_CASE("daemonHosting.policy", "[LocationChip]")
     CHECK(other.naming == ChipNaming::NamesDaemon);
     CHECK(other.segments == ChipSegments::DaemonOnly);
     CHECK(other.reach == SwitcherReach::AsAsked);
+    // Only a daemon's tree names its daemon in a heading row, and so carries the switcher as a control; a
+    // tmux window's chip opens the switcher, an in-process window has no daemon to switch.
+    CHECK(daemon.sidebar == SidebarNaming::HeadingRow);
+    CHECK(inProcess.sidebar == SidebarNaming::None);
+    CHECK(other.sidebar == SidebarNaming::None);
 }
 
 TEST_CASE("locationChip.otherWorkspaceClauseIsTheTranslatorsToCase", "[LocationChip]")
@@ -378,4 +419,29 @@ TEST_CASE("locationChip.otherWorkspaceClauseIsTheTranslatorsToCase", "[LocationC
     CHECK(locationChipAccessibleDescription(
               HostChipState::Disconnected, Urgency::NeedsYou, Disclosure::Collapsed)
           == "Disconnected, another workspace needs you, collapsed");
+}
+
+TEST_CASE("a pending jump with the sidebar hidden puts the chip in the band, saying where it goes",
+          "[LocationChip][jump]")
+{
+    // Correction 17: with no sidebar to mark the row, a daemon window's chip is in the band whatever the
+    // band's centre holds, and while a jump is under way it names the daemon the jump connects to.
+    for (auto const centre: { BarCentre::Breadcrumb, BarCentre::Tabs, BarCentre::Empty, BarCentre::Title })
+    {
+        INFO("centre " << static_cast<int>(centre));
+        CHECK(
+            locationChipPlace(
+                BarPresence::Shown, centre, DaemonHosting::Daemon, SidebarShown::No, HostChipState::Connected)
+            == LocationChipPlace::Band);
+    }
+
+    auto const texts = locationChipPendingStepTexts("starfive");
+    REQUIRE(texts.size() == LocationChipSteps.size());
+    CHECK(texts.front().fit == LocationChipFit::Full);
+    CHECK(texts.front().daemon == "starfive");
+    CHECK(texts.front().status == "Connecting…");
+    CHECK(texts.front().tooltip == "Connecting to starfive… · Click to cancel");
+    // The workspace it goes to is not this window's: no workspace is named until it lands.
+    CHECK(std::ranges::all_of(texts, [](auto const& text) { return text.workspace.empty(); }));
+    CHECK(locationChipPendingAccessibleName("starfive") == "Connecting to starfive…");
 }

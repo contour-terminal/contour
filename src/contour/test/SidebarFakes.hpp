@@ -4,6 +4,7 @@
 /// The window a SidebarModel sits in, faked: a directory source that lists what a test sets, and a host that
 /// records what the sidebar asks of the window. Shared by the model's own tests and by the QML tests, which
 /// drive the real model under the real Sidebar.qml.
+#include <contour/test/FakeDaemonSections.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
 
@@ -20,7 +21,8 @@
 namespace contour::test
 {
 
-/// A source that lists what the test sets and records what it is asked to select.
+/// A source that lists what the test sets, answers a selection as the test chooses, and records what it is
+/// asked.
 struct FakeDirectorySource final: window::IWorkspaceDirectorySource
 {
     window::WorkspaceDirectory listed;
@@ -35,8 +37,23 @@ struct FakeDirectorySource final: window::IWorkspaceDirectorySource
     window::SelectResult select(uint64_t workspace) override
     {
         selected.push_back(workspace);
-        return window::SelectResult::Requested;
+        return answer;
     }
+    [[nodiscard]] window::FlagSource flagSource() const override { return flags; }
+    void markSeen(window::PaneKey pane, window::PaneSeen seen) override
+    {
+        seenMarks.emplace_back(pane, seen);
+    }
+    void reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes) override
+    {
+        shownReports.emplace_back(focus, std::move(panes));
+    }
+
+    window::SelectResult answer = window::SelectResult::Requested; ///< What select() answers.
+    window::FlagSource flags = window::FlagSource::Window;         ///< Who keeps the listed panes' flags.
+    std::vector<std::pair<window::PaneKey, window::PaneSeen>> seenMarks; ///< Every markSeen(), in order.
+    /// Every reportShown(), in order.
+    std::vector<std::pair<window::WindowFocusState, std::vector<window::PaneKey>>> shownReports;
 };
 
 /// A window that records what the sidebar asks of it.
@@ -112,6 +129,30 @@ struct FakeSidebarHost final: window::ISidebarHost
         auto const found = lines.find(row);
         return found != lines.end() ? found->second : std::vector<std::string> {};
     }
+
+    std::optional<window::OwnDaemon> own;                                  ///< What ownDaemon() answers.
+    vtworkspace::WorkspaceId window { 1 };                                 ///< What windowId() answers.
+    std::vector<std::pair<window::SidebarTarget, window::JumpMode>> jumps; ///< Every jumpTo(), in order.
+    window::PendingJumps pending;                                          ///< What pendingJumps() answers.
+    int cancels = 0;                                                       ///< How often cancelJump() ran.
+    std::vector<window::JumpMode> cancelled;                               ///< Each cancelJump()'s mode.
+    int reconnects = 0;                                                    ///< How often reconnect() ran.
+    int promptRaises = 0;                                                  ///< How often raisePrompt() ran.
+
+    [[nodiscard]] std::optional<window::OwnDaemon> ownDaemon() const override { return own; }
+    [[nodiscard]] vtworkspace::WorkspaceId windowId() const override { return window; }
+    void jumpTo(window::SidebarTarget target, window::JumpMode mode) override
+    {
+        jumps.emplace_back(std::move(target), mode);
+    }
+    [[nodiscard]] window::PendingJumps pendingJumps() const override { return pending; }
+    void cancelJump(window::JumpMode mode) override
+    {
+        ++cancels;
+        cancelled.push_back(mode);
+    }
+    void reconnect() override { ++reconnects; }
+    void raisePrompt() override { ++promptRaises; }
 };
 
 /// @param key The pane's key value; also its tab's id, by workspaceOf().

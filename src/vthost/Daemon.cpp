@@ -1283,6 +1283,8 @@ namespace
                                                        proto::Capability::SoftFonts,
                                                        proto::Capability::WorkspaceSwitch,
                                                        proto::Capability::DaemonFollow,
+                                                       proto::Capability::DaemonAttention,
+                                                       proto::Capability::Observe,
                                                        proto::Capability::WorkspaceMeta,
                                                        proto::Capability::ClientGoodbye,
                                                        proto::Capability::LaunchFirstTab,

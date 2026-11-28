@@ -164,19 +164,37 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         vtworkspace::WorkspaceId window;       ///< The window asking.
         contour::session::SwitchTarget target; ///< Where to go.
         contour::session::SwitchMode mode {};  ///< Switch or open.
+        /// Told the outcome, when the test completes it; empty for one failed or handed on at once.
+        contour::session::SwitchCompletion done {};
     };
 
     void request(vtworkspace::WorkspaceId window,
                  contour::session::SwitchTarget target,
                  contour::session::SwitchMode mode,
-                 contour::session::SwitchLandBy landBy,
+                 contour::session::SwitchWaiter waiter,
                  contour::session::SwitchCompletion done) override
     {
-        requests.push_back({ .window = window, .target = target, .mode = mode });
         if (failWith)
+        {
+            requests.push_back({ .window = window, .target = target, .mode = mode, .done = {} });
             done(std::unexpected(*failWith));
+        }
         else if (forwardTo != nullptr)
-            forwardTo->request(window, std::move(target), mode, landBy, std::move(done));
+        {
+            requests.push_back({ .window = window, .target = target, .mode = mode, .done = {} });
+            forwardTo->request(window, std::move(target), mode, waiter, std::move(done));
+        }
+        else
+            requests.push_back(
+                { .window = window, .target = std::move(target), .mode = mode, .done = std::move(done) });
+    }
+
+    /// Records the cancel, and hands it on.
+    void cancel(vtworkspace::WorkspaceId window, contour::session::SwitchMode mode) override
+    {
+        cancels.push_back(window);
+        if (forwardTo != nullptr)
+            forwardTo->cancel(window, mode);
     }
 
     /// Lists nothing: a test of the popup's listing builds a real switcher.
@@ -197,7 +215,7 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         createdLabels.push_back(std::move(label));
         auto target = daemon;
         target.workspace = contour::session::NewWorkspace {};
-        request(window, std::move(target), mode, contour::session::NoLandingDeadline, std::move(done));
+        request(window, std::move(target), mode, contour::session::UserSwitch, std::move(done));
     }
 
     /// No window here has a daemon behind it.
@@ -207,8 +225,9 @@ class RecordingWindowSwitching final: public contour::remote::SwitchingService
         return {};
     }
 
-    std::vector<std::string> createdLabels; ///< The labels createWorkspace() was asked for, in order.
-    std::vector<Request> requests;          ///< Every request, in order.
+    std::vector<std::string> createdLabels;        ///< The labels createWorkspace() was asked for, in order.
+    std::vector<Request> requests;                 ///< Every request, in order.
+    std::vector<vtworkspace::WorkspaceId> cancels; ///< The windows a cancel was asked for, in order.
     std::optional<std::string> failWith {}; ///< When set, every request fails at once with this reason.
     /// When set (and failWith is not), every request is handed on to it: a test of a real switcher behind
     /// the app's manager. It must outlive the requests.
@@ -224,6 +243,7 @@ class FakeSwitchDirectory final: public contour::session::SwitchDirectory
         return daemons;
     }
     [[nodiscard]] std::vector<std::string> hostsShownHere() const override { return hosts; }
+    [[nodiscard]] std::vector<contour::session::SwitchTarget> daemonRing() const override { return ring; }
     [[nodiscard]] std::vector<contour::session::KnownWorkspace> workspacesOf(
         vtworkspace::WorkspaceId /*window*/) const override
     {
@@ -234,6 +254,7 @@ class FakeSwitchDirectory final: public contour::session::SwitchDirectory
 
     std::vector<contour::cli::DiscoveredDaemon> daemons;      ///< What localDaemons() answers.
     std::vector<std::string> hosts;                           ///< What hostsShownHere() answers.
+    std::vector<contour::session::SwitchTarget> ring;         ///< What daemonRing() answers.
     std::vector<contour::session::KnownWorkspace> workspaces; ///< What workspacesOf() answers.
     int discoveryRefreshes = 0;                               ///< How often refreshDiscovery() was called.
     int refreshes = 0;                                        ///< How often refresh() was called.
@@ -265,6 +286,7 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     {
         return _target;
     }
+    [[nodiscard]] std::optional<contour::window::DaemonRef> daemonRef() const override { return ref; }
     [[nodiscard]] contour::window::DaemonDriftModel* daemonDrift() noexcept override { return nullptr; }
     [[nodiscard]] contour::window::DaemonLocality daemonLocality() const noexcept override
     {
@@ -293,6 +315,8 @@ class DaemonNamedBinding final: public contour::session::WindowBinding
     unsigned waitingElsewhere = 0;
     /// What daemonKey() reports: bindings sharing one count their daemon once.
     std::optional<uint64_t> key = std::nullopt;
+    /// What daemonRef() reports: how the sidebar names the daemon.
+    std::optional<contour::window::DaemonRef> ref = std::nullopt;
 
     /// One openSiblingWindow() call.
     struct OpenedWindow

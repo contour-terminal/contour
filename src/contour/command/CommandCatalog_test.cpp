@@ -558,6 +558,22 @@ TEST_CASE("ActionCommandSource does not offer a nameless AttachToHost", "[contou
     CHECK_FALSE(hasCommand(ActionCommandSource {}.commands(), "AttachToHost"));
 }
 
+TEST_CASE("the palette lists CancelSwitch, bound or not", "[contour][palette][sidebar]")
+{
+    // It ends the sidebar's jump under way, which the window tracks: the palette offers it as it offers
+    // every action, and a binding of it lists it once.
+    CHECK(hasCommand(ActionCommandSource {}.commands(), "CancelSwitch"));
+    auto mappings = config::InputMappings {};
+    mappings.keyMappings.push_back(
+        config::KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                                  .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                  .input = vtbackend::Key::F6,
+                                  .binding = { { actions::CancelSwitch {}, actions::SplitVertical {} } } });
+    auto const bound = BoundCommandSource { mappings }.commands();
+    CHECK(hasCommand(bound, "CancelSwitch"));
+    CHECK(hasCommand(bound, "SplitVertical"));
+}
+
 TEST_CASE("commandCategory.everyCatalogueActionHasExactlyOneRow", "[contour][palette][commandcategory]")
 {
     auto const& catalog = actions::actionCatalog();
@@ -666,10 +682,10 @@ TEST_CASE("every new sidebar action has a catalog entry and a palette category",
 {
     using namespace actions;
     auto const sidebarActions = std::array {
-        Action { ToggleSidebar {} },      Action { FocusSidebar {} },    Action { JumpToNextAttention {} },
-        Action { MarkSeen {} },           Action { RenameWorkspace {} }, Action { MoveWorkspaceUp {} },
-        Action { MoveWorkspaceDown {} },  Action { CloseWorkspace {} },  Action { GoToPane {} },
-        Action { MoveTabToWorkspace {} },
+        Action { ToggleSidebar {} },   Action { FocusSidebar {} },       Action { JumpToNextAttention {} },
+        Action { JumpBack {} },        Action { MarkSeen {} },           Action { RenameWorkspace {} },
+        Action { MoveWorkspaceUp {} }, Action { MoveWorkspaceDown {} },  Action { CloseWorkspace {} },
+        Action { GoToPane {} },        Action { MoveTabToWorkspace {} }, Action { ToggleSidebarNeedsMe {} },
     };
     for (auto const& action: sidebarActions)
     {
@@ -683,5 +699,7 @@ TEST_CASE("every new sidebar action has a catalog entry and a palette category",
         CHECK(row != actionCategories().end());
     }
     CHECK(commandCategory(Action { ToggleSidebar {} }) == CommandCategory::View);
+    CHECK(commandCategory(Action { ToggleSidebarNeedsMe {} }) == CommandCategory::View);
     CHECK(commandCategory(Action { JumpToNextAttention {} }) == CommandCategory::Window);
+    CHECK(commandCategory(Action { JumpBack {} }) == CommandCategory::Window);
 }

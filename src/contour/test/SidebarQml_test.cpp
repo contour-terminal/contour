@@ -20,6 +20,7 @@
 #include <contour/window/LocationChip.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/SidebarControls.hpp>
+#include <contour/window/SidebarMenuState.hpp>
 #include <contour/window/SidebarModel.hpp>
 #include <contour/window/SidebarTabColor.hpp>
 #include <contour/window/StatusUrgency.hpp>
@@ -34,6 +35,9 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtGui/QAccessible>
+#include <QtGui/QFont>
+#include <QtGui/QFontDatabase>
+#include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>
 #include <QtQml/QQmlEngine>
@@ -84,13 +88,61 @@ namespace
     return rows;
 }
 
+/// Skips the running test where the platform's UI font is not installed: the sidebar's default and minimum
+/// widths are sized against it, and a substitute's metrics decide other fits. Windows ships Segoe UI, but a
+/// Windows build run elsewhere (wine) may lack it; every other platform's application font is its own.
+void skipWithoutPlatformUiFont()
+{
+#ifdef _WIN32
+    if (!QFontDatabase::hasFamily(QStringLiteral("Segoe UI")))
+        SKIP("Segoe UI is not installed: the sidebar's widths are sized against it");
+#endif
+}
+
+/// The font a scene's chrome is set in.
+enum class SceneFont : uint8_t
+{
+    Application = 0, ///< The application's font, on every row.
+    /// The row's own as a running window sets it: on the Terminal row the profile's terminal font, which is
+    /// monospaced -- in a proportional face its cells would hold words a running window's do not.
+    RowOwn,
+    /// The application's font set a quarter wider, as a wide UI face (DejaVu Sans, many a Linux desktop's)
+    /// sets the chrome's words: whatever the machine running the test has installed.
+    Wide,
+};
+
+/// How much wider SceneFont::Wide sets each letter, in percent of the face's own spacing: wider than DejaVu
+/// Sans sets "Workspaces" against Noto Sans or Cantarell.
+constexpr auto WideLetterSpacing = 125.0;
+
+/// @return The font a scene set in @p font chromes @p row with.
+[[nodiscard]] QFont sceneFontOf(ChromeStyle row, SceneFont font)
+{
+    switch (font)
+    {
+        case SceneFont::Application: break;
+        case SceneFont::RowOwn:
+            if (row == ChromeStyle::Terminal)
+                return QFontDatabase::systemFont(QFontDatabase::FixedFont);
+            break;
+        case SceneFont::Wide: {
+            auto wide = QGuiApplication::font();
+            wide.setLetterSpacing(QFont::PercentageSpacing, WideLetterSpacing);
+            return wide;
+        }
+    }
+    return QGuiApplication::font();
+}
+
 /// The setup @p row is loaded under, with the window controls its host shows.
 [[nodiscard]] contour::test::ChromeSetup setupOf(
-    ChromeStyle row, contour::config::MotionPreference motion = contour::config::MotionPreference::Full)
+    ChromeStyle row,
+    contour::config::MotionPreference motion = contour::config::MotionPreference::Full,
+    SceneFont font = SceneFont::Application)
 {
     auto setup = contour::test::ChromeSetup {
         .row = row,
-        .font = QGuiApplication::font(),
+        .font = sceneFontOf(row, font),
         .windowControls = contour::config::resolveWindowControlStyle(
             contour::config::WindowControlStyle::Auto, contour::test::snapshot::rowHost(row).host),
     };
@@ -159,7 +211,8 @@ struct SidebarScene
     BillingAsks billing = BillingAsks::Permission; ///< What billing's first pane asks.
     /// When the strip shows: Never with tabs on top hides a band that is not also the window's controls.
     contour::config::TabBarVisibility tabBar = contour::config::TabBarVisibility::Always;
-    PaneTree paneTree = PaneTree::Leaf; ///< Whether the window shows a pane tree.
+    PaneTree paneTree = PaneTree::Leaf;      ///< Whether the window shows a pane tree.
+    SceneFont font = SceneFont::Application; ///< The font the chrome is set in.
     /// The sidebar's width in logical pixels; the row's own default when unset.
     std::optional<int> width = std::nullopt;
     ClaudeTab claudeTab = ClaudeTab::OnePane; ///< Whether claude's tab is split.
@@ -239,7 +292,8 @@ struct SidebarWindow
         controller.setSidebarWorkspaceColorStyle(scene.workspaceColorStyle);
         controller.setSidebarRowSpacing(scene.rowSpacing);
 
-        root = contour::test::loadMainWindow(engine, controller, warnings, setupOf(scene.row, scene.motion));
+        root = contour::test::loadMainWindow(
+            engine, controller, warnings, setupOf(scene.row, scene.motion, scene.font));
         if (scene.visibility == contour::config::SidebarVisibility::Shown)
             controller.showSidebar(scene.width.value_or(static_cast<int>(token("width"))));
         window = qobject_cast<QQuickWindow*>(root.get());
@@ -355,6 +409,25 @@ struct SidebarWindow
         QCoreApplication::processEvents();
     }
 
+    /// Lays every positioner and list view of the window out now: one does so at its next polish, which the
+    /// offscreen platform runs with the next frame, so a control that has just appeared would still overlap
+    /// its neighbour under the pointer.
+    void layOut() const
+    {
+        QCoreApplication::processEvents();
+        std::function<void(QQuickItem&)> visit = [&](QQuickItem& item) {
+            for (auto* child: item.childItems())
+            {
+                // A list view, too, lays out its delegates for a new model row at its next polish.
+                if (child->inherits("QQuickBasePositioner") || child->inherits("QQuickItemView"))
+                    QMetaObject::invokeMethod(child, "forceLayout");
+                visit(*child);
+            }
+        };
+        visit(*window->contentItem());
+        QCoreApplication::processEvents();
+    }
+
     [[nodiscard]] static QQuickItem* findNamed(QQuickItem const& parent, QString const& name)
     {
         for (auto* child: parent.childItems())
@@ -391,8 +464,10 @@ struct SidebarWindow
 /// Whether @p message is a diagnostic of the sidebar's own QML.
 [[nodiscard]] bool isSidebarDiagnostic(QString const& message)
 {
-    static auto const sidebarFiles = QRegularExpression { QStringLiteral(
-        R"((Sidebar|SidebarRow|SidebarHoverCard|SidebarFooter|WorkspaceChip|Breadcrumb)\.qml)") };
+    static auto const sidebarFiles = QRegularExpression {
+        QStringLiteral(
+            R"((Sidebar|SidebarRow|SidebarHoverCard|SidebarFooter|SidebarControlButton|SidebarNeedsMeButton|WorkspaceChip|Breadcrumb)\.qml)")
+    };
     return contour::test::isQmlDiagnostic(message) && sidebarFiles.match(message).hasMatch();
 }
 
@@ -1743,7 +1818,9 @@ TEST_CASE("the sidebar's header is the title bar's, its buttons excepted (offscr
         auto scene = SidebarWindow { { .row = row } };
         if (row == ChromeStyle::MacOS)
             scene.controller.setNativeControlsInset(TrafficLightsInset);
-        QCoreApplication::processEvents();
+        // A daemon's window: the row carries the switcher and the Needs-me control beside the filter.
+        scene.controller.setDaemon(QStringLiteral("local"));
+        scene.layOut();
 
         // The header bar's part above the sidebar, or the sidebar's own title row.
         auto const inHeader = scene.token("titleInHeaderBar") != 0;
@@ -1791,12 +1868,27 @@ TEST_CASE("the sidebar's header is the title bar's, its buttons excepted (offscr
              { inHeader ? QStringLiteral("headerNewWorkspaceButton")
                         : QStringLiteral("sidebarNewWorkspaceButton"),
                inHeader ? QStringLiteral("headerSidebarFilterButton") : QStringLiteral("sidebarFilterButton"),
+               inHeader ? QStringLiteral("headerSidebarSwitcherButton")
+                        : QStringLiteral("sidebarSwitcherButton"),
+               inHeader ? QStringLiteral("headerSidebarNeedsMeButton")
+                        : QStringLiteral("sidebarNeedsMeButton"),
                QStringLiteral("sidebarToggle") })
             if (auto* button = SidebarWindow::findNamed(*header, name);
                 button != nullptr && button->isVisible())
                 buttons.push_back(button);
-        // The filter button stands in the title row on every row; the "+" and the toggle only on some.
-        REQUIRE_FALSE(buttons.empty());
+        // The filter and switcher buttons stand in the title row on every row at its default width, and the
+        // Needs-me one where the look keeps it there rather than beside the filter field; the "+" and the
+        // toggle only on some.
+        auto const needsMeInTitle = scene.token("needsMeInFilterRow") == 0;
+        REQUIRE(buttons.size() >= (needsMeInTitle ? 3u : 2u));
+        CHECK(std::ranges::any_of(buttons, [&](QQuickItem const* button) {
+            return button->objectName().contains(QStringLiteral("Switcher"));
+        }));
+        CHECK(std::ranges::any_of(buttons,
+                                  [&](QQuickItem const* button) {
+                                      return button->objectName().contains(QStringLiteral("NeedsMe"));
+                                  })
+              == needsMeInTitle);
         for (auto* button: buttons)
         {
             INFO(button->objectName().toStdString());
@@ -2172,6 +2264,30 @@ TEST_CASE("at the narrowest sidebar the footer keeps its counts whole, in fewer 
     }
 }
 
+TEST_CASE("at the narrowest sidebar in the row's own font the footer's counts are whole, and named in full "
+          "(offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    // The Terminal row's footer is set in the profile's monospaced font, where even the shorter words take
+    // more cells than its narrowest sidebar has: its status glyphs say the counts there.
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row, .font = SceneFont::RowOwn } };
+        scene.controller.showSidebar(static_cast<int>(scene.token("minWidth")));
+        QTest::qWait(50);
+        auto const* counts = scene.item(QStringLiteral("sidebarFooterCounts"));
+        REQUIRE(counts != nullptr);
+        INFO("counts " << counts->property("text").toString().toStdString() << ", width " << counts->width()
+                       << ", implicit " << counts->property("implicitWidth").toReal());
+        CHECK(counts->isVisible());
+        CHECK(!counts->property("truncated").toBool());
+        auto const* attached = accessibleOf(*counts);
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("name").toString() == QStringLiteral("1 needs you · 1 working"));
+    }
+}
+
 TEST_CASE(
     "each close from the sidebar's menu opens one confirmation, and cancelling closes nothing (offscreen)",
     "[contour][gui][qml][sidebar]")
@@ -2193,9 +2309,18 @@ TEST_CASE(
              })
         {
             INFO("row " << static_cast<int>(row) << ", kind " << static_cast<int>(kind));
+            auto const node =
+                contour::window::CloseNode { .kind = kind,
+                                             .row = contour::window::SidebarRowKey {
+                                                 .kind = contour::window::SidebarRowKind::Pane,
+                                                 .daemon = contour::window::DaemonRef { "host:starfive" },
+                                                 .instance = contour::window::DaemonInstance { 7 },
+                                                 .workspace = 1,
+                                                 .tab = 10,
+                                                 .pane = contour::window::PaneKey { 11 } } };
             auto const asked = [&]() -> QObject* {
                 emit scene.controller.sidebarCloseConfirmationRequested(
-                    static_cast<int>(kind), 1, 10, 11, QStringLiteral("billing"), QString {});
+                    QVariant::fromValue(node), QStringLiteral("billing"), QString {});
                 auto* dialog = scene.root->findChild<QObject*>(QStringLiteral("closeConfirmation"));
                 REQUIRE(dialog != nullptr);
                 REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 1000));
@@ -2210,17 +2335,18 @@ TEST_CASE(
             REQUIRE(QTest::qWaitFor([&] { return !dialog->property("opened").toBool(); }, 1000));
             CHECK(scene.controller.confirmedCloses.empty());
 
-            // The destructive button closes exactly the node the menu was opened on.
+            // The destructive button closes exactly the node the menu was opened on: the dialog hands back
+            // the node it was asked with, daemon and run included.
             dialog = asked();
             REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
             REQUIRE(QTest::qWaitFor([&] { return !scene.controller.confirmedCloses.empty(); }, 1000));
             REQUIRE(scene.controller.confirmedCloses.size() == 1);
-            auto const& closed = scene.controller.confirmedCloses.front();
-            CHECK(closed.kind == static_cast<int>(kind));
-            CHECK(closed.workspace == 1);
-            CHECK(closed.tab == 10);
-            CHECK(closed.pane == 11);
+            CHECK(scene.controller.confirmedCloses.front() == node);
             scene.controller.confirmedCloses.clear();
+            // A second press of the destructive button, after the answer, closes nothing more.
+            QMetaObject::invokeMethod(dialog, "accepted");
+            QCoreApplication::processEvents();
+            CHECK(scene.controller.confirmedCloses.empty());
         }
         CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
@@ -2442,12 +2568,18 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
     constexpr auto Rebound =
         std::string_view { "  - { mods: [Primary, Alt], key: 'B', action: ToggleSidebar }\n"
                            "  - { mods: [Primary, Alt], key: 'N', action: NewWorkspace }\n"
-                           "  - { mods: [Primary, Alt], key: 'F', action: FilterWorkspaces }\n" };
+                           "  - { mods: [Primary, Alt], key: 'F', action: FilterWorkspaces }\n"
+                           "  - { mods: [Primary, Alt], key: 'S', action: ShowSwitcher }\n"
+                           "  - { mods: [Primary, Alt], key: 'M', action: ToggleSidebarNeedsMe }\n" };
     using contour::window::SidebarControl;
     using vtbackend::Modifier;
     // In SidebarControl order, as the expected chords below are.
-    constexpr auto Controls =
-        std::array { SidebarControl::Toggle, SidebarControl::NewWorkspace, SidebarControl::Filter };
+    constexpr auto Controls = std::array { SidebarControl::Toggle,
+                                           SidebarControl::NewWorkspace,
+                                           SidebarControl::Filter,
+                                           SidebarControl::Switcher,
+                                           SidebarControl::NeedsMe };
+    static_assert(Controls.size() == contour::window::SidebarControlCount);
 
     for (auto const row: drawnRows())
         for (auto const visibility:
@@ -2455,6 +2587,9 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
         {
             INFO("row " << static_cast<int>(row) << ", sidebar " << static_cast<int>(visibility));
             auto scene = SidebarWindow { { .row = row, .visibility = visibility } };
+            // A daemon's window, so its title row carries the switcher too.
+            scene.controller.setDaemon(QStringLiteral("local"));
+            scene.layOut();
             auto const style = scene.controller.shortcutStyle;
             auto const spelled = [&](vtbackend::Modifiers modifiers, char32_t key) {
                 return QString::fromStdString(contour::command::shortcutText(
@@ -2483,12 +2618,21 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
                 return control->property("control").toString() == QStringLiteral("toggle");
             }));
 
-            for (auto const& [mapping, toggle, newWorkspace, filter]:
-                 { std::tuple { Predating, toggleDefault, newWorkspaceDefault, QString {} },
+            for (auto const& [mapping, toggle, newWorkspace, filter, switcher, needsMe]:
+                 { std::tuple { Predating,
+                                toggleDefault,
+                                newWorkspaceDefault,
+                                QString {},
+                                // ShowSwitcher's chord is written into the defaults, not a fallback: a
+                                // configuration with its own input_mapping has none.
+                                QString {},
+                                QString {} },
                    std::tuple { Rebound,
                                 spelled(primaryAlt, U'B'),
                                 spelled(primaryAlt, U'N'),
-                                spelled(primaryAlt, U'F') } })
+                                spelled(primaryAlt, U'F'),
+                                spelled(primaryAlt, U'S'),
+                                spelled(primaryAlt, U'M') } })
             {
                 scene.controller.chords = contour::command::chordIndex(bindingsOf(row, mapping));
                 for (auto* control: controls)
@@ -2503,8 +2647,9 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
                     REQUIRE(which != Controls.end());
                     CHECK(control->property("toolTipCommand").toString().toStdString()
                           == contour::window::sidebarControlCommand(*which));
-                    auto const expected =
-                        std::array { toggle, newWorkspace, filter }[static_cast<std::size_t>(*which)];
+                    auto const expected = std::array {
+                        toggle, newWorkspace, filter, switcher, needsMe
+                    }[static_cast<std::size_t>(*which)];
                     auto const* tip = openToolTipOf(*scene.window, *control);
                     CHECK_FALSE(tip->property("text").toString().isEmpty());
                     CHECK(tip->property("shownShortcut").toString().toStdString() == expected.toStdString());
@@ -2515,6 +2660,165 @@ TEST_CASE("every sidebar control's tooltip names the chord its action is bound t
             CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
         }
 }
+
+// {{{ The Needs-me scope
+
+namespace
+{
+/// The Needs-me control a shown sidebar carries: its own title row's, the header bar's part above it, or on
+/// a look that keeps it beside the filter field, that one's, the filter opened for it.
+[[nodiscard]] QQuickItem* needsMeControlOf(SidebarWindow const& scene)
+{
+    if (auto* own = scene.visibleItem(QStringLiteral("sidebarNeedsMeButton")); own != nullptr)
+        return own;
+    if (auto* header = scene.visibleItem(QStringLiteral("headerSidebarNeedsMeButton")); header != nullptr)
+        return header;
+    if (scene.token("needsMeInFilterRow") == 0)
+        return nullptr;
+    auto* sidebar = scene.item(QStringLiteral("sidebar"));
+    REQUIRE(sidebar != nullptr);
+    QMetaObject::invokeMethod(sidebar, "openFilter");
+    scene.layOut();
+    return scene.visibleItem(QStringLiteral("sidebarFilterNeedsMeButton"));
+}
+} // namespace
+
+TEST_CASE("the Needs me control flips Accessible.checked and its name (offscreen)",
+          "[contour][gui][qml][sidebar][needsme]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        auto* control = needsMeControlOf(scene);
+        REQUIRE(control != nullptr);
+        auto const* attached = accessibleOf(*control);
+        REQUIRE(attached != nullptr);
+        auto const allRows = scene.controller.sidebarModel().rows();
+        CHECK(attached->property("checkable").toBool());
+        CHECK_FALSE(attached->property("checked").toBool());
+        CHECK(attached->property("name").toString() == QStringLiteral("Show only what needs me"));
+
+        // The first press narrows the tree to billing's waiting pane and the shown tab's path.
+        scene.click(*control);
+        CHECK(scene.controller.needsMeToggles == 1);
+        CHECK(scene.controller.sidebarModel().scope() == contour::config::SidebarScope::NeedsMe);
+        CHECK(attached->property("checked").toBool());
+        CHECK(attached->property("name").toString() == QStringLiteral("Show all"));
+        CHECK(scene.controller.sidebarModel().rows().size() < allRows.size());
+        CHECK(std::ranges::none_of(scene.controller.sidebarModel().rows(),
+                                   [](auto const& listed) { return listed.title == "docs"; }));
+
+        // The second, at the same spot, brings every row back.
+        CHECK(needsMeControlOf(scene) == control);
+        scene.click(*control);
+        CHECK(scene.controller.sidebarModel().scope() == contour::config::SidebarScope::All);
+        CHECK_FALSE(attached->property("checked").toBool());
+        CHECK(attached->property("name").toString() == QStringLiteral("Show only what needs me"));
+        CHECK(scene.controller.sidebarModel().rows() == allRows);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("beside the filter field, the Needs me control stays while it narrows the tree (offscreen)",
+          "[contour][gui][qml][sidebar][needsme]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        if (scene.token("needsMeInFilterRow") == 0)
+            continue;
+        // Its action, with the filter closed: the row the control stands in opens with it.
+        CHECK(scene.visibleItem(QStringLiteral("sidebarFilterNeedsMeButton")) == nullptr);
+        scene.controller.toggleSidebarNeedsMe();
+        scene.layOut();
+        auto* control = scene.visibleItem(QStringLiteral("sidebarFilterNeedsMeButton"));
+        REQUIRE(control != nullptr);
+        CHECK(control->property("checked").toBool());
+        auto const* field = scene.visibleItem(QStringLiteral("sidebarFilterField"));
+        REQUIRE(field != nullptr);
+        // Beside the field, not over it.
+        CHECK(sceneRectOf(*field).right() <= sceneRectOf(*control).left());
+
+        // Its second press, at the same spot, lists everything and lets the row go.
+        scene.click(*control);
+        CHECK(scene.controller.sidebarModel().scope() == contour::config::SidebarScope::All);
+        CHECK(scene.visibleItem(QStringLiteral("sidebarFilterNeedsMeButton")) == nullptr);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("its tooltip shows the chord when bound and the plain label when not (offscreen)",
+          "[contour][gui][qml][sidebar][needsme][tooltip]")
+{
+    constexpr auto Bound =
+        std::string_view { "  - { mods: [Primary, Alt], key: 'M', action: ToggleSidebarNeedsMe }\n" };
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        auto* control = needsMeControlOf(scene);
+        REQUIRE(control != nullptr);
+        CHECK(control->property("toolTipCommand").toString() == QStringLiteral("ToggleSidebarNeedsMe"));
+
+        scene.controller.chords = contour::command::chordIndex(bindingsOf(row, Bound));
+        auto const chord = scene.controller.shortcutText(QStringLiteral("ToggleSidebarNeedsMe"));
+        REQUIRE_FALSE(chord.isEmpty());
+        auto const* tip = openToolTipOf(*scene.window, *control);
+        CHECK(tip->property("text").toString() == QStringLiteral("Show only what needs me"));
+        CHECK(tip->property("shownShortcut").toString() == chord);
+        CHECK(tip->property("shortcutShown").toBool());
+
+        // Unbound, as by default: the label alone, no stray separator and no invented chord.
+        QTest::mouseMove(scene.window, QPoint { scene.window->width() - 5, scene.window->height() - 5 });
+        QCoreApplication::processEvents();
+        scene.controller.chords = contour::command::ChordIndex {};
+        auto const* unbound = openToolTipOf(*scene.window, *control);
+        CHECK(unbound->property("shownShortcut").toString().isEmpty());
+        CHECK_FALSE(unbound->property("shortcutShown").toBool());
+        CHECK(unbound->property("text").toString() == QStringLiteral("Show only what needs me"));
+    }
+}
+
+TEST_CASE("the empty state's Show all restores the scope (offscreen)",
+          "[contour][gui][qml][sidebar][needsme]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        // Billing's first pane asks nothing; its second only works.
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Shown,
+                                       .billing = BillingAsks::Nothing } };
+        CHECK(scene.visibleItem(QStringLiteral("sidebarEmptyState")) == nullptr);
+        scene.controller.toggleSidebarNeedsMe();
+        QCoreApplication::processEvents();
+        CHECK(scene.controller.sidebarModel().emptyState()
+              == contour::window::SidebarEmptyState::NothingNeedsYou);
+        auto* empty = scene.visibleItem(QStringLiteral("sidebarEmptyState"));
+        REQUIRE(empty != nullptr);
+        auto const* text = SidebarWindow::findNamed(*empty, QStringLiteral("sidebarEmptyStateText"));
+        REQUIRE(text != nullptr);
+        CHECK(text->property("text").toString() == QStringLiteral("Nothing needs you"));
+        auto* showAll = SidebarWindow::findNamed(*empty, QStringLiteral("sidebarEmptyStateShowAll"));
+        REQUIRE(showAll != nullptr);
+        auto const* attached = accessibleOf(*showAll);
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").toInt() == QAccessible::Button);
+        CHECK(attached->property("name").toString() == QStringLiteral("Show all"));
+
+        scene.click(*showAll);
+        CHECK(scene.controller.sidebarModel().scope() == contour::config::SidebarScope::All);
+        CHECK(scene.visibleItem(QStringLiteral("sidebarEmptyState")) == nullptr);
+        CHECK(scene.rowTitled(QStringLiteral("docs")) != nullptr);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+// }}}
 
 // {{{ The location chip: daemon, dot, state and workspace in one control
 
@@ -2581,7 +2885,7 @@ TEST_CASE("the location chip names the daemon, a remote's dot and its state on e
     CHECK(chipPart(*chip, "workspaceChipStatus")->property("text").toString()
           == QStringLiteral("Reconnecting…"));
     if (bracketed)
-        CHECK(chipSpelling(*chip) == QStringLiteral("[◑ starfive Reconnecting… › billing ▾]"));
+        CHECK(chipSpelling(*chip) == QStringLiteral("[↻ starfive Reconnecting… › billing ▾]"));
 
     // Each state has its own glyph, so colour is never the only cue.
     if (bracketed)
@@ -2928,179 +3232,355 @@ TEST_CASE("the location chip's tooltip names the switcher and the chord bound no
 }
 // }}}
 
-// {{{ The daemon control heading the sidebar
+// {{{ The sidebar's head: no daemon chip on a daemon's window, the switcher and the host chip of a tmux one
 
 namespace
 {
-/// The daemon control a shown sidebar carries: its own title row's, or on a row whose header bar draws that
-/// row, the header bar's part above the sidebar.
+/// The host control a shown sidebar carries (a tmux window's): its own title row's, or on a row whose header
+/// bar draws that row, the header bar's part above the sidebar.
 [[nodiscard]] QQuickItem* sidebarDaemonChipOf(SidebarWindow const& scene)
 {
     if (auto* own = scene.visibleItem(QStringLiteral("sidebarDaemonChip")); own != nullptr)
         return own;
     return scene.visibleItem(QStringLiteral("headerSidebarDaemonChip"));
 }
+
+/// The switcher control a shown sidebar carries: its own title row's, or the header bar's part's.
+[[nodiscard]] QQuickItem* switcherControlOf(SidebarWindow const& scene)
+{
+    if (auto* own = scene.visibleItem(QStringLiteral("sidebarSwitcherButton")); own != nullptr)
+        return own;
+    return scene.visibleItem(QStringLiteral("headerSidebarSwitcherButton"));
+}
+
+/// Makes @p scene's window a daemon's: the chip's name, and the tree's own section headed by @p name, with
+/// @p others listed beside it.
+void onDaemon(SidebarWindow& scene,
+              QString const& name,
+              contour::window::DaemonLinkState state = contour::window::DaemonLinkState::Connected,
+              std::vector<contour::window::DaemonSection> others = {})
+{
+    scene.controller.setDaemon(name);
+    scene.controller.sidebarHost().own = contour::window::OwnDaemon {
+        .daemon = contour::window::localDaemonRef("default"),
+        .instance = contour::window::DaemonInstance { 1 },
+        .name = name.toStdString(),
+        .locality = contour::window::DaemonLocality::Local,
+        .state = state,
+    };
+    scene.controller.sidebarSections().listed = std::move(others);
+    scene.controller.sidebarModel().refreshNow();
+    scene.layOut();
+}
+
+/// starfive, connected, with one workspace of one tab.
+[[nodiscard]] contour::window::DaemonSection starfiveSection()
+{
+    auto section = contour::window::DaemonSection {};
+    section.daemon = contour::window::hostDaemonRef("starfive");
+    section.instance = contour::window::DaemonInstance { 9 };
+    section.name = "starfive";
+    section.state = contour::window::DaemonLinkState::Connected;
+    section.directory.workspaces = { contour::test::directoryWorkspaceOf(
+        5, "ci", { contour::test::directoryPaneOf(50, "build") }) };
+    section.feed = contour::window::SectionFeed::Observer;
+    return section;
+}
+
+/// Makes @p scene's window a tmux attach's: a host with no daemon behind it.
+void onTmuxHost(SidebarWindow& scene)
+{
+    scene.controller.attachedHost = QStringLiteral("tmuxhost");
+    scene.controller.setHosting(contour::window::DaemonHosting::OtherHost);
+    QCoreApplication::processEvents();
+}
 } // namespace
 
-TEST_CASE("a shown sidebar's daemon control names the daemon and the band holds no chip (offscreen)",
+TEST_CASE("no daemon chip in the sidebar or header bar of a daemon window (offscreen)",
           "[contour][gui][qml][sidebar][chip]")
 {
-    auto const row =
-        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
-    INFO("row " << static_cast<int>(row));
-    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
-    scene.controller.setDaemon(QStringLiteral("local"));
-    QCoreApplication::processEvents();
-
-    auto* chip = sidebarDaemonChipOf(scene);
-    REQUIRE(chip != nullptr);
-    CHECK(chipPart(*chip, "workspaceChipDaemon")
-              ->property("text")
-              .toString()
-              .startsWith(QStringLiteral("local")));
-    CHECK(chipPart(*chip, "workspaceChipCaret")->isVisible());
-    // The daemon alone: no workspace segment, and the daemon is named nowhere else.
-    CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
-    CHECK_FALSE(chipPart(*chip, "workspaceChipSeparator")->isVisible());
-    CHECK_FALSE(chipPart(*chip, "workspaceChipDot")->isVisible());
-    CHECK_FALSE(chipPart(*chip, "workspaceChipDotGlyph")->isVisible());
-    CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
-    if (row == ChromeStyle::Terminal)
-        CHECK(chipSpelling(*chip) == QStringLiteral("[local ▾]"));
-
-    // The same tooltip as the band's chip.
-    auto const* host = chip->findChild<QQuickItem*>(QStringLiteral("kitToolTipHost"));
-    REQUIRE(host != nullptr);
-    CHECK(host->property("text").toString().startsWith(QStringLiteral("Switch workspace or daemon")));
-    CHECK(host->property("shortcutCommand").toString() == QStringLiteral("ShowSwitcher"));
-    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    for (auto const placement: { contour::config::TabPlacement::Sidebar, contour::config::TabPlacement::Top })
+        for (auto const row: drawnRows())
+        {
+            INFO("row " << static_cast<int>(row) << ", placement " << static_cast<int>(placement));
+            // Tabs on top with the strip off: some rows draw no band at all, which used to make the sidebar's
+            // chip the one place that named the daemon. The tree's heading row is that place now.
+            auto scene = SidebarWindow { { .row = row,
+                                           .visibility = contour::config::SidebarVisibility::Shown,
+                                           .placement = placement,
+                                           .tabBar = placement == contour::config::TabPlacement::Top
+                                                         ? contour::config::TabBarVisibility::Never
+                                                         : contour::config::TabBarVisibility::Always } };
+            onDaemon(scene, QStringLiteral("local"));
+            CHECK(scene.controller.chip()->place() == QStringLiteral("none"));
+            CHECK(sidebarDaemonChipOf(scene) == nullptr);
+            CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+            // The daemon is named once, by its heading row.
+            auto const& rows = scene.controller.sidebarModel().rows();
+            REQUIRE_FALSE(rows.empty());
+            CHECK(rows.front().key.kind == contour::window::SidebarRowKind::Daemon);
+            CHECK(rows.front().title == "local");
+            CHECK(switcherControlOf(scene) != nullptr);
+            CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+        }
 }
 
-TEST_CASE("a shown sidebar's daemon control adds the dot and the state when not connected (offscreen)",
+TEST_CASE("the chip returns to the band while the own link is down (offscreen)",
           "[contour][gui][qml][sidebar][chip]")
 {
-    using contour::window::DaemonLocality;
     using contour::window::HostChipState;
-    auto const row =
-        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
-    INFO("row " << static_cast<int>(row));
-    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
-    scene.controller.setDaemon(QStringLiteral("starfive"), DaemonLocality::Remote);
-    scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
-    QCoreApplication::processEvents();
-
-    auto* chip = sidebarDaemonChipOf(scene);
-    REQUIRE(chip != nullptr);
-    auto const bracketed = row == ChromeStyle::Terminal;
-    CHECK(chipPart(*chip, "workspaceChipDot")->isVisible() == !bracketed);
-    CHECK(chipPart(*chip, "workspaceChipDotGlyph")->isVisible() == bracketed);
-    // The sidebar's room is short: the state's words are the first thing to give way, the dot never does.
-    CHECK(chipPart(*chip, "workspaceChipStatus")->isVisible() == (chip->property("fit").toInt() == 0));
-    CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
-    if (bracketed)
+    for (auto const row: drawnRows())
     {
-        // Every step is measured with the attention marker reserved (it never moves the fit), which on the
-        // cells of this row can cost the words their step: the dot and the name stay either way.
-        auto const fit = chip->property("fit").toInt();
-        CHECK(fit <= static_cast<int>(contour::window::LocationChipFit::NoStateText));
-        CHECK(chipSpelling(*chip)
-              == (fit == 0 ? QStringLiteral("[◑ starfive Reconnecting… ▾]")
-                           : QStringLiteral("[◑ starfive ▾]")));
-    }
-    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
-}
-
-TEST_CASE("clicking a shown sidebar's daemon control drops the switcher down below it (offscreen)",
-          "[contour][gui][qml][sidebar][chip]")
-{
-    auto const row =
-        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
-    INFO("row " << static_cast<int>(row));
-    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
-    scene.controller.setDaemon(QStringLiteral("local"));
-    QCoreApplication::processEvents();
-    auto* chip = sidebarDaemonChipOf(scene);
-    REQUIRE(chip != nullptr);
-
-    scene.click(*chip);
-    REQUIRE(scene.controller.workspaceDropdownAnchor.has_value());
-    auto const chipRect = sceneRectOf(*chip);
-    auto const& anchor = *scene.controller.workspaceDropdownAnchor;
-    CHECK(anchor.left() == Catch::Approx(chipRect.left()));
-    CHECK(anchor.top() == Catch::Approx(chipRect.top()));
-    CHECK(anchor.bottom() == Catch::Approx(chipRect.bottom()));
-    auto const* attached = accessibleOf(*chip);
-    REQUIRE(attached != nullptr);
-    CHECK(attached->property("role").toInt() == QAccessible::ButtonMenu);
-}
-
-TEST_CASE("a shown sidebar's daemon control is in the chrome's keyboard walk, and Return and Space open the "
-          "switcher (offscreen)",
-          "[contour][gui][qml][sidebar][chip]")
-{
-    auto const row =
-        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
-    INFO("row " << static_cast<int>(row));
-    auto scene = SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
-    scene.controller.setDaemon(QStringLiteral("local"));
-    QCoreApplication::processEvents();
-    auto* chip = sidebarDaemonChipOf(scene);
-    REQUIRE(chip != nullptr);
-
-    // The walk counts it, and its first stop is the control at the window's leading end.
-    CHECK(scene.controller.reportedToolbarItems >= 1);
-    scene.controller.focusToolbarItem(0);
-    QCoreApplication::processEvents();
-    CHECK(chip->hasActiveFocus());
-    CHECK(chip->property("focusRingShown").toBool());
-
-    for (auto const key: { Qt::Key_Return, Qt::Key_Space })
-    {
-        scene.controller.workspaceDropdownAnchor.reset();
-        QTest::keyClick(scene.window, key);
-        QCoreApplication::processEvents();
-        INFO("key " << static_cast<int>(key));
-        CHECK(scene.controller.workspaceDropdownAnchor.has_value());
-    }
-    CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
-}
-
-TEST_CASE("a window attached to a host that is no daemon names its host alone, as a daemon-only control "
-          "(offscreen)",
-          "[contour][gui][qml][sidebar][chip]")
-{
-    auto const row =
-        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
-    INFO("row " << static_cast<int>(row));
-    SECTION("the sidebar shown: it heads the sidebar, with no workspace beside it")
-    {
+        INFO("row " << static_cast<int>(row));
         auto scene =
             SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
-        scene.controller.attachedHost = QStringLiteral("tmuxhost");
-        scene.controller.setHosting(contour::window::DaemonHosting::OtherHost);
+        onDaemon(scene, QStringLiteral("starfive"), contour::window::DaemonLinkState::Reconnecting);
+        scene.controller.daemonLocality = contour::window::DaemonLocality::Remote;
+        scene.controller.setHostChipState(static_cast<int>(HostChipState::Reconnecting));
         QCoreApplication::processEvents();
+        CHECK(scene.controller.chip()->place() == QStringLiteral("band"));
+        CHECK(sidebarDaemonChipOf(scene) == nullptr);
+        auto* chip = scene.visibleItem(QStringLiteral("workspaceChip"));
+        REQUIRE(chip != nullptr);
+        CHECK(chipPart(*chip, "workspaceChipDaemon")
+                  ->property("text")
+                  .toString()
+                  .startsWith(QStringLiteral("starfive")));
+        // The connection's dot says why the chip is back.
+        auto const bracketed = row == ChromeStyle::Terminal;
+        CHECK(chipPart(*chip, "workspaceChipDot")->isVisible() == !bracketed);
+        CHECK(chipPart(*chip, "workspaceChipDotGlyph")->isVisible() == bracketed);
+
+        // Back up, the band lets it go again.
+        scene.controller.setHostChipState(static_cast<int>(HostChipState::Connected));
+        QCoreApplication::processEvents();
+        CHECK(scene.controller.chip()->place() == QStringLiteral("none"));
+        CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the switcher control opens the switcher and shows the bound ShowSwitcher chord (offscreen)",
+          "[contour][gui][qml][sidebar][chip][tooltip]")
+{
+    constexpr auto Bound =
+        std::string_view { "  - { mods: [Primary, Alt], key: 'R', action: ShowSwitcher }\n" };
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        // In process: no daemon to switch, so no control.
+        CHECK(switcherControlOf(scene) == nullptr);
+        onDaemon(scene, QStringLiteral("local"));
+        auto* control = switcherControlOf(scene);
+        REQUIRE(control != nullptr);
+        CHECK(control->property("toolTipCommand").toString() == QStringLiteral("ShowSwitcher"));
+        auto const* attached = accessibleOf(*control);
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").toInt() == QAccessible::Button);
+        CHECK(attached->property("name").toString() == QStringLiteral("Switch workspace or daemon"));
+
+        // A click drops the switcher down below the control (ui-ux 4.2).
+        scene.click(*control);
+        REQUIRE(scene.controller.workspaceDropdownAnchor.has_value());
+        auto const controlRect = sceneRectOf(*control);
+        auto const& anchor = *scene.controller.workspaceDropdownAnchor;
+        CHECK(anchor.left() == Catch::Approx(controlRect.left()));
+        CHECK(anchor.top() == Catch::Approx(controlRect.top()));
+        CHECK(anchor.bottom() == Catch::Approx(controlRect.bottom()));
+
+        // Its tooltip names the chord bound now, or none.
+        scene.controller.chords = contour::command::chordIndex(bindingsOf(row, Bound));
+        auto const chord = scene.controller.shortcutText(QStringLiteral("ShowSwitcher"));
+        REQUIRE_FALSE(chord.isEmpty());
+        auto const* tip = openToolTipOf(*scene.window, *control);
+        CHECK(tip->property("text").toString() == QStringLiteral("Switch workspace or daemon"));
+        CHECK(tip->property("shownShortcut").toString() == chord);
+        QTest::mouseMove(scene.window, QPoint { scene.window->width() - 5, scene.window->height() - 5 });
+        QCoreApplication::processEvents();
+        scene.controller.chords = contour::command::ChordIndex {};
+        auto const* unbound = openToolTipOf(*scene.window, *control);
+        CHECK(unbound->property("shownShortcut").toString().isEmpty());
+        CHECK_FALSE(unbound->property("shortcutShown").toBool());
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("Ctrl+F6 reaches both controls (offscreen)", "[contour][gui][qml][sidebar][chip]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        onDaemon(scene, QStringLiteral("local"));
+        // A look that keeps the Needs-me control beside the filter field has no toolbar item for it.
+        auto const needsMeInTitle = scene.token("needsMeInFilterRow") == 0;
+        auto* switcher = switcherControlOf(scene);
+        REQUIRE(switcher != nullptr);
+
+        // The walk counts both, the switcher at the window's leading end first.
+        CHECK(scene.controller.reportedToolbarItems >= (needsMeInTitle ? 2 : 1));
+        scene.controller.focusToolbarItem(0);
+        QCoreApplication::processEvents();
+        CHECK(switcher->hasActiveFocus());
+        CHECK(switcher->property("focusRingShown").toBool());
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        CHECK(scene.controller.workspaceDropdownAnchor.has_value());
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+        if (!needsMeInTitle)
+            continue;
+
+        auto* needsMe = needsMeControlOf(scene);
+        REQUIRE(needsMe != nullptr);
+        scene.controller.focusToolbarItem(1);
+        QCoreApplication::processEvents();
+        CHECK(needsMe->hasActiveFocus());
+        CHECK(needsMe->property("focusRingShown").toBool());
+        QTest::keyClick(scene.window, Qt::Key_Space);
+        QCoreApplication::processEvents();
+        CHECK(scene.controller.sidebarModel().scope() == contour::config::SidebarScope::NeedsMe);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a tmux window keeps its host chip (offscreen)", "[contour][gui][qml][sidebar][chip]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        onTmuxHost(scene);
+        CHECK(scene.controller.chip()->place() == QStringLiteral("sidebar"));
         auto* chip = sidebarDaemonChipOf(scene);
         REQUIRE(chip != nullptr);
         CHECK(chipPart(*chip, "workspaceChipDaemon")
                   ->property("text")
                   .toString()
                   .startsWith(QStringLiteral("tmuxhost")));
+        CHECK(chipPart(*chip, "workspaceChipCaret")->isVisible());
+        CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
         CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+        // The chip opens the switcher, so no switcher control stands beside it.
+        CHECK(switcherControlOf(scene) == nullptr);
+        auto const* host = chip->findChild<QQuickItem*>(QStringLiteral("kitToolTipHost"));
+        REQUIRE(host != nullptr);
+        CHECK(host->property("shortcutCommand").toString() == QStringLiteral("ShowSwitcher"));
+
+        // A click drops the switcher down below it.
+        scene.click(*chip);
+        REQUIRE(scene.controller.workspaceDropdownAnchor.has_value());
+        auto const chipRect = sceneRectOf(*chip);
+        CHECK(scene.controller.workspaceDropdownAnchor->left() == Catch::Approx(chipRect.left()));
+        CHECK(scene.controller.workspaceDropdownAnchor->bottom() == Catch::Approx(chipRect.bottom()));
+        CHECK(accessibleOf(*chip)->property("role").toInt() == QAccessible::ButtonMenu);
+
+        // It leads the chrome's keyboard walk; Return and Space open the switcher.
+        scene.controller.focusToolbarItem(0);
+        QCoreApplication::processEvents();
+        CHECK(chip->hasActiveFocus());
+        CHECK(chip->property("focusRingShown").toBool());
+        for (auto const key: { Qt::Key_Return, Qt::Key_Space })
+        {
+            INFO("key " << static_cast<int>(key));
+            scene.controller.workspaceDropdownAnchor.reset();
+            QTest::keyClick(scene.window, key);
+            QCoreApplication::processEvents();
+            CHECK(scene.controller.workspaceDropdownAnchor.has_value());
+        }
+
+        // No tree row names a tmux host, so its chip stays whatever its connection says.
+        scene.controller.setHostChipState(static_cast<int>(contour::window::HostChipState::Reconnecting));
+        QCoreApplication::processEvents();
+        CHECK(scene.controller.chip()->place() == QStringLiteral("sidebar"));
+        CHECK(sidebarDaemonChipOf(scene) != nullptr);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
     }
-    SECTION("the sidebar hidden, the tabs on top: the band's chip is the host alone")
+}
+
+TEST_CASE("a tmux window with the sidebar hidden names its host alone in the band (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    for (auto const row: drawnRows())
     {
+        INFO("row " << static_cast<int>(row));
         auto scene = SidebarWindow { { .row = row,
                                        .visibility = contour::config::SidebarVisibility::Hidden,
                                        .placement = contour::config::TabPlacement::Top } };
-        scene.controller.attachedHost = QStringLiteral("tmuxhost");
-        scene.controller.setHosting(contour::window::DaemonHosting::OtherHost);
-        QCoreApplication::processEvents();
+        onTmuxHost(scene);
         auto* chip = scene.visibleItem(QStringLiteral("workspaceChip"));
         REQUIRE(chip != nullptr);
         CHECK(chip->property("namesDaemonOnly").toBool());
         CHECK(chipPart(*chip, "workspaceChipDaemon")->property("text").toString()
               == QStringLiteral("tmuxhost"));
         CHECK_FALSE(chipPart(*chip, "workspaceChipLabel")->isVisible());
+    }
+}
+
+TEST_CASE("a tmux window with no band names its host at the sidebar's head (offscreen)",
+          "[contour][gui][qml][sidebar][chip]")
+{
+    auto hiddenBands = 0;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row,
+                                       .visibility = contour::config::SidebarVisibility::Shown,
+                                       .placement = contour::config::TabPlacement::Top,
+                                       .tabBar = contour::config::TabBarVisibility::Never } };
+        onTmuxHost(scene);
+        auto const* bar = scene.item(QStringLiteral("titleBar"));
+        REQUIRE(bar != nullptr);
+        if (bar->property("presence").toString() != QStringLiteral("hidden"))
+            continue;
+        ++hiddenBands;
+        auto* chip = sidebarDaemonChipOf(scene);
+        REQUIRE(chip != nullptr);
+        CHECK(chip->objectName() == QStringLiteral("sidebarDaemonChip"));
+        CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
+    }
+    if (hiddenBands == 0)
+        SKIP("no row of this style hides its band here");
+}
+
+TEST_CASE("the breadcrumb names the daemon with two daemons listed (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { { .row = row, .visibility = contour::config::SidebarVisibility::Shown } };
+        auto* bar = scene.item(QStringLiteral("titleBar"));
+        REQUIRE(bar != nullptr);
+        if (bar->property("centre").toString() != QStringLiteral("breadcrumb"))
+            SKIP("this row's band does not show a breadcrumb here");
+        auto* daemon = scene.item(QStringLiteral("breadcrumbDaemon"));
+        REQUIRE(daemon != nullptr);
+
+        // One daemon goes without saying.
+        onDaemon(scene, QStringLiteral("local"));
+        CHECK(scene.controller.sidebarModel().sectionCount() == 1);
+        CHECK_FALSE(daemon->isVisible());
+
+        // Beside another, the breadcrumb leads with it: `local › billing › claude`.
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 contour::window::DaemonLinkState::Connected,
+                 { starfiveSection() });
+        CHECK(scene.controller.sidebarModel().sectionCount() == 2);
+        CHECK(daemon->isVisible());
+        CHECK(daemon->property("text").toString() == QStringLiteral("local"));
+        CHECK(scene.item(QStringLiteral("breadcrumbDaemonSeparator"))->isVisible());
+        CHECK(scene.item(QStringLiteral("breadcrumbWorkspace"))->property("text").toString()
+              == QStringLiteral("billing"));
+        auto const* crumb = scene.item(QStringLiteral("breadcrumb"));
+        REQUIRE(crumb != nullptr);
+        CHECK(accessibleOf(*crumb)->property("name").toString().startsWith(QStringLiteral("local, billing")));
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
     }
 }
 
@@ -3149,41 +3629,34 @@ TEST_CASE("in process a shown sidebar keeps its heading and carries no daemon co
     }
 }
 
-TEST_CASE("with no band, a shown sidebar's daemon control is the one place that names the daemon (offscreen)",
+TEST_CASE("no look elides the sidebar's heading at its default width (offscreen)",
           "[contour][gui][qml][sidebar][chip]")
 {
-    auto hiddenBands = 0;
-    for (auto const row:
-         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    skipWithoutPlatformUiFont();
+    auto const row =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    // A daemon's window stands its switcher beside the heading too.
+    auto const daemon = GENERATE(false, true);
+    // The default width is sized against the face the heading is set in: a wide one widens it.
+    auto const font = GENERATE(SceneFont::Application, SceneFont::Wide);
+    INFO("row " << static_cast<int>(row) << ", daemon " << daemon << ", font " << static_cast<int>(font));
+    auto scene = SidebarWindow {
+        { .row = row, .visibility = contour::config::SidebarVisibility::Shown, .font = font }
+    };
+    if (daemon)
+        onDaemon(scene, QStringLiteral("local"));
+    scene.layOut();
+    auto* title = scene.visibleItem(QStringLiteral("sidebarTitle"));
+    if (title == nullptr)
+        title = scene.visibleItem(QStringLiteral("headerSidebarTitle"));
+    if (row == ChromeStyle::MacOS)
+        CHECK(title == nullptr);
+    else
     {
-        INFO("row " << static_cast<int>(row));
-        auto scene = SidebarWindow { { .row = row,
-                                       .visibility = contour::config::SidebarVisibility::Shown,
-                                       .placement = contour::config::TabPlacement::Top,
-                                       .tabBar = contour::config::TabBarVisibility::Never } };
-        scene.controller.setDaemon(QStringLiteral("local"));
-        QCoreApplication::processEvents();
-        auto const* bar = scene.item(QStringLiteral("titleBar"));
-        REQUIRE(bar != nullptr);
-        auto const bandHidden = bar->property("presence").toString() == QStringLiteral("hidden");
-        // A row whose rules still draw a band names the daemon there; this case is the band-less ones.
-        if (!bandHidden)
-            continue;
-        ++hiddenBands;
-
-        // Whether the band is there or not, the daemon is named once, at the sidebar's head.
-        auto* chip = sidebarDaemonChipOf(scene);
-        REQUIRE(chip != nullptr);
-        CHECK(chipPart(*chip, "workspaceChipDaemon")
-                  ->property("text")
-                  .toString()
-                  .startsWith(QStringLiteral("local")));
-        CHECK(scene.visibleItem(QStringLiteral("workspaceChip")) == nullptr);
-        if (bandHidden)
-            CHECK(chip->objectName() == QStringLiteral("sidebarDaemonChip"));
+        REQUIRE(title != nullptr);
+        CHECK(title->width() > 0);
+        CHECK_FALSE(title->property("truncated").toBool());
     }
-    // The scenario is real: some row draws no band here.
-    CHECK(hiddenBands > 0);
 }
 // }}}
 
@@ -3776,9 +4249,34 @@ TEST_CASE("a status mark stays legible on a tinted workspace row (offscreen)", "
     }
 }
 
-TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours it by id (offscreen)",
+namespace
+{
+/// Has @p scene's controller ask for the colour picker of @p kind over the row titled @p title, as
+/// WindowController::requestColorPick() asks: by the row's index, with its key.
+/// @return The row's key, which the pick must hand back.
+contour::window::SidebarRowKey askColorPickOver(SidebarWindow& scene,
+                                                QString const& title,
+                                                contour::window::SidebarRowKind kind)
+{
+    auto const* item = scene.rowTitled(title);
+    REQUIRE(item != nullptr);
+    auto const index = item->property("index").toInt();
+    auto const& rows = scene.controller.sidebarModel().rows();
+    REQUIRE(std::cmp_less(index, rows.size()));
+    auto const key = rows[static_cast<std::size_t>(index)].key;
+    REQUIRE(key.kind == kind);
+    if (kind == contour::window::SidebarRowKind::Tab)
+        emit scene.controller.sidebarTabColorPickRequested(index, QVariant::fromValue(key));
+    else
+        emit scene.controller.workspaceColorPickRequested(index, QVariant::fromValue(key));
+    return key;
+}
+} // namespace
+
+TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours that row (offscreen)",
           "[contour][gui][qml][sidebar]")
 {
+    using contour::window::SidebarRowKind;
     for (auto const row: drawnRows())
     {
         INFO("row " << static_cast<int>(row));
@@ -3789,7 +4287,7 @@ TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours 
         REQUIRE_FALSE(flyout->property("opened").toBool());
 
         // docs, the workspace the window does not show.
-        emit scene.controller.workspaceColorPickRequested(2);
+        auto const docsKey = askColorPickOver(scene, QStringLiteral("docs"), SidebarRowKind::Workspace);
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
         auto* docs = scene.rowTitled(QStringLiteral("docs"));
         REQUIRE(docs != nullptr);
@@ -3797,14 +4295,49 @@ TEST_CASE("the sidebar's colour picker opens at the workspace's row and colours 
 
         auto const picked = QColor { 0x12, 0x34, 0x56 };
         QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
-        REQUIRE(scene.controller.workspaceColorCalls.size() == 1);
-        CHECK(scene.controller.workspaceColorCalls[0].workspace == 2);
-        CHECK(scene.controller.workspaceColorCalls[0].color == picked);
+        REQUIRE(scene.controller.rowColorCalls.size() == 1);
+        CHECK(scene.controller.rowColorCalls[0].row == docsKey);
+        CHECK(scene.controller.rowColorCalls[0].color == picked);
 
         QMetaObject::invokeMethod(flyout, "resetRequested");
-        REQUIRE(scene.controller.workspaceColorCalls.size() == 2);
-        CHECK(scene.controller.workspaceColorCalls[1].workspace == 2);
-        CHECK_FALSE(scene.controller.workspaceColorCalls[1].color.has_value());
+        REQUIRE(scene.controller.rowColorCalls.size() == 2);
+        CHECK(scene.controller.rowColorCalls[1].row == docsKey);
+        CHECK_FALSE(scene.controller.rowColorCalls[1].color.has_value());
+    }
+}
+
+TEST_CASE("the colour picker of another daemon's workspace hangs from that row, not an own one of its id "
+          "(offscreen)",
+          "[contour][gui][qml][sidebar][daemon]")
+{
+    using contour::window::SidebarRowKind;
+    constexpr auto CiColour = vtbackend::RGBColor { 0x2E, 0x8B, 0x57 };
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene =
+            SidebarWindow { workspaceColourScene(row, contour::config::SidebarWorkspaceColorStyle::Tint) };
+        // starfive's ci has the id of the window's own docs: workspace ids start at 1 on every daemon.
+        auto starfive = starfiveSection();
+        starfive.directory.workspaces.front().id = 2;
+        starfive.directory.workspaces.front().color = CiColour;
+        onDaemon(scene, QStringLiteral("local"), contour::window::DaemonLinkState::Connected, { starfive });
+        auto* flyout = scene.window->findChild<QObject*>(QStringLiteral("sidebarWorkspaceColorFlyout"));
+        REQUIRE(flyout != nullptr);
+
+        auto const ciKey = askColorPickOver(scene, QStringLiteral("ci"), SidebarRowKind::Workspace);
+        CHECK(ciKey.daemon == starfive.daemon);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
+        CHECK(flyout->property("parent").value<QQuickItem*>() == scene.rowTitled(QStringLiteral("ci")));
+        // Its keyboard cursor starts on ci's colour, not on docs' none.
+        CHECK(flyout->property("currentColor").value<QColor>()
+              == QColor { CiColour.red, CiColour.green, CiColour.blue });
+
+        auto const picked = QColor { 0x12, 0x34, 0x56 };
+        QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
+        REQUIRE(scene.controller.rowColorCalls.size() == 1);
+        CHECK(scene.controller.rowColorCalls[0].row == ciKey);
+        CHECK(scene.warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 }
 
@@ -3822,8 +4355,9 @@ TEST_CASE("the sidebar's tab colour picker opens at the tab's row and colours it
         // build, a tab that is not the current one.
         auto* build = scene.rowTitled(QStringLiteral("build"));
         REQUIRE(build != nullptr);
-        constexpr auto BuildTab = quint64 { 11 };
-        emit scene.controller.sidebarTabColorPickRequested(build->property("index").toInt(), BuildTab);
+        auto const buildKey =
+            askColorPickOver(scene, QStringLiteral("build"), contour::window::SidebarRowKind::Tab);
+        CHECK(buildKey.tab == 11);
         REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
         build = scene.rowTitled(QStringLiteral("build"));
         CHECK(flyout->property("parent").value<QQuickItem*>() == build);
@@ -3833,15 +4367,1079 @@ TEST_CASE("the sidebar's tab colour picker opens at the tab's row and colours it
 
         auto const picked = QColor { 0x12, 0x34, 0x56 };
         QMetaObject::invokeMethod(flyout, "colorPicked", Q_ARG(QColor, picked));
-        REQUIRE(scene.controller.tabColorCalls.size() == 1);
-        CHECK(scene.controller.tabColorCalls[0].tab == BuildTab);
-        CHECK(scene.controller.tabColorCalls[0].color == picked);
+        REQUIRE(scene.controller.rowColorCalls.size() == 1);
+        CHECK(scene.controller.rowColorCalls[0].row == buildKey);
+        CHECK(scene.controller.rowColorCalls[0].color == picked);
 
         QMetaObject::invokeMethod(flyout, "resetRequested");
-        REQUIRE(scene.controller.tabColorCalls.size() == 2);
-        CHECK(scene.controller.tabColorCalls[1].tab == BuildTab);
-        CHECK_FALSE(scene.controller.tabColorCalls[1].color.has_value());
-        CHECK(scene.controller.workspaceColorCalls.empty());
+        REQUIRE(scene.controller.rowColorCalls.size() == 2);
+        CHECK(scene.controller.rowColorCalls[1].row == buildKey);
+        CHECK_FALSE(scene.controller.rowColorCalls[1].color.has_value());
     }
 }
 // }}}
+
+// {{{ Daemon rows
+
+namespace
+{
+/// The daemon row titled @p title's heading, or null.
+[[nodiscard]] QQuickItem* daemonHeadingOf(SidebarWindow const& scene, QString const& title)
+{
+    auto* row = scene.rowTitled(title);
+    return row != nullptr ? SidebarWindow::findNamed(*row, QStringLiteral("sidebarDaemonHeading")) : nullptr;
+}
+
+/// The part named @p name of @p heading.
+[[nodiscard]] QQuickItem& headingPart(QQuickItem const& heading, char const* name)
+{
+    auto* found = SidebarWindow::findNamed(heading, QString::fromLatin1(name));
+    REQUIRE(found != nullptr);
+    return *found;
+}
+
+/// The buttons @p heading shows, leading first.
+[[nodiscard]] std::vector<QQuickItem*> daemonButtonsOf(QQuickItem const& heading)
+{
+    auto buttons = contour::test::itemsNamed(heading, QStringLiteral("sidebarDaemonButton"));
+    std::erase_if(buttons, [](QQuickItem const* button) { return !button->isVisible(); });
+    std::ranges::sort(buttons, {}, [](QQuickItem const* button) { return sceneRectOf(*button).left(); });
+    return buttons;
+}
+
+/// starfive in @p state, its one workspace listed as last known.
+[[nodiscard]] contour::window::DaemonSection starfiveIn(contour::window::DaemonLinkState state,
+                                                        std::string name = "starfive")
+{
+    auto section = starfiveSection();
+    section.state = state;
+    section.name = std::move(name);
+    return section;
+}
+
+/// A daemon of this machine named @p name in @p state, with one workspace: Start and Remove are its verbs.
+[[nodiscard]] contour::window::DaemonSection workIn(contour::window::DaemonLinkState state,
+                                                    std::string name = "work")
+{
+    auto section = contour::window::DaemonSection {};
+    section.daemon = contour::window::localDaemonRef(name);
+    section.instance = contour::window::DaemonInstance { 3 };
+    section.name = std::move(name);
+    section.locality = contour::window::DaemonLocality::Local;
+    section.state = state;
+    section.directory.workspaces = { contour::test::directoryWorkspaceOf(
+        7, "api", { contour::test::directoryPaneOf(70, "server") }) };
+    section.feed = contour::window::SectionFeed::Observer;
+    return section;
+}
+
+/// The row index of the daemon row titled @p title in @p scene's model.
+[[nodiscard]] int daemonRowIndex(SidebarWindow const& scene, std::string_view title)
+{
+    auto const& rows = scene.controller.sidebarModel().rows();
+    auto const at = std::ranges::find_if(rows, [&](contour::window::SidebarRow const& row) {
+        return row.key.kind == contour::window::SidebarRowKind::Daemon && row.title == title;
+    });
+    REQUIRE(at != rows.end());
+    return static_cast<int>(std::distance(rows.begin(), at));
+}
+
+/// Whether @p part lies inside @p row, horizontally.
+[[nodiscard]] bool insideRow(QQuickItem const& part, QQuickItem const& row)
+{
+    auto const rect = sceneRectOf(part);
+    auto const bounds = sceneRectOf(row);
+    return rect.left() >= bounds.left() - 0.5 && rect.right() <= bounds.right() + 0.5;
+}
+
+/// Types @p text into @p window, a key at a time: QTest::keyClicks() takes a widget only.
+void typeInto(QQuickWindow& window, std::string_view text)
+{
+    for (auto const letter: text)
+    {
+        QTest::keyClick(&window, letter);
+        QCoreApplication::processEvents();
+    }
+}
+
+/// The look @p row draws its sidebar in.
+[[nodiscard]] contour::config::SidebarLook lookOf(ChromeStyle row)
+{
+    return contour::config::resolveChromeTokens(row, {}).layout.sidebar;
+}
+} // namespace
+
+TEST_CASE("a daemon row shows its name and link state (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::window::DaemonLinkState;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        // At its widest, so Remove, which a narrower row lets go after the locality icon, stands beside
+        // Start.
+        scene.controller.showSidebar(static_cast<int>(scene.token("maxWidth")));
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 DaemonLinkState::Connected,
+                 { workIn(DaemonLinkState::NotRunning), starfiveIn(DaemonLinkState::NotRunning) });
+
+        auto* own = daemonHeadingOf(scene, QStringLiteral("local"));
+        auto* other = daemonHeadingOf(scene, QStringLiteral("work"));
+        auto* host = daemonHeadingOf(scene, QStringLiteral("starfive"));
+        REQUIRE(own != nullptr);
+        REQUIRE(other != nullptr);
+        REQUIRE(host != nullptr);
+        CHECK(headingPart(*other, "sidebarDaemonName").property("text").toString() == QStringLiteral("work"));
+        // A host that is not running offers Connect alone: it finds the daemon once it runs, and nothing here
+        // starts it.
+        auto const hostButtons = daemonButtonsOf(*host);
+        REQUIRE(hostButtons.size() == 1);
+        CHECK(hostButtons[0]->property("accessibleName").toString() == QStringLiteral("Connect"));
+
+        // Not running: its mark from the link table, its words, and Start beside Remove.
+        auto const look = contour::window::linkLookOf(DaemonLinkState::NotRunning, lookOf(row));
+        auto& mark = headingPart(*other, "sidebarDaemonLinkMark");
+        CHECK(mark.isVisible());
+        CHECK(mark.property("text").toString() == QString::fromUtf8(look.glyph));
+        auto& words = headingPart(*other, "sidebarDaemonLinkWords");
+        CHECK(words.property("text").toString() == QStringLiteral("Not running"));
+        auto const buttons = daemonButtonsOf(*other);
+        REQUIRE(buttons.size() == 2);
+        CHECK(buttons[0]->property("accessibleName").toString() == QStringLiteral("Start"));
+        CHECK(buttons[1]->property("accessibleName").toString() == QStringLiteral("Remove"));
+
+        // The window's own daemon is connected: no link mark, no button.
+        CHECK_FALSE(headingPart(*own, "sidebarDaemonLinkMark").isVisible());
+        CHECK(daemonButtonsOf(*own).empty());
+
+        auto& name = headingPart(*own, "sidebarDaemonName");
+        auto const* ownRow = scene.rowTitled(QStringLiteral("local"));
+        REQUIRE(ownRow != nullptr);
+        // The name in the look's section-heading type.
+        auto* style =
+            scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        auto const sectionFont =
+            style->property("type").value<QObject*>()->property("sidebarSection").value<QFont>();
+        CHECK(name.property("font").value<QFont>() == sectionFont);
+        auto const* workspace = scene.rowTitled(QStringLiteral("billing"));
+        REQUIRE(workspace != nullptr);
+        auto const& workspaceTitle = rowPart(*workspace, "sidebarRowTitle");
+        if (row != ChromeStyle::Terminal)
+        {
+            // A source list's section header: the footnote's size, semibold, smaller than the workspaces it
+            // heads, in the secondary ink; it ranks by being a header, not by its weight.
+            auto const footnote =
+                style->property("type").value<QObject*>()->property("footnote").value<QFont>();
+            auto const drawn = name.property("font").value<QFont>();
+            CHECK(drawn.pointSizeF() == Catch::Approx(footnote.pointSizeF()));
+            CHECK(drawn.pixelSize() == footnote.pixelSize());
+            CHECK(drawn.weight() == QFont::DemiBold);
+            auto const workspaceFont = workspaceTitle.property("font").value<QFont>();
+            CHECK(QFontMetricsF(drawn).height() < QFontMetricsF(workspaceFont).height());
+        }
+        if (row == ChromeStyle::Terminal)
+        {
+            // A section heading: bold at column 0, its disclosure after the name, no locality mark.
+            CHECK_FALSE(headingPart(*other, "sidebarDaemonDisclosure").isVisible());
+            CHECK_FALSE(headingPart(*other, "sidebarDaemonLocality").isVisible());
+            CHECK(sceneRectOf(name).left() == Catch::Approx(sceneRectOf(*ownRow).left()).margin(0.5));
+            CHECK(name.property("font").value<QFont>().bold());
+            auto const& fold = headingPart(*own, "sidebarDaemonTrailingDisclosure");
+            CHECK(fold.isVisible());
+            CHECK(sceneRectOf(fold).left() >= sceneRectOf(name).right());
+        }
+        else
+        {
+            // A chevron as the workspaces', the name where their names stand, and the locality's icon after
+            // it: the heading never reads as nested deeper than its workspaces.
+            CHECK(headingPart(*other, "sidebarDaemonDisclosure").isVisible());
+            auto const& locality = headingPart(*own, "sidebarDaemonLocality");
+            CHECK(locality.isVisible());
+            CHECK(sceneRectOf(locality).left() >= sceneRectOf(name).right());
+            CHECK(sceneRectOf(name).left() <= sceneRectOf(workspaceTitle).left() + 0.5);
+        }
+        // A blank line, or a gap, sets the second section apart; the first starts at the top.
+        auto const* first = scene.rows().front();
+        auto const* second =
+            daemonRowIndex(scene, "local") == 0 ? scene.rowTitled(QStringLiteral("starfive")) : ownRow;
+        REQUIRE(first->property("kind").toInt() == static_cast<int>(contour::window::SidebarRowKind::Daemon));
+        CHECK(second->height() > first->height());
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("Connect, Start, Cancel and Remove call the model (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::test::DaemonSectionsCall;
+    using contour::window::DaemonLinkState;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        // At its widest, so every offered button is on the row to press.
+        scene.controller.showSidebar(static_cast<int>(scene.token("maxWidth")));
+        auto const pressAllOf = [&](contour::window::DaemonSection const& section) {
+            onDaemon(scene, QStringLiteral("local"), DaemonLinkState::Connected, { section });
+            auto* heading = daemonHeadingOf(scene, QString::fromStdString(section.name));
+            REQUIRE(heading != nullptr);
+            for (auto* button: daemonButtonsOf(*heading))
+                scene.click(*button);
+        };
+        auto const pressAll = [&](DaemonLinkState state) {
+            pressAllOf(starfiveIn(state));
+        };
+        auto& calls = scene.controller.sidebarSections().calls;
+        auto const starfive = contour::window::hostDaemonRef("starfive");
+        auto const work = contour::window::localDaemonRef("work");
+
+        pressAllOf(workIn(DaemonLinkState::NotRunning));
+        // Each says its verb in full on hover, as the row's menu does.
+        if (auto* heading = daemonHeadingOf(scene, QStringLiteral("work")); heading != nullptr)
+        {
+            auto const tips = std::ranges::to<std::vector>(
+                daemonButtonsOf(*heading) | std::views::transform([](QQuickItem const* button) {
+                    return button->property("toolTipText").toString();
+                }));
+            CHECK(tips
+                  == std::vector { QStringLiteral("Start Daemon"), QStringLiteral("Remove from Sidebar") });
+        }
+        REQUIRE(calls.size() == 2);
+        CHECK(calls[0].verb == decltype(calls[0].verb) { DaemonSectionsCall::Start { .daemon = work } });
+        CHECK(calls[1].verb == decltype(calls[1].verb) { DaemonSectionsCall::Remove { .daemon = work } });
+
+        calls.clear();
+        pressAll(DaemonLinkState::NotConnected);
+        if (auto* heading = daemonHeadingOf(scene, QStringLiteral("starfive")); heading != nullptr)
+        {
+            auto const buttons = daemonButtonsOf(*heading);
+            REQUIRE(buttons.size() == 1);
+            CHECK(buttons[0]->property("toolTipText").toString() == QStringLiteral("Connect"));
+        }
+        REQUIRE(calls.size() == 1);
+        CHECK(std::holds_alternative<DaemonSectionsCall::Connect>(calls[0].verb));
+
+        // Cancel on a connect that is under way ends it; on a pending jump into the section, the jump.
+        calls.clear();
+        pressAll(DaemonLinkState::Connecting);
+        REQUIRE(calls.size() == 1);
+        CHECK(calls[0].verb
+              == decltype(calls[0].verb) { DaemonSectionsCall::Disconnect { .daemon = starfive } });
+
+        calls.clear();
+        scene.controller.sidebarHost().pending.here =
+            contour::window::SidebarTarget { .daemon = starfive,
+                                             .instance = contour::window::DaemonInstance { 9 },
+                                             .workspace = 5,
+                                             .tab = std::nullopt,
+                                             .pane = {} };
+        pressAll(DaemonLinkState::Connected);
+        CHECK(calls.empty());
+        CHECK(scene.controller.sidebarHost().cancels == 1);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the daemon row fits at 160 px and 18 cells in the documented order (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    skipWithoutPlatformUiFont();
+    using contour::window::DaemonLinkState;
+    using contour::window::sidebarrows::DaemonRowFit;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        // A long name, the link's words and two buttons: everything that can give way.
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 DaemonLinkState::Connected,
+                 { workIn(DaemonLinkState::NotRunning, "build-farm-eu-west") });
+        auto const fitNow = [&] {
+            // Twice: the row's new width changes its fit, and the buttons' new widths lay out the next time.
+            scene.layOut();
+            scene.layOut();
+            auto* heading = daemonHeadingOf(scene, QStringLiteral("build-farm-eu-west"));
+            REQUIRE(heading != nullptr);
+            auto const* rowItem = scene.rowTitled(QStringLiteral("build-farm-eu-west"));
+            // Whatever gave way, every part stays inside the row and the name is not covered.
+            for (auto* button: daemonButtonsOf(*heading))
+            {
+                CHECK(insideRow(*button, *rowItem));
+                CHECK(sceneRectOf(headingPart(*heading, "sidebarDaemonName")).right()
+                      <= sceneRectOf(*button).left() + 0.5);
+            }
+            CHECK(insideRow(headingPart(*heading, "sidebarDaemonLinkMark"), *rowItem));
+            // What the fit gives the name is drawn whole: never cut further by the room left.
+            auto const& name = headingPart(*heading, "sidebarDaemonName");
+            CHECK(name.width() > 0);
+            auto parts = std::format("heading {} name x {} w {} implicit {} fit {}",
+                                     heading->width(),
+                                     sceneRectOf(name).left(),
+                                     name.width(),
+                                     name.implicitWidth(),
+                                     heading->property("fit").toInt());
+            for (auto const* part: { "sidebarDaemonLocality", "sidebarDaemonLinkMark" })
+                parts += std::format(" | {} x {} w {}",
+                                     part,
+                                     sceneRectOf(headingPart(*heading, part)).left(),
+                                     headingPart(*heading, part).width());
+            for (auto* button: daemonButtonsOf(*heading))
+                parts += std::format(" | button x {} w {}", sceneRectOf(*button).left(), button->width());
+            INFO(parts);
+            CHECK_FALSE(name.property("truncated").toBool());
+            auto const fit = heading->property("fit").toInt();
+            // The buttons shrink first: the words stay beside the mark until they have.
+            CHECK(headingPart(*heading, "sidebarDaemonLinkWords").isVisible()
+                  == (fit < static_cast<int>(DaemonRowFit::NoWords)));
+            // Once the words are gone they are the mark's tooltip.
+            auto const* tip =
+                SidebarWindow::findNamed(*heading, QStringLiteral("sidebarDaemonReasonToolTipHost"));
+            REQUIRE(tip != nullptr);
+            CHECK(tip->property("text").toString().contains(QStringLiteral("Not running"))
+                  == (fit >= static_cast<int>(DaemonRowFit::NoWords)));
+            // Remove is words wherever it stands.
+            for (auto* button: daemonButtonsOf(*heading))
+                if (button->property("accessibleName").toString() == QStringLiteral("Remove"))
+                    CHECK(button->property("glyph").toString().contains(QStringLiteral("Remove")));
+            return fit;
+        };
+        auto const roomy = fitNow();
+        scene.controller.showSidebar(static_cast<int>(scene.token("minWidth")));
+        auto const narrowest = fitNow();
+        // At the narrowest the row gives way at least as far as at its default, and something has given.
+        CHECK(narrowest >= roomy);
+        CHECK(narrowest > static_cast<int>(DaemonRowFit::Full));
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("at its default width a daemon row says its state in words (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    skipWithoutPlatformUiFont();
+    // Spec §2 and §5.1: "Not running · Start", "Connecting… · Cancel", "Needs you · Connect", and the longest
+    // words, "Not connected" and "Reconnecting…", on the Terminal row's 30 cells too. The locality
+    // icon and the secondary button give way, and the primary button shrinks to its icon, before the words
+    // leave, so a first-time user reads what the mark means -- under an ordinary name, eight letters long.
+    using contour::window::DaemonLinkState;
+    using contour::window::sidebarrows::DaemonRowFit;
+    for (auto const row: drawnRows())
+        for (auto const state: { DaemonLinkState::NotConnected,
+                                 DaemonLinkState::NotRunning,
+                                 DaemonLinkState::Connecting,
+                                 DaemonLinkState::Reconnecting,
+                                 DaemonLinkState::NeedsInput,
+                                 DaemonLinkState::Failed })
+            // A daemon of this machine, so a NotRunning one offers Start and Remove; and a saved host, whose
+            // row also stands its fold mark and locality beside the name.
+            for (auto const& section: { workIn(state, "starfive"), starfiveIn(state) })
+            {
+                INFO("row " << static_cast<int>(row) << ", state " << static_cast<int>(state) << ", locality "
+                            << static_cast<int>(section.locality));
+                auto scene = SidebarWindow { { .row = row, .font = SceneFont::RowOwn } };
+                onDaemon(scene, QStringLiteral("local"), DaemonLinkState::Connected, { section });
+                scene.layOut();
+                scene.layOut();
+                auto* heading = daemonHeadingOf(scene, QStringLiteral("starfive"));
+                REQUIRE(heading != nullptr);
+                // The locality icon, Remove and the buttons' words give way first: the words stand beside the
+                // mark on every look.
+                CHECK(headingPart(*heading, "sidebarDaemonLinkWords").isVisible());
+                CHECK(heading->property("fit").toInt() < static_cast<int>(DaemonRowFit::NoWords));
+                CHECK_FALSE(headingPart(*heading, "sidebarDaemonName").property("truncated").toBool());
+                // On the Terminal row the link's mark takes one cell, however wide its face draws it, a
+                // button in words is bracketed, so two never read as one phrase, and one in its glyph form
+                // takes one cell.
+                if (row == ChromeStyle::Terminal)
+                    CHECK(headingPart(*heading, "sidebarDaemonLinkMark").width() == scene.style("cellWidth"));
+                if (row == ChromeStyle::Terminal)
+                    for (auto* button: daemonButtonsOf(*heading))
+                    {
+                        if (!button->property("iconOnly").toBool())
+                            CHECK(button->property("glyph").toString().startsWith(QLatin1Char('[')));
+                        else
+                            CHECK(button->width() == scene.style("cellWidth"));
+                    }
+                CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+            }
+}
+
+TEST_CASE("at its narrowest a daemon row keeps six letters of its name, in every state (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    // At the 160 px / 18-cell minimum the primary button stays (as its icon, or its one-cell glyph on the
+    // Terminal row), and the name is drawn whole at its shortest: at least six of its letters.
+    using contour::window::DaemonLinkState;
+    using contour::window::RowPending;
+    for (auto const daemonName:
+         { std::string_view { "build-farm-eu-west" }, std::string_view { "starfive" } })
+        for (auto const row: drawnRows())
+            for (auto const& [state, pending]: { std::pair { DaemonLinkState::NotRunning, RowPending::No },
+                                                 std::pair { DaemonLinkState::Connecting, RowPending::No },
+                                                 std::pair { DaemonLinkState::NeedsInput, RowPending::No },
+                                                 std::pair { DaemonLinkState::Connecting, RowPending::Yes } })
+            {
+                INFO("name " << daemonName << ", row " << static_cast<int>(row) << ", state "
+                             << static_cast<int>(state) << ", pending " << static_cast<int>(pending));
+                auto scene = SidebarWindow { { .row = row } };
+                auto const section = workIn(state, std::string(daemonName));
+                if (pending == RowPending::Yes)
+                    scene.controller.sidebarHost().pending.here =
+                        contour::window::SidebarTarget { .daemon = section.daemon,
+                                                         .instance = section.instance,
+                                                         .workspace = 7,
+                                                         .tab = std::nullopt,
+                                                         .pane = {} };
+                onDaemon(scene, QStringLiteral("local"), DaemonLinkState::Connected, { section });
+                scene.controller.showSidebar(static_cast<int>(scene.token("minWidth")));
+                scene.layOut();
+                scene.layOut();
+                auto* heading = daemonHeadingOf(
+                    scene, QString::fromUtf8(daemonName.data(), static_cast<qsizetype>(daemonName.size())));
+                REQUIRE(heading != nullptr);
+                auto const& name = headingPart(*heading, "sidebarDaemonName");
+                auto const text = name.property("text").toString();
+                INFO("name " << text.toStdString() << ", fit " << heading->property("fit").toInt());
+                CHECK_FALSE(name.property("truncated").toBool());
+                CHECK(QString(text).remove(QStringLiteral("…")).size() >= 6);
+                // The primary button is never dropped.
+                auto const buttons = daemonButtonsOf(*heading);
+                REQUIRE_FALSE(buttons.empty());
+                for (auto* button: buttons)
+                {
+                    CHECK(sceneRectOf(name).right() <= sceneRectOf(*button).left() + 0.5);
+                    // On the Terminal row the button in its glyph form takes one cell.
+                    if (row == ChromeStyle::Terminal && button->property("iconOnly").toBool())
+                        CHECK(button->width() == scene.style("cellWidth"));
+                }
+                CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+            }
+}
+
+TEST_CASE("Cancel's tooltip names CancelSwitch's chord only while a jump is under way (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    // CancelSwitch ends a pending jump, not a connect: a Cancel that ends a connect names no chord.
+    using contour::window::DaemonLinkState;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto toolTip = QString {};
+        auto const cancelCommand = [&] {
+            onDaemon(scene,
+                     QStringLiteral("local"),
+                     DaemonLinkState::Connected,
+                     { starfiveIn(DaemonLinkState::Connecting) });
+            auto* heading = daemonHeadingOf(scene, QStringLiteral("starfive"));
+            REQUIRE(heading != nullptr);
+            auto const buttons = daemonButtonsOf(*heading);
+            REQUIRE(buttons.size() == 1);
+            CHECK(buttons[0]->property("accessibleName").toString() == QStringLiteral("Cancel"));
+            toolTip = buttons[0]->property("toolTipText").toString();
+            return buttons[0]->property("toolTipCommand").toString();
+        };
+        CHECK(cancelCommand().isEmpty());
+        // A tooltip stands alone, so it names the verb in full, as the row's menu does.
+        CHECK(toolTip == QStringLiteral("Cancel Connecting"));
+
+        scene.controller.sidebarHost().pending.here =
+            contour::window::SidebarTarget { .daemon = contour::window::hostDaemonRef("starfive"),
+                                             .instance = contour::window::DaemonInstance { 9 },
+                                             .workspace = 5,
+                                             .tab = std::nullopt,
+                                             .pane = {} };
+        CHECK(cancelCommand() == QStringLiteral("CancelSwitch"));
+        CHECK(toolTip == QStringLiteral("Cancel Jump"));
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a daemon another window is adopting says Connecting and offers no Cancel (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    // Its connection is that window's switch's: a Cancel here would end nothing (no observer connects).
+    using contour::window::DaemonLinkState;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.showSidebar(static_cast<int>(scene.token("maxWidth")));
+        auto adopted = starfiveIn(DaemonLinkState::Connecting);
+        adopted.feed = contour::window::SectionFeed::WindowLink;
+        onDaemon(scene, QStringLiteral("local"), DaemonLinkState::Connected, { adopted });
+        auto* heading = daemonHeadingOf(scene, QStringLiteral("starfive"));
+        REQUIRE(heading != nullptr);
+        CHECK(daemonButtonsOf(*heading).empty());
+        CHECK(scene.controller.sidebarModel()
+                  .rows()[static_cast<std::size_t>(daemonRowIndex(scene, "starfive"))]
+                  .linkState
+              == DaemonLinkState::Connecting);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("hovering a daemon row opens no tab hover card (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    // The card is a tab's and a pane's; a daemon row's reason is its own tooltip, which the card would cover.
+    auto scene = SidebarWindow { { .row = drawnRows().front() } };
+    onDaemon(scene,
+             QStringLiteral("local"),
+             contour::window::DaemonLinkState::Connected,
+             { starfiveIn(contour::window::DaemonLinkState::Failed) });
+    auto* daemon = scene.rowTitled(QStringLiteral("starfive"));
+    REQUIRE(daemon != nullptr);
+    auto* card = scene.root->findChild<QObject*>(QStringLiteral("sidebarHoverCard"));
+    REQUIRE(card != nullptr);
+    auto const over = daemon->mapToScene(QPointF { daemon->width() / 4, daemon->height() / 2 }).toPoint();
+    QTest::mouseMove(scene.window, over - QPoint { 0, 1 });
+    QTest::mouseMove(scene.window, over);
+    CHECK_FALSE(QTest::qWaitFor([&] { return card->property("opened").toBool(); }, 1500));
+}
+
+TEST_CASE("long daemon names elide in the middle (offscreen)", "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::window::DaemonLinkState;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 DaemonLinkState::Connected,
+                 { workIn(DaemonLinkState::NotRunning, "build-farm-eu-west-2-staging") });
+        // At the narrowest, where no row has room for it whole: the name gives way last of all.
+        scene.controller.showSidebar(static_cast<int>(scene.token("minWidth")));
+        scene.layOut();
+        scene.layOut();
+        auto* heading = daemonHeadingOf(scene, QStringLiteral("build-farm-eu-west-2-staging"));
+        REQUIRE(heading != nullptr);
+        auto const& name = headingPart(*heading, "sidebarDaemonName");
+        CHECK(heading->property("fit").toInt()
+              >= static_cast<int>(contour::window::sidebarrows::DaemonRowFit::NameElided));
+        auto const text = name.property("text").toString();
+        INFO(text.toStdString());
+        // Its ends kept, the middle given up.
+        CHECK(text.startsWith(QLatin1Char('b')));
+        CHECK(text.endsWith(QLatin1Char('g')));
+        CHECK(text.contains(QStringLiteral("…")));
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the progress mark is static under reduced motion (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row][motion]")
+{
+    using contour::config::MotionPreference;
+    using contour::window::DaemonLinkState;
+    for (auto const row: drawnRows())
+        for (auto const motion: { MotionPreference::Full, MotionPreference::Reduced })
+        {
+            INFO("row " << static_cast<int>(row) << ", reduced " << (motion == MotionPreference::Reduced));
+            auto scene = SidebarWindow { { .row = row, .motion = motion } };
+            scene.controller.sidebarHost().pending.here =
+                contour::window::SidebarTarget { .daemon = contour::window::hostDaemonRef("starfive"),
+                                                 .instance = contour::window::DaemonInstance { 9 },
+                                                 .workspace = 5,
+                                                 .tab = std::nullopt,
+                                                 .pane = {} };
+            onDaemon(scene,
+                     QStringLiteral("local"),
+                     DaemonLinkState::Connected,
+                     { starfiveIn(DaemonLinkState::Connecting) });
+            auto* heading = daemonHeadingOf(scene, QStringLiteral("starfive"));
+            REQUIRE(heading != nullptr);
+            auto& mark = headingPart(*heading, "sidebarPendingMark");
+            CHECK(mark.isVisible());
+            CHECK(mark.property("text").toString()
+                  == QString::fromUtf8(contour::window::daemonRowFace(lookOf(row)).pendingMark));
+            CHECK(mark.property("pulsing").toBool() == (motion == MotionPreference::Full));
+            CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+        }
+}
+
+TEST_CASE("filter Return jumps to the first match, Shift+Return opens it in a new window (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::window::DaemonLinkState;
+    using contour::window::JumpMode;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 DaemonLinkState::Connected,
+                 { starfiveIn(DaemonLinkState::Connected) });
+        auto* field = scene.item(QStringLiteral("sidebarFilterField"));
+        auto* content = scene.item(QStringLiteral("content"));
+        REQUIRE(field != nullptr);
+        REQUIRE(content != nullptr);
+        auto const& jumps = scene.controller.sidebarHost().jumps;
+
+        // Another daemon's workspace: Return jumps to it, and the keyboard stays where it was.
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return scene.item(QStringLiteral("sidebarTree"))->hasActiveFocus(); },
+                                1000));
+        typeInto(*scene.window, "ci");
+        REQUIRE(QTest::qWaitFor([&] { return field->hasActiveFocus(); }, 1000));
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        REQUIRE(jumps.size() == 1);
+        CHECK(jumps.back().first.daemon == contour::window::hostDaemonRef("starfive"));
+        CHECK(jumps.back().second == JumpMode::Here);
+        CHECK(field->hasActiveFocus());
+
+        QTest::keyClick(scene.window, Qt::Key_Return, Qt::ShiftModifier);
+        QCoreApplication::processEvents();
+        REQUIRE(jumps.size() == 2);
+        CHECK(jumps.back().second == JumpMode::NewWindow);
+
+        // A row of the window's own is shown here, and the terminal takes the keyboard.
+        QTest::keyClick(scene.window, 'a', Qt::ControlModifier);
+        typeInto(*scene.window, "claude");
+        QCoreApplication::processEvents();
+        auto const shownBefore = scene.controller.sidebarHost().shown.size();
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        CHECK(scene.controller.sidebarHost().shown.size() == shownBefore + 1);
+        CHECK(QTest::qWaitFor([&] { return isWithin(scene.window->activeFocusItem(), content); }, 1000));
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("Esc in the sidebar cancels a pending jump, then clears the filter, then leaves (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        onDaemon(scene, QStringLiteral("local"));
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        auto* field = scene.item(QStringLiteral("sidebarFilterField"));
+        REQUIRE(tree != nullptr);
+        REQUIRE(field != nullptr);
+        auto& host = scene.controller.sidebarHost();
+        auto const& model = scene.controller.sidebarModel();
+        auto const intoStarfive =
+            contour::window::SidebarTarget { .daemon = contour::window::hostDaemonRef("starfive"),
+                                             .instance = {},
+                                             .workspace = 5,
+                                             .tab = std::nullopt,
+                                             .pane = {} };
+
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        QTest::keyClick(scene.window, 'b');
+        REQUIRE(QTest::qWaitFor([&] { return field->hasActiveFocus(); }, 1000));
+
+        // In the filter field: the jump first, the filter after.
+        host.pending.here = intoStarfive;
+        QTest::keyClick(scene.window, Qt::Key_Escape);
+        QCoreApplication::processEvents();
+        CHECK(host.cancels == 1);
+        CHECK(model.isFiltered());
+        CHECK(field->hasActiveFocus());
+        host.pending.here.reset();
+
+        // In the tree: the same order, then the keyboard leaves.
+        QTest::keyClick(scene.window, Qt::Key_Down);
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        host.pending.here = intoStarfive;
+        QTest::keyClick(scene.window, Qt::Key_Escape);
+        QCoreApplication::processEvents();
+        CHECK(host.cancels == 2);
+        CHECK(model.isFiltered());
+        host.pending.here.reset();
+        QTest::keyClick(scene.window, Qt::Key_Escape);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(model.isFiltered());
+        CHECK(scene.controller.sidebarHasFocus());
+        QTest::keyClick(scene.window, Qt::Key_Escape);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(scene.controller.sidebarHasFocus());
+        CHECK(host.cancels == 2);
+    }
+}
+
+TEST_CASE(
+    "Left and Right fold a daemon row, Left from a workspace reaches its daemon row, Home and End cross "
+    "daemons (offscreen)",
+    "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::window::RowExpansion;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 contour::window::DaemonLinkState::Connected,
+                 { starfiveSection() });
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        auto const& model = scene.controller.sidebarModel();
+        auto const current = [&] {
+            return tree->property("currentIndex").toInt();
+        };
+        auto const expansionOf = [&](int index) {
+            return model.rows().at(static_cast<std::size_t>(index)).expansion;
+        };
+
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        auto const starfive = daemonRowIndex(scene, "starfive");
+        tree->setProperty("currentIndex", starfive);
+        REQUIRE(expansionOf(starfive) == RowExpansion::Expanded);
+
+        QTest::keyClick(scene.window, Qt::Key_Left);
+        QCoreApplication::processEvents();
+        CHECK(expansionOf(daemonRowIndex(scene, "starfive")) == RowExpansion::Collapsed);
+        QTest::keyClick(scene.window, Qt::Key_Right);
+        QCoreApplication::processEvents();
+        CHECK(expansionOf(daemonRowIndex(scene, "starfive")) == RowExpansion::Expanded);
+
+        // Its workspace, folded by default: Left moves up to the daemon row.
+        auto const ci = model.rowIndexOf(
+            contour::window::SidebarRowKey { .kind = contour::window::SidebarRowKind::Workspace,
+                                             .daemon = contour::window::hostDaemonRef("starfive"),
+                                             .instance = contour::window::DaemonInstance { 9 },
+                                             .workspace = 5,
+                                             .tab = 0,
+                                             .pane = {} });
+        REQUIRE(ci >= 0);
+        tree->setProperty("currentIndex", ci);
+        QTest::keyClick(scene.window, Qt::Key_Left);
+        QCoreApplication::processEvents();
+        CHECK(current() == daemonRowIndex(scene, "starfive"));
+
+        // Home and End reach the first and the last daemon's rows.
+        QTest::keyClick(scene.window, Qt::Key_Home);
+        QCoreApplication::processEvents();
+        CHECK(current() == 0);
+        CHECK(model.rows().front().key.kind == contour::window::SidebarRowKind::Daemon);
+        QTest::keyClick(scene.window, Qt::Key_End);
+        QCoreApplication::processEvents();
+        CHECK(current() == model.rowCount() - 1);
+        CHECK(current() > std::max(daemonRowIndex(scene, "starfive"), daemonRowIndex(scene, "local")));
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the Menu key and Shift+F10 open a daemon row's menu (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        onDaemon(scene, QStringLiteral("local"));
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        tree->setProperty("currentIndex", daemonRowIndex(scene, "local"));
+        auto& menus = scene.controller.sidebarHost().menus;
+        menus.clear();
+
+        QTest::keyClick(scene.window, Qt::Key_Menu);
+        QCoreApplication::processEvents();
+        QTest::keyClick(scene.window, Qt::Key_F10, Qt::ShiftModifier);
+        QCoreApplication::processEvents();
+        REQUIRE(menus.size() == 2);
+        for (auto const& key: menus)
+            CHECK(key.kind == contour::window::SidebarRowKind::Daemon);
+    }
+}
+
+TEST_CASE("the Menu key on a daemon row opens its menu with Open in New Window (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        // Another daemon's row, which the window's own menus did not reach before.
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 contour::window::DaemonLinkState::Connected,
+                 { starfiveSection() });
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        auto const starfive = daemonRowIndex(scene, "starfive");
+        tree->setProperty("currentIndex", starfive);
+        auto& menus = scene.controller.sidebarHost().menus;
+        menus.clear();
+
+        QTest::keyClick(scene.window, Qt::Key_Menu);
+        QCoreApplication::processEvents();
+        REQUIRE(menus.size() == 1);
+        CHECK(menus.front().kind == contour::window::SidebarRowKind::Daemon);
+        CHECK(menus.front().daemon == contour::window::hostDaemonRef("starfive"));
+        // The menu the window builds for that row offers it in a window of its own.
+        auto const& shown = scene.controller.sidebarModel().rows().at(static_cast<std::size_t>(starfive));
+        auto const menu = contour::command::buildSidebarDaemonMenu(
+            contour::window::sidebarDaemonMenuStateOf(shown, contour::command::RowOrigin::OtherDaemon));
+        CHECK(std::ranges::count(
+                  menu, std::string_view { "Open in New Window" }, &contour::command::ContextMenuEntry::title)
+              == 1);
+    }
+}
+
+TEST_CASE("Return on a daemon row keeps the keyboard on it as its daemon connects (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        auto notConnected = starfiveSection();
+        notConnected.instance = {};
+        notConnected.state = contour::window::DaemonLinkState::NotConnected;
+        notConnected.directory = {};
+        onDaemon(
+            scene, QStringLiteral("local"), contour::window::DaemonLinkState::Connected, { notConnected });
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        auto const starfive = daemonRowIndex(scene, "starfive");
+        tree->setProperty("currentIndex", starfive);
+        auto& sections = scene.controller.sidebarSections();
+        sections.calls.clear();
+
+        // Return connects it; the connect gives its section a run, and a tree to list.
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        REQUIRE(sections.calls.size() == 1);
+        // The current row never leaves it, not even for a moment.
+        auto moved = QSignalSpy { tree, SIGNAL(currentIndexChanged()) };
+        sections.listed = { starfiveSection() };
+        scene.controller.sidebarModel().refreshNow();
+        QCoreApplication::processEvents();
+
+        CHECK(daemonRowIndex(scene, "starfive") == starfive);
+        CHECK(tree->property("currentIndex").toInt() == starfive);
+        CHECK(moved.count() == 0);
+        CHECK(tree->hasActiveFocus());
+    }
+}
+
+TEST_CASE("the Menu key on another daemon's tab row opens its menu (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::window::SidebarRowKind;
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        onDaemon(scene,
+                 QStringLiteral("local"),
+                 contour::window::DaemonLinkState::Connected,
+                 { starfiveSection() });
+        auto& model = scene.controller.sidebarModel();
+        auto const rowOf = [&](SidebarRowKind kind) {
+            return model.rowIndexOf(
+                contour::window::SidebarRowKey { .kind = kind,
+                                                 .daemon = contour::window::hostDaemonRef("starfive"),
+                                                 .instance = contour::window::DaemonInstance { 9 },
+                                                 .workspace = 5,
+                                                 .tab = kind == SidebarRowKind::Tab ? 50U : 0U,
+                                                 .pane = {} });
+        };
+        // Another daemon's workspaces start folded.
+        model.expand(rowOf(SidebarRowKind::Workspace));
+        model.refreshNow();
+        QCoreApplication::processEvents();
+        auto const tab = rowOf(SidebarRowKind::Tab);
+        REQUIRE(tab >= 0);
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        tree->setProperty("currentIndex", tab);
+        auto& menus = scene.controller.sidebarHost().menus;
+        menus.clear();
+
+        QTest::keyClick(scene.window, Qt::Key_Menu);
+        QCoreApplication::processEvents();
+        REQUIRE(menus.size() == 1);
+        CHECK(menus.front().kind == SidebarRowKind::Tab);
+        CHECK(menus.front().daemon == contour::window::hostDaemonRef("starfive"));
+        // The menu the window builds for that row: what runs on another daemon's row, and no move.
+        auto const menu = contour::command::buildSidebarTabMenu(
+            { .tab = { .tabIndex = 0, .tabCount = 1 },
+              .others = {},
+              .joinable = {},
+              .workspaceTabs = 1,
+              .moves = contour::command::MenuMoves::Nodes,
+              .open = contour::window::openOfferOf(menus.front().daemon),
+              .origin = contour::window::rowOriginOf(menus.front().daemon,
+                                                     scene.controller.sidebarHost().own->daemon) });
+        REQUIRE_FALSE(menu.empty());
+        CHECK(menu.front().title == "Open in New Window");
+        CHECK(std::ranges::count(
+                  menu, std::string_view { "Move to Workspace" }, &contour::command::ContextMenuEntry::title)
+              == 0);
+        CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("after a jump the selected row is scrolled into view (offscreen)",
+          "[contour][gui][qml][sidebar][daemon-row]")
+{
+    auto scene = SidebarWindow { { .row = drawnRows().front() } };
+    // The presence lists the window's own daemon first; starfive below it lists more workspaces than the
+    // tree has room for.
+    auto own = contour::window::DaemonSection {};
+    own.daemon = contour::window::localDaemonRef("default");
+    own.name = "local";
+    own.locality = contour::window::DaemonLocality::Local;
+    own.state = contour::window::DaemonLinkState::Connected;
+    auto starfive = starfiveSection();
+    for (auto const id: std::views::iota(uint64_t { 100 }, uint64_t { 140 }))
+        starfive.directory.workspaces.push_back(contour::test::directoryWorkspaceOf(
+            id, std::format("ws{}", id), { contour::test::directoryPaneOf(id * 10, "sh") }));
+    onDaemon(scene, QStringLiteral("local"), contour::window::DaemonLinkState::Connected, { own, starfive });
+    REQUIRE(daemonRowIndex(scene, "local") == 0);
+    auto* tree = scene.item(QStringLiteral("sidebarTree"));
+    REQUIRE(tree != nullptr);
+    QMetaObject::invokeMethod(tree, "positionViewAtEnd");
+    QCoreApplication::processEvents();
+    REQUIRE(tree->property("contentY").toReal() > 0);
+
+    // The window lands on build, at the top: it is brought into view.
+    scene.controller.sidebarHost().displayed = contour::window::TabRef { .workspace = 1, .tab = 11 };
+    scene.controller.sidebarModel().refreshNow();
+    QCoreApplication::processEvents();
+    auto const index = scene.controller.sidebarModel().currentIndex();
+    REQUIRE(index >= 0);
+    QQuickItem* item = nullptr;
+    QMetaObject::invokeMethod(tree, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index));
+    REQUIRE(item != nullptr);
+    auto const top = tree->property("contentY").toReal();
+    CHECK(item->y() >= top - 0.5);
+    CHECK(item->y() + item->height() <= top + tree->height() + 0.5);
+}
+
+TEST_CASE("a last-known row is dimmed and keeps 3:1 (offscreen)", "[contour][gui][qml][sidebar][daemon-row]")
+{
+    using contour::window::DaemonLinkState;
+    // The live row's contrast over the last-known row's, both on the sidebar's fill: a step the eye sees, on
+    // every look and appearance (the live row's ink is also its secondary text's on the native rows).
+    constexpr auto MinimumDimGap = 1.6;
+    for (auto const appearance: { vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark })
+        for (auto const row: drawnRows())
+            for (auto const down:
+                 { DaemonLinkState::Reconnecting, DaemonLinkState::NotRunning, DaemonLinkState::Failed })
+            {
+                INFO("appearance " << static_cast<int>(appearance) << ", row " << static_cast<int>(row)
+                                   << ", state " << static_cast<int>(down));
+                auto const forced = contour::test::ScopedChromeAppearance { appearance };
+                auto scene = SidebarWindow { { .row = row } };
+                // ci's pane works: what was last known of it draws no running mark.
+                auto starfive = starfiveIn(down);
+                starfive.directory.workspaces[0].tabs[0].panes[0].status = { recordOf(
+                    vtbackend::ProgramState::Working) };
+                onDaemon(scene, QStringLiteral("local"), DaemonLinkState::Connected, { starfive });
+                scene.controller.sidebarModel().expand(scene.controller.sidebarModel().rowIndexOf(
+                    contour::window::SidebarRowKey { .kind = contour::window::SidebarRowKind::Workspace,
+                                                     .daemon = contour::window::hostDaemonRef("starfive"),
+                                                     .instance = contour::window::DaemonInstance { 9 },
+                                                     .workspace = 5,
+                                                     .tab = 0,
+                                                     .pane = {} }));
+                scene.layOut();
+                auto* lastKnown = scene.rowTitled(QStringLiteral("ci"));
+                auto* live = scene.rowTitled(QStringLiteral("docs"));
+                auto* lastKnownTab = scene.rowTitled(QStringLiteral("build"));
+                REQUIRE(lastKnown != nullptr);
+                REQUIRE(live != nullptr);
+                REQUIRE(lastKnownTab != nullptr);
+                auto* style = scene.engine.rootContext()
+                                  ->contextProperty(QStringLiteral("chromeStyle"))
+                                  .value<QObject*>();
+                auto const* colors = style->property("colors").value<QObject*>();
+                auto const fill = colors->property("sidebarFill").value<QColor>();
+                auto const drawn = rowPart(*lastKnown, "sidebarRowTitle").property("color").value<QColor>();
+                auto const liveInk = rowPart(*live, "sidebarRowTitle").property("color").value<QColor>();
+                CHECK(drawn.rgba() == colors->property("sidebarLastKnownInk").value<QColor>().rgba());
+                // A live row keeps the row's own ink.
+                CHECK(liveInk.rgba() == colors->property("tabText").value<QColor>().rgba());
+                // Over what shows through a translucent fill, as the window's surface is.
+                auto const ground = fill.alpha() == 255 ? fill : scene.window->color();
+                auto const over = [&](QColor const& ink) {
+                    return vtbackend::mixColor(rgbOf(ground), rgbOf(ink), ink.alphaF());
+                };
+                auto const dimContrast = vtbackend::contrastRatio(over(drawn), rgbOf(ground));
+                CHECK(dimContrast >= vtbackend::MinimumMarkContrast);
+                CHECK(vtbackend::contrastRatio(over(liveInk), rgbOf(ground)) / dimContrast >= MinimumDimGap);
+                // Its status mark takes the same ink, and no running ring.
+                auto const& glyph = rowPart(*lastKnownTab, "sidebarRowGlyph");
+                CHECK_FALSE(glyph.isVisible());
+                CHECK(scene.warnings.count(isSidebarDiagnostic) == 0);
+            }
+}
+// }}}
+
+TEST_CASE("the hidden row lists hidden daemons and opens its menu by click and by Return (offscreen)",
+          "[contour][gui][qml][sidebar]")
+{
+    for (auto const row: drawnRows())
+    {
+        INFO("row " << static_cast<int>(row));
+        auto scene = SidebarWindow { { .row = row } };
+        scene.controller.sidebarSections().hidden = { contour::window::HiddenDaemon {
+            .daemon = contour::window::hostDaemonRef("starfive"), .name = "starfive" } };
+        onDaemon(scene, QStringLiteral("local"));
+        auto* hidden = scene.rowTitled(QStringLiteral("1 hidden daemon"));
+        REQUIRE(hidden != nullptr);
+        // Its words start at the sections' edge, where a daemon heading's first part does: its disclosure,
+        // or on a look without one (the Terminal row) its name.
+        scene.layOut();
+        auto* heading = daemonHeadingOf(scene, QStringLiteral("local"));
+        REQUIRE(heading != nullptr);
+        auto const& disclosure = headingPart(*heading, "sidebarDaemonDisclosure");
+        auto const edge = disclosure.isVisible()
+                              ? sceneRectOf(disclosure).left()
+                              : sceneRectOf(headingPart(*heading, "sidebarDaemonName")).left();
+        CHECK(sceneRectOf(rowPart(*hidden, "sidebarRowTitle")).left() == Catch::Approx(edge).margin(0.5));
+        auto& menus = scene.controller.sidebarHost().menus;
+        menus.clear();
+
+        scene.click(*hidden);
+        REQUIRE(menus.size() == 1);
+        CHECK(menus.back().kind == contour::window::SidebarRowKind::Hidden);
+
+        // The keyboard: the tree's current row, and Return.
+        auto* tree = scene.item(QStringLiteral("sidebarTree"));
+        REQUIRE(tree != nullptr);
+        scene.controller.focusSidebar();
+        REQUIRE(QTest::qWaitFor([&] { return tree->hasActiveFocus(); }, 1000));
+        tree->setProperty("currentIndex", hidden->property("index"));
+        QTest::keyClick(scene.window, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        REQUIRE(menus.size() == 2);
+        CHECK(menus.back().kind == contour::window::SidebarRowKind::Hidden);
+        // The menu the window builds for it: one Show per hidden daemon.
+        auto const& rows = scene.controller.sidebarModel().rows();
+        auto const names = std::ranges::to<std::vector>(
+            rows.back().hidden | std::views::transform(&contour::window::HiddenDaemon::name));
+        auto const menu = contour::command::buildSidebarHiddenMenu(names);
+        REQUIRE(menu.size() == 1);
+        CHECK(menu.front().title == "Show starfive");
+
+        // Shown again: the row goes.
+        scene.controller.sidebarSections().hidden.clear();
+        scene.controller.sidebarModel().refreshNow();
+        scene.layOut();
+        CHECK(scene.rowTitled(QStringLiteral("1 hidden daemon")) == nullptr);
+    }
+}

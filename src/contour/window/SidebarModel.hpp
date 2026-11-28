@@ -9,9 +9,13 @@
 #include <contour/config/TabBarMode.hpp>
 #include <contour/platform/Announcer.hpp>
 #include <contour/window/CloseDialogTable.hpp>
+#include <contour/window/DaemonSections.hpp>
 #include <contour/window/NodeDrag.hpp>
 #include <contour/window/PaneKey.hpp>
+#include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/SidebarDropPolicy.hpp>
+#include <contour/window/SidebarJumps.hpp>
+#include <contour/window/SidebarSections.hpp>
 #include <contour/window/SidebarTree.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
@@ -29,10 +33,13 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <vtworkspace/Primitives.hpp>
 
 /// The enumerators a sidebar row's kind, time and expansion roles carry, as QML names them. Their own
 /// namespace, because Q_ENUM_NS needs Q_NAMESPACE in the namespace that declares the enums, and
@@ -50,6 +57,8 @@ enum class SidebarRowKind : uint8_t
     Workspace = 0, ///< A workspace.
     Tab,           ///< A tab of a workspace.
     Pane,          ///< One pane of a tab with more than one.
+    Daemon,        ///< A daemon: the heading of its section.
+    Hidden,        ///< The daemons the user chose not to list.
 };
 Q_ENUM_NS(SidebarRowKind)
 
@@ -91,12 +100,82 @@ enum class SecondLine : uint8_t
 };
 Q_ENUM_NS(SecondLine)
 
-/// Whether activating a row showed anything. Not exposed to QML: only C++ asks.
+/// What a row's one trailing status slot shows (@see window::StatusSlot, which it mirrors).
+enum class StatusSlot : uint8_t
+{
+    None = 0, ///< Nothing.
+    Link,     ///< The daemon's link state.
+    Urgency,  ///< The row's rolled-up urgency.
+    Pending,  ///< A jump to the row, or into its section, is under way.
+};
+Q_ENUM_NS(StatusSlot)
+
+/// Whether a row says what its daemon says now (@see window::RowStaleness, which it mirrors).
+enum class RowStaleness : uint8_t
+{
+    Live = 0,  ///< Its daemon is connected.
+    LastKnown, ///< What was last known of a daemon that is not connected.
+};
+Q_ENUM_NS(RowStaleness)
+
+/// A button a daemon row offers (@see window::DaemonRowButton, which it mirrors).
+enum class DaemonRowButton : uint8_t
+{
+    None = 0, ///< No button in this place.
+    Connect,  ///< Connects to the daemon.
+    Start,    ///< Starts the local daemon.
+    Cancel,   ///< Ends a pending jump into the section, or a connect.
+    Remove,   ///< Unlists the daemon for the rest of the run.
+};
+Q_ENUM_NS(DaemonRowButton)
+
+/// How much of a daemon row fits its width (@see window::DaemonRowFit, which it mirrors).
+enum class DaemonRowFit : uint8_t
+{
+    Full = 0,    ///< Everything.
+    NoLocality,  ///< The locality icon goes first.
+    NoSecondary, ///< And the secondary button.
+    IconButton,  ///< And the primary button shrinks to its icon.
+    NoWords,     ///< And the link's words, into the mark's tooltip.
+    NameElided,  ///< And the name elides in the middle.
+    NameShort,   ///< And last further, to its shortest.
+};
+Q_ENUM_NS(DaemonRowFit)
+
+/// Whether a jump to a row is under way (@see window::RowPending, which it mirrors).
+enum class RowPending : uint8_t
+{
+    No = 0, ///< Nothing is under way.
+    Yes,    ///< The pending jump goes to the row, or into a daemon row's section.
+};
+Q_ENUM_NS(RowPending)
+
+/// Which rows the sidebar lists (@see config::SidebarScope, which it mirrors).
+enum class SidebarScope : uint8_t
+{
+    All = 0, ///< Every row.
+    NeedsMe, ///< Only the rows on the path to a pane that needs the user.
+};
+Q_ENUM_NS(SidebarScope)
+
+/// Where a row a jump goes to is opened (@see window::JumpMode, which it mirrors).
+enum class JumpMode : uint8_t
+{
+    Here = 0,  ///< In this window.
+    NewWindow, ///< In a window of its own.
+};
+Q_ENUM_NS(JumpMode)
+
+/// Whether activating a row showed anything.
 enum class RowActivation : uint8_t
 {
     Nothing = 0, ///< The row is not there.
     Shown,       ///< What the row names is shown.
+    /// The filter's Return with nothing typed and every row listed: there is no match to go to, so nothing is
+    /// activated and the tree takes the keyboard, as Down does.
+    Unfiltered,
 };
+Q_ENUM_NS(RowActivation)
 
 /// What a close confirmation is about (@see window::CloseKind, which it mirrors).
 enum class CloseKind : uint8_t
@@ -119,7 +198,8 @@ Q_ENUM_NS(FooterChord)
 enum class FooterCounts : uint8_t
 {
     Full = 0, ///< `1 needs you · 1 working`.
-    Compact,  ///< `1 waiting · 1 busy`: the same counts in fewer letters, for the narrowest sidebar.
+    Compact,  ///< `1 waiting · 1 busy`: the same counts in fewer letters, for a narrow sidebar.
+    Glyphs,   ///< `! 1 · ◑ 1`: the counts in their rows' status glyphs, where no words fit.
 };
 Q_ENUM_NS(FooterCounts)
 
@@ -145,6 +225,10 @@ static_assert(std::to_underlying(SidebarRowKind::Workspace)
               == std::to_underlying(window::SidebarRowKind::Workspace));
 static_assert(std::to_underlying(SidebarRowKind::Tab) == std::to_underlying(window::SidebarRowKind::Tab));
 static_assert(std::to_underlying(SidebarRowKind::Pane) == std::to_underlying(window::SidebarRowKind::Pane));
+static_assert(std::to_underlying(SidebarRowKind::Daemon)
+              == std::to_underlying(window::SidebarRowKind::Daemon));
+static_assert(std::to_underlying(SidebarRowKind::Hidden)
+              == std::to_underlying(window::SidebarRowKind::Hidden));
 static_assert(std::to_underlying(TimeKind::None) == std::to_underlying(window::TimeKind::None));
 static_assert(std::to_underlying(TimeKind::Live) == std::to_underlying(window::TimeKind::Live));
 static_assert(std::to_underlying(TimeKind::Relative) == std::to_underlying(window::TimeKind::Relative));
@@ -162,6 +246,40 @@ static_assert(std::to_underlying(RowSelection::Selected)
               == std::to_underlying(window::RowSelection::Selected));
 static_assert(std::to_underlying(RowSelection::ContainsSelected)
               == std::to_underlying(window::RowSelection::ContainsSelected));
+static_assert(std::to_underlying(StatusSlot::None) == std::to_underlying(window::StatusSlot::None));
+static_assert(std::to_underlying(StatusSlot::Link) == std::to_underlying(window::StatusSlot::Link));
+static_assert(std::to_underlying(StatusSlot::Urgency) == std::to_underlying(window::StatusSlot::Urgency));
+static_assert(std::to_underlying(StatusSlot::Pending) == std::to_underlying(window::StatusSlot::Pending));
+static_assert(std::to_underlying(DaemonRowFit::Full) == std::to_underlying(window::DaemonRowFit::Full));
+static_assert(std::to_underlying(DaemonRowFit::NoLocality)
+              == std::to_underlying(window::DaemonRowFit::NoLocality));
+static_assert(std::to_underlying(DaemonRowFit::NoSecondary)
+              == std::to_underlying(window::DaemonRowFit::NoSecondary));
+static_assert(std::to_underlying(DaemonRowFit::NoWords) == std::to_underlying(window::DaemonRowFit::NoWords));
+static_assert(std::to_underlying(DaemonRowFit::IconButton)
+              == std::to_underlying(window::DaemonRowFit::IconButton));
+static_assert(std::to_underlying(DaemonRowFit::NameElided)
+              == std::to_underlying(window::DaemonRowFit::NameElided));
+static_assert(std::to_underlying(DaemonRowFit::NameShort)
+              == std::to_underlying(window::DaemonRowFit::NameShort));
+static_assert(std::to_underlying(RowPending::No) == std::to_underlying(window::RowPending::No));
+static_assert(std::to_underlying(RowPending::Yes) == std::to_underlying(window::RowPending::Yes));
+static_assert(std::to_underlying(RowStaleness::Live) == std::to_underlying(window::RowStaleness::Live));
+static_assert(std::to_underlying(RowStaleness::LastKnown)
+              == std::to_underlying(window::RowStaleness::LastKnown));
+static_assert(std::to_underlying(SidebarScope::All) == std::to_underlying(config::SidebarScope::All));
+static_assert(std::to_underlying(SidebarScope::NeedsMe) == std::to_underlying(config::SidebarScope::NeedsMe));
+static_assert(std::to_underlying(JumpMode::Here) == std::to_underlying(window::JumpMode::Here));
+static_assert(std::to_underlying(JumpMode::NewWindow) == std::to_underlying(window::JumpMode::NewWindow));
+static_assert(std::to_underlying(DaemonRowButton::None) == std::to_underlying(window::DaemonRowButton::None));
+static_assert(std::to_underlying(DaemonRowButton::Connect)
+              == std::to_underlying(window::DaemonRowButton::Connect));
+static_assert(std::to_underlying(DaemonRowButton::Start)
+              == std::to_underlying(window::DaemonRowButton::Start));
+static_assert(std::to_underlying(DaemonRowButton::Cancel)
+              == std::to_underlying(window::DaemonRowButton::Cancel));
+static_assert(std::to_underlying(DaemonRowButton::Remove)
+              == std::to_underlying(window::DaemonRowButton::Remove));
 static_assert(std::to_underlying(SecondLine::None) == std::to_underlying(window::SecondLine::None));
 static_assert(std::to_underlying(SecondLine::Idle) == std::to_underlying(window::SecondLine::Idle));
 static_assert(std::to_underlying(SecondLine::Status) == std::to_underlying(window::SecondLine::Status));
@@ -239,7 +357,7 @@ class ISidebarHost
     ///        for the end.
     virtual void moveNode(SidebarNode const& node, NodeDestination const& destination) = 0;
 
-    /// Opens the context menu of a row.
+    /// Opens the context menu of a row: by its kind, the Hidden row's offering each hidden daemon back.
     /// @param row The row, as the model lists it.
     /// @param windowPosition Where the pointer is, in window coordinates.
     virtual void openContextMenu(SidebarRow const& row, QPointF windowPosition) = 0;
@@ -254,6 +372,36 @@ class ISidebarHost
     /// @return What runs in it and how its last command ended (session::tabHoverLines()), one line each: a
     ///         tab's active pane's; empty for a row whose panes the window does not hold.
     [[nodiscard]] virtual std::vector<std::string> hoverLines(SidebarRowKey const& row) const = 0;
+
+    /// @return The daemon the window is on; none for a window with no daemon behind it (its sessions run
+    ///         in-process, or on a tmux host), whose sidebar lists its own workspaces alone, with no daemon
+    ///         row. Asked on every rebuild: a jump moves the window to another daemon.
+    [[nodiscard]] virtual std::optional<OwnDaemon> ownDaemon() const = 0;
+
+    /// @return The window's workspace, as a daemon's verbs name the window that asked (a connect's prompts
+    ///         are shown in it).
+    [[nodiscard]] virtual vtworkspace::WorkspaceId windowId() const = 0;
+
+    /// Goes to what another daemon's row names.
+    /// @param target The workspace, and the tab and pane within it where the row names them.
+    /// @param mode In this window, or in a window of its own.
+    virtual void jumpTo(SidebarTarget target, JumpMode mode) = 0;
+
+    /// @return Where the jumps under way go: the one in this window, and an Open in New Window.
+    [[nodiscard]] virtual PendingJumps pendingJumps() const = 0;
+
+    /// Ends the jump of @p mode under way, leaving the window as it was; the other mode's goes on. Nothing
+    /// while none is under way.
+    /// @param mode Which jump.
+    virtual void cancelJump(window::JumpMode mode) = 0;
+
+    /// Seeks the window's own daemon again, as the location chip and a lost pane's Reconnect do: the Connect
+    /// of the window's own section, which the daemon sections leave to the window that holds the link.
+    virtual void reconnect() = 0;
+
+    /// Brings the prompt the window's own link waits on to the front and gives it the keyboard: the Connect
+    /// of the window's own section while that link needs the user. Nothing while no prompt is open here.
+    virtual void raisePrompt() = 0;
 };
 
 /// Whether the user can see the sidebar's rows, which decides whether their times need to run.
@@ -261,6 +409,13 @@ enum class SidebarPresence : uint8_t
 {
     Hidden = 0, ///< The sidebar is hidden, or the window is not exposed.
     Shown,      ///< The sidebar is shown in an exposed window.
+};
+
+/// Whether a sidebar follows the daemon sections' change notices.
+enum class SectionsFeed : uint8_t
+{
+    Dropped = 0, ///< It holds no subscription: its window is closing, and nothing is to be rebuilt for it.
+    Followed,    ///< Every change notice rebuilds its rows.
 };
 
 /// Whether the window is on screen.
@@ -342,14 +497,19 @@ struct FooterRoom
     return needed <= room.available ? sidebarrows::FooterChord::Shown : sidebarrows::FooterChord::Dropped;
 }
 
-/// Decides which wording of the counts the footer shows: the full one whenever it fits, so the counts are
-/// never cut short by an ellipsis while a shorter wording of them would fit.
+/// Decides which wording of the counts the footer shows: the longest one that fits, so the counts are never
+/// cut short by an ellipsis while a shorter wording of them would fit.
 /// @param available The width the counts have, with no chord beside them.
 /// @param fullWidth The full wording's width.
-/// @return Full when it fits, Compact otherwise.
-[[nodiscard]] constexpr sidebarrows::FooterCounts footerCountsFor(double available, double fullWidth) noexcept
+/// @param compactWidth The compact wording's width.
+/// @return Full when it fits, else Compact when it fits, else Glyphs.
+[[nodiscard]] constexpr sidebarrows::FooterCounts footerCountsFor(double available,
+                                                                  double fullWidth,
+                                                                  double compactWidth) noexcept
 {
-    return fullWidth <= available ? sidebarrows::FooterCounts::Full : sidebarrows::FooterCounts::Compact;
+    if (fullWidth <= available)
+        return sidebarrows::FooterCounts::Full;
+    return compactWidth <= available ? sidebarrows::FooterCounts::Compact : sidebarrows::FooterCounts::Glyphs;
 }
 
 /// The sidebar tree's own commands for QML (SidebarCommandNames): each name to its window::ChromeCommand
@@ -375,6 +535,13 @@ class SidebarModel: public QAbstractListModel
     Q_PROPERTY(int currentIndex READ currentIndex NOTIFY currentIndexChanged)
     /// The shown workspace's name, as its row titles it: the breadcrumb's and the workspace chip's.
     Q_PROPERTY(QString currentWorkspaceTitle READ currentWorkspaceTitle NOTIFY summaryChanged)
+    /// The window's own daemon's name, as its heading row titles it; empty for a window with no daemon.
+    Q_PROPERTY(QString currentDaemonTitle READ currentDaemonTitle NOTIFY summaryChanged)
+    /// How many daemon sections the tree lists; 0 for a window with no daemon.
+    Q_PROPERTY(int sectionCount READ sectionCount NOTIFY summaryChanged)
+    /// The breadcrumb's daemon part: currentDaemonTitle while more than one section is listed
+    /// (breadcrumbDepthOf()), empty otherwise.
+    Q_PROPERTY(QString breadcrumbDaemon READ breadcrumbDaemon NOTIFY summaryChanged)
     /// The row of the shown workspace, or -1: where the RenameWorkspace action edits.
     Q_PROPERTY(int currentWorkspaceIndex READ currentWorkspaceIndex NOTIFY summaryChanged)
     /// The most urgent roll-up of the workspaces the window does not show, an Urgency's underlying value.
@@ -385,6 +552,12 @@ class SidebarModel: public QAbstractListModel
     /// The marker's glyph, a TabBadgeKind's underlying value: the other workspaces' roll-up while the chip is
     /// marked, TabBadgeKind::None otherwise.
     Q_PROPERTY(int workspaceChipGlyph READ workspaceChipGlyph NOTIFY summaryChanged)
+    /// Which rows are listed, a config::SidebarScope's underlying value: the Needs-me control's checked
+    /// state.
+    Q_PROPERTY(int scope READ scopeValue NOTIFY scopeChanged)
+    /// What the tree says where it lists nothing the user asked for, a SidebarEmptyState's underlying value
+    /// (sidebarEmptyStateOf()).
+    Q_PROPERTY(int emptyState READ emptyStateValue NOTIFY emptyStateChanged)
 
   public:
     /// What each row of the model says; QML reads them by the names in roleNames().
@@ -427,14 +600,26 @@ class SidebarModel: public QAbstractListModel
         RailTextRole, ///< The Terminal look's workspace rail on the first line (workspaceRailCellsOf()).
         RailTextContinuedRole, ///< The rail on the second line (workspaceRailCellsOf()).
         IconRole,              ///< A tab row's icon as { kind, text } (tabIconVariant()); empty for none.
+        LinkStateRole,         ///< A daemon row: its DaemonLinkState.
+        LinkReasonRole,        ///< A daemon row: why its link failed; empty otherwise.
+        LocalityRole,          ///< A daemon row: its DaemonLocality.
+        StalenessRole,         ///< RowStaleness: whether the row is what was last known.
+        ShownElsewhereRole,    ///< A workspace row: whether another window shows it (ShownElsewhere).
+        PendingRole,           ///< RowPending: whether a jump under way goes to it, or into its section.
+        StatusSlotRole,        ///< StatusSlot: what its trailing status slot shows.
+        DaemonNameRole,        ///< The name of its section's daemon; empty for a window with no daemon.
+        DaemonButtonsRole,     ///< A daemon row: its buttons, a list of DaemonRowButton (daemonRowButtons()).
     };
 
     /// @param host The window the sidebar sits in; must outlive the model.
+    /// @param sections The daemons the sidebar lists besides the window's own; must outlive the model. The
+    ///        model rebuilds when they change, for as long as it lives.
     /// @param attention The window's seen-state; must outlive the model.
     /// @param clock The wall clock the times are measured against; must outlive the model.
     /// @param announcer What a background pane that needs the user is said through; must outlive the model.
     /// @param parent The QObject parent.
     SidebarModel(ISidebarHost& host,
+                 IDaemonSections& sections,
                  TabAttention const& attention,
                  core::platform::IWallClock const& clock,
                  platform::Announcer& announcer,
@@ -449,8 +634,8 @@ class SidebarModel: public QAbstractListModel
 
     /// @return The rows as shown, in order.
     [[nodiscard]] std::vector<SidebarRow> const& rows() const noexcept { return _rows; }
-    /// @return Every workspace's row as the last rebuild made it, in order, whatever the filter or a fold
-    ///         hides (SidebarListing::workspaces): what the switcher shows of the window's own daemon.
+    /// @return Every workspace's row of the window's own daemon as the last rebuild made it, in order,
+    ///         whatever the filter or a fold hides: what the switcher shows of the window's own daemon.
     [[nodiscard]] std::span<SidebarRow const> workspaceRows() const noexcept { return _workspaceRows; }
     /// @return Panes that need the user, over every pane the window lists (a filter hides none of them).
     [[nodiscard]] int footerNeedYou() const noexcept { return static_cast<int>(_footer.needYou); }
@@ -463,10 +648,13 @@ class SidebarModel: public QAbstractListModel
     /// Decides the footer's counts wording for QML (footerCountsFor()), as a sidebarrows::FooterCounts.
     /// @param available The width the counts have alone.
     /// @param fullWidth The full wording's width.
+    /// @param compactWidth The compact wording's width.
     /// @return The FooterCounts value.
-    [[nodiscard]] Q_INVOKABLE int footerCounts(qreal available, qreal fullWidth) const noexcept
+    [[nodiscard]] Q_INVOKABLE int footerCounts(qreal available,
+                                               qreal fullWidth,
+                                               qreal compactWidth) const noexcept
     {
-        return static_cast<int>(std::to_underlying(footerCountsFor(available, fullWidth)));
+        return static_cast<int>(std::to_underlying(footerCountsFor(available, fullWidth, compactWidth)));
     }
 
     /// Decides the footer's chord for QML (footerChordFor()), as a sidebarrows::FooterChord.
@@ -491,6 +679,16 @@ class SidebarModel: public QAbstractListModel
     [[nodiscard]] QString currentWorkspaceTitle() const
     {
         return QString::fromStdString(_summary.currentWorkspace);
+    }
+    /// @return The window's own daemon's name; empty for a window with no daemon.
+    [[nodiscard]] QString currentDaemonTitle() const { return QString::fromStdString(_daemonTitle); }
+    /// @return How many daemon sections the last rebuild listed.
+    [[nodiscard]] int sectionCount() const noexcept { return static_cast<int>(_sectionCount); }
+    /// @return The breadcrumb's daemon part: the own daemon's name with more than one section, else empty.
+    [[nodiscard]] QString breadcrumbDaemon() const
+    {
+        return breadcrumbDepthOf(_sectionCount) == BreadcrumbDepth::DaemonWorkspaceTab ? currentDaemonTitle()
+                                                                                       : QString {};
     }
     /// @return The row of the shown workspace, or -1.
     [[nodiscard]] int currentWorkspaceIndex() const noexcept { return _currentWorkspaceIndex; }
@@ -517,19 +715,56 @@ class SidebarModel: public QAbstractListModel
     [[nodiscard]] bool isTimerActive() const noexcept { return _timer.isActive(); }
     /// @return Whether a rebuild waits for the event loop.
     [[nodiscard]] bool isRebuildPending() const noexcept { return _rowsState == RowsState::Stale; }
+    /// @return Whether the sidebar follows the daemon sections' change notices.
+    [[nodiscard]] SectionsFeed sectionsFeed() const noexcept
+    {
+        return _sectionsChanged.holds() ? SectionsFeed::Followed : SectionsFeed::Dropped;
+    }
+    /// Follows the daemon sections' change notices, or drops the subscription and the running-time tick: a
+    /// closing window's sidebar is dropped when its directory source goes, so no notice queues a rebuild of
+    /// a controller that is deleted later (WindowController::setDirectorySource()).
+    /// @param feed Whether to follow them.
+    void followSections(SectionsFeed feed);
     /// @return Whether a filter narrows the rows.
     [[nodiscard]] bool isFiltered() const noexcept { return !_state.filter.empty(); }
+    /// @return Which rows are listed.
+    [[nodiscard]] config::SidebarScope scope() const noexcept { return _state.scope; }
+    /// @return scope(), as its underlying value for QML.
+    [[nodiscard]] int scopeValue() const noexcept
+    {
+        return static_cast<int>(std::to_underlying(_state.scope));
+    }
+    /// @return What the tree says where it lists nothing the user asked for, as of the last rebuild.
+    [[nodiscard]] SidebarEmptyState emptyState() const noexcept { return _emptyState; }
+    /// @return emptyState(), as its underlying value for QML.
+    [[nodiscard]] int emptyStateValue() const noexcept
+    {
+        return static_cast<int>(std::to_underlying(_emptyState));
+    }
+    /// Lists every row, or only those on the way to what needs the user; rebuilds at once. Folds are kept,
+    /// so the scope's way back shows the rows as they were.
+    /// @param scope The scope.
+    void setScope(config::SidebarScope scope);
 
+    /// @param row A row.
+    /// @return Whether @p row is of the window's own daemon (or the window has none), which the window's own
+    ///         verbs -- rename, mark seen, drag, its menus -- act on; false for another daemon's row and for
+    ///         a row that is not there.
+    [[nodiscard]] bool isOwnRow(int row) const;
     /// @param key A row's key.
     /// @return The row's index, or -1 when it is not listed.
     [[nodiscard]] int rowIndexOf(SidebarRowKey const& key) const noexcept;
-    /// @param workspace A workspace's id, as the window's directory lists it.
-    /// @return Its row, or -1 when it is not listed: where the sidebar's colour picker hangs.
-    [[nodiscard]] Q_INVOKABLE int workspaceRowIndex(quint64 workspace) const noexcept
-    {
-        return rowIndexOf(
-            { .kind = SidebarRowKind::Workspace, .workspace = workspace, .tab = 0, .pane = {} });
-    }
+    /// @param key A row's key, as a menu carries it.
+    /// @return What a jump from that row names (sidebarTargetOf()): a daemon row's in the run its section
+    ///         lists now, which its key leaves out; a row no longer listed, what its key names.
+    [[nodiscard]] SidebarTarget targetOf(SidebarRowKey const& key) const;
+    /// @param kind A workspace or a tab row.
+    /// @param workspace The workspace's id, as the window's directory lists it.
+    /// @param tab The tab's id; 0 for a workspace row.
+    /// @return The key of the window's own row of that node, on its own daemon and that daemon's run as they
+    ///         are now (ISidebarHost::ownDaemon()), not as the rows were last built: right after a switch a
+    ///         key names the daemon switched to.
+    [[nodiscard]] SidebarRowKey ownRowKey(SidebarRowKind kind, uint64_t workspace, uint64_t tab) const;
 
     /// Tells the model whether anyone can see its rows. The one-second timer runs only while they can.
     /// @param presence The sidebar's presence.
@@ -538,6 +773,13 @@ class SidebarModel: public QAbstractListModel
     /// @param activity The window's activity.
     void setActivity(WindowActivity activity) noexcept { _activity = activity; }
 
+    /// Says a jump's progress politely: "Connecting to work…", "Now on work › api", "Jump cancelled",
+    /// "Could not reach work: <reason>". What the window calls as its jump moves on.
+    /// @param event How far the jump has come.
+    /// @param target Where it goes: its daemon and workspace are named by what the sidebar lists of them.
+    /// @param reason Why it failed (Failed only); empty says no reason.
+    void noteJump(JumpEvent event, SidebarTarget const& target, std::string const& reason);
+
     /// Marks the rows stale: they are rebuilt once, when control returns to the event loop, however many
     /// times this is called before. What a directory change, a seen-state change or a burst of output calls.
     Q_INVOKABLE void noteChanged();
@@ -545,14 +787,62 @@ class SidebarModel: public QAbstractListModel
     void refreshNow();
 
     /// Shows what a row names: a workspace is selected, a tab is shown, a pane is shown and focused; the
-    /// pane is counted as seen.
+    /// pane is counted as seen. Another daemon's row is jumped to; a daemon row acts as its state says
+    /// (daemonRowActivation()).
     /// @param row The row.
     Q_INVOKABLE void activate(int row);
     /// What activate() does, said back.
     /// @param row The row.
-    /// @return Shown when the row named something that was shown; Nothing for a row the tree does not have
-    ///         (an empty or filtered-out tree), which changes nothing.
+    /// @return Shown when the window's own row named something that was shown; Nothing for a row the tree
+    ///         does not have (an empty or filtered-out tree), which changes nothing, and for a daemon row or
+    ///         another daemon's row, whose jump or connect leaves the keyboard where it was.
     [[nodiscard]] sidebarrows::RowActivation activateRow(int row);
+
+    /// Activates the first row a filter or the Needs-me scope left (firstMatchOf()): the first tab or pane
+    /// row that itself matches, not an ancestor listed for a pane beneath it; else the first workspace row.
+    /// What Return in the sidebar's filter field does (WindowController::activateSidebarFirstMatch()).
+    /// @param mode A JumpMode's underlying value: Here, or NewWindow for a window of its own.
+    /// @return What activateRow() answers for that row; Nothing when the filter left none; Unfiltered, with
+    ///         nothing activated, while no filter is typed and every row is listed.
+    sidebarrows::RowActivation activateFirstMatch(int mode);
+
+    /// @return Whether a jump in this window the sidebar started is still under way
+    ///         (ISidebarHost::pendingJumps()).
+    [[nodiscard]] Q_INVOKABLE bool isJumpPending() const;
+    /// Ends the jump in this window under way, if one is (ISidebarHost::cancelJump()): Escape in the sidebar,
+    /// first. An Open in New Window goes on: its own row ends it.
+    Q_INVOKABLE void cancelJump();
+
+    /// Connects to a daemon row's daemon, asking in this window for what it needs (its Connect button), as
+    /// connectRouteOf() routes it: an observed daemon through the daemon sections, the window's own by
+    /// seeking its link again (ISidebarHost::reconnect()), or, while that link waits for the user, by raising
+    /// the prompt it waits on (ISidebarHost::raisePrompt()); another window's link is that window's, and
+    /// nothing happens here.
+    /// @param row A daemon row; any other does nothing.
+    Q_INVOKABLE void connectDaemon(int row);
+
+    /// Starts a daemon row's local daemon (its Start button).
+    /// @param row A daemon row; any other does nothing.
+    Q_INVOKABLE void startDaemon(int row);
+
+    /// Unlists a daemon row's daemon for the rest of the run (its Remove button).
+    /// @param row A daemon row; any other does nothing.
+    Q_INVOKABLE void removeDaemon(int row);
+
+    /// Ends what a daemon row's Cancel button ends (cancelRouteOf()): a pending jump into its section, else a
+    /// connect still connecting.
+    /// @param row A daemon row; any other does nothing.
+    Q_INVOKABLE void cancelPending(int row);
+
+    /// What a press of one of a daemon row's buttons does: the button's verb, decided here so the row's QML
+    /// only reports which button it was.
+    /// @param row A daemon row; any other does nothing.
+    /// @param button A DaemonRowButton's underlying value; None, or one out of range, does nothing.
+    Q_INVOKABLE void pressDaemonButton(int row, int button);
+
+    /// Opens what a row names in a window of its own, of any daemon, as a jump does.
+    /// @param row A workspace, tab or pane row; any other does nothing.
+    Q_INVOKABLE void openInNewWindow(int row);
     /// Expands a collapsed row, collapses an expanded one.
     /// @param row The row.
     Q_INVOKABLE void toggle(int row);
@@ -570,11 +860,13 @@ class SidebarModel: public QAbstractListModel
     /// @param row The focused row.
     /// @return The row the focus is on afterwards: @p row, or the row after it when that is its child.
     Q_INVOKABLE int expandOrChild(int row);
-    /// Renames what @p row names: a workspace's label, or the title a tab shows.
-    /// @param row A workspace or tab row; a pane has no name of its own to change.
+    /// Renames what @p row names: a workspace's label, or the title a tab shows; another daemon's through its
+    /// section (IDaemonSections).
+    /// @param row A workspace or tab row; a pane has no name of its own to change, and a last-known row names
+    ///        a run that may be gone.
     /// @param name The new name.
     Q_INVOKABLE void rename(int row, QString const& name);
-    /// Counts every pane under @p row as seen.
+    /// Counts every pane under @p row as seen: the window's own here, another daemon's at that daemon.
     /// @param row The row.
     Q_INVOKABLE void markSeen(int row);
     /// What the hover card of @p row adds: what runs in it and how its last command ended
@@ -582,13 +874,16 @@ class SidebarModel: public QAbstractListModel
     /// @param row The row.
     /// @return One line each; empty for a workspace row and for panes the window does not hold.
     [[nodiscard]] Q_INVOKABLE QStringList hoverLines(int row) const;
-    /// Opens the context menu of @p row.
-    /// @param row The row.
+    /// Opens the context menu of @p row, of any daemon's.
+    /// @param row The row; the Hidden row's offers each hidden daemon back.
     /// @param windowPosition Where the pointer is, in window coordinates.
     Q_INVOKABLE void openContextMenu(int row, QPointF windowPosition);
     /// Narrows the rows to those matching @p text (and the ancestors of a match); empty shows everything.
     /// @param text The typed filter.
     Q_INVOKABLE void setFilter(QString const& text);
+    /// setScope() for QML: the empty state's "Show all".
+    /// @param scope A config::SidebarScope's underlying value; one out of range lists every row.
+    Q_INVOKABLE void setScope(int scope);
     /// Drops what a node drag carries on @p row.
     /// @param row The row under the pointer.
     /// @param y The pointer's position within the row, 0 (top) to 1 (bottom).
@@ -611,14 +906,24 @@ class SidebarModel: public QAbstractListModel
     Q_INVOKABLE void dropOnNewWorkspace(QString const& payload);
 
   signals:
+    /// The Hidden row @p row was activated (Return, a click, its accessible press): the tree opens its menu
+    /// hanging from it (openContextMenu()).
+    void rowMenuRequested(int row);
     /// The footer's counts changed.
     void footerChanged();
     /// The row of the tab the window shows changed.
     void currentIndexChanged();
+    /// The tab the window shows is another one (a jump or a switch landed), not merely at another index: the
+    /// tree brings it into view, and leaves alone a view the user scrolls while another section grows.
+    void currentRowChanged();
     /// The shown workspace, its row or what the other workspaces ask changed.
     void summaryChanged();
     /// A rebuild changed a workspace's row (workspaceRows()).
     void workspaceRowsChanged();
+    /// The scope changed (scope()).
+    void scopeChanged();
+    /// The empty state changed (emptyState()).
+    void emptyStateChanged();
 
   private:
     /// A node drag as the sidebar reads it: what it is to the drop policy, and what moves.
@@ -647,25 +952,58 @@ class SidebarModel: public QAbstractListModel
     struct Rebuilt
     {
         std::vector<SidebarRow> rows;
-        std::vector<SidebarRow> workspaces; ///< Every workspace's row (SidebarListing::workspaces).
+        std::vector<SidebarRow> workspaces; ///< The own daemon's workspace rows, for workspaceRows().
         SidebarFooter footer;
         SidebarSummary summary;
         std::optional<TabRef> displayed;
         std::optional<uint64_t> currentWorkspace; ///< The workspace the window shows.
+        std::vector<DaemonSection> sections;      ///< What was listed, the own section the window's own.
     };
 
     [[nodiscard]] SidebarRow const* rowAt(int row) const noexcept;
+    /// @return @p row, when it is a daemon row; null otherwise.
+    [[nodiscard]] SidebarRow const* daemonRowAt(int row) const noexcept;
+    /// @return @p row, when it is one of the window's own daemon's (isOwn()); null otherwise.
+    [[nodiscard]] SidebarRow const* ownRowAt(int row) const;
     [[nodiscard]] WorkspaceDirectory directory() const;
+    /// @return The section @p daemon is listed by, as the daemon sections state it now; none for one not
+    /// listed.
+    [[nodiscard]] std::optional<DaemonSection> sectionOf(DaemonRef const& daemon) const;
     [[nodiscard]] Rebuilt build(WorkspaceDirectory const& directory) const;
+    /// @return Whether @p key is of the window's own daemon (or the window has none): what the window's own
+    ///         verbs act on. Another daemon's rows are reached by a jump. Asked of the window's live daemon
+    ///         (ISidebarHost::ownDaemon()), as WindowController::rowOriginOf() asks it: right after a switch
+    ///         the rows still show the daemon left until the queued rebuild, and a verb must not act on it.
+    [[nodiscard]] bool isOwn(SidebarRowKey const& key) const;
+    /// @return Whether @p key is of the own daemon the rows were built for (_own): what a rebuild lists as
+    /// the
+    ///         window's own. Rendering only; a verb asks isOwn().
+    [[nodiscard]] bool isShownAsOwn(SidebarRowKey const& key) const noexcept;
+    /// Activates @p row as the user asked: the own daemon's is shown, another daemon's jumped to by @p mode.
+    [[nodiscard]] sidebarrows::RowActivation activateRow(int row, JumpMode mode);
     /// Replaces the rows with @p next in one model reset: the first build's.
     void resetRows(std::vector<SidebarRow> next);
     /// Diffs @p next against the rows and applies it as removals, moves, insertions and dataChanged.
     void apply(std::vector<SidebarRow> next);
-    void announceNewNeeds(WorkspaceDirectory const& directory);
+    /// Announces each pane of any section that began to need the user since the last rebuild.
+    void announceNewNeeds(std::span<DaemonSection const> sections, WorkspaceDirectory const& own);
+
+    /// What a jump's announcement names: a daemon, and the workspace on it when one is listed.
+    struct JumpPlace
+    {
+        QString daemon;    ///< The daemon's name.
+        QString workspace; ///< The workspace's name; empty when it is not listed or has none.
+    };
+    /// @return The names @p target goes to, as the sidebar lists them.
+    [[nodiscard]] JumpPlace placeOf(SidebarTarget const& target) const;
+
+    /// One run of a daemon's section: a section listed anew, or under a new run, is a baseline.
+    using SectionRun = std::pair<DaemonRef, DaemonInstance>;
     void updateTimer();
     void setExpansion(int row, RowExpansion wanted);
 
     ISidebarHost& _host;
+    IDaemonSections& _sections;
     TabAttention const& _attention;
     core::platform::IWallClock const& _clock;
     platform::Announcer& _announcer;
@@ -674,16 +1012,30 @@ class SidebarModel: public QAbstractListModel
     std::vector<SidebarRow> _workspaceRows; ///< @see workspaceRows()
     SidebarFooter _footer;
     SidebarSummary _summary;
+    SidebarEmptyState _emptyState = SidebarEmptyState::None; ///< @see emptyState()
+    std::string _daemonTitle;                                ///< @see currentDaemonTitle()
+    std::size_t _sectionCount = 0;                           ///< @see sectionCount()
     int _currentIndex = -1;
+    /// The key of the row at _currentIndex: a selection that moves to another row at the same index is a
+    /// change too, which the tree scrolls into view.
+    std::optional<SidebarRowKey> _currentKey;
     int _currentWorkspaceIndex = -1;
     RowsState _rowsState = RowsState::Unbuilt;
     SidebarPresence _presence = SidebarPresence::Hidden;
     WindowActivity _activity = WindowActivity::Inactive;
     /// The source the last rebuild read; a different one is a new baseline, not news.
     IWorkspaceDirectorySource const* _source = nullptr;
-    /// Each pane's urgency at the last rebuild, to see which ones just began to need the user.
-    std::map<PaneKey, Urgency> _paneUrgency;
+    /// Each pane's urgency at the last rebuild, of every section, by a pane-kind key: to see which ones just
+    /// began to need the user. A pane of an unsplit or folded tab has no row, but has a key.
+    std::map<SidebarRowKey, Urgency> _paneUrgency;
+    /// The sections the last rebuild listed, each by its run: one not among them is a new baseline.
+    std::set<SectionRun> _sectionRuns;
+    /// The window's own daemon at the last rebuild; none for a window with no daemon. What the rows are drawn
+    /// for only: a verb and a key ask the live one (isOwn(), ownRowKey()).
+    std::optional<OwnDaemon> _own;
     QTimer _timer;
+    /// Rebuilds on every change of the daemons listed; declared last, so it ends before anything it reaches.
+    SectionsSubscription _sectionsChanged;
 };
 
 } // namespace contour::window

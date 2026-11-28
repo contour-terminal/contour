@@ -20,6 +20,7 @@ using contour::window::NoticeQueue;
 using contour::window::noticeRow;
 using contour::window::NoticeRows;
 using contour::window::NoticeSurface;
+using contour::window::ToastFocus;
 using contour::window::ToastHover;
 
 namespace
@@ -193,6 +194,25 @@ TEST_CASE("NoticeQueue: a hovered toast stays", "[notices]")
     auto const t1 = T0 + 1h;
     std::ignore = queue.hover(ToastHover::Away, t1);
     CHECK(queue.nextDeadline() == t1 + noticeRow(NoticeKind::Copied).duration);
+}
+
+TEST_CASE("NoticeQueue: a toast the keyboard is on stays, hovered or not", "[notices]")
+{
+    auto queue = NoticeQueue {};
+    std::ignore = queue.post(notice(NoticeKind::DaemonHidden, "starfive hidden from the sidebar"), T0);
+    CHECK(queue.focus(ToastFocus::Focused, T0 + 100ms) == NoticeChange::None);
+    CHECK_FALSE(queue.nextDeadline().has_value());
+    CHECK(queue.expire(T0 + 1h) == NoticeChange::None);
+    CHECK(queue.toast() != nullptr);
+
+    // The pointer passing over and leaving lets go of nothing while the keyboard is still on it.
+    std::ignore = queue.hover(ToastHover::Hovered, T0 + 1h);
+    std::ignore = queue.hover(ToastHover::Away, T0 + 1h);
+    CHECK_FALSE(queue.nextDeadline().has_value());
+
+    auto const t1 = T0 + 2h;
+    std::ignore = queue.focus(ToastFocus::Away, t1);
+    CHECK(queue.nextDeadline() == t1 + noticeRow(NoticeKind::DaemonHidden).duration);
 }
 
 TEST_CASE("NoticeQueue: one banner, replaced, cleared or dismissed", "[notices]")

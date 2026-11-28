@@ -275,6 +275,8 @@ ThemedWindow
         // or still fading out.
         presence: appWindow.band.band
         centre: appWindow.band.centre
+        // The notice toast, while the band hosts it, takes the band's centre.
+        centreYielded: noticeToast.shown && noticeToast.host === "titleBand"
         // A concealed "reveal" band leaves the screen and the accessibility tree once it has slid away (or,
         // under Reduce Motion, faded out). A "pinned" one overlays the top rows like a revealed one, held there
         // while the remote connection is interrupted.
@@ -512,7 +514,7 @@ ThemedWindow
     // This window's toast (window::NoticeModel): centred, in the title band while a band at the top can hold
     // it, else at the content's top -- or its bottom, while the cursor is in the rows the top one would
     // cover, or at the top again over an ended pane's footer. Where it goes is decided as it shows
-    // (WindowController.toastHost: "titleBand", "contentTop" or "contentBottom"); a hovered toast stays. Not an
+    // (WindowController.toastHost: "titleBand", "contentTop" or "contentBottom"); a hovered or focused toast stays. Not an
     // alert to a screen reader: the window's NoticeModel says each notice once, and an AlertMessage would
     // have it said twice.
     Toast {
@@ -522,6 +524,9 @@ ThemedWindow
         property string host: "titleBand"
         text: notices !== null ? notices.toastText : ""
         glyph: notices !== null ? notices.toastGlyph : ""
+        // `!== undefined` for a lightweight mock `win` whose notices predate the toast's action.
+        actionText: notices !== null && notices.toastActionText !== undefined ? notices.toastActionText : ""
+        onActionTriggered: if (noticeToast.notices !== null) noticeToast.notices.triggerToastAction()
         shown: notices !== null && notices.toastShown
         x: (parent.width - width) / 2
         y: host === "titleBand" ? titleBar.y + (titleBar.height - height) / 2
@@ -544,6 +549,11 @@ ThemedWindow
             enabled: noticeToast.shown
             onHoveredChanged: if (noticeToast.notices !== null) noticeToast.notices.setToastHovered(hovered)
         }
+
+        // The keyboard holds it as the pointer does: Tab reaches its action (Hide's Undo), which stays until
+        // the keyboard leaves it. Undo has no chord of its own; the Hidden row's menu is the keyboard's other
+        // path back. A toast that fades out takes the keyboard off its button, and so lets go.
+        onActionFocusedChanged: if (noticeToast.notices !== null) noticeToast.notices.setToastFocused(actionFocused)
     }
 
     // Shown only while the daemon runs another release than this client (see DaemonDriftModel): in the
@@ -576,9 +586,10 @@ ThemedWindow
     // at the content's corner for want of a band. Their order is the controller's focusedToolbarIndex.
     readonly property var toolbarItems: {
         const items = titleBar.toolbarItems.slice()
-        const sidebarChip = sidebarSlot.item ? sidebarSlot.item.daemonChip : null
-        if (sidebarChip !== null && sidebarChip.visible)
-            items.unshift(sidebarChip)
+        // The sidebar's own title row comes first, at the window's leading end: a tmux window's host chip, the
+        // switcher and the Needs-me control.
+        if (sidebarSlot.item)
+            items.unshift(...sidebarSlot.item.toolbarControls)
         if (driftChip.visible && !driftChip.inBand)
             items.push(driftChip)
         return items
@@ -710,11 +721,11 @@ ThemedWindow
     Connections {
         target: appWindow.win
         ignoreUnknownSignals: true
-        function onCloseWorkspaceConfirmationRequested(workspace, workspaceLabel, program) {
-            closeDialog.ask(SidebarRows.CloseKind.Workspace, workspace, 0, 0, workspaceLabel, program)
+        function onCloseWorkspaceConfirmationRequested(node, workspaceLabel, program) {
+            closeDialog.ask(node, workspaceLabel, program)
         }
-        function onSidebarCloseConfirmationRequested(kind, workspace, tab, pane, label, program) {
-            closeDialog.ask(kind, workspace, tab, pane, label, program)
+        function onSidebarCloseConfirmationRequested(node, label, program) {
+            closeDialog.ask(node, label, program)
         }
     }
     // }}}
@@ -829,6 +840,14 @@ ThemedWindow
         target: askpassDialog.host
         ignoreUnknownSignals: true
         function onPendingPromptChanged() { askpassDialog.present(askpassDialog.host.pendingPrompt) }
+        // The sidebar's Connect on this window's own daemon while its link waits for the user: the prompt it
+        // waits on comes to the front, with the keyboard in it.
+        function onRaiseRequested() {
+            appWindow.raise();
+            appWindow.requestActivate();
+            askpassDialog.present(askpassDialog.host.pendingPrompt);
+            askpassDialog.takeFocus();
+        }
     }
 
     Connections {

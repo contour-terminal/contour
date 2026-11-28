@@ -12,6 +12,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -55,7 +56,14 @@ enum class TransportErrorKind : uint8_t
     /// The remote host's key differs from the one on record: a reinstalled machine, or someone in between.
     /// Unlike HostKeyUnknown, no answer from the user makes it safe to go on.
     HostKeyChanged = 10,
+    /// The remote host's daemon program is there, but too old for what was asked of it: upgrading it there
+    /// is the only remedy.
+    RemoteProgramTooOld = 11,
 };
+
+/// Number of @c TransportErrorKind enumerators, derived from the last one; tables indexed by kind pin to it.
+inline constexpr std::size_t TransportErrorKindCount =
+    static_cast<std::size_t>(TransportErrorKind::RemoteProgramTooOld) + 1;
 
 /// A failed transport.
 struct TransportError
@@ -95,10 +103,10 @@ namespace detail
         // A setting of this end's own reads the same on the next attempt.
         { .kind = TransportErrorKind::Misconfigured, .retry = TransportRetry::Permanent },
         { .kind = TransportErrorKind::HostKeyChanged, .retry = TransportRetry::Permanent },
+        { .kind = TransportErrorKind::RemoteProgramTooOld, .retry = TransportRetry::Permanent },
     });
 
-    static_assert(TransportRetryTable.size()
-                      == static_cast<std::size_t>(TransportErrorKind::HostKeyChanged) + 1,
+    static_assert(TransportRetryTable.size() == TransportErrorKindCount,
                   "TransportRetryTable needs a row for every TransportErrorKind");
 } // namespace detail
 

@@ -11,6 +11,7 @@
 
 #include <vthost/FlushPolicy.hpp>
 
+using vthost::ActivityMark;
 using vthost::CursorVisibility;
 using vthost::decideFlush;
 using vthost::flushDeadline;
@@ -18,6 +19,8 @@ using vthost::FlushInputs;
 using vthost::FlushPolicy;
 using vthost::FlushReason;
 using vthost::IncrementHistory;
+using vthost::MarkPace;
+using vthost::OutputReach;
 
 TEST_CASE("decideFlush follows the echo, first-output and coalesce rules", "[vthost][flush]")
 {
@@ -77,4 +80,41 @@ TEST_CASE("flushDeadline is now for an immediate reason, now + 5 ms for a redraw
     CHECK(flushDeadline(FlushPolicy {}, FlushReason::FirstOutput, t0) == t0);
     CHECK(flushDeadline(FlushPolicy {}, FlushReason::AwaitRedraw, t0) == t0 + 5ms);
     CHECK(flushDeadline(FlushPolicy {}, FlushReason::Coalesce, t0) == t0 + 20ms);
+}
+
+TEST_CASE("ActivityMark tells main-display output from a status-line rewrite", "[vthost][flush]")
+{
+    auto mark = ActivityMark {};
+    CHECK(mark.look(0) == OutputReach::StatusLineOnly);
+    CHECK(mark.look(3) == OutputReach::MainDisplay);
+    CHECK(mark.look(3) == OutputReach::StatusLineOnly);
+    CHECK(mark.look(4) == OutputReach::MainDisplay);
+}
+
+TEST_CASE("ActivityMark marks at most once per interval", "[vthost][flush]")
+{
+    using namespace std::chrono_literals;
+    auto const t0 = core::platform::SteadyTimePoint {} + 1s;
+    auto mark = ActivityMark {};
+    CHECK(mark.mark(t0, 1s) == MarkPace::Marked);
+    CHECK(mark.mark(t0 + 999ms, 1s) == MarkPace::TooSoon);
+    CHECK(mark.markedAt == t0);
+    CHECK(mark.mark(t0 + 1s, 1s) == MarkPace::Marked);
+    CHECK(mark.markedAt == t0 + 1s);
+}
+
+TEST_CASE("ActivityMark owes held output a trailing mark as the interval ends", "[vthost][flush]")
+{
+    using namespace std::chrono_literals;
+    auto const t0 = core::platform::SteadyTimePoint {} + 1s;
+    auto mark = ActivityMark {};
+    REQUIRE(mark.mark(t0, 1s) == MarkPace::Marked);
+    CHECK(mark.trailingDue(1s) == std::nullopt);
+
+    REQUIRE(mark.mark(t0 + 300ms, 1s) == MarkPace::TooSoon);
+    CHECK(mark.trailingDue(1s) == std::optional { t0 + 1s });
+
+    // The trailing mark is a mark: it owes nothing more.
+    REQUIRE(mark.mark(t0 + 1s, 1s) == MarkPace::Marked);
+    CHECK(mark.trailingDue(1s) == std::nullopt);
 }

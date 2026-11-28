@@ -87,6 +87,24 @@ struct StateEnumWire<vtworkspace::ZoomState>
 };
 
 template <>
+struct StateEnumWire<vthost::proto::OutputActivity>
+{
+    static constexpr auto Values = std::array {
+        vthost::proto::OutputActivity::None,
+        vthost::proto::OutputActivity::Output,
+    };
+};
+
+template <>
+struct StateEnumWire<vthost::proto::PaneBell>
+{
+    static constexpr auto Values = std::array {
+        vthost::proto::PaneBell::Silent,
+        vthost::proto::PaneBell::Rang,
+    };
+};
+
+template <>
 struct StateEnumWire<vtcontrol::ObjectKind>
 {
     static constexpr auto Values = std::array {
@@ -205,6 +223,29 @@ static void visitForeignFields(Visitor& visitor, T& wire)
     visitor(6, wire.sixelScrolling);
     visitor(7, wire.wordDelimiters);
     visitor(8, wire.frozenModes);
+}
+
+template <typename Visitor, typename T>
+    requires std::same_as<std::remove_const_t<T>, vthost::proto::FinishedCommand>
+static void visitForeignFields(Visitor& visitor, T& finished)
+{
+    visitor(1, finished.exitCode);
+    visitor(2, finished.durationMs);
+    visitor(3, finished.commandLine);
+}
+
+template <typename Visitor, typename T>
+    requires std::same_as<std::remove_const_t<T>, vthost::PaneAttention>
+static void visitForeignFields(Visitor& visitor, T& attention)
+{
+    visitor(1, attention.activity);
+    visitor(2, attention.activitySerial);
+    visitor(3, attention.bell);
+    visitor(4, attention.bellSerial);
+    visitor(5, attention.finished);
+    visitor(6, attention.finishedSerial);
+    visitor(7, attention.finishedAt);
+    visitor(8, attention.seenStatusGeneration);
 }
 
 template <typename Visitor, typename T>

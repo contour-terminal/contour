@@ -852,6 +852,9 @@ TEST_CASE("ChromeSnapshotPlan: the switcher's eight scripts precede the location
              std::tuple {
                  SnapshotScript::SwitcherRowMenu, "switcher-row-menu", ScriptAction::SwitcherRowMenu },
              std::tuple { SnapshotScript::SwitcherHover, "switcher-hover", ScriptAction::HoverSwitcherRow },
+             std::tuple { SnapshotScript::SwitcherDaemonMenu,
+                          "switcher-daemon-menu",
+                          ScriptAction::SwitcherDaemonMenu },
          })
     {
         INFO(name);
@@ -913,4 +916,74 @@ TEST_CASE("snapshot plan: the sidebar tree is drawn at each row spacing", "[snap
     CHECK(compact.tabCount == comfortable.tabCount);
     CHECK(compact.sidebarColor == comfortable.sidebarColor);
     CHECK(compact.action == comfortable.action);
+}
+
+TEST_CASE("snapshot plan: the daemon sections' scripts are listed and named", "[snapshot][sidebar]")
+{
+    using namespace contour::test::snapshot;
+    struct Expected
+    {
+        SnapshotScript script;
+        std::string_view name;
+        SnapshotSections sections;
+    };
+    constexpr auto Scripts = std::array {
+        Expected { SnapshotScript::SidebarTwoDaemons, "sidebar-two-daemons", SnapshotSections::TwoDaemons },
+        Expected { SnapshotScript::SidebarDaemonNeedsInput,
+                   "sidebar-daemon-needs-input",
+                   SnapshotSections::NeedsInput },
+        Expected { SnapshotScript::SidebarDaemonNotRunning,
+                   "sidebar-daemon-not-running",
+                   SnapshotSections::NotRunning },
+        Expected { SnapshotScript::SidebarDaemonConnecting,
+                   "sidebar-daemon-connecting",
+                   SnapshotSections::Connecting },
+        Expected { SnapshotScript::SidebarDaemonReconnecting,
+                   "sidebar-daemon-reconnecting",
+                   SnapshotSections::Reconnecting },
+        Expected { SnapshotScript::SidebarDaemonTooOld, "sidebar-daemon-too-old", SnapshotSections::TooOld },
+        Expected { SnapshotScript::SidebarPendingRow, "sidebar-pending-row", SnapshotSections::Pending },
+        Expected {
+            SnapshotScript::SidebarNeedsMeEmpty, "sidebar-needs-me-empty", SnapshotSections::NeedsMeEmpty },
+        Expected { SnapshotScript::SidebarDaemonNarrow, "sidebar-daemon-narrow", SnapshotSections::Narrow },
+        Expected { SnapshotScript::LocationChipPending, "location-chip-pending", SnapshotSections::Pending },
+        Expected { SnapshotScript::SidebarDaemonMenu, "sidebar-daemon-menu", SnapshotSections::NotRunning },
+        Expected { SnapshotScript::SidebarOtherDaemonWorkspaceMenu,
+                   "sidebar-other-daemon-menus-workspace",
+                   SnapshotSections::OtherDaemonRows },
+        Expected { SnapshotScript::SidebarOtherDaemonTabMenu,
+                   "sidebar-other-daemon-menus-tab",
+                   SnapshotSections::OtherDaemonRows },
+        Expected { SnapshotScript::SidebarOtherDaemonPaneMenu,
+                   "sidebar-other-daemon-menus-pane",
+                   SnapshotSections::OtherDaemonRows },
+        Expected { SnapshotScript::SidebarHiddenMenu, "sidebar-hidden-menu", SnapshotSections::Hidden },
+        Expected { SnapshotScript::DaemonHiddenToast, "daemon-hidden-toast", SnapshotSections::Hidden },
+        Expected {
+            SnapshotScript::SidebarDaemonMenuLive, "sidebar-daemon-menu-live", SnapshotSections::TwoDaemons },
+        Expected { SnapshotScript::SidebarHostNotRunning,
+                   "sidebar-host-not-running",
+                   SnapshotSections::HostNotRunning },
+        Expected { SnapshotScript::SidebarHostNotRunningMenu,
+                   "sidebar-host-not-running-menu",
+                   SnapshotSections::HostNotRunning },
+    };
+    for (auto const& expected: Scripts)
+    {
+        auto const& row = scriptRow(expected.script);
+        INFO(row.name);
+        CHECK(row.name == expected.name);
+        CHECK(row.sections == expected.sections);
+        // Drawn over sidebar-tree's workspaces, the sidebar shown -- but for the chip of a jump under way,
+        // which comes back to the band as the sidebar hides.
+        CHECK(row.sidebar
+              == (expected.script == SnapshotScript::LocationChipPending ? SnapshotSidebar::Hidden
+                                                                         : SnapshotSidebar::Tree));
+        CHECK(row.tabCount == scriptRow(SnapshotScript::SidebarTree).tabCount);
+    }
+    // Every script that lists sections is one of these.
+    CHECK(std::ranges::count_if(
+              SnapshotScripts,
+              [](SnapshotScriptRow const& row) { return row.sections != SnapshotSections::None; })
+          == static_cast<std::ptrdiff_t>(Scripts.size()));
 }

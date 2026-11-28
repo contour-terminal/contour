@@ -4,6 +4,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/WindowSwitching.hpp>
 #include <contour/window/DaemonDriftChoice.hpp>
+#include <contour/window/DaemonSection.hpp>
 #include <contour/window/WorkspaceDirectorySource.hpp>
 
 #include <cstdint>
@@ -69,6 +70,10 @@ class WindowBinding
     ///         -- a factory binding, as a tmux window's -- which offers no switching at all.
     [[nodiscard]] virtual std::optional<SwitchTarget> daemonTarget() const { return std::nullopt; }
 
+    /// @return The daemon the binding is attached to, as the sidebar names it (window::DaemonRef); none for a
+    ///         binding with no daemon behind it, whose window lists no daemons.
+    [[nodiscard]] virtual std::optional<window::DaemonRef> daemonRef() const { return std::nullopt; }
+
     /// @return Whether the daemon behind the binding runs on this machine. Local for a binding with no
     /// daemon.
     [[nodiscard]] virtual window::DaemonLocality daemonLocality() const noexcept
@@ -102,12 +107,6 @@ class WindowBinding
     /// the binding releases its windows itself (TerminalSessionManager::releaseBinding). Which windows it
     /// serves is the manager's to know (TerminalSessionManager::windowsBoundTo). GUI thread.
     virtual void lastWindowReleased() = 0;
-
-    /// Tells the daemon behind the binding whether the window bound here has the user's focus: of every
-    /// window on a daemon, the one focused most recently raises (raiseRole()). Nothing for a binding with no
-    /// daemon. GUI thread.
-    /// @param focus Whether the window gained or lost the focus.
-    virtual void reportFocus(vthost::proto::WindowFocus /*focus*/) {}
 
     /// @return Whether a window bound here rings, alerts and notifies for its panes, or only marks them: the
     ///         daemon names one window of all those on it, so that a bell sounds once. Raise for a binding

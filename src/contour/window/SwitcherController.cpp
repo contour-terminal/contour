@@ -28,6 +28,47 @@ namespace
                                        .workspace = std::move(workspace) };
     }
 
+    static_assert(std::to_underlying(command::SidebarListing::Listed)
+                          == std::to_underlying(SidebarListingChoice::Listed)
+                      && std::to_underlying(command::SidebarListing::Unlisted)
+                             == std::to_underlying(SidebarListingChoice::Unlisted),
+                  "command::SidebarListing mirrors window::SidebarListingChoice");
+
+    /// @return The sidebar's name of the daemon @p address names; none for this window's unnameable one.
+    [[nodiscard]] std::optional<DaemonRef> daemonRefOf(session::SwitchTarget const& address)
+    {
+        switch (address.kind)
+        {
+            case vthost::proto::SwitchDaemonKind::Name: return localDaemonRef(address.daemon);
+            case vthost::proto::SwitchDaemonKind::Host: return hostDaemonRef(address.daemon);
+            case vthost::proto::SwitchDaemonKind::Same: break;
+        }
+        return std::nullopt;
+    }
+
+    /// @return One leading choice of a row menu, as ActionContextMenu draws it.
+    [[nodiscard]] QVariantMap choiceEntryOf(command::SwitcherChoiceRow const& choice, int actionId)
+    {
+        return QVariantMap {
+            { QStringLiteral("kind"), QStringLiteral("command") },
+            { QStringLiteral("title"), QString::fromStdString(choice.title) },
+            { QStringLiteral("enabled"), choice.availability == command::RowAvailability::Enabled },
+            { QStringLiteral("checkable"), choice.check != command::RowCheck::None },
+            { QStringLiteral("checked"), choice.check == command::RowCheck::Checked },
+            { QStringLiteral("shortcut"), QString::fromStdString(choice.shortcut) },
+            { QStringLiteral("actionId"), actionId },
+        };
+    }
+
+    /// Appends one leading choice to a row menu's @p model, numbered after the @p choices it already holds.
+    void appendChoice(QVariantList& model,
+                      std::vector<command::SwitcherMenuChoice>& choices,
+                      command::SwitcherChoiceRow const& choice)
+    {
+        model.push_back(choiceEntryOf(choice, static_cast<int>(choices.size())));
+        choices.push_back(choice.choice);
+    }
+
     /// @return The daemon @p target names, with no workspace.
     [[nodiscard]] session::SwitchTarget daemonOf(session::SwitchTarget const& target)
     {
@@ -649,6 +690,8 @@ QVariantList SwitcherController::rowMenu(int row)
 {
     _rowMenu = {};
     auto const* const chosen = rowAt(row);
+    if (chosen != nullptr && chosen->kind == SwitcherRowKind::Daemon)
+        return daemonRowMenu(*chosen);
     if (chosen == nullptr || chosen->kind != SwitcherRowKind::Workspace)
         return {};
     auto const owner = chosen->daemon == _windowDaemon ? command::SwitcherMenuOwner::WindowDaemon
@@ -678,18 +721,7 @@ QVariantList SwitcherController::rowMenu(int row)
     for (auto const& each: menu)
     {
         if (auto const* const choice = std::get_if<command::SwitcherChoiceRow>(&each))
-        {
-            model.push_back(QVariantMap {
-                { QStringLiteral("kind"), QStringLiteral("command") },
-                { QStringLiteral("title"), QString::fromStdString(choice->title) },
-                { QStringLiteral("enabled"), choice->availability == command::RowAvailability::Enabled },
-                { QStringLiteral("checkable"), false },
-                { QStringLiteral("checked"), false },
-                { QStringLiteral("shortcut"), QString::fromStdString(choice->shortcut) },
-                { QStringLiteral("actionId"), static_cast<int>(_rowMenu.choices.size()) },
-            });
-            _rowMenu.choices.push_back(choice->choice);
-        }
+            appendChoice(model, _rowMenu.choices, *choice);
         else
             entries.push_back(std::get<command::ContextMenuEntry>(each));
     }
@@ -718,6 +750,41 @@ QVariantList SwitcherController::rowMenu(int row)
     return model;
 }
 
+QVariantList SwitcherController::daemonRowMenu(SwitcherRow const& chosen)
+{
+    // The window's own daemon is listed whatever is chosen: its row has no toggle.
+    auto const daemon = chosen.daemon != _windowDaemon && chosen.daemon < _daemons.size()
+                            ? daemonRefOf(_daemons[chosen.daemon].address)
+                            : std::nullopt;
+    auto const listing = daemon && _services.listingOf ? _services.listingOf(*daemon) : std::nullopt;
+    auto const menu = command::buildSwitcherDaemonMenu(
+        command::SwitcherDaemonMenuState { .listing = listing.transform([](SidebarListingChoice choice) {
+            return static_cast<command::SidebarListing>(std::to_underlying(choice));
+        }) });
+    auto model = QVariantList {};
+    for (auto const& each: menu)
+        if (auto const* const choice = std::get_if<command::SwitcherChoiceRow>(&each))
+            appendChoice(model, _rowMenu.choices, *choice);
+    if (!model.isEmpty())
+    {
+        _rowMenu.row = switcherRowIdentity(chosen);
+        _rowMenu.daemon = daemon;
+    }
+    return model;
+}
+
+void SwitcherController::toggleListing()
+{
+    if (!_rowMenu.daemon || !_services.listingOf || !_services.setListed)
+        return;
+    auto const listing = _services.listingOf(*_rowMenu.daemon);
+    if (!listing)
+        return;
+    _services.setListed(*_rowMenu.daemon,
+                        *listing == SidebarListingChoice::Listed ? SidebarListingChoice::Unlisted
+                                                                 : SidebarListingChoice::Listed);
+}
+
 void SwitcherController::triggerRowMenu(int /*row*/, int id)
 {
     // The menu's pick has already closed the popup: when it finds nothing to act on, the opening ends.
@@ -741,6 +808,11 @@ void SwitcherController::triggerRowMenu(int /*row*/, int id)
         {
             case command::SwitcherMenuChoice::Switch: activate(row); break;
             case command::SwitcherMenuChoice::OpenInNewWindow: activateInNewWindow(row); break;
+            // The sidebar changes; the pick closed the popup, whose opening ends as Escape's does.
+            case command::SwitcherMenuChoice::ShowInSidebar:
+                toggleListing();
+                cancel();
+                break;
         }
         return;
     }

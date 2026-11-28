@@ -958,18 +958,66 @@ TEST_CASE("a ClientHello whose client area is cut short is malformed", "[vthost]
     CHECK_FALSE(decodePdu(cut).has_value());
 }
 
+namespace
+{
+/// @return A ClientHello frame whose role byte is @p role.
+[[nodiscard]] std::vector<std::byte> helloWithRoleByte(uint8_t role)
+{
+    auto const encoded = [](ConnectionRole stated) {
+        auto stream = Writer {};
+        encodePdu(stream, 1, DecodedPdu { ClientHello { .role = stated } });
+        return std::vector<std::byte> { stream.view().begin(), stream.view().end() };
+    };
+    // The role is the one byte two hellos differing only in it differ in, wherever later fields put it.
+    auto bytes = encoded(ConnectionRole::Control);
+    auto const attach = encoded(ConnectionRole::Attach);
+    REQUIRE(bytes.size() == attach.size());
+    auto const differing = std::ranges::mismatch(bytes, attach).in1;
+    REQUIRE(differing != bytes.end());
+    *differing = std::byte { role };
+    return bytes;
+}
+} // namespace
+
 TEST_CASE("an unknown ConnectionRole byte reads as Control, never as Attach", "[vthost][proto]")
 {
-    auto const future = encodeWithFieldsEdited(DecodedPdu { ClientHello { .role = ConnectionRole::Control } },
-                                               [](std::span<std::byte const> fields) {
-                                                   auto edited =
-                                                       std::vector<std::byte>(fields.begin(), fields.end());
-                                                   // The role, just before the area's presence byte, the
-                                                   // intent's kind and count, and the empty profile.
-                                                   edited.rbegin()[4] = std::byte { 7 };
-                                                   return edited;
-                                               });
-    CHECK(decodeAs<ClientHello>(future).role == ConnectionRole::Control);
+    CHECK(decodeAs<ClientHello>(helloWithRoleByte(7)).role == ConnectionRole::Control);
+}
+
+TEST_CASE("role byte 2 decodes as Observe", "[vthost][proto][observer]")
+{
+    STATIC_CHECK(std::to_underlying(ConnectionRole::Observe) == 2);
+    CHECK(decodeAs<ClientHello>(helloWithRoleByte(2)).role == ConnectionRole::Observe);
+    CHECK(
+        std::get<ClientHello>(roundTrip(DecodedPdu { ClientHello { .role = ConnectionRole::Observe } })).role
+        == ConnectionRole::Observe);
+}
+
+TEST_CASE("role byte 3 still decodes as Control", "[vthost][proto][observer]")
+{
+    CHECK(decodeAs<ClientHello>(helloWithRoleByte(3)).role == ConnectionRole::Control);
+}
+
+TEST_CASE("ObserveOnly is a bodiless PDU of tag 65 that round-trips and ignores appended bytes",
+          "[vthost][pdu][observer]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ObserveOnly) == 65);
+    CHECK(roundTrip(DecodedPdu { ObserveOnly {} }) == DecodedPdu { ObserveOnly {} });
+    CHECK(bodyOf(DecodedPdu { ObserveOnly {} }).empty());
+    auto appended = Writer {};
+    appended.u8(7);
+    CHECK(decodeAs<ObserveOnly>(frameOf(PduType::ObserveOnly, appended.view())) == ObserveOnly {});
+}
+
+TEST_CASE("ObserveOnly states a withdrawn promotion in one byte", "[vthost][pdu][observer]")
+{
+    auto const withdrawn = ObserveOnly { .cause = ObserveCause::Withdrawn };
+    CHECK(roundTrip(DecodedPdu { withdrawn }) == DecodedPdu { withdrawn });
+    // One byte: what a daemon from before the cause ignores, reading a demotion, as it always did.
+    CHECK(bodyOf(DecodedPdu { withdrawn }).size() == 1);
+    auto stated = Writer {};
+    stated.u8(std::to_underlying(ObserveCause::Withdrawn));
+    CHECK(decodeAs<ObserveOnly>(frameOf(PduType::ObserveOnly, stated.view())) == withdrawn);
 }
 
 TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty", "[vthost][proto]")
@@ -2331,11 +2379,25 @@ TEST_CASE("LayoutBatchEnd round-trips, and a newer peer's appended bytes do not 
         CHECK(std::get<LayoutBatchEnd>(roundTrip(DecodedPdu { LayoutBatchEnd { .causeSerial = cause } }))
                   .causeSerial
               == cause);
+    // The restore counts a promotion's answer appends.
+    auto const promoted =
+        LayoutBatchEnd { .causeSerial = 4, .selected = 2, .restoredWorkspaces = 3, .restoredTabs = 5 };
+    CHECK(roundTrip(DecodedPdu { promoted }) == DecodedPdu { promoted });
+    auto const tabsAlone = LayoutBatchEnd { .causeSerial = 4, .selected = 2, .restoredTabs = 1 };
+    CHECK(roundTrip(DecodedPdu { tabsAlone }) == DecodedPdu { tabsAlone });
     auto body = Writer {};
     body.varint(5);
     body.varint(7); // the selected workspace
+    body.varint(2); // restored workspaces
+    body.varint(3); // restored tabs
     body.varint(9); // a field a later version appended
     CHECK(decodeAs<LayoutBatchEnd>(frameOf(PduType::LayoutBatchEnd, body.view()))
+          == LayoutBatchEnd { .causeSerial = 5, .selected = 7, .restoredWorkspaces = 2, .restoredTabs = 3 });
+    // A sender from before the restore counts ends with the selection: they read as none.
+    auto older = Writer {};
+    older.varint(5);
+    older.varint(7);
+    CHECK(decodeAs<LayoutBatchEnd>(frameOf(PduType::LayoutBatchEnd, older.view()))
           == LayoutBatchEnd { .causeSerial = 5, .selected = 7 });
     STATIC_CHECK(std::to_underlying(PduType::LayoutBatchEnd) == 39);
 }
@@ -2415,6 +2477,35 @@ TEST_CASE("the workspace select, focus, role and switch PDUs round-trip", "[vtho
     STATIC_CHECK(std::to_underlying(PduType::ReportFocus) == 52);
     STATIC_CHECK(std::to_underlying(PduType::NotifyRole) == 53);
     STATIC_CHECK(std::to_underlying(PduType::PaneSummary) == 54);
+}
+
+TEST_CASE("SelectWorkspace round-trips a creation token", "[vthost][pdu][proto]")
+{
+    auto token = CreationToken {};
+    std::ranges::generate(token, [next = 0xA0]() mutable { return static_cast<std::byte>(next++); });
+    // With a directory, and without one: then it is written as the 0 that names none, and read back as none.
+    for (auto const from: { std::optional<uint64_t> {}, std::optional<uint64_t> { 7 } })
+    {
+        auto const select =
+            SelectWorkspace { .workspace = 0, .directoryFromSession = from, .creationToken = token };
+        CHECK(roundTrip(DecodedPdu { select }) == DecodedPdu { select });
+    }
+    // Only a creation carries one: a select of a workspace that exists makes nothing.
+    auto const existing = SelectWorkspace { .workspace = 4, .creationToken = token };
+    CHECK(roundTrip(DecodedPdu { existing }) == DecodedPdu { SelectWorkspace { .workspace = 4 } });
+}
+
+TEST_CASE("a SelectWorkspace from before the token reads as none", "[vthost][pdu][proto]")
+{
+    auto older = Writer {};
+    older.varint(0); // the workspace: a creation
+    older.varint(7); // the session whose directory it starts in
+    CHECK(decodeAs<SelectWorkspace>(frameOf(PduType::SelectWorkspace, older.view()))
+          == SelectWorkspace { .workspace = 0, .directoryFromSession = 7 });
+    // A token cut short is a truncated body, not none.
+    older.u8(1);
+    older.bytes(std::array { std::byte { 1 }, std::byte { 2 } });
+    CHECK_FALSE(decodePdu(frameOf(PduType::SelectWorkspace, older.view())).has_value());
 }
 
 TEST_CASE("Goodbye is a bodiless PDU of tag 60 that round-trips and ignores appended bytes",
@@ -2865,6 +2956,143 @@ TEST_CASE("SetWorkspaceColor is a PDU of tag 62 that round-trips a colour and it
         cut.varint(7);
         cut.u8(1);
         CHECK_FALSE(decodePdu(frameOf(PduType::SetWorkspaceColor, cut.view())).has_value());
+    }
+}
+
+TEST_CASE("PaneAttentionState is a PDU of tag 63 that round-trips with and without a finished command",
+          "[vthost][pdu][daemon-attention]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::PaneAttentionState) == 63);
+    auto const quiet = PaneAttentionState { .session = 4, .finishedSerial = 2, .seenStatusGeneration = 1 };
+    CHECK(roundTrip(DecodedPdu { quiet }) == DecodedPdu { quiet });
+    auto const raised = PaneAttentionState {
+        .session = 4,
+        .activity = OutputActivity::Output,
+        .activitySerial = 300,
+        .bell = PaneBell::Rang,
+        .bellSerial = 301,
+        .finished = FinishedCommand { .exitCode = -1, .durationMs = 1500, .commandLine = "make" },
+        .finishedSerial = 302,
+        .finishedAtUnixMs = 1'790'000'000'000,
+        .seenStatusGeneration = 7,
+    };
+    CHECK(roundTrip(DecodedPdu { raised }) == DecodedPdu { raised });
+    // A time before the epoch is zig-zagged like any other svarint.
+    auto const early = PaneAttentionState { .session = 4, .finishedAtUnixMs = -5 };
+    CHECK(roundTrip(DecodedPdu { early }) == DecodedPdu { early });
+}
+
+TEST_CASE("PaneAttentionState's body: the serials, then a presence mask for the finish and its time",
+          "[vthost][pdu][daemon-attention]")
+{
+    auto body = Writer {};
+    body.varint(4);  // session
+    body.u8(1);      // activity: output
+    body.varint(10); // activity serial
+    body.u8(1);      // bell: rang
+    body.varint(11); // bell serial
+    body.varint(12); // finished serial
+    body.varint(3);  // seen status generation
+    body.u8(0b11);   // finished, finished at
+    body.u8(0b01);   // the finish states its exit code
+    body.svarint(2); // exit code
+    body.string("ls");
+    body.svarint(-7); // finished at
+    auto const expected = PaneAttentionState {
+        .session = 4,
+        .activity = OutputActivity::Output,
+        .activitySerial = 10,
+        .bell = PaneBell::Rang,
+        .bellSerial = 11,
+        .finished = FinishedCommand { .exitCode = 2, .commandLine = "ls" },
+        .finishedSerial = 12,
+        .finishedAtUnixMs = -7,
+        .seenStatusGeneration = 3,
+    };
+    CHECK(decodeAs<PaneAttentionState>(frameOf(PduType::PaneAttentionState, body.view())) == expected);
+    CHECK(std::ranges::equal(bodyOf(DecodedPdu { expected }), body.view()));
+    SECTION("appended bytes are ignored")
+    {
+        body.u8(9);
+        CHECK(decodeAs<PaneAttentionState>(frameOf(PduType::PaneAttentionState, body.view())) == expected);
+    }
+}
+
+TEST_CASE("a truncated PaneAttentionState is malformed", "[vthost][pdu][daemon-attention]")
+{
+    auto const whole = bodyOf(DecodedPdu { PaneAttentionState {
+        .session = 4,
+        .finished = FinishedCommand { .exitCode = 0, .commandLine = "make" },
+        .finishedSerial = 2,
+        .finishedAtUnixMs = 1'790'000'000'000,
+    } });
+    // Every cut short of the whole body leaves a field it announced unread: a decode error, never a state.
+    for (auto const length: std::views::iota(std::size_t { 0 }, whole.size()))
+    {
+        INFO("length " << length);
+        auto const cut = std::span { whole }.first(length);
+        CHECK_FALSE(decodePdu(frameOf(PduType::PaneAttentionState, cut)).has_value());
+    }
+}
+
+TEST_CASE("MarkSeen is a PDU of tag 64 that round-trips the serials a window saw",
+          "[vthost][pdu][daemon-attention]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::MarkSeen) == 64);
+    auto const seen =
+        MarkSeen { .session = 9,
+                   .seen = SeenSerials { .activity = 1, .bell = 200, .finished = 3, .statusGeneration = 4 } };
+    CHECK(roundTrip(DecodedPdu { seen }) == DecodedPdu { seen });
+    auto body = Writer {};
+    for (auto const value: { 9, 1, 200, 3, 4 })
+        body.varint(static_cast<uint64_t>(value));
+    CHECK(decodeAs<MarkSeen>(frameOf(PduType::MarkSeen, body.view())) == seen);
+    SECTION("a body cut short is malformed")
+    {
+        auto cut = Writer {};
+        for (auto const value: { 9, 1, 200, 3 })
+            cut.varint(static_cast<uint64_t>(value));
+        CHECK_FALSE(decodePdu(frameOf(PduType::MarkSeen, cut.view())).has_value());
+    }
+}
+
+TEST_CASE("a ReportFocus without shown sessions decodes as before", "[vthost][pdu][daemon-attention]")
+{
+    // The body an older client sends: the focus alone.
+    auto older = Writer {};
+    older.u8(std::to_underlying(WindowFocus::Focused));
+    auto const decoded = decodeAs<ReportFocus>(frameOf(PduType::ReportFocus, older.view()));
+    CHECK(decoded.focus == WindowFocus::Focused);
+    CHECK(decoded.shownSessions.empty());
+
+    SECTION("the shown sessions follow the focus as a count and session ids")
+    {
+        auto const report = ReportFocus { .focus = WindowFocus::Focused, .shownSessions = { 4, 300 } };
+        CHECK(roundTrip(DecodedPdu { report }) == DecodedPdu { report });
+        auto body = Writer {};
+        body.u8(std::to_underlying(WindowFocus::Focused));
+        body.varint(2);
+        body.varint(4);
+        body.varint(300);
+        CHECK(std::ranges::equal(bodyOf(DecodedPdu { report }), body.view()));
+        // An older daemon reads the focus alone: the sessions are bytes it leaves unread.
+        CHECK(decodeAs<ReportFocus>(frameOf(PduType::ReportFocus, body.view())) == report);
+    }
+    SECTION("none shown is a count of 0, which reads as before")
+    {
+        auto const report = ReportFocus { .focus = WindowFocus::Unfocused };
+        auto body = Writer {};
+        body.u8(std::to_underlying(WindowFocus::Unfocused));
+        body.varint(0);
+        CHECK(std::ranges::equal(bodyOf(DecodedPdu { report }), body.view()));
+    }
+    SECTION("a count announcing more sessions than follow is malformed")
+    {
+        auto body = Writer {};
+        body.u8(std::to_underlying(WindowFocus::Focused));
+        body.varint(3);
+        body.varint(4);
+        CHECK_FALSE(decodePdu(frameOf(PduType::ReportFocus, body.view())).has_value());
     }
 }
 

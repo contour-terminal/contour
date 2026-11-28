@@ -107,6 +107,7 @@ ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens,
     _bodyMedium { weightedFont(_body, QFont::Medium) },
     _footnoteStrong { weightedFont(_footnote, QFont::Bold) },
     _footnoteSemibold { weightedFont(_footnote, QFont::DemiBold) },
+    _sidebarSection { weightedFont(sizedFont(font, tokens.sidebarSection), tokens.sidebarSectionWeight) },
     _monospace { sizedLike(mono, _body) },
     _monospaceFootnote { xHeightLike(mono, _footnote) }
 {

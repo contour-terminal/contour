@@ -290,6 +290,26 @@ TEST_CASE("stdio attach writes the ready preamble and nothing else before the cl
     client.b->closeWrite();    // lets the relay's client→daemon thread finish
 }
 
+// Final review M3: a relay told not to start a daemon says, in its ready line, that it honoured the flag.
+TEST_CASE("stdio attach told not to start a daemon states it in its ready line", "[vthost][stdio]")
+{
+    auto const client = makeMemoryStreamPair();
+    auto const daemon = makeMemoryStreamPair();
+    auto attach = std::async(std::launch::async, [&]() {
+        return vthost::runStdioAttach(
+            client.a,
+            [&]() -> std::expected<std::shared_ptr<IByteStream>, std::string> { return daemon.a; },
+            {},
+            vthost::RelayNoStart::Honoured);
+    });
+
+    CHECK(readText(*client.b, vthost::StdioPreambleReadyNoStart.size()) == vthost::StdioPreambleReadyNoStart);
+
+    daemon.b->closeWrite();
+    CHECK(attach.get() == EXIT_SUCCESS);
+    client.b->closeWrite(); // lets the relay's client→daemon thread finish
+}
+
 TEST_CASE("stdio attach gives up, by name, on a daemon that sends nothing", "[vthost][stdio]")
 {
     auto capture = core::log::ScopedCapture {};
@@ -404,6 +424,18 @@ TEST_CASE("stdio attach starts the daemon through the starter when none serves",
             std::string_view { "contour-stdio 1 error: daemon did not start within 5 seconds.\n" };
         CHECK(readText(*client.b, expected.size() + 1) == expected);
     }
+}
+
+TEST_CASE("a connector without a starter reports an absent daemon", "[vthost][stdio][afunix]")
+{
+    auto const directory = SocketDirectory {};
+    auto const spawner = vthost::makeNativeDaemonSpawner();
+    auto connector = vthost::makeLocalDaemonConnector(directory.controlSocket(), *spawner, nullptr);
+
+    auto const client = makeMemoryStreamPair();
+    CHECK(vthost::runStdioAttach(client.a, connector) == EXIT_FAILURE);
+    auto const expected = vthost::stdioPreambleError(vthost::StdioDaemonAbsentMessage);
+    CHECK(readText(*client.b, expected.size() + 1) == expected);
 }
 
 // What the stdio relay rests on: the daemon learns that the client is gone from the client's half-close, and

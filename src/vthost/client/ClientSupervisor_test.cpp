@@ -292,6 +292,23 @@ TEST_CASE("a first connect that fails ends Failed without retrying", "[vthost][r
     CHECK(h.sequence() == std::vector { ConnectionState::Connecting, ConnectionState::Failed });
     CHECK(h.states.back().reason == "no such file");
     CHECK(h.transport->calls() == 1);
+    CHECK(h.supervisor->failureKind() == TransportErrorKind::DaemonAbsent);
+}
+
+TEST_CASE("a first connect the daemon never answers ends Failed as a protocol failure", "[vthost][reconnect]")
+{
+    // What a caller retries by: unlike a refusal, a daemon that did not answer in time may answer later.
+    auto daemon = Daemon {};
+    auto h = Supervised { daemon,
+                          { daemon.silent() },
+                          { .first = 1ms, .ceiling = 4ms },
+                          { .kind = proto::AttachIntentKind::Default, .workspace = 0 },
+                          { .idleBeforeProbe = 5s, .deadAfter = 15s, .handshakeDeadline = 50ms } };
+    CHECK_FALSE(h.supervisor->failureKind().has_value());
+    daemon.loop.blockOn(h.supervisor->run());
+
+    CHECK(h.sequence() == std::vector { ConnectionState::Connecting, ConnectionState::Failed });
+    CHECK(h.supervisor->failureKind() == TransportErrorKind::Protocol);
 }
 
 TEST_CASE("a first connect the user cancels ends Failed, saying so", "[vthost][reconnect]")
@@ -339,6 +356,7 @@ TEST_CASE("a first connect the daemon refuses ends Failed", "[vthost][reconnect]
     CHECK(h.sequence() == std::vector { ConnectionState::Connecting, ConnectionState::Failed });
     CHECK(h.states.back().reason.contains("the daemon speaks protocol"));
     CHECK(h.transport->calls() == 1);
+    CHECK(h.supervisor->failureKind() == TransportErrorKind::Refused);
 }
 
 TEST_CASE("a lost connection reconnects with Resume of the selected workspace", "[vthost][reconnect]")

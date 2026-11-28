@@ -192,6 +192,29 @@ TEST_CASE("tabAttention.pooledOverEveryLeaf", "[tabattention]")
     CHECK(pooledAttention(tab, ledger, KeyOf) == SessionAttention { .finished = FinishedBlockBadge::Failed });
 }
 
+TEST_CASE("tabAttention.pooledReadsTheMarksItIsGiven", "[tabattention][daemon-attention]")
+{
+    // A tab mixing a pane whose flags a daemon keeps with one the window's ledger keeps pools whatever marks
+    // each one's keeper states, and the ledger has no say over the daemon's.
+    auto tab = vtworkspace::Tab { vtworkspace::TabId { 1 }, vtworkspace::PaneId { 1 }, ShellSession };
+    std::ignore = tab.rootPane()->split(vtworkspace::SplitState::Vertical,
+                                        vtworkspace::PaneId { 2 },
+                                        vtworkspace::PaneId { 3 },
+                                        EditorSession);
+    auto ledger = TabAttention {};
+    std::ignore = ledger.noteBell(Editor, SessionVisibility::Hidden, OutputOrigin::Live);
+    auto const daemonMarks = SessionAttention { .finished = FinishedBlockBadge::Succeeded };
+    auto const marksOf = [&](vtworkspace::SessionId session) {
+        return KeyOf(session) == Editor ? daemonMarks : ledger.of(KeyOf(session));
+    };
+    CHECK(pooledAttention(tab, marksOf) == SessionAttention { .finished = FinishedBlockBadge::Succeeded });
+
+    std::ignore = ledger.noteOutput(Shell, SessionVisibility::Hidden, OutputOrigin::Live);
+    CHECK(pooledAttention(tab, marksOf)
+          == SessionAttention { .activity = TabActivity::UnseenOutput,
+                                .finished = FinishedBlockBadge::Succeeded });
+}
+
 TEST_CASE("tabAttention.outputOrigin", "[tabattention]")
 {
     using vthost::client::ConnectionState;

@@ -612,3 +612,44 @@ TEST_CASE("an in-process window's rows name each workspace it owns and resolve a
     CHECK(std::get<SwitchTo>(other).workspace == 9);
     CHECK(std::holds_alternative<SwitchNoop>(choose(rows[0].ref)));
 }
+
+TEST_CASE("supersession follows the table, cause by stage", "[switch]")
+{
+    using contour::remote::SupersedeCause;
+    using contour::remote::Supersession;
+    using contour::remote::SwitchStage;
+    struct Row
+    {
+        SupersedeCause cause;
+        SwitchStage stage;
+        Supersession expected;
+    };
+    // A program's newer request ends only a wait for a tab; the user's newer request, a cancel and the
+    // window's close end a switch at any stage.
+    constexpr auto Rows = std::array {
+        Row { SupersedeCause::NewerRequest, SwitchStage::Resolving, Supersession::Kept },
+        Row { SupersedeCause::NewerRequest, SwitchStage::Connecting, Supersession::Kept },
+        Row { SupersedeCause::NewerRequest, SwitchStage::WaitingForTab, Supersession::Ended },
+        Row { SupersedeCause::WindowClosed, SwitchStage::Resolving, Supersession::Ended },
+        Row { SupersedeCause::WindowClosed, SwitchStage::Connecting, Supersession::Ended },
+        Row { SupersedeCause::WindowClosed, SwitchStage::WaitingForTab, Supersession::Ended },
+        Row { SupersedeCause::NewerUserRequest, SwitchStage::Resolving, Supersession::Ended },
+        Row { SupersedeCause::NewerUserRequest, SwitchStage::Connecting, Supersession::Ended },
+        Row { SupersedeCause::NewerUserRequest, SwitchStage::WaitingForTab, Supersession::Ended },
+        Row { SupersedeCause::UserCancelled, SwitchStage::Resolving, Supersession::Ended },
+        Row { SupersedeCause::UserCancelled, SwitchStage::Connecting, Supersession::Ended },
+        Row { SupersedeCause::UserCancelled, SwitchStage::WaitingForTab, Supersession::Ended },
+    };
+    static_assert(Rows.size() == contour::remote::SupersedeCauseCount * contour::remote::SwitchStageCount,
+                  "one row per cause and stage");
+    for (auto const& row: Rows)
+    {
+        INFO("cause " << static_cast<int>(row.cause) << ", stage " << static_cast<int>(row.stage));
+        CHECK(contour::remote::supersessionOf(row.cause, row.stage) == row.expected);
+    }
+    // A request with no landing time is the user's.
+    CHECK(contour::remote::newerRequestCause(contour::session::UserSwitch.landBy)
+          == SupersedeCause::NewerUserRequest);
+    CHECK(contour::remote::newerRequestCause(core::platform::SteadyTimePoint {})
+          == SupersedeCause::NewerRequest);
+}

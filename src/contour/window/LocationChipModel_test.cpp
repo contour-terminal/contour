@@ -103,13 +103,16 @@ TEST_CASE("LocationChipModel: each group of readers hears only what they read", 
     SECTION("the sidebar's visibility reaches the place alone, and only when it moves the chip")
     {
         auto inputs = remoteDaemon();
-        inputs.sidebar = SidebarShown::Yes; // the band still holds the tabs: the chip stays where it was
+        REQUIRE(inputs.state == HostChipState::Connected);
+        // The tree's heading row names the daemon now: the chip leaves the band.
+        inputs.sidebar = SidebarShown::Yes;
         model.setInputs(inputs);
-        CHECK(place.count() == 0);
+        CHECK(place.count() == 1);
+        CHECK(model.place() == "none");
+        // A move of the band's centre that leaves it nowhere says nothing.
         inputs.centre = BarCentre::Breadcrumb;
         model.setInputs(inputs);
         CHECK(place.count() == 1);
-        CHECK(model.place() == "sidebar");
         CHECK(surface.count() == 0);
     }
 
@@ -120,7 +123,7 @@ TEST_CASE("LocationChipModel: each group of readers hears only what they read", 
         model.setInputs(inputs);
         CHECK(surface.count() == 1);
         CHECK(accessibility.count() == 1);
-        CHECK(model.stateGlyph() == "◑");
+        CHECK(model.stateGlyph() == "↻");
         CHECK(stepText(model, LocationChipFit::Full, "status") == "Reconnecting…");
         CHECK(stepText(model, LocationChipFit::NoStateText, "status").isEmpty());
     }

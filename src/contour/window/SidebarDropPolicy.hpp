@@ -425,15 +425,18 @@ using NodeDestination = std::variant<MoveTab, JoinTab, IntoNewWorkspace>;
 }
 
 /// The spot a row is.
-[[nodiscard]] constexpr SidebarSpot sidebarSpotOf(SidebarRow const& row) noexcept
+/// @return Its spot; none for a Daemon or Hidden row, which takes no drop.
+[[nodiscard]] constexpr std::optional<SidebarSpot> sidebarSpotOf(SidebarRow const& row) noexcept
 {
     switch (row.key.kind)
     {
         case SidebarRowKind::Workspace: return SidebarSpot::WorkspaceRow;
         case SidebarRowKind::Tab: return SidebarSpot::TabRow;
-        case SidebarRowKind::Pane: break;
+        case SidebarRowKind::Pane: return SidebarSpot::PaneRow;
+        case SidebarRowKind::Daemon:
+        case SidebarRowKind::Hidden: break;
     }
-    return SidebarSpot::PaneRow;
+    return std::nullopt;
 }
 
 /// The tab a drop on @p row would join: its own, for a tab row; none for any other.
@@ -458,8 +461,11 @@ using NodeDestination = std::variant<MoveTab, JoinTab, IntoNewWorkspace>;
     if (rowIndex < 0 || static_cast<std::size_t>(rowIndex) >= rows.size())
         return Refuse {};
     auto const& row = rows[static_cast<std::size_t>(rowIndex)];
+    auto const spot = sidebarSpotOf(row);
+    if (!spot)
+        return Refuse {};
     auto const isTab = row.key.kind == SidebarRowKind::Tab;
-    switch (sidebarPlacementOf(dragged, sidebarSpotOf(row), yWithinRow, joinTargetOf(row)))
+    switch (sidebarPlacementOf(dragged, *spot, yWithinRow, joinTargetOf(row)))
     {
         case SidebarPlacement::Refused:
         case SidebarPlacement::NearerGap: break;
@@ -502,7 +508,10 @@ using NodeDestination = std::variant<MoveTab, JoinTab, IntoNewWorkspace>;
     if (rowIndex < 0 || static_cast<std::size_t>(rowIndex) >= rows.size())
         return DropIndicator::Refused;
     auto const& row = rows[static_cast<std::size_t>(rowIndex)];
-    return dropIndicatorOf(sidebarPlacementOf(dragged, sidebarSpotOf(row), yWithinRow, joinTargetOf(row)));
+    auto const spot = sidebarSpotOf(row);
+    if (!spot)
+        return DropIndicator::Refused;
+    return dropIndicatorOf(sidebarPlacementOf(dragged, *spot, yWithinRow, joinTargetOf(row)));
 }
 
 /// Resolves a drop on the tree's empty area below the last row, or on the New Workspace control.

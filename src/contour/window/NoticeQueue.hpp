@@ -48,6 +48,8 @@ enum class NoticeKind : uint8_t
     WorkspaceRefused,       ///< The NewWorkspace action was refused: the window is attached to a tmux server.
     SwitchDeclined,         ///< The user declined a question a window switch asked; nothing changed.
     WorkspaceColorRefused,  ///< A workspace colour action ran against a daemon that predates the colour.
+    DaemonHidden,           ///< Hide from Sidebar unlisted a daemon; its Undo lists it again.
+    NowhereToGoBack,        ///< JumpBack found no place left to go back to.
 };
 
 /// Where a notice is shown.
@@ -62,6 +64,7 @@ enum class NoticeAction : uint8_t
 {
     None = 0,       ///< It has none.
     OpenConfigFile, ///< Opens the configuration file in the user's editor.
+    UndoHide,       ///< Lists the daemon a Hide unlisted again (Notice::subject names it).
 };
 
 /// How a kind of notice is shown, and for how long.
@@ -173,6 +176,18 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 6000 },
                 .action = NoticeAction::None,
                 .actionText = "" },
+    NoticeRow { .kind = NoticeKind::DaemonHidden,
+                .surface = NoticeSurface::Toast,
+                .glyph = "",
+                .duration = std::chrono::milliseconds { 6000 },
+                .action = NoticeAction::UndoHide,
+                .actionText = "Undo" },
+    NoticeRow { .kind = NoticeKind::NowhereToGoBack,
+                .surface = NoticeSurface::Toast,
+                .glyph = "",
+                .duration = std::chrono::milliseconds { 2000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -183,7 +198,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::WorkspaceColorRefused) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::NowhereToGoBack) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.
@@ -197,6 +212,8 @@ struct Notice
 {
     NoticeKind kind = NoticeKind::Copied;
     std::string text {}; ///< Plain text, already made safe to show.
+    std::string
+        subject {}; ///< What the action acts on: the DaemonRef value for DaemonHidden; empty otherwise.
 
     bool operator==(Notice const&) const = default;
 };
@@ -253,6 +270,27 @@ namespace detail
         return std::format("{} {}{}", count, noun, count == 1 ? "" : "s");
     }
 } // namespace detail
+
+/// @param name What the sidebar calls the daemon.
+/// @param daemon The daemon, by its DaemonRef value: what Undo lists again.
+/// @return The NoticeKind::DaemonHidden notice telling that Hide from Sidebar unlisted it: "starfive hidden
+///         from the sidebar".
+[[nodiscard]] inline Notice daemonHiddenNotice(std::string_view name, std::string daemon)
+{
+    return Notice { .kind = NoticeKind::DaemonHidden,
+                    .text = std::format("{} hidden from the sidebar", detail::shownText(name)),
+                    .subject = std::move(daemon) };
+}
+
+/// What JumpBack says when no place is left to go back to.
+inline constexpr auto NowhereToGoBack = std::string_view { "Nowhere to go back to" };
+
+/// @return The NoticeKind::NowhereToGoBack notice: JumpBack has no place left to go back to
+///         (NowhereToGoBack).
+[[nodiscard]] inline Notice nowhereToGoBackNotice()
+{
+    return Notice { .kind = NoticeKind::NowhereToGoBack, .text = std::string { NowhereToGoBack } };
+}
 
 /// "Copied 3 lines".
 /// @param lines How many lines were copied.
@@ -488,6 +526,14 @@ enum class ToastHover : uint8_t
     Hovered,  ///< On it: its time stands still.
 };
 
+/// Whether the keyboard is on the toast (its action button): a toast the keyboard is on stays, as a hovered
+/// one does, so a user who tabbed to its Undo does not lose it to the timeout.
+enum class ToastFocus : uint8_t
+{
+    Away = 0, ///< Not on it: its time runs, unless it is hovered.
+    Focused,  ///< On it: its time stands still.
+};
+
 /// Whether a call changed what is shown.
 enum class NoticeChange : uint8_t
 {
@@ -564,11 +610,16 @@ class NoticeQueue
     /// @return None: hovering changes when a toast goes, not what shows.
     [[nodiscard]] NoticeChange hover(ToastHover hover, TimePoint now)
     {
-        _lastNow = now;
         _hover = hover;
-        if (_hover == ToastHover::Away && _toast)
-            restartDeadline(now);
-        return NoticeChange::None;
+        return holdChanged(now);
+    }
+
+    /// The keyboard came onto the toast, or left it.
+    /// @return None: focus changes when a toast goes, not what shows.
+    [[nodiscard]] NoticeChange focus(ToastFocus focus, TimePoint now)
+    {
+        _focus = focus;
+        return holdChanged(now);
     }
 
     /// Takes the toast away if its time is up, and shows the next one waiting.
@@ -602,13 +653,28 @@ class NoticeQueue
     /// @return When the toast shown goes; nothing while none shows or it is hovered.
     [[nodiscard]] std::optional<TimePoint> nextDeadline() const noexcept
     {
-        if (!_toast || _hover == ToastHover::Hovered)
+        if (!_toast || isHeld())
             return std::nullopt;
         return _deadline;
     }
 
   private:
     void restartDeadline(TimePoint now) { _deadline = now + noticeRow(_toast->kind).duration; }
+
+    /// @return Whether the pointer or the keyboard is on the toast, which holds its time still.
+    [[nodiscard]] bool isHeld() const noexcept
+    {
+        return _hover == ToastHover::Hovered || _focus == ToastFocus::Focused;
+    }
+
+    /// The pointer or the keyboard came or went: a toast let go of has its whole time again.
+    [[nodiscard]] NoticeChange holdChanged(TimePoint now)
+    {
+        _lastNow = now;
+        if (!isHeld() && _toast)
+            restartDeadline(now);
+        return NoticeChange::None;
+    }
 
     void promoteNext(TimePoint now)
     {
@@ -626,6 +692,7 @@ class NoticeQueue
     TimePoint _deadline {};
     TimePoint _lastNow {};
     ToastHover _hover = ToastHover::Away;
+    ToastFocus _focus = ToastFocus::Away;
 };
 
 } // namespace contour::window

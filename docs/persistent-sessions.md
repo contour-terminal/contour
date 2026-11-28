@@ -148,6 +148,7 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 | `--size-policy POLICY` | Which attached client's size the shared grid takes when clients of different sizes are attached: `latest`, `smallest` or `largest`. Mirrors tmux's `window-size`. Defaults to the configuration's `daemon.size_policy` (`latest` unless set). |
 | `--background` | Relaunches the command detached and returns once the daemon accepts connections. Without `--log-file` the daemon logs beside its socket (`SOCKET.log`), since a detached process has no console. |
 | `--stdio` | Relays the native protocol between standard input/output and this user's daemon, starting it if needed: what `contour client --host` runs over ssh. Honours `--name`, `--socket`, `--config`, `--profile`, `--log`, `--log-file` and `--size-policy` (forwarded to a daemon it starts); cannot be combined with `--listen-tcp`, `--background` or `--tmux-compat-socket`. |
+| `--no-start` | With `--stdio` only: relays to a daemon that is running already, and never starts one; when none runs, the client is told so (the workspace sidebar shows the host as not running). What the sidebar runs over ssh to watch a saved host in the background. |
 | `--in-place` | Runs from the installed binary instead of a per-version copy. See [After upgrading Contour](#after-upgrading-contour). |
 | `--tmux-compat-socket LABEL` | Additionally binds tmux's own discovery path `/tmp/tmux-<uid>/<LABEL>`, so a plain `tmux -L LABEL -C attach-session` finds this daemon. |
 | `--listen-tcp HOST:PORT` | Also serve the native protocol over TCP. Opt-in; always TLS-encrypted, and clients sign in with an authorized key or a token. The daemon's TLS fingerprint is logged and shown by `daemon status`. Port `0` lets the system pick a free port, which the log names. See [Remote access](#remote-access-over-tcp). |
@@ -222,7 +223,8 @@ window somewhere else without closing it, and its panes are swapped in place:
 - **To another workspace of the same daemon**, with `SwitchToWorkspace` or `CycleWorkspace`
   (`Ctrl+Alt+PageDown` / `PageUp`, `⌃⌘↓` / `⌃⌘↑` on macOS, for the next / previous one).
 - **To another daemon**: a local one by its name (`contour daemon --name`), or a saved
-  [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon`. The window lands on that
+  [host](remote-hosts.md), with `SwitchToDaemon` or `CycleDaemon` (which walks the daemons the sidebar lists,
+  in its order), or by activating any of its rows in the [sidebar](sidebar.md#several-daemons). The window lands on that
   daemon's only workspace, on a new one when it has none, and asks which when it has several. A workspace
   that holds no tab -- a daemon no window has attached to yet keeps one -- counts as none: there is nothing
   in it to show.
@@ -230,8 +232,8 @@ window somewhere else without closing it, and its panes are swapped in place:
   palette's family, drawn over the window. See [The switcher](#the-switcher) below.
 - **By mouse**: click the location chip (`local › billing ▾`) in the title band of a window on a daemon (Space or
   Return when it has keyboard focus) to open the same switcher below it, as `ShowSwitcher` does; its tooltip
-  names that chord, and Escape closes the popup. With the sidebar shown, the daemon at the head of the sidebar
-  does the same. Or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
+  names that chord, and Escape closes the popup. With the sidebar shown, the sidebar's switcher button (in its
+  title row; on Linux in the header bar above it) does the same. Or pick **Switch To Daemon** or **Daemon & Workspace Switcher…**
   from the Window submenu of the main menu (☰). **Switch To Daemon** lists the same daemons as the command
   palette's *Switch to daemon* rows.
 - **The chip's connection state.** The chip shows the daemon's connection too: a dot for a remote daemon that is
@@ -251,7 +253,8 @@ is refused, with a hint to run `contour daemon upgrade` or to pick **Upgrade dae
 
 Bells and desktop notifications come from one window only: the most recently focused one. A command that
 finishes in a workspace no window shows is noticed once, by that window. A program's clipboard write (OSC 52)
-reaches only a window that shows its pane.
+reaches only a window that shows its pane. A daemon no window is on, but the sidebar lists, alerts the same way:
+once, from the most recently focused window of one Contour process, its title prefixed with the daemon's name.
 
 A switch that cannot finish leaves the window as it was and says why in a notice: the destination is not
 reachable, it has no such workspace, or it did not show the workspace within 10 seconds.
@@ -321,7 +324,7 @@ so reopening Contour finds your sessions where you left them. The same holds acr
 | --- | --- |
 | `--daemon PATH\|HOST:PORT\|URL\|NAME` | Which daemon to attach to, as every control verb reads it: a socket path, a TCP daemon, an `ssh://` URL, or a name, which is a local daemon's, else a saved host's (`name:NAME` picks a local daemon and `host:NAME` a saved host; a number after them that names no such daemon or host is a port, so `host:2222` reaches a machine called `host`; a bare name both have is refused). A local daemon resolves as above, `daemon.socket` of the client's configuration included. Not together with `--socket`, `--host` or `--connect-tcp`. Until 0.9.0, `--label NAME` still works, as `--daemon name:NAME`. |
 | `--socket PATH` | The control socket of the daemon to attach to. |
-| `--workspace WORKSPACE` | Show only that daemon workspace instead of what a launch brings back, named as every control verb names one: its id or an id suffix (as `contour ls` prints it), its name, or its 1-based position. Fails, saying why, when it names no workspace or several. It also works with `--host`. |
+| `--workspace WORKSPACE` | Show only that daemon workspace instead of what a launch brings back, named as every control verb names one: its id or an id suffix (as `contour ls` prints it), its name, or its 1-based position. Fails, saying why, when it names no workspace or several. A workspace that is gone by the time the daemon is asked fails too (`the daemon has no workspace N`); nothing else is shown instead. It also works with `--host`. |
 | `--size-policy POLICY` | The policy a daemon this client auto-starts runs with; defaults to `daemon.size_policy`. |
 | `--tmux` | Attach to a **real tmux server** instead of a Contour daemon. See [tmux interoperability](#tmux-interoperability). |
 | `--tmux-socket PATH` | The tmux server socket (tmux's `-S`) for `--tmux`. |

@@ -2745,6 +2745,38 @@ TEST_CASE("a client learns the workspace the daemon selects instead of one that 
     CHECK(h.client->selectedWorkspace() == first);
 }
 
+// Phase 7 review M9: a long-lived connection keeps no screen of a session gone from every layout.
+TEST_CASE("a client forgets the screen of a session no layout names any more", "[vthost][attach][intent]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = selectingCapabilities();
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions { .capabilities = selectingCapabilities() } };
+    auto* const tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5);
+    auto leaves = std::vector<vtworkspace::SessionId> {};
+    tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+        if (pane.isLeaf())
+            leaves.push_back(pane.session());
+    });
+    REQUIRE(leaves.size() == 2);
+    auto const kept = leaves.front();
+    auto const closed = leaves.back();
+    auto scenario = [](IntentHarness* h, vtworkspace::SessionId gone) -> Task<void> {
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, gone] { return h->client->screens().contains(gone.value); });
+        h->host.closeSession(gone);
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, gone] { return !h->client->screens().contains(gone.value); });
+        h->client->detach();
+    }(&h, closed);
+    h.drive(std::move(scenario));
+
+    CHECK_FALSE(h.client->screens().contains(closed.value));
+    CHECK(h.client->screens().contains(kept.value));
+}
+
 TEST_CASE("selecting workspace 0 names the created workspace once its batch ends", "[vthost][attach][intent]")
 {
     auto services = vthost::NativeSessionServices {};
@@ -2793,6 +2825,76 @@ TEST_CASE("the selection arrives in ServerHello and LayoutBatchEnd", "[vthost][a
     CHECK(h.client->selectedWorkspace() != first);
 }
 
+TEST_CASE("a demoted client adopts no selection a batch ended before its demotion states",
+          "[vthost][attach][observer]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto const capabilities = proto::CapabilitySet::of({ proto::Capability::DaemonFollow,
+                                                         proto::Capability::LayoutBatch,
+                                                         proto::Capability::WorkspaceMeta,
+                                                         proto::Capability::Observe });
+    // What the connection was, as each batch ended: its selection and its role.
+    auto ends = std::vector<std::pair<uint64_t, proto::ConnectionRole>> {};
+    auto client = std::unique_ptr<NativeClient> {};
+    client = std::make_unique<NativeClient>(
+        loop,
+        std::move(pair.second),
+        NativeClient::HandshakeOptions { .capabilities = capabilities },
+        vtbackend::CommandBlockStoreLimits {},
+        NativeClient::UpdateHandler {},
+        NativeClient::ImageHandler {},
+        NativeClient::SessionEventHandler {},
+        NativeClient::LayoutHandler {},
+        NativeClient::PermissionHandler {},
+        vthost::client::LivenessPolicy {},
+        NativeClient::TabMergeRefusedHandler {},
+        NativeClient::MoveNodeRefusedHandler {},
+        NativeClient::LayoutBatchEndHandler { [&](proto::LayoutBatchEnd const&) {
+            ends.emplace_back(client->selectedWorkspace(), client->role());
+        } });
+    auto const script = ScriptFor { [&capabilities](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+        {
+            auto hello = acceptingHello(capabilities);
+            hello.selectedWorkspace = 3;
+            return Script { { std::nullopt, std::move(hello) } };
+        }
+        // A batch the daemon ended while the ObserveOnly was on its way, still stating workspace 3; then the
+        // one answering the demotion.
+        if (std::holds_alternative<proto::ObserveOnly>(frame.pdu))
+            return Script { { 0, proto::LayoutBatchEnd { .causeSerial = 0, .selected = 3 } },
+                            { 0, proto::LayoutBatchEnd { .causeSerial = frame.serial, .selected = 0 } } };
+        // The promotion an observer's select asks for, answered.
+        if (auto const* select = std::get_if<proto::SelectWorkspace>(&frame.pdu))
+            return Script {
+                { 0, proto::LayoutBatchEnd { .causeSerial = frame.serial, .selected = select->workspace } }
+            };
+        return Script {};
+    } };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<std::pair<uint64_t, proto::ConnectionRole>> const* ends) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [client] { return client->negotiated().has_value(); });
+        REQUIRE(client->selectedWorkspace() == 3);
+        REQUIRE(client->observeOnly() == vthost::client::Delivery::Sent);
+        co_await core::net::testing::waitUntil(loop, [ends] { return ends->size() == 2; });
+        std::ignore = client->selectWorkspace(5);
+        co_await core::net::testing::waitUntil(loop, [ends] { return ends->size() == 3; });
+        client->detach();
+    }(&loop, client.get(), &ends);
+    loop.blockOn(core::net::testing::allOf(
+        client->run(), scriptedDaemon(&loop, daemonSocket, script, &seen), std::move(scenario)));
+
+    using enum proto::ConnectionRole;
+    CHECK(ends
+          == std::vector<std::pair<uint64_t, proto::ConnectionRole>> {
+              { 0, Observe }, { 0, Observe }, { 5, Attach } });
+}
+
 TEST_CASE("a client reports its focus and is told the role the daemon gives it", "[vthost][attach][intent]")
 {
     auto services = vthost::NativeSessionServices {};
@@ -2803,7 +2905,7 @@ TEST_CASE("a client reports its focus and is told the role the daemon gives it",
     auto delivery = vthost::client::Delivery::Unsupported;
     auto scenario = [](IntentHarness* h, vthost::client::Delivery* delivery) -> Task<void> {
         co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
-        *delivery = h->client->reportFocus(proto::WindowFocus::Focused);
+        *delivery = h->client->reportFocus(proto::WindowFocus::Focused, {});
         // The only window attached is the one that raises: the daemon says so with a NotifyRole.
         co_await core::net::testing::waitUntil(
             &h->loop, [h] { return h->client->raiseRole() == proto::RaiseRole::Raise; });

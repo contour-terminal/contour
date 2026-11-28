@@ -114,6 +114,8 @@ void collectActionNames(std::vector<ContextMenuEntry> const& entries, std::set<s
                           .hostNames = { "server" },
                           .layoutNames = { "dev" },
                           .switching = DaemonSwitching::Available,
+                          .nextAttention = JumpAvailability::Available,
+                          .jumpBack = JumpAvailability::Available,
                           .switchToDaemon = { switchCommand("work") } };
 }
 
@@ -335,6 +337,28 @@ TEST_CASE("menuBar.sidebarRowIsNamedForWhatItDoes", "[menubar]")
     CHECK(find(find(bar, "View")->children, "Hide Sidebar")->check == RowCheck::None);
 }
 
+TEST_CASE("the View menu's Needs Me row is checked while the scope is on", "[menubar][sidebar]")
+{
+    auto state = fullState();
+    auto const rowOf = [&](config::SidebarScope scope) {
+        state.sidebarScope = scope;
+        auto const bar = buildMenuBar(state);
+        auto const* view = find(bar, "View");
+        REQUIRE(view != nullptr);
+        auto const* row = find(view->children, "Show Only What Needs Me");
+        REQUIRE(row != nullptr);
+        CHECK(std::holds_alternative<actions::ToggleSidebarNeedsMe>(row->action));
+        CHECK(row->availability == RowAvailability::Enabled);
+        return row->check;
+    };
+
+    CHECK(rowOf(config::SidebarScope::NeedsMe) == RowCheck::Checked);
+    CHECK(rowOf(config::SidebarScope::All) == RowCheck::Unchecked);
+    // It acts on a window's sidebar: none, nothing to narrow.
+    CHECK(find(buildMenuBar(MenuBarState {}), "Show Only What Needs Me")->availability
+          == RowAvailability::Disabled);
+}
+
 TEST_CASE("menuBar.windowRowsNeedAWindow", "[menubar]")
 {
     auto const bare = buildMenuBar(MenuBarState {});
@@ -435,6 +459,44 @@ TEST_CASE("menuBar.windowMenuSwitchesDaemons", "[menubar]")
         CHECK(find(window, "Switch To Daemon") == nullptr);
         CHECK(find(window, "Daemon & Workspace Switcher…") == nullptr);
     }
+}
+
+TEST_CASE("the Window menu offers Next Needing Me and Jump Back", "[menubar][sidebar][history]")
+{
+    // With a daemon behind the window and without one: both move within the window's own places too.
+    for (auto const switching: { DaemonSwitching::Available, DaemonSwitching::Unavailable })
+    {
+        auto state = fullState();
+        state.switching = switching;
+        auto const window = buildMenuBar(state)[static_cast<std::size_t>(MenuBarMenu::Window)].children;
+        auto const* next = find(window, "Next Needing Me");
+        auto const* back = find(window, "Jump Back");
+        REQUIRE(next != nullptr);
+        REQUIRE(back != nullptr);
+        CHECK(std::holds_alternative<actions::JumpToNextAttention>(next->action));
+        CHECK(std::holds_alternative<actions::JumpBack>(back->action));
+        CHECK(next->availability == RowAvailability::Enabled);
+        CHECK(back->availability == RowAvailability::Enabled);
+    }
+}
+
+// Phase 7 review M8: a row that cannot act is greyed -- a tmux window has no directory to jump in, an empty
+// back stack nowhere to go.
+TEST_CASE("the Window menu greys Next Needing Me and Jump Back when they would do nothing",
+          "[menubar][sidebar][history]")
+{
+    auto state = fullState();
+    state.nextAttention = JumpAvailability::Unavailable;
+    auto window = buildMenuBar(state)[static_cast<std::size_t>(MenuBarMenu::Window)].children;
+    REQUIRE(find(window, "Next Needing Me") != nullptr);
+    CHECK(find(window, "Next Needing Me")->availability == RowAvailability::Disabled);
+    CHECK(find(window, "Jump Back")->availability == RowAvailability::Enabled);
+
+    state = fullState();
+    state.jumpBack = JumpAvailability::Unavailable;
+    window = buildMenuBar(state)[static_cast<std::size_t>(MenuBarMenu::Window)].children;
+    CHECK(find(window, "Next Needing Me")->availability == RowAvailability::Enabled);
+    CHECK(find(window, "Jump Back")->availability == RowAvailability::Disabled);
 }
 
 namespace

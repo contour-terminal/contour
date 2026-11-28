@@ -96,6 +96,78 @@ TEST_CASE("actions::fromString round-trips the new pane actions", "[actions][par
     CHECK_FALSE(actions::fromString("NoSuchPaneAction").has_value());
 }
 
+TEST_CASE("CancelSwitch round-trips by name", "[actions][parse][sidebar]")
+{
+    auto const parsed = actions::fromString("CancelSwitch");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::CancelSwitch>(*parsed));
+    CHECK(actions::name(*parsed) == "CancelSwitch");
+    CHECK_FALSE(actions::isParameterized(*parsed));
+}
+
+TEST_CASE("JumpBack round-trips by name", "[actions][parse][sidebar][history]")
+{
+    auto const parsed = actions::fromString("JumpBack");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::JumpBack>(*parsed));
+    CHECK(actions::name(*parsed) == "JumpBack");
+    CHECK_FALSE(actions::isParameterized(*parsed));
+    // A held key walks the stack by one press, not through it.
+    CHECK(actions::isNonRepeatable(*parsed));
+}
+
+TEST_CASE("OpenInNewWindow round-trips by name", "[actions][parse][sidebar]")
+{
+    auto const parsed = actions::fromString("OpenInNewWindow");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::OpenInNewWindow>(*parsed));
+    CHECK(actions::name(*parsed) == "OpenInNewWindow");
+    // A row of the sidebar's menus, which name the row: bare, it names none.
+    CHECK(actions::isParameterized(*parsed));
+}
+
+TEST_CASE("a daemon row's verbs round-trip by name", "[actions][parse][sidebar]")
+{
+    for (auto const* const name: { "ConnectDaemon", "StartDaemon", "RemoveDaemon" })
+    {
+        INFO(name);
+        auto const parsed = actions::fromString(name);
+        REQUIRE(parsed.has_value());
+        CHECK(actions::name(*parsed) == name);
+        CHECK(actions::isParameterized(*parsed));
+    }
+    CHECK(std::holds_alternative<actions::ConnectDaemon>(*actions::fromString("ConnectDaemon")));
+    CHECK(std::holds_alternative<actions::StartDaemon>(*actions::fromString("StartDaemon")));
+    CHECK(std::holds_alternative<actions::RemoveDaemon>(*actions::fromString("RemoveDaemon")));
+}
+
+TEST_CASE("HideDaemon and ShowHiddenDaemon round-trip by name", "[actions][parse][sidebar]")
+{
+    for (auto const* const name: { "HideDaemon", "ShowHiddenDaemon" })
+    {
+        INFO(name);
+        auto const parsed = actions::fromString(name);
+        REQUIRE(parsed.has_value());
+        CHECK(actions::name(*parsed) == name);
+        // Rows of the sidebar's menus, which name the daemon: bare, they name none.
+        CHECK(actions::isParameterized(*parsed));
+    }
+    CHECK(std::holds_alternative<actions::HideDaemon>(*actions::fromString("HideDaemon")));
+    CHECK(std::holds_alternative<actions::ShowHiddenDaemon>(*actions::fromString("ShowHiddenDaemon")));
+    CHECK(actions::name(actions::Action { actions::ShowHiddenDaemon { .index = 2 } }) == "ShowHiddenDaemon");
+}
+
+TEST_CASE("ToggleSidebarNeedsMe round-trips by name", "[actions][parse][sidebar]")
+{
+    auto const parsed = actions::fromString("ToggleSidebarNeedsMe");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::ToggleSidebarNeedsMe>(*parsed));
+    CHECK(actions::name(*parsed) == "ToggleSidebarNeedsMe");
+    CHECK_FALSE(actions::isParameterized(*parsed));
+    // A toggle: a held key would only flip it back and forth.
+    CHECK(actions::isNonRepeatable(*parsed));
+}
+
 TEST_CASE("actions::fromString names the window's Minimize and Zoom", "[actions][parse]")
 {
     CHECK(std::holds_alternative<actions::MinimizeWindow>(*actions::fromString("MinimizeWindow")));

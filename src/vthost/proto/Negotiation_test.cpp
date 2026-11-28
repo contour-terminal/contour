@@ -189,6 +189,37 @@ TEST_CASE("capability 33 is workspace-color", "[vthost][negotiation][workspace-c
     CHECK(color->name == "workspace-color");
 }
 
+TEST_CASE("capability 35 is observe", "[vthost][negotiation][observer]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::Observe) == 35);
+    auto const observe = std::ranges::find(CapabilityTable, Capability::Observe, &CapabilityRow::capability);
+    REQUIRE(observe != CapabilityTable.end());
+    CHECK(observe->name == "observe");
+}
+
+TEST_CASE("observing needs observe, daemon-follow and workspace-meta shared",
+          "[vthost][negotiation][observer]")
+{
+    auto const all =
+        CapabilitySet::of({ Capability::Observe, Capability::DaemonFollow, Capability::WorkspaceMeta });
+    CHECK(sharesObserving(all));
+    for (auto const missing: ObserverCapabilities)
+    {
+        auto lacking = all;
+        std::erase(lacking.idents, std::to_underlying(missing));
+        CHECK_FALSE(sharesObserving(lacking));
+    }
+}
+
+TEST_CASE("capability 34 is daemon-attention", "[vthost][negotiation][daemon-attention]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::DaemonAttention) == 34);
+    auto const attention =
+        std::ranges::find(CapabilityTable, Capability::DaemonAttention, &CapabilityRow::capability);
+    REQUIRE(attention != CapabilityTable.end());
+    CHECK(attention->name == "daemon-attention");
+}
+
 TEST_CASE("the workspace switch capability keeps its ident and name",
           "[vthost][negotiation][workspace-follow]")
 {

@@ -156,6 +156,11 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
         outcome = Outcome { .ending = Ending::Refused,
                             .error = { .kind = TransportErrorKind::Refused,
                                        .message = _current->refusalMessage() } };
+    else if (_roleAcceptance = _current->roleAcceptance();
+             _roleAcceptance == NativeClient::RoleAcceptance::ObserveUnsupported)
+        outcome = Outcome { .ending = Ending::Refused,
+                            .error = { .kind = TransportErrorKind::Refused,
+                                       .message = "the daemon predates observing; upgrade it to list it" } };
     else if (auto const& upgrading = _current->upgradingTo(); upgrading && _current->connected())
         outcome =
             Outcome { .ending = Ending::Upgrading,
@@ -233,7 +238,10 @@ core::async::Task<void> ClientSupervisor::run()
         if (outcome.ending == Ending::Stopped)
             enter(ConnectionState::Stopped);
         else
+        {
+            _failureKind = outcome.error.kind;
             enter(ConnectionState::Failed, outcome.error.message);
+        }
         co_return;
     }
 
@@ -254,7 +262,10 @@ core::async::Task<void> ClientSupervisor::run()
     if (outcome.ending == Ending::Stopped)
         enter(ConnectionState::Stopped);
     else
+    {
+        _failureKind = outcome.error.kind;
         enter(ConnectionState::Refused, outcome.error.message);
+    }
 }
 
 } // namespace vthost::client

@@ -5,10 +5,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <format>
 #include <initializer_list>
+#include <iterator>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -105,6 +109,18 @@ WorkspaceDirectory oneTabWith(ProgramStatusRecord record)
     return directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { paneOf(1, "p", { std::move(record) }) }) }) });
 }
 
+/// A workspace of the window's one daemonless section.
+WorkspaceKey workspaceKeyOf(uint64_t workspace)
+{
+    return WorkspaceKey { .daemon = {}, .instance = {}, .workspace = workspace };
+}
+
+/// A tab of the window's one daemonless section.
+TabKey tabKeyOf(uint64_t workspace, uint64_t tab)
+{
+    return TabKey { .workspace = workspaceKeyOf(workspace), .tab = tab };
+}
+
 SidebarRow const& tabRowOf(std::vector<SidebarRow> const& rows)
 {
     return rows.at(1);
@@ -126,9 +142,11 @@ TEST_CASE("SidebarTree.split_tab_lists_panes_depth_first", "[sidebar]")
         { workspaceOf(7, {}, { tabOf(3, "t", { paneOf(10, "a"), paneOf(11, "b") }), tabOf(4, "u", {}) }) }));
     REQUIRE(rows.size() == 5);
     CHECK(rows[0].title == "Workspace 1");
-    CHECK(rows[1].key == SidebarRowKey { SidebarRowKind::Tab, 7, 3, PaneKey {} });
+    CHECK(rows[1].key == SidebarRowKey { .kind = SidebarRowKind::Tab, .workspace = 7, .tab = 3, .pane = {} });
     CHECK(rows[1].expansion == RowExpansion::Expanded);
-    CHECK(rows[2].key == SidebarRowKey { SidebarRowKind::Pane, 7, 3, PaneKey { 10 } });
+    CHECK(
+        rows[2].key
+        == SidebarRowKey { .kind = SidebarRowKind::Pane, .workspace = 7, .tab = 3, .pane = PaneKey { 10 } });
     CHECK(rows[2].title == "a");
     CHECK(rows[2].depth == 2);
     CHECK(rows[3].title == "b");
@@ -163,7 +181,7 @@ TEST_CASE("SidebarTree.collapsed_workspace_rolls_up_most_urgent_pane", "[sidebar
                                  "t",
                                  { paneOf(static_cast<uint64_t>(index) + 1, "p", { recordOf(state) }) }));
         auto const rows = rowsOf(directoryOf({ workspaceOf(1, "w", std::move(tabs)) }),
-                                 SidebarState { .collapsedWorkspaces = { 1 } });
+                                 SidebarState { .toggled = { workspaceKeyOf(1) } });
         REQUIRE(rows.size() == 1);
         CHECK(rows[0].urgency == urgency);
         CHECK(rows[0].glyph == glyph);
@@ -175,8 +193,8 @@ TEST_CASE("SidebarTree.collapsed_workspace_hides_children", "[sidebar]")
 {
     auto const directory = directoryOf(
         { workspaceOf(1, "w", { tabOf(1, "t", { paneOf(1), paneOf(2) }) }), workspaceOf(2, "x", {}) });
-    CHECK(rowsOf(directory, SidebarState { .collapsedWorkspaces = { 1 } }).size() == 2);
-    auto const tabFolded = rowsOf(directory, SidebarState { .collapsedTabs = { TabRef { 1, 1 } } });
+    CHECK(rowsOf(directory, SidebarState { .toggled = { workspaceKeyOf(1) } }).size() == 2);
+    auto const tabFolded = rowsOf(directory, SidebarState { .collapsedTabs = { tabKeyOf(1, 1) } });
     REQUIRE(tabFolded.size() == 3);
     CHECK(tabFolded[1].expansion == RowExpansion::Collapsed);
     CHECK(rowsOf(directory).size() == 5);
@@ -431,7 +449,7 @@ TEST_CASE("SidebarTree.filter_keeps_ancestors_of_a_match", "[sidebar]")
     auto const forced =
         rowsOf(directory,
                SidebarState {
-                   .collapsedWorkspaces = { 1 }, .collapsedTabs = { TabRef { 1, 1 } }, .filter = "make" });
+                   .toggled = { workspaceKeyOf(1) }, .collapsedTabs = { tabKeyOf(1, 1) }, .filter = "make" });
     REQUIRE(forced.size() == 3);
     CHECK(forced[0].expansion == RowExpansion::Expanded);
     CHECK(forced[1].expansion == RowExpansion::Expanded);
@@ -466,7 +484,9 @@ TEST_CASE("SidebarTree.footer_counts_leaves_not_roll_ups", "[sidebar]")
     auto const expected = SidebarFooter { .needYou = 2, .working = 2 };
     CHECK(sidebarFooter(rowsOf(directory)) == expected);
     // Folding hides rows, not panes.
-    CHECK(sidebarFooter(rowsOf(directory, SidebarState { .collapsedWorkspaces = { 1, 2 } })) == expected);
+    CHECK(
+        sidebarFooter(rowsOf(directory, SidebarState { .toggled = { workspaceKeyOf(1), workspaceKeyOf(2) } }))
+        == expected);
     CHECK(sidebarFooter({}) == SidebarFooter {});
 }
 
@@ -484,7 +504,8 @@ TEST_CASE("SidebarTree.listing_counts_every_workspace_in_the_same_pass_as_a_filt
     CHECK(listing.workspaces[0].title == "alpha");
     CHECK(listing.workspaces[1].title == "beta");
     CHECK(sidebarFooter(listing.workspaces) == sidebarFooter(rowsOf(directory)));
-    CHECK(sidebarSummary(listing.workspaces, 2) == sidebarSummary(rowsOf(directory), 2));
+    CHECK(sidebarSummary(listing.workspaces, workspaceKeyOf(2))
+          == sidebarSummary(rowsOf(directory), workspaceKeyOf(2)));
 }
 
 TEST_CASE("SidebarTree.terminal_tree_lines", "[sidebar]")
@@ -525,7 +546,7 @@ TEST_CASE("SidebarTree.displayed_tab_is_selected", "[sidebar]")
     CHECK(selections(TabRef { 2, 2 }) == std::vector { None, None, None, None, None, None, None });
 
     // Folded away, the displayed tab hands its selection to its workspace, the nearest row shown.
-    auto const folded = rowsOf(directory, SidebarState { .collapsedWorkspaces = { 2 } }, TabRef { 2, 1 });
+    auto const folded = rowsOf(directory, SidebarState { .toggled = { workspaceKeyOf(2) } }, TabRef { 2, 1 });
     CHECK(std::ranges::to<std::vector>(folded | std::views::transform(&SidebarRow::selection))
           == std::vector { None, None, None, ContainsSelected });
 }
@@ -534,7 +555,7 @@ TEST_CASE("SidebarTree.collapsing_a_tab_does_not_collapse_its_namesake", "[sideb
 {
     auto const directory = directoryOf({ workspaceOf(1, "a", { tabOf(1, "t", { paneOf(1), paneOf(2) }) }),
                                          workspaceOf(2, "b", { tabOf(1, "u", { paneOf(3), paneOf(4) }) }) });
-    auto const rows = rowsOf(directory, SidebarState { .collapsedTabs = { TabRef { 2, 1 } } });
+    auto const rows = rowsOf(directory, SidebarState { .collapsedTabs = { tabKeyOf(2, 1) } });
     REQUIRE(rows.size() == 6);
     CHECK(rows[1].expansion == RowExpansion::Expanded);
     CHECK(rows[2].key.kind == SidebarRowKind::Pane);
@@ -570,7 +591,7 @@ TEST_CASE("SidebarTree.rows_carry_their_real_positions", "[sidebar]")
     CHECK(positions(rowsOf(directory, SidebarState { .filter = "four" }))
           == Entries { { "beta", 1 }, { "four", 1 } });
     // Nor does a fold.
-    CHECK(positions(rowsOf(directory, SidebarState { .collapsedWorkspaces = { 5 } }))
+    CHECK(positions(rowsOf(directory, SidebarState { .toggled = { workspaceKeyOf(5) } }))
           == Entries { { "alpha", 0 }, { "beta", 1 }, { "three", 0 }, { "four", 1 } });
 }
 
@@ -606,13 +627,29 @@ TEST_CASE("SidebarTree.hostile_titles_and_branches_are_sanitized", "[sidebar]")
 
 TEST_CASE("SidebarTree.a_failed_command_has_a_reason_but_no_time", "[sidebar]")
 {
-    // vthost::proto::FinishedCommand carries no timestamp, so nothing can be measured from.
+    // vthost::proto::FinishedCommand carries no timestamp, so without the daemon's finish time nothing can be
+    // measured from.
     auto pane = paneOf(1, "p");
     pane.finished = vthost::proto::FinishedCommand { .exitCode = 1, .durationMs = 18'000 };
     pane.finishedSerial = 1;
     auto const row = tabRowOf(rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { pane }) }) })));
     CHECK(row.reason == "exit 1 · 18s");
     CHECK(row.time == TimeText {});
+}
+
+TEST_CASE("SidebarTree.finished_command_shows_time_since_it_ended", "[sidebar][daemon-attention]")
+{
+    // A daemon keeps the pane's flags and stated when the command ended: the row says how long ago.
+    auto pane = paneOf(1, "p");
+    pane.flagSource = FlagSource::Daemon;
+    pane.attention = AttentionKnowledge::Stated;
+    pane.finished = vthost::proto::FinishedCommand { .exitCode = 1, .durationMs = 18'000 };
+    pane.finishedSerial = 1;
+    pane.finishedAt = Now - std::chrono::minutes { 3 };
+    auto const row = tabRowOf(rowsOf(directoryOf({ workspaceOf(1, "w", { tabOf(1, "t", { pane }) }) })));
+    CHECK(row.reason == "exit 1 · 18s");
+    CHECK(row.time.kind == TimeKind::Relative);
+    CHECK(row.time.text == formatRelative(std::chrono::minutes { 3 }));
 }
 
 TEST_CASE("SidebarTree.git_text", "[sidebar]")
@@ -680,14 +717,14 @@ TEST_CASE("SidebarTree.the_summary_names_the_shown_workspace_and_rolls_up_the_ot
     });
     auto const rows = rowsOf(directory);
 
-    auto const onDocs = sidebarSummary(rows, 2);
+    auto const onDocs = sidebarSummary(rows, workspaceKeyOf(2));
     CHECK(onDocs.currentWorkspace == "docs");
     CHECK(onDocs.otherWorkspaces == Urgency::NeedsYou);
     CHECK(onDocs.otherWorkspacesGlyph == rows.front().glyph);
     CHECK(chipMarkerOf(onDocs.otherWorkspaces) == ChipMarker::Shown);
 
     // Work running elsewhere does not mark the chip.
-    auto const onBilling = sidebarSummary(rows, 1);
+    auto const onBilling = sidebarSummary(rows, workspaceKeyOf(1));
     CHECK(onBilling.currentWorkspace == "billing");
     CHECK(onBilling.otherWorkspaces == Urgency::Working);
     CHECK(chipMarkerOf(onBilling.otherWorkspaces) == ChipMarker::None);
@@ -951,7 +988,7 @@ TEST_CASE("a workspace row carries no tab colour", "[sidebar]")
     CHECK_FALSE(expanded[0].tabColor.has_value());
 
     // Folded over its coloured tab, the workspace row still shows none of it.
-    auto const folded = rowsOf(directory, SidebarState { .collapsedWorkspaces = { 1 } });
+    auto const folded = rowsOf(directory, SidebarState { .toggled = { workspaceKeyOf(1) } });
     REQUIRE(folded.size() == 1);
     CHECK(folded[0].key.kind == SidebarRowKind::Workspace);
     CHECK_FALSE(folded[0].tabColor.has_value());
@@ -979,7 +1016,7 @@ TEST_CASE("a folded coloured workspace keeps its colour", "[sidebar]")
     auto coloured = workspaceOf(1, "w", { tabOf(1, "t", { paneOf(1) }) });
     coloured.color = vtbackend::RGBColor { 0xC2, 0x54, 0x8F };
     auto const folded =
-        rowsOf(directoryOf({ std::move(coloured) }), SidebarState { .collapsedWorkspaces = { 1 } });
+        rowsOf(directoryOf({ std::move(coloured) }), SidebarState { .toggled = { workspaceKeyOf(1) } });
     REQUIRE(folded.size() == 1);
     CHECK(folded[0].key.kind == SidebarRowKind::Workspace);
     CHECK(folded[0].workspaceColor == vtbackend::RGBColor { 0xC2, 0x54, 0x8F });
@@ -996,4 +1033,607 @@ TEST_CASE("an uncoloured workspace's rows carry none", "[sidebar]")
     CHECK(rows[2].key.workspace == 2);
     for (auto const& row: rows | std::views::drop(2))
         CHECK_FALSE(row.workspaceColor.has_value());
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Several daemons, each under its section heading.
+
+namespace
+{
+DaemonRef daemonA()
+{
+    return localDaemonRef("a");
+}
+
+DaemonRef daemonB()
+{
+    return hostDaemonRef("b");
+}
+
+DaemonSection sectionOf(DaemonRef daemon,
+                        uint64_t instance,
+                        WorkspaceDirectory directory,
+                        DaemonLinkState state = DaemonLinkState::Connected)
+{
+    auto section = DaemonSection {};
+    section.name = std::string { parseDaemonRef(daemon)->second };
+    section.daemon = std::move(daemon);
+    section.instance = DaemonInstance { instance };
+    section.directory = std::move(directory);
+    section.state = state;
+    return section;
+}
+
+/// Two workspaces of one tab of one pane each, with the ids every daemon reuses.
+WorkspaceDirectory pairOf(ProgramState first = ProgramState::Idle, ProgramState second = ProgramState::Idle)
+{
+    return directoryOf(
+        { workspaceOf(1, "one", { tabOf(1, "t1", { paneOf(1, "p1", { recordOf(first) }) }) }),
+          workspaceOf(2, "two", { tabOf(1, "t2", { paneOf(2, "p2", { recordOf(second) }) }) }) });
+}
+
+SidebarTarget targetOf(DaemonRef daemon, uint64_t workspace, std::optional<uint64_t> tab)
+{
+    return SidebarTarget { .daemon = std::move(daemon),
+                           .instance = DaemonInstance { 1 },
+                           .workspace = workspace,
+                           .tab = tab,
+                           .pane = {} };
+}
+
+WorkspaceKey workspaceKeyOn(DaemonRef daemon, uint64_t instance, uint64_t workspace)
+{
+    return WorkspaceKey { .daemon = std::move(daemon),
+                          .instance = DaemonInstance { instance },
+                          .workspace = workspace };
+}
+
+SidebarState openedOn(DaemonRef daemon)
+{
+    auto state = SidebarState {};
+    state.openedOn = std::move(daemon);
+    return state;
+}
+
+SidebarListing listingOf(std::vector<DaemonSection> const& sections,
+                         SidebarState const& state,
+                         std::optional<SidebarTarget> displayed = std::nullopt,
+                         std::optional<SidebarTarget> pending = std::nullopt,
+                         std::vector<HiddenDaemon> const& hidden = {})
+{
+    return sidebarListing(
+        SidebarSources { .sections = sections, .own = daemonA(), .ownMarks = nullptr, .hidden = hidden },
+        state,
+        Now,
+        std::move(displayed),
+        PendingJumps { .here = std::move(pending), .newWindow = std::nullopt });
+}
+
+/// A row as one line: its kind's letter, then its daemon, workspace, tab and pane where it has them.
+std::string describe(SidebarRow const& row)
+{
+    auto const& key = row.key;
+    switch (key.kind)
+    {
+        case SidebarRowKind::Daemon: return "D " + key.daemon.value;
+        case SidebarRowKind::Workspace: return std::format("W {} {}", key.daemon.value, key.workspace);
+        case SidebarRowKind::Tab: return std::format("T {} {} {}", key.daemon.value, key.workspace, key.tab);
+        case SidebarRowKind::Pane:
+            return std::format("P {} {} {} {}", key.daemon.value, key.workspace, key.tab, key.pane.value);
+        case SidebarRowKind::Hidden: return "H";
+    }
+    return {};
+}
+
+std::vector<std::string> describe(std::vector<SidebarRow> const& rows)
+{
+    return std::ranges::to<std::vector>(
+        rows | std::views::transform([](SidebarRow const& row) { return describe(row); }));
+}
+
+/// @return The index of the row described as @p description; -1 when none is.
+int indexOf(std::vector<SidebarRow> const& rows, std::string const& description)
+{
+    auto const all = describe(rows);
+    auto const found = std::ranges::find(all, description);
+    return found == all.end() ? -1 : static_cast<int>(std::distance(all.begin(), found));
+}
+
+SidebarRow const& rowAt(std::vector<SidebarRow> const& rows, std::string const& description)
+{
+    auto const index = indexOf(rows, description);
+    REQUIRE(index >= 0);
+    return rows[static_cast<std::size_t>(index)];
+}
+} // namespace
+
+TEST_CASE("SidebarTree.daemon_rows_head_each_section", "[sidebar]")
+{
+    auto const solo = directoryOf({ workspaceOf(1, "solo", { tabOf(1, "t", { paneOf(1) }) }) });
+    auto const rows =
+        listingOf({ sectionOf(daemonA(), 1, pairOf()), sectionOf(daemonB(), 1, solo) }, openedOn(daemonA()))
+            .rows;
+    CHECK(describe(rows)
+          == std::vector<std::string> { "D local:a",
+                                        "W local:a 1",
+                                        "T local:a 1 1",
+                                        "W local:a 2",
+                                        "T local:a 2 1",
+                                        "D host:b",
+                                        "W host:b 1" });
+    for (auto const& row: rows)
+    {
+        if (row.key.kind == SidebarRowKind::Tab)
+            continue;
+        CHECK(row.depth == 0);
+    }
+    CHECK(rows[0].title == "a");
+    CHECK(rows[5].title == "b");
+    CHECK(rows[2].daemonName == "a");
+    CHECK(rows[6].daemonName == "b");
+}
+
+TEST_CASE("SidebarTree.order_is_fixed_and_independent_of_the_window", "[sidebar]")
+{
+    auto const sections =
+        std::vector { sectionOf(daemonA(), 1, pairOf()), sectionOf(daemonB(), 1, pairOf()) };
+    // The window is on b and shows one of its tabs: b stays second.
+    auto const listing = sidebarListing(
+        SidebarSources { .sections = sections, .own = daemonB(), .ownMarks = nullptr, .hidden = {} },
+        openedOn(daemonB()),
+        Now,
+        targetOf(daemonB(), 1, 1),
+        PendingJumps {});
+    auto const daemons = std::ranges::to<std::vector>(
+        listing.rows
+        | std::views::filter([](SidebarRow const& row) { return row.key.kind == SidebarRowKind::Daemon; })
+        | std::views::transform(&SidebarRow::title));
+    CHECK(daemons == std::vector<std::string> { "a", "b" });
+    CHECK(rowAt(listing.rows, "T host:b 1 1").selection == RowSelection::Selected);
+}
+
+TEST_CASE("SidebarTree.other_daemons_start_folded_and_a_jump_refolds_nothing", "[sidebar]")
+{
+    auto const sections =
+        std::vector { sectionOf(daemonA(), 1, pairOf()), sectionOf(daemonB(), 1, pairOf()) };
+    auto const state = openedOn(daemonA());
+    auto const rows = listingOf(sections, state).rows;
+    CHECK(rowAt(rows, "W local:a 1").expansion == RowExpansion::Expanded);
+    CHECK(rowAt(rows, "W local:a 2").expansion == RowExpansion::Expanded);
+    CHECK(rowAt(rows, "W host:b 1").expansion == RowExpansion::Collapsed);
+    CHECK(rowAt(rows, "W host:b 2").expansion == RowExpansion::Collapsed);
+
+    // Displaying a tab of b's unfolds nothing: its folded workspace carries the selection.
+    auto const jumped = listingOf(sections, state, targetOf(daemonB(), 1, 1)).rows;
+    CHECK(rowAt(jumped, "W host:b 1").expansion == RowExpansion::Collapsed);
+    CHECK(rowAt(jumped, "W host:b 1").selection == RowSelection::ContainsSelected);
+    CHECK(rowAt(jumped, "D host:b").selection == RowSelection::None);
+    CHECK(indexOf(jumped, "T host:b 1 1") == -1);
+
+    // A folded daemon row holding the displayed tab carries it instead.
+    auto foldedB = state;
+    foldedB.foldedDaemons = { daemonB() };
+    auto const folded = listingOf(sections, foldedB, targetOf(daemonB(), 1, 1)).rows;
+    CHECK(rowAt(folded, "D host:b").expansion == RowExpansion::Collapsed);
+    CHECK(rowAt(folded, "D host:b").selection == RowSelection::ContainsSelected);
+    CHECK(indexOf(folded, "W host:b 1") == -1);
+}
+
+TEST_CASE("SidebarTree.a_workspace_appearing_later_follows_its_daemon_default", "[sidebar]")
+{
+    auto state = openedOn(daemonA());
+    state.toggled = { workspaceKeyOn(daemonB(), 1, 1) };
+    auto grown = pairOf();
+    grown.workspaces.push_back(workspaceOf(3, "three", { tabOf(1, "t3", { paneOf(3) }) }));
+    auto const rows =
+        listingOf({ sectionOf(daemonA(), 1, grown), sectionOf(daemonB(), 1, grown) }, state).rows;
+    CHECK(rowAt(rows, "W host:b 1").expansion == RowExpansion::Expanded);
+    CHECK(rowAt(rows, "W host:b 3").expansion == RowExpansion::Collapsed);
+    CHECK(rowAt(rows, "W local:a 3").expansion == RowExpansion::Expanded);
+}
+
+TEST_CASE("SidebarTree.same_ids_on_two_daemons_have_distinct_keys", "[sidebar]")
+{
+    auto state = openedOn(localDaemonRef("elsewhere"));
+    state.toggled = { workspaceKeyOn(daemonA(), 1, 1) };
+    auto const rows =
+        listingOf({ sectionOf(daemonA(), 1, pairOf()), sectionOf(daemonB(), 1, pairOf()) }, state).rows;
+    auto const& onA = rowAt(rows, "W local:a 1");
+    auto const& onB = rowAt(rows, "W host:b 1");
+    CHECK(onA.key != onB.key);
+    CHECK(onA.expansion == RowExpansion::Expanded);
+    CHECK(onB.expansion == RowExpansion::Collapsed);
+}
+
+TEST_CASE("SidebarTree.a_restarted_daemon_does_not_inherit_toggles", "[sidebar]")
+{
+    auto state = openedOn(daemonA());
+    state.toggled = { workspaceKeyOn(daemonA(), 1, 1) };
+    CHECK(rowAt(listingOf({ sectionOf(daemonA(), 1, pairOf()) }, state).rows, "W local:a 1").expansion
+          == RowExpansion::Collapsed);
+    CHECK(rowAt(listingOf({ sectionOf(daemonA(), 2, pairOf()) }, state).rows, "W local:a 1").expansion
+          == RowExpansion::Expanded);
+}
+
+TEST_CASE("SidebarTree.status_slot_shows_link_state_until_connected", "[sidebar]")
+{
+    for (auto const index: std::views::iota(size_t { 0 }, DaemonLinkStateCount))
+    {
+        auto const state = DaemonLinkState(index);
+        auto const rows =
+            listingOf({ sectionOf(daemonA(), 1, pairOf(ProgramState::Blocked), state) }, openedOn(daemonA()))
+                .rows;
+        auto const expected = state == DaemonLinkState::Connected ? StatusSlot::Urgency : StatusSlot::Link;
+        CHECK(rowAt(rows, "D local:a").slot == expected);
+        CHECK(rowAt(rows, "D local:a").linkState == state);
+        CHECK(statusSlotOf(state, RowPending::Yes, Urgency::Idle) == StatusSlot::Pending);
+    }
+    auto const idle = listingOf({ sectionOf(daemonA(), 1, pairOf()) }, openedOn(daemonA())).rows;
+    CHECK(rowAt(idle, "D local:a").slot == StatusSlot::None);
+    CHECK(statusSlotOf(DaemonLinkState::Connected, RowPending::No, Urgency::Working) == StatusSlot::Urgency);
+}
+
+TEST_CASE("SidebarTree.daemon_row_rolls_up_most_urgent_glyph", "[sidebar]")
+{
+    auto const sections =
+        std::vector { sectionOf(daemonA(), 1, pairOf()),
+                      sectionOf(daemonB(), 1, pairOf(ProgramState::Working, ProgramState::Blocked)) };
+    auto foldedB = openedOn(daemonA());
+    foldedB.foldedDaemons = { daemonB() };
+    for (auto const& state: { openedOn(daemonA()), openedOn(daemonB()), foldedB })
+    {
+        auto const listing = listingOf(sections, state);
+        auto const& row = rowAt(listing.rows, "D host:b");
+        CHECK(row.urgency == Urgency::NeedsYou);
+        CHECK(row.glyph == TabBadgeKind::Blocked);
+        CHECK(rowAt(listing.rows, "D local:a").urgency == Urgency::Idle);
+    }
+}
+
+TEST_CASE("SidebarTree.needs_me_keeps_displayed_and_pending_paths", "[sidebar]")
+{
+    auto onA = pairOf(ProgramState::Blocked);
+    onA.workspaces[0].tabs.push_back(tabOf(2,
+                                           "split",
+                                           { paneOf(11, "bad", { recordOf(ProgramState::Error) }),
+                                             paneOf(12, "fine", { recordOf(ProgramState::Idle) }) }));
+    auto state = openedOn(daemonA());
+    state.scope = contour::config::SidebarScope::NeedsMe;
+    auto const rows = listingOf({ sectionOf(daemonA(), 1, onA), sectionOf(daemonB(), 1, pairOf()) },
+                                state,
+                                targetOf(daemonA(), 2, 1),
+                                targetOf(daemonB(), 1, 1))
+                          .rows;
+    CHECK(describe(rows)
+          == std::vector<std::string> { "D local:a",
+                                        "W local:a 1",
+                                        "T local:a 1 1",
+                                        "T local:a 1 2",
+                                        "P local:a 1 2 11",
+                                        "W local:a 2",
+                                        "T local:a 2 1",
+                                        "D host:b",
+                                        "W host:b 1",
+                                        "T host:b 1 1" });
+    // Ancestors of what stays are expanded, b's default fold notwithstanding.
+    CHECK(rowAt(rows, "W host:b 1").expansion == RowExpansion::Expanded);
+    CHECK(rowAt(rows, "D host:b").expansion == RowExpansion::Expanded);
+    CHECK(needsMe(Urgency::NeedsYou));
+    CHECK(needsMe(Urgency::Failed));
+    CHECK(needsMe(Urgency::DoneUnseen));
+    CHECK_FALSE(needsMe(Urgency::Working));
+    CHECK_FALSE(needsMe(Urgency::UnseenOutput));
+    CHECK_FALSE(needsMe(Urgency::Idle));
+}
+
+TEST_CASE("SidebarTree.needs_me_empty", "[sidebar]")
+{
+    auto state = openedOn(daemonA());
+    state.scope = contour::config::SidebarScope::NeedsMe;
+    auto const listing = listingOf(
+        { sectionOf(daemonA(), 1, pairOf(ProgramState::Working)), sectionOf(daemonB(), 1, pairOf()) },
+        state,
+        std::nullopt,
+        std::nullopt,
+        { HiddenDaemon { .daemon = hostDaemonRef("c"), .name = "c" } });
+    CHECK(listing.rows.empty());
+    CHECK(listing.workspaces.size() == 4);
+    CHECK(sidebarFooter(listing.workspaces) == SidebarFooter { .needYou = 0, .working = 1 });
+}
+
+TEST_CASE("SidebarTree.empty_state_only_under_needs_me", "[sidebar]")
+{
+    using contour::config::SidebarScope;
+    CHECK(sidebarEmptyStateOf(SidebarScope::NeedsMe, 0) == SidebarEmptyState::NothingNeedsYou);
+    CHECK(sidebarEmptyStateOf(SidebarScope::NeedsMe, 1) == SidebarEmptyState::None);
+    // Everything listed has nothing to say about what needs the user, empty or not.
+    CHECK(sidebarEmptyStateOf(SidebarScope::All, 0) == SidebarEmptyState::None);
+    CHECK(sidebarEmptyStateOf(SidebarScope::All, 3) == SidebarEmptyState::None);
+    CHECK(toggledScope(SidebarScope::All) == SidebarScope::NeedsMe);
+    CHECK(toggledScope(SidebarScope::NeedsMe) == SidebarScope::All);
+
+    // The displayed tab's path stays under Needs-me, so rows remain while nothing needs the user: the rows
+    // that need the user decide, not the rows listed.
+    auto state = openedOn(daemonA());
+    state.scope = SidebarScope::NeedsMe;
+    auto const quiet = listingOf({ sectionOf(daemonA(), 1, pairOf(ProgramState::Working)) },
+                                 state,
+                                 targetOf(daemonA(), 1, 1))
+                           .rows;
+    CHECK_FALSE(quiet.empty());
+    CHECK(rowsNeedingMe(quiet) == 0);
+    auto const asking = listingOf({ sectionOf(daemonA(), 1, pairOf(ProgramState::Blocked)) },
+                                  state,
+                                  targetOf(daemonA(), 2, 1))
+                            .rows;
+    CHECK(rowsNeedingMe(asking) > 0);
+}
+
+TEST_CASE("SidebarTree.breadcrumb_names_the_daemon_only_beside_another", "[sidebar]")
+{
+    CHECK(breadcrumbDepthOf(0) == BreadcrumbDepth::WorkspaceTab);
+    CHECK(breadcrumbDepthOf(1) == BreadcrumbDepth::WorkspaceTab);
+    CHECK(breadcrumbDepthOf(2) == BreadcrumbDepth::DaemonWorkspaceTab);
+    CHECK(breadcrumbDepthOf(7) == BreadcrumbDepth::DaemonWorkspaceTab);
+}
+
+TEST_CASE("SidebarTree.filter_matches_daemon_names", "[sidebar]")
+{
+    auto star = sectionOf(daemonB(), 1, pairOf());
+    star.name = "starfive";
+    auto const sections = std::vector { sectionOf(daemonA(), 1, pairOf()), star };
+    auto state = openedOn(daemonA());
+    state.filter = "STAR";
+    // A daemon whose name matches keeps its workspaces, folded.
+    auto const byName = listingOf(sections, state).rows;
+    CHECK(describe(byName) == std::vector<std::string> { "D host:b", "W host:b 1", "W host:b 2" });
+    CHECK(rowAt(byName, "W host:b 1").expansion == RowExpansion::Collapsed);
+    CHECK(rowAt(byName, "D host:b").expansion == RowExpansion::Expanded);
+
+    // Across daemons, a tab's name matches on each of them.
+    state.filter = "t2";
+    CHECK(describe(listingOf(sections, state).rows)
+          == std::vector<std::string> {
+              "D local:a", "W local:a 2", "T local:a 2 1", "D host:b", "W host:b 2", "T host:b 2 1" });
+}
+
+TEST_CASE("SidebarTree.pending_target_marks_its_row", "[sidebar]")
+{
+    auto const sections =
+        std::vector { sectionOf(daemonA(), 1, pairOf()), sectionOf(daemonB(), 1, pairOf()) };
+    auto state = openedOn(daemonA());
+    state.toggled = { workspaceKeyOn(daemonB(), 1, 1) };
+    auto const rows = listingOf(sections, state, std::nullopt, targetOf(daemonB(), 1, 1)).rows;
+    CHECK(rowAt(rows, "T host:b 1 1").pending == RowPending::Yes);
+    CHECK(rowAt(rows, "T host:b 1 1").slot == StatusSlot::Pending);
+    CHECK(rowAt(rows, "D host:b").pending == RowPending::Yes);
+    CHECK(rowAt(rows, "D host:b").slot == StatusSlot::Pending);
+    CHECK(rowAt(rows, "W host:b 1").pending == RowPending::No);
+    CHECK(std::ranges::count(rows, RowPending::Yes, &SidebarRow::pending) == 2);
+
+    // Folded away, the target's nearest row shown carries it.
+    auto const folded =
+        listingOf(sections, openedOn(daemonA()), std::nullopt, targetOf(daemonB(), 1, 1)).rows;
+    CHECK(rowAt(folded, "W host:b 1").slot == StatusSlot::Pending);
+}
+
+TEST_CASE("SidebarTree.reconnecting_daemon_keeps_last_known_tree", "[sidebar]")
+{
+    // Every state but Connected: a section's directory is then what was last known of the daemon, whether
+    // its link is being tried, waits for the user, or the daemon has stopped.
+    for (auto const down: { DaemonLinkState::NotConnected,
+                            DaemonLinkState::Connecting,
+                            DaemonLinkState::Reconnecting,
+                            DaemonLinkState::NeedsInput,
+                            DaemonLinkState::NotRunning,
+                            DaemonLinkState::TooOld,
+                            DaemonLinkState::Failed })
+    {
+        INFO("state " << static_cast<int>(down));
+        auto const rows =
+            listingOf({ sectionOf(daemonA(), 1, pairOf()), sectionOf(daemonB(), 1, pairOf(), down) },
+                      openedOn(daemonB()))
+                .rows;
+        CHECK(rowAt(rows, "T host:b 2 1").title == "t2");
+        CHECK(rowAt(rows, "D host:b").expansion == RowExpansion::Expanded);
+        for (auto const& row: rows)
+            CHECK(row.staleness
+                  == (row.key.daemon == daemonB() ? RowStaleness::LastKnown : RowStaleness::Live));
+    }
+    // Nothing known: nothing stale, and nothing to fold.
+    auto const empty =
+        listingOf({ sectionOf(daemonB(), 1, {}, DaemonLinkState::Reconnecting) }, openedOn(daemonB())).rows;
+    REQUIRE(empty.size() == 1);
+    CHECK(empty[0].staleness == RowStaleness::Live);
+    CHECK(empty[0].expansion == RowExpansion::None);
+}
+
+TEST_CASE("SidebarTree.last_known_rows_claim_nothing_live", "[sidebar]")
+{
+    // b stopped while a pane of it worked and another waited for the user: what was last known draws no
+    // running mark and is counted neither by the footer nor by the chip's roll-up.
+    auto const sections = std::vector { sectionOf(daemonA(), 1, pairOf()),
+                                        sectionOf(daemonB(),
+                                                  1,
+                                                  pairOf(ProgramState::Working, ProgramState::Blocked),
+                                                  DaemonLinkState::NotRunning) };
+    auto const listing = listingOf(sections, openedOn(daemonB()));
+    auto const& working = rowAt(listing.rows, "T host:b 1 1");
+    CHECK(working.staleness == RowStaleness::LastKnown);
+    CHECK(working.glyph == TabBadgeKind::None);
+    CHECK(working.time.kind != TimeKind::Live);
+    CHECK(working.time.kind != TimeKind::Progress);
+    // What asks for the user keeps its mark: the row says what was last known of it.
+    CHECK(rowAt(listing.rows, "T host:b 2 1").glyph == TabBadgeKind::Blocked);
+    CHECK(sidebarFooter(listing.workspaces) == SidebarFooter {});
+    auto const summary = sidebarSummary(listing.workspaces, workspaceKeyOn(daemonA(), 1, 1));
+    CHECK(summary.otherWorkspaces == Urgency::Idle);
+    CHECK(chipMarkerOf(summary.otherWorkspaces) == ChipMarker::None);
+    // A last-known workspace still names the window's own, whose link is down.
+    CHECK(sidebarSummary(listing.workspaces, workspaceKeyOn(daemonB(), 1, 2)).currentWorkspace == "two");
+
+    // Once b is back, the same panes count.
+    auto live = sections;
+    live[1].state = DaemonLinkState::Connected;
+    auto const back = listingOf(live, openedOn(daemonB()));
+    CHECK(rowAt(back.rows, "T host:b 1 1").glyph == TabBadgeKind::Working);
+    CHECK(sidebarFooter(back.workspaces).needYou == 1);
+    CHECK(sidebarFooter(back.workspaces).working == 1);
+    CHECK(sidebarSummary(back.workspaces, workspaceKeyOn(daemonA(), 1, 1)).otherWorkspaces
+          == Urgency::NeedsYou);
+}
+
+TEST_CASE("SidebarTree.first_match_prefers_a_row_that_itself_matches", "[sidebar]")
+{
+    // A pane "logs" under a tab "t1" that does not match: the tab is listed as the pane's ancestor, but
+    // Return goes to the pane.
+    auto directory =
+        directoryOf({ workspaceOf(1,
+                                  "one",
+                                  { tabOf(1,
+                                          "t1",
+                                          { paneOf(1, "shell", { recordOf(ProgramState::Idle) }),
+                                            paneOf(2, "logs", { recordOf(ProgramState::Idle) }) }) }) });
+    auto state = openedOn(daemonA());
+    state.filter = "logs";
+    auto const rows = listingOf({ sectionOf(daemonA(), 1, directory) }, state).rows;
+    auto const first = firstMatchOf(rows, state);
+    REQUIRE(first.has_value());
+    CHECK(rows[*first].key.kind == SidebarRowKind::Pane);
+    CHECK(rows[*first].title == "logs");
+
+    // A workspace that matches by name, with no tab that does, is the match.
+    state.filter = "one";
+    auto const byWorkspace = listingOf({ sectionOf(daemonA(), 1, directory) }, state).rows;
+    auto const workspace = firstMatchOf(byWorkspace, state);
+    REQUIRE(workspace.has_value());
+    CHECK(byWorkspace[*workspace].key.kind == SidebarRowKind::Workspace);
+
+    // Nothing typed and every row listed: nothing narrows the tree, and Return has no match to go to.
+    CHECK(isUnnarrowed(openedOn(daemonA())));
+    CHECK_FALSE(isUnnarrowed(state));
+    auto needsMe = openedOn(daemonA());
+    needsMe.scope = contour::config::SidebarScope::NeedsMe;
+    CHECK_FALSE(isUnnarrowed(needsMe));
+}
+
+TEST_CASE("SidebarTree.shown_elsewhere_marks_workspace", "[sidebar]")
+{
+    auto b = sectionOf(daemonB(), 1, pairOf());
+    b.shownElsewhere = { 2 };
+    auto const rows = listingOf({ sectionOf(daemonA(), 1, pairOf()), b }, openedOn(daemonA())).rows;
+    CHECK(rowAt(rows, "W host:b 2").shownElsewhere == ShownElsewhere::Yes);
+    CHECK(rowAt(rows, "W host:b 1").shownElsewhere == ShownElsewhere::No);
+    CHECK(rowAt(rows, "W local:a 2").shownElsewhere == ShownElsewhere::No);
+}
+
+TEST_CASE("SidebarTree.hidden_row_lists_hidden_daemons", "[sidebar]")
+{
+    auto const hidden = std::vector { HiddenDaemon { .daemon = hostDaemonRef("c"), .name = "c" },
+                                      HiddenDaemon { .daemon = hostDaemonRef("d"), .name = "d" } };
+    auto const sections = std::vector { sectionOf(daemonA(), 1, pairOf()) };
+    auto const rows = listingOf(sections, openedOn(daemonA()), std::nullopt, std::nullopt, hidden).rows;
+    REQUIRE(!rows.empty());
+    CHECK(rows.back().key.kind == SidebarRowKind::Hidden);
+    CHECK(rows.back().title.empty());
+    CHECK(rows.back().hidden == hidden);
+    CHECK(std::ranges::none_of(listingOf(sections, openedOn(daemonA())).rows,
+                               [](SidebarRow const& row) { return row.key.kind == SidebarRowKind::Hidden; }));
+}
+
+TEST_CASE("SidebarTree.footer_and_summary_span_daemons", "[sidebar]")
+{
+    auto const listing =
+        listingOf({ sectionOf(daemonA(), 1, pairOf(ProgramState::Blocked, ProgramState::Working)),
+                    sectionOf(daemonB(), 1, pairOf(ProgramState::Working, ProgramState::Error)) },
+                  openedOn(daemonA()));
+    REQUIRE(listing.workspaces.size() == 4);
+    CHECK(sidebarFooter(listing.workspaces) == SidebarFooter { .needYou = 1, .working = 2 });
+    // b's folded rows count as much as a's.
+    CHECK(sidebarFooter(listing.rows) == sidebarFooter(listing.workspaces));
+
+    auto const onA = sidebarSummary(listing.workspaces, workspaceKeyOn(daemonA(), 1, 1));
+    CHECK(onA.currentWorkspace == "one");
+    CHECK(onA.otherWorkspaces == Urgency::Failed);
+    // Workspace 1 on b is not workspace 1 on a.
+    auto const onB = sidebarSummary(listing.workspaces, workspaceKeyOn(daemonB(), 1, 1));
+    CHECK(onB.currentWorkspace == "one");
+    CHECK(onB.otherWorkspaces == Urgency::NeedsYou);
+}
+
+TEST_CASE("SidebarTree.terminal_row_widths_unchanged_at_18_cells", "[sidebar]")
+{
+    auto split = pairOf();
+    split.workspaces[0].tabs.push_back(tabOf(2, "split", { paneOf(11, "a"), paneOf(12, "b") }));
+    auto const sections = std::vector { sectionOf(daemonA(), 1, split), sectionOf(daemonB(), 1, split) };
+    auto state = SidebarState {};
+    state.openedOn = localDaemonRef("elsewhere");
+    state.toggled = { workspaceKeyOn(daemonA(), 1, 1),
+                      workspaceKeyOn(daemonA(), 1, 2),
+                      workspaceKeyOn(daemonB(), 1, 1),
+                      workspaceKeyOn(daemonB(), 1, 2) };
+    auto const unfolded = listingOf(sections, state).rows;
+    auto const single = rowsOf(split);
+    for (auto const& row: unfolded)
+    {
+        if (row.depth != 0)
+            continue;
+        CHECK(treeLinesText(row.lines, row.depth).empty());
+        CHECK(treeContinuationText(row).empty());
+    }
+    // Each section's rows below its heading draw what the daemonless tree draws, cell for cell.
+    auto const textsOf = [](std::span<SidebarRow const> shown) {
+        return std::ranges::to<std::vector>(shown | std::views::transform([](SidebarRow const& row) {
+                                                return treeLinesText(row.lines, row.depth) + "|"
+                                                       + treeContinuationText(row);
+                                            }));
+    };
+    REQUIRE(unfolded.size() == (single.size() + 1) * 2);
+    CHECK(textsOf(std::span { unfolded }.subspan(1, single.size())) == textsOf(single));
+    CHECK(textsOf(std::span { unfolded }.subspan(single.size() + 2)) == textsOf(single));
+}
+
+TEST_CASE("SidebarTree.workspace_rail_cells_unchanged", "[sidebar]")
+{
+    auto split = pairOf();
+    split.workspaces[0].tabs.push_back(tabOf(2, "split", { paneOf(11, "a"), paneOf(12, "b") }));
+    split.workspaces.push_back(workspaceOf(3, "empty", {}));
+    auto const rows = listingOf({ sectionOf(daemonA(), 1, split) }, openedOn(daemonA())).rows;
+    auto const single = rowsOf(split);
+    REQUIRE(rows.size() == single.size() + 1);
+    CHECK(workspaceRailCellsOf(rows[0]) == RailCells {});
+    auto const cellsOf = [](std::span<SidebarRow const> shown) {
+        return std::ranges::to<std::vector>(shown | std::views::transform(workspaceRailCellsOf));
+    };
+    CHECK(cellsOf(std::span { rows }.subspan(1)) == cellsOf(single));
+}
+
+TEST_CASE("SidebarTree.window_without_daemon_has_no_daemon_row", "[sidebar]")
+{
+    auto const rows = rowsOf(pairOf());
+    REQUIRE(rows.size() == 4);
+    CHECK(std::ranges::none_of(rows,
+                               [](SidebarRow const& row) { return row.key.kind == SidebarRowKind::Daemon; }));
+    CHECK(std::ranges::all_of(rows, [](SidebarRow const& row) { return row.key.daemon == DaemonRef {}; }));
+    CHECK(std::ranges::all_of(rows, [](SidebarRow const& row) { return row.slot != StatusSlot::Link; }));
+}
+
+TEST_CASE("SidebarTree.left_from_a_workspace_reaches_its_daemon_row", "[sidebar]")
+{
+    auto state = openedOn(daemonA());
+    state.toggled = { workspaceKeyOn(daemonB(), 1, 1) };
+    auto const rows = listingOf({ sectionOf(daemonA(), 1, pairOf()), sectionOf(daemonB(), 1, pairOf()) },
+                                state,
+                                std::nullopt,
+                                std::nullopt,
+                                { HiddenDaemon { .daemon = hostDaemonRef("c"), .name = "c" } })
+                          .rows;
+    auto const daemonRowA = indexOf(rows, "D local:a");
+    auto const daemonRowB = indexOf(rows, "D host:b");
+    CHECK(parentRowOf(rows, indexOf(rows, "W local:a 1")) == daemonRowA);
+    CHECK(parentRowOf(rows, indexOf(rows, "W local:a 2")) == daemonRowA);
+    CHECK(parentRowOf(rows, indexOf(rows, "W host:b 2")) == daemonRowB);
+    CHECK(parentRowOf(rows, indexOf(rows, "T host:b 1 1")) == indexOf(rows, "W host:b 1"));
+    CHECK(parentRowOf(rows, daemonRowB) == -1);
+    CHECK(parentRowOf(rows, indexOf(rows, "H")) == -1);
 }

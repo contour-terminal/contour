@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -105,6 +106,48 @@ namespace
         return node;
     }
 
+    /// The key the sidebar's listed and unlisted daemons are kept under.
+    constexpr auto SidebarDaemonsKey = std::string_view { "sidebar_daemons" };
+
+    /// The daemon references a `shown` or `hidden` list holds.
+    /// @param node The list; anything else holds none.
+    /// @return Its scalar entries.
+    [[nodiscard]] std::set<std::string> daemonKeysOf(YAML::Node const& node)
+    {
+        auto keys = std::set<std::string> {};
+        if (node && node.IsSequence())
+            for (auto const& entry: node)
+                if (entry.IsScalar())
+                    keys.insert(entry.as<std::string>());
+        return keys;
+    }
+
+    /// The listing choices @p node holds.
+    /// @param node A `sidebar_daemons` node; anything but a map holds none.
+    [[nodiscard]] SidebarDaemons sidebarDaemonsOf(YAML::Node const& node)
+    {
+        if (!node || !node.IsMap())
+            return {};
+        return SidebarDaemons { .shown = daemonKeysOf(node["shown"]),
+                                .hidden = daemonKeysOf(node["hidden"]) };
+    }
+
+    /// The node that stores @p daemons, its lists in flow style.
+    [[nodiscard]] YAML::Node sidebarDaemonsNode(SidebarDaemons const& daemons)
+    {
+        auto node = YAML::Node { YAML::NodeType::Map };
+        for (auto const& [key, keys]:
+             { std::pair { "shown", &daemons.shown }, std::pair { "hidden", &daemons.hidden } })
+        {
+            auto list = YAML::Node { YAML::NodeType::Sequence };
+            for (auto const& daemon: *keys)
+                list.push_back(daemon);
+            list.SetStyle(YAML::EmitterStyle::Flow);
+            node[key] = list;
+        }
+        return node;
+    }
+
     /// The Settings window state @p node holds.
     /// @param node A `settings_window` node.
     /// @return The state; none when the node is absent or not a map. A key that does not read as its type is
@@ -196,6 +239,7 @@ namespace
             auto state = GuiState {};
             state.settingsWindow = settingsWindowOf(document[std::string { SettingsWindowKey }]);
             state.sidebar = sidebarPrefsOf(document[std::string { SidebarKey }]);
+            state.sidebarDaemons = sidebarDaemonsOf(document[std::string { SidebarDaemonsKey }]);
             if (auto const target = document[std::string { LastConnectTargetKey }];
                 target && target.IsScalar())
                 state.lastConnectTarget = target.as<std::string>();
@@ -269,6 +313,10 @@ namespace
             previous[std::string { SidebarKey }] = sidebarPrefsNode(*state.sidebar);
         else
             previous.remove(std::string { SidebarKey });
+        if (state.sidebarDaemons == SidebarDaemons {})
+            previous.remove(std::string { SidebarDaemonsKey });
+        else
+            previous[std::string { SidebarDaemonsKey }] = sidebarDaemonsNode(state.sidebarDaemons);
         if (state.lastConnectTarget.empty())
             previous.remove(std::string { LastConnectTargetKey });
         else
@@ -283,6 +331,12 @@ namespace
         return std::string { out.c_str() } + '\n';
     }
 } // namespace
+
+void forgetDaemonChoice(SidebarDaemons& daemons, std::string const& daemonKey)
+{
+    daemons.shown.erase(daemonKey);
+    daemons.hidden.erase(daemonKey);
+}
 
 FileGuiStateStore::FileGuiStateStore(core::platform::FileSystem const& fileSystem,
                                      std::filesystem::path const& configDir):

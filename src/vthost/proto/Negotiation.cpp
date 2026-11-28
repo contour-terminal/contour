@@ -47,6 +47,12 @@ CapabilitySet intersect(CapabilitySet const& a, CapabilitySet const& b)
     return result;
 }
 
+bool sharesObserving(CapabilitySet const& shared)
+{
+    return std::ranges::all_of(ObserverCapabilities,
+                               [&shared](Capability capability) { return shared.contains(capability); });
+}
+
 bool isPreNegotiation(VersionRange range) noexcept
 {
     return range.max < NegotiatingHelloMarker;

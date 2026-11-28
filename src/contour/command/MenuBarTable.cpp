@@ -48,6 +48,11 @@ namespace
         return !isSidebarShown(state);
     }
 
+    bool isSidebarNeedsMe(MenuBarState const& state) noexcept
+    {
+        return state.sidebarScope == config::SidebarScope::NeedsMe;
+    }
+
     bool isMouseForwarded(MenuBarState const& state) noexcept
     {
         return state.mouseForwarding == vtbackend::MouseForwarding::Forwarded;
@@ -71,6 +76,16 @@ namespace
     bool canSwitchDaemon(MenuBarState const& state) noexcept
     {
         return state.switching == DaemonSwitching::Available;
+    }
+
+    bool canJumpToNextAttention(MenuBarState const& state) noexcept
+    {
+        return state.nextAttention == JumpAvailability::Available;
+    }
+
+    bool canJumpBack(MenuBarState const& state) noexcept
+    {
+        return state.jumpBack == JumpAvailability::Available;
     }
     // }}}
 
@@ -331,6 +346,8 @@ namespace
             // Named for what picking it does, as macOS apps do, rather than a checkmark on "Show Sidebar".
             inWindow(Table::command(ToggleSidebar {}, "Show Sidebar").shownWhen(isSidebarHidden)),
             inWindow(Table::command(ToggleSidebar {}, "Hide Sidebar").shownWhen(isSidebarShown)),
+            // A mode of the sidebar's list, so a checkmark: the row's name stays and its check flips.
+            windowCommand(ToggleSidebarNeedsMe {}, "Show Only What Needs Me").checkedWhen(isSidebarNeedsMe),
             Table::command(ToggleFullscreen {}),
             Table::separator(),
             Table::submenu("Scroll", rowsOf<scrollTemplate>),
@@ -399,7 +416,9 @@ namespace
             // Switching a window between daemons; both rows exist only for a window with a daemon behind it.
             Table::submenu("Switch To Daemon", switchToDaemonRows).shownWhen(canSwitchDaemon),
             windowCommand(ShowSwitcher {}, "Daemon & Workspace Switcher…").shownWhen(canSwitchDaemon),
-            Table::separator().shownWhen(canSwitchDaemon),
+            windowCommand(JumpToNextAttention {}, "Next Needing Me").enabledWhen(canJumpToNextAttention),
+            windowCommand(JumpBack {}, "Jump Back").enabledWhen(canJumpBack),
+            Table::separator(),
             Table::rows(tabListRows),
         };
         return rows;

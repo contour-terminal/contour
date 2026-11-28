@@ -1,5 +1,10 @@
 // vim:syntax=qml
-// One row of the workspace sidebar (SidebarModel): a workspace, a tab of one, or a pane of a split tab.
+// One row of the workspace sidebar (SidebarModel): a daemon heading its section, a workspace, a tab of one, a
+// pane of a split tab, or the quiet line that counts the daemons the user hid.
+//
+// A daemon row draws its heading instead of the parts below (SidebarDaemonHeading.qml), a little apart from
+// the section above it. A row that is what was last known of a daemon whose link is down is dimmed to the
+// secondary ink, which keeps 4.5:1 on the sidebar.
 //
 // A workspace row: its disclosure, its name, its git state and the rolled-up status glyph. A tab or pane row:
 // its status glyph, its title, a second line -- its reason when there is one, else its folder and program --
@@ -62,6 +67,18 @@ Item {
     /// What the rail draws on the row's second line; empty on a workspace row.
     required property string railTextContinued
     required property var icon
+    /// A daemon row: its link state (window::DaemonLinkState).
+    required property int linkState
+    /// A daemon row: why its link failed; empty otherwise.
+    required property string linkReason
+    /// A daemon row: its window::DaemonLocality.
+    required property int locality
+    /// Whether the row is what was last known of its daemon (window::RowStaleness: Live is zero).
+    required property int staleness
+    /// What its trailing status slot shows (SidebarRows.StatusSlot).
+    required property int statusSlot
+    /// A daemon row: its buttons (SidebarRows.DaemonRowButton values).
+    required property var daemonButtons
 
     /// The sidebar's model (WindowController.sidebar), which the row's actions go to. Its bindings never
     /// read it: the row compares its roles with the SidebarRows enums, so a row that outlives its model while
@@ -81,8 +98,25 @@ Item {
     signal pressed(int index)
 
     readonly property bool isWorkspace: row.kind === SidebarRows.SidebarRowKind.Workspace
-    // A workspace and a tab have names of their own, which the user can change; a pane has none.
-    readonly property bool renamable: row.kind !== SidebarRows.SidebarRowKind.Pane
+    readonly property bool isDaemon: row.kind === SidebarRows.SidebarRowKind.Daemon
+    readonly property bool isHidden: row.kind === SidebarRows.SidebarRowKind.Hidden
+    /// Whether the row is one line: a workspace's, a daemon's and the hidden daemons' rows are.
+    readonly property bool oneLine: row.isWorkspace || row.isDaemon || row.isHidden
+    /// The room above a daemon row that follows another section, and above the hidden daemons' row, which is
+    /// a section of its own: a blank line on the Terminal row, a gap of the row's spacing elsewhere, so the
+    /// sections read apart.
+    readonly property real sectionGap: !(row.isDaemon || row.isHidden) || row.index === 0 ? 0
+                                     : row.cellTree ? chromeStyle.sidebar.rowHeight : chromeStyle.space.s4
+    /// Whether the row is what was last known of a daemon that is not connected: a workspace, tab or pane row
+    /// drawn in the dimmer last-known ink, its marks too, as spec §11 says. The daemon row itself speaks for
+    /// the live link and keeps its ink.
+    readonly property bool lastKnown: row.staleness === SidebarRows.RowStaleness.LastKnown && !row.isDaemon
+    // A workspace and a tab have names of their own, which the user can change; a pane, a daemon and the
+    // hidden daemons' row have none here, and a last-known row names a run that may be gone
+    // (SidebarModel.rename() does nothing for it).
+    readonly property bool renamable: (row.kind === SidebarRows.SidebarRowKind.Workspace
+                                       || row.kind === SidebarRows.SidebarRowKind.Tab)
+                                      && !row.lastKnown
     readonly property bool cellTree: chromeStyle.sidebar.look === chromeStyle.sidebar.cellTree
     readonly property bool hasReason: row.secondLine === SidebarRows.SecondLine.Status
     readonly property bool hasProgress: row.timeKind === SidebarRows.TimeKind.Progress && row.progress >= 0
@@ -131,11 +165,20 @@ Item {
     readonly property color selectionInk: row.emphasized ? chromeStyle.colors.sidebarSelectionInk
                                                          : chromeStyle.colors.sidebarSelectionInkInactive
     readonly property color ink: chromeStyle.paletteRevision < 0 ? "transparent"
-                               : row.marked ? row.selectionInk : chromeStyle.colors.tabText
+                               : row.marked ? row.selectionInk
+                               : row.lastKnown ? chromeStyle.colors.sidebarLastKnownInk
+                               : row.isHidden ? chromeStyle.colors.sidebarSecondaryInk
+                               : chromeStyle.colors.tabText
     // On a tinted row everything the row writes takes the ink chosen for the tint, so it stays legible on it.
     readonly property color secondaryInk: chromeStyle.paletteRevision < 0 ? "transparent"
                                         : row.filled ? row.tint.ink
-                                        : row.marked ? row.selectionInk : chromeStyle.colors.sidebarSecondaryInk
+                                        : row.marked ? row.selectionInk
+                                        : row.lastKnown ? chromeStyle.colors.sidebarLastKnownInk
+                                        : chromeStyle.colors.sidebarSecondaryInk
+    /// The ink a last-known row's status marks take instead of their hues: what was last known asks nothing
+    /// now. Transparent, the hues, on every other row and wherever a tint or the selection decides the ink.
+    readonly property color markInk: row.lastKnown && !row.filled && !row.marked
+                                     ? chromeStyle.colors.sidebarLastKnownInk : "transparent"
     // The gap between the leading glyphs and the name: at least a cell on the Terminal row, whose small
     // spacing steps are no cells at all, so `▾ billing` never reads `▾billing`.
     readonly property real leadGap: row.cellTree ? Math.max(chromeStyle.space.s3, chromeStyle.cellWidth)
@@ -152,7 +195,7 @@ Item {
     // than the lines within one, and whatever room the spacing adds goes between the rows.
     readonly property real lineGap: row.groupsLines ? chromeStyle.sidebar.lineGap(row.rowSpacing) : 0
     // On the Terminal row each line is a whole cell row, so the first line keeps the row's height there.
-    readonly property bool groupsLines: !row.isWorkspace && !row.cellTree
+    readonly property bool groupsLines: !row.oneLine && !row.cellTree
     /// Whether a tab or pane row has anything for its second line (SidebarTree's secondLineOf()). A row that
     /// has not keeps its two-line height and centres its name in it, except on the Terminal row, whose name
     /// keeps the first of its two cell rows, as half a cell is no place on the grid.
@@ -184,7 +227,7 @@ Item {
     readonly property bool renaming: renameLoader.active
 
     width: ListView.view ? ListView.view.width : implicitWidth
-    implicitHeight: row.isWorkspace ? chromeStyle.sidebar.rowHeight
+    implicitHeight: row.oneLine ? chromeStyle.sidebar.rowHeight + row.sectionGap
                   : row.groupsLines ? Math.max(chromeStyle.sidebar.twoLineRowHeight(row.rowSpacing), row.fittedHeight)
                                     : chromeStyle.sidebar.twoLineRowHeight(row.rowSpacing)
     height: implicitHeight
@@ -253,7 +296,8 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: row.fillInset
         anchors.rightMargin: row.fillInset
-        visible: chromeStyle.sidebar.rowFeedback && !row.marked && !row.filled
+        anchors.topMargin: row.sectionGap
+        visible: chromeStyle.sidebar.rowFeedback && !row.marked && !row.filled && !row.isHidden
                  && (primaryTap.pressed || hover.hovered)
         radius: chromeStyle.sidebar.selectionRadius
         color: chromeStyle.paletteRevision < 0 ? "transparent"
@@ -265,6 +309,7 @@ Item {
     Rectangle {
         objectName: "sidebarRowSelection"
         anchors.fill: parent
+        anchors.topMargin: row.sectionGap
         anchors.leftMargin: row.fillInset
         anchors.rightMargin: row.fillInset
         visible: row.marked && !row.filled
@@ -288,6 +333,34 @@ Item {
     FocusRing {
         shown: row.paint.ring
         hostRadius: chromeStyle.sidebar.selectionRadius
+        anchors.topMargin: row.sectionGap - reach
+    }
+
+    // A daemon row's heading, in place of the first line's parts.
+    Loader {
+        id: daemonHeading
+        active: row.isDaemon
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: chromeStyle.sidebar.rowHeight
+        sourceComponent: SidebarDaemonHeading {
+            index: row.index
+            title: row.title
+            expansion: row.expansion
+            linkState: row.linkState
+            linkReason: row.linkReason
+            locality: row.locality
+            statusSlot: row.statusSlot
+            glyph: row.glyph
+            buttons: row.daemonButtons
+            sidebar: row.sidebar
+            ink: row.ink
+            secondaryInk: row.secondaryInk
+            tint: row.tint
+            leadPadding: row.padding
+            trailInset: row.trailInset
+        }
     }
 
     // A coloured workspace's rail (`sidebar.workspace_color: group`): the row's full height in the sidebar's
@@ -387,10 +460,12 @@ Item {
     // Terminal row (snapToCells), so the title and the times keep their columns whatever the glyphs measure.
     Item {
         id: firstLine
+        visible: !row.isDaemon
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.topMargin: row.firstLineTop
+        // Below the gap above a row that opens a section of its own (the hidden daemons').
+        anchors.topMargin: row.sectionGap + row.firstLineTop
         height: row.firstLineHeight
 
         // The gap between the name and what trails it: at least a cell on the Terminal row, where the space
@@ -549,12 +624,14 @@ Item {
                 kind: row.glyph
                 shaped: !row.cellTree
                 tint: row.tint
+                faintInk: row.markInk
                 progress: row.hasProgress ? row.progress : -1
             }
 
-            // A tab with nothing to say keeps the glyph's column, so the titles of a tab list stay aligned.
+            // A tab with nothing to say keeps the glyph's column, so the titles of a tab list stay aligned. The
+            // hidden daemons' row is no tab: it starts at the sections' own edge, under none of them.
             Item {
-                visible: !row.isWorkspace && !glyphSlot.known
+                visible: !row.isWorkspace && !row.isHidden && !glyphSlot.known
                 anchors.verticalCenter: parent.verticalCenter
                 width: chromeStyle.snapToCells(glyphSlot.edge)
                 height: glyphSlot.implicitHeight
@@ -582,7 +659,9 @@ Item {
             objectName: "sidebarRowTitle"
             visible: !renameLoader.active
             anchors.left: lead.right
-            anchors.leftMargin: row.leadGap
+            // No gap after a lead that draws nothing (the hidden daemons' row): its words start at the
+            // sections' edge, where a daemon heading's first part does.
+            anchors.leftMargin: lead.implicitWidth > 0 ? row.leadGap : 0
             anchors.right: trail.left
             anchors.rightMargin: firstLine.titleGap
             anchors.verticalCenter: parent.verticalCenter
@@ -616,16 +695,24 @@ Item {
                 Accessible.ignored: true
             }
 
+            // A jump to the row under way: in place of its status.
+            SidebarPendingMark {
+                pending: row.statusSlot === SidebarRows.StatusSlot.Pending
+                anchors.verticalCenter: parent.verticalCenter
+                color: row.secondaryInk
+            }
+
             // A workspace's rolled-up status.
             TabBadgeSlot {
                 id: rollUp
                 objectName: "sidebarRowRollUp"
-                visible: row.isWorkspace && known
+                visible: row.isWorkspace && known && row.statusSlot !== SidebarRows.StatusSlot.Pending
                 anchors.verticalCenter: parent.verticalCenter
                 width: chromeStyle.snapToCells(implicitWidth)
                 kind: row.glyph
                 shaped: !row.cellTree
                 tint: row.tint
+                faintInk: row.markInk
             }
 
             // The time in the state, the time since it ended, or the progress's percent.
@@ -801,7 +888,9 @@ Item {
 
     Timer {
         interval: chromeStyle.motion.tooltipDelay
-        running: hover.hovered && !row.isWorkspace && !renameLoader.active
+        // A tab's and a pane's card; a one-line row (a workspace, a daemon, the hidden daemons) has none, and a
+        // daemon row's reason is its own tooltip.
+        running: hover.hovered && !row.oneLine && !renameLoader.active
         onTriggered: row.hoverCardWanted(row, true)
     }
 

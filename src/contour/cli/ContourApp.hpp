@@ -154,12 +154,18 @@ class ContourApp: public core::cli::App
     /// @return The TCP listener to serve, nullopt for none; or why the options cannot be served.
     [[nodiscard]] std::expected<std::optional<vthost::NativeTcpListenerConfig>, std::string> nativeTcpOption(
         DaemonVerbOptions const& options, std::string_view daemonName);
+    /// Checks that an option only `contour daemon --stdio` honours (`--no-start`) comes with `--stdio`.
+    /// @param options The daemon's options.
+    /// @return The refusal, naming the option, when one is given without `--stdio`.
+    [[nodiscard]] static std::expected<void, std::string> checkStdioOnlyOptions(
+        DaemonVerbOptions const& options);
     /// Checks that `contour daemon --stdio` names no option only a daemon this process becomes can honour.
     /// @param options The daemon's options.
     /// @return The refusal, naming the option, when one is given.
     [[nodiscard]] std::expected<void, std::string> checkStdioCombinations(DaemonVerbOptions const& options);
     /// Runs `contour daemon --stdio`: relays the native protocol between this process's standard
-    /// input/output and the daemon serving @p socketPath, starting that daemon when none serves.
+    /// input/output and the daemon serving @p socketPath, starting that daemon when none serves (never with
+    /// `--no-start`).
     /// @param client This process's stdio, taken (makeProcessStdioStream()) before the configuration loaded.
     /// @param options The daemon's options; a daemon this relay starts is told the log and configuration.
     /// @param socketPath The daemon's control socket.

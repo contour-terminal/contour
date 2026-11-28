@@ -106,6 +106,9 @@ enum class PduType : uint8_t
     Goodbye = 60,
     OpenFirstTab = 61,
     SetWorkspaceColor = 62,
+    PaneAttentionState = 63,
+    MarkSeen = 64,
+    ObserveOnly = 65,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -202,12 +205,14 @@ enum class HelloLayout : uint8_t
 
 /// What a connection is for. A Control connection asks the daemon about itself (DaemonStatusRequest,
 /// StopDaemon): it is no client, so it is shown no layout, spawns no first session and keeps nothing alive.
-/// Decoding fails closed: a role byte this version does not know reads as Control, so a future role never
-/// spawns a session.
+/// An Observe connection (Capability::Observe) is told the daemon's layout, workspace metadata, pane
+/// summaries and attention, and shows no screen until it selects a workspace. Decoding fails closed: a role
+/// byte this version does not know reads as Control, so a future role never spawns a session.
 enum class ConnectionRole : uint8_t
 {
     Attach = 0,  ///< A terminal client: it is shown the daemon's sessions and layout.
     Control = 1, ///< A probe or a command to the daemon itself.
+    Observe = 2, ///< A window that lists the daemon's workspaces and shows none of their screens.
 };
 
 /// The light/dark preference a ClientHello states for the sessions it follows: what the client's display
@@ -252,7 +257,7 @@ enum class AttachIntentKind : uint8_t
 {
     Default = 5,      ///< The daemon picks: the first workspace no window shows, else a new one.
     NewWorkspace = 6, ///< A new workspace of its own, selected at once.
-    Select = 7,       ///< Exactly the workspace named in AttachIntent::workspace.
+    Select = 7,       ///< Exactly the workspace named in AttachIntent::workspace; when it is gone, none.
     Resume = 8,       ///< The workspace named after a reconnect; when it is gone, as Default.
 };
 
@@ -1672,6 +1677,12 @@ struct LayoutBatchEnd
     /// The workspace this connection selects as of this batch, so a client learns a daemon-side reselection
     /// (its workspace closed) explicitly rather than inferring it from which snapshots arrive.
     uint64_t selected = 0;
+    /// Appended, and written to every peer: the restore announcement ServerHello::restoredWorkspaces states,
+    /// told instead by the batch answering an observer's promotion when that promotion is the first viewer
+    /// since the restore. Zero on every other batch, and when a sender from before the field leaves it out.
+    uint32_t restoredWorkspaces = 0;
+    /// The tabs of those workspaces; zero as @ref restoredWorkspaces is.
+    uint32_t restoredTabs = 0;
     bool operator==(LayoutBatchEnd const&) const = default;
 };
 
@@ -1691,6 +1702,10 @@ enum class WindowFocus : uint8_t
     Focused = 1,   ///< The window gained focus.
 };
 
+/// What a promotion that asks for a new workspace (SelectWorkspace::workspace 0) names itself by: random
+/// bytes the client draws once per promotion and sends again with every re-ask of it.
+using CreationToken = std::array<std::byte, 16>;
+
 /// Client→server (Capability::DaemonFollow): select the one workspace this connection displays in full.
 /// The daemon pushes that workspace's layout and screens in full, and the other workspaces' panes as
 /// PaneSummary only.
@@ -1705,14 +1720,30 @@ struct SelectWorkspace
     /// Optional by omission, with no presence byte: it is written only when engaged, so a field appended
     /// after it must make the encoder always write this one, or a decoder would read the later field as this.
     std::optional<uint64_t> directoryFromSession = std::nullopt;
+    /// A promotion's "make at most one": a re-ask selects what it made. Only a creation (@ref workspace 0)
+    /// carries one; the daemon remembers which workspace it made for each token
+    /// (SessionHost::workspaceMadeFor), so a select asked again after its answer was lost selects that
+    /// workspace instead of making another.
+    ///
+    /// Appended after @ref directoryFromSession, which is then always written (0 standing for none, as no
+    /// session has that id). A written directory is followed by a byte saying whether a token comes (1) or
+    /// not (0), then the token's 16 bytes: a body that ends before that byte names none.
+    std::optional<CreationToken> creationToken = std::nullopt;
     bool operator==(SelectWorkspace const&) const = default;
 };
 
 /// Client→server (Capability::DaemonFollow): the window gained or lost focus. The daemon routes bells,
 /// clipboard writes and switch requests by the most recently focused window.
+///
+/// With Capability::DaemonAttention it also names the panes the window shows, whose output the daemon then
+/// does not flag for attention. A sender states them only to a daemon sharing the capability; the encoder
+/// always writes their count after the focus, which an older daemon, reading the focus alone, leaves unread.
 struct ReportFocus
 {
     WindowFocus focus = WindowFocus::Unfocused; ///< The window's focus now.
+    /// The sessions of the panes the window shows. Appended after @ref focus: a body from a sender from
+    /// before the field ends before it and reads as none.
+    std::vector<uint64_t> shownSessions = {};
     bool operator==(ReportFocus const&) const = default;
 };
 
@@ -1910,6 +1941,64 @@ struct SetWorkspaceColor
     bool operator==(SetWorkspaceColor const&) const = default;
 };
 
+/// The serials a window has seen of one pane's attention: every flag raised at or before them is
+/// acknowledged. The daemon's ledger and MarkSeen speak it alike.
+struct SeenSerials
+{
+    uint64_t activity = 0;         ///< The output serial seen; 0 acknowledges none.
+    uint64_t bell = 0;             ///< The bell serial seen; 0 acknowledges none.
+    uint64_t finished = 0;         ///< The finished-command serial seen; 0 acknowledges none.
+    uint64_t statusGeneration = 0; ///< The status generation seen.
+    bool operator==(SeenSerials const&) const = default;
+};
+
+/// Server→client (Capability::DaemonAttention): what one pane raised for the user's attention, as the
+/// daemon's attention ledger states it, in full each time it changes. Each flag carries the ledger serial
+/// that raised it last, which a window hands back in MarkSeen once it showed the pane.
+struct PaneAttentionState
+{
+    uint64_t session = 0;                           ///< The pane's session.
+    OutputActivity activity = OutputActivity::None; ///< Whether the pane printed output not yet seen.
+    uint64_t activitySerial = 0;      ///< The serial that raised @ref activity last; 0 for none.
+    PaneBell bell = PaneBell::Silent; ///< Whether the pane rang a bell not yet seen.
+    uint64_t bellSerial = 0;          ///< The serial of the latest bell; 0 for none.
+    /// The command that finished unseen, if one did.
+    std::optional<FinishedCommand> finished = std::nullopt;
+    uint64_t finishedSerial = 0; ///< The serial of the latest finish; 0 for none.
+    /// When @ref finished finished, in milliseconds since the Unix epoch (an svarint on the wire).
+    std::optional<int64_t> finishedAtUnixMs = std::nullopt;
+    uint64_t seenStatusGeneration = 0; ///< The highest status generation a window reported seen.
+    bool operator==(PaneAttentionState const&) const = default;
+};
+
+/// Client→server (Capability::DaemonAttention): the window showed a pane and saw its attention up to these
+/// serials. The daemon clears what they cover and tells every window sharing the capability. An unknown
+/// session changes nothing; there is no reply.
+struct MarkSeen
+{
+    uint64_t session = 0;  ///< The pane's session.
+    SeenSerials seen = {}; ///< What the window saw.
+    bool operator==(MarkSeen const&) const = default;
+};
+
+/// Why a connection asks to observe only.
+enum class ObserveCause : uint8_t
+{
+    Demoted = 0, ///< Its window leaves what it showed.
+    /// The promotion it asked for was withdrawn before its answer came: nothing of what the answer selected
+    /// was shown, so a workspace the promotion made is the daemon's to take back.
+    Withdrawn,
+};
+
+/// Client→server (Capability::Observe): the viewer connection stops showing its workspace and observes the
+/// daemon instead, as a connection of ConnectionRole::Observe does. There is no reply. The body is empty for
+/// a demotion; a withdrawn promotion's states its cause in one byte, which a daemon from before it ignores.
+struct ObserveOnly
+{
+    ObserveCause cause = ObserveCause::Demoted; ///< Why.
+    bool operator==(ObserveOnly const&) const = default;
+};
+
 /// @param summary A pane's summary.
 /// @return Whether it carries something a window raises for: a finished command, a bell, a notification.
 [[nodiscard]] inline bool carriesRaise(PaneSummary const& summary) noexcept
@@ -2071,7 +2160,10 @@ using DecodedPdu = std::variant<Invalid,
                                 CloseWorkspace,
                                 Goodbye,
                                 OpenFirstTab,
-                                SetWorkspaceColor>;
+                                SetWorkspaceColor,
+                                PaneAttentionState,
+                                MarkSeen,
+                                ObserveOnly>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

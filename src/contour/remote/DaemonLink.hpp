@@ -67,6 +67,13 @@ enum class WindowAdoption : uint8_t
 /// workspace it shows now, or why it does not.
 using SwitchLanded = std::function<void(std::expected<uint64_t, std::string>)>;
 
+/// What becomes of a daemon's connection as its window leaves the daemon (DaemonLink::leaveDaemon()).
+enum class LeaveKind : uint8_t
+{
+    End = 0,        ///< The connection is stopped, as a link that served its last window is.
+    KeepAsObserver, ///< The connection is demoted, and handed back once no pane of it is bound.
+};
+
 /// What a switch that has not landed yet waits for.
 enum class SwitchWait : uint8_t
 {
@@ -83,6 +90,9 @@ struct SwitchArrival
     /// opens a window of its own for the workspace.
     session::SwitchMode mode = session::SwitchMode::Switch;
     SwitchLanded landed; ///< Told once: the workspace is shown (Open) or ready to be (Switch), or it failed.
+    /// What the window activates once it shows the workspace, once; the daemon's active tab and pane for
+    /// none.
+    session::LandingFocus focus = {};
 };
 
 /// How a link that opens a window of its own (IDaemonLinkHost::startWindowLink) opens it.
@@ -91,6 +101,9 @@ struct WindowOpening
     /// The daemon's id of the tab the window activates once it shows the workspace -- the tab torn off
     /// another window --; none for the tab the daemon names.
     std::optional<uint64_t> activeTab = std::nullopt;
+    /// The pane the window activates once it shows the workspace, by its daemon session; none for the tab's
+    /// active pane.
+    std::optional<window::PaneKey> activePane = std::nullopt;
     /// Where the window opens; null for the default placement, and once the platform took the screen away
     /// while the link connected.
     QPointer<QScreen> screen = nullptr;
@@ -172,6 +185,50 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
                DaemonLinkConfig config,
                IDaemonLinkHost& host,
                session::TerminalSessionManager& sessions);
+
+  private:
+    /// What only adopt() can name: the constructor taking it is public so that std::make_unique reaches it.
+    struct AdoptKey
+    {
+        explicit AdoptKey() = default;
+    };
+
+  public:
+    /// What both the dialling constructor and adopt() build on. @see DaemonLink()
+    /// @param observing The connection to take over, already connected; null to make one from @p config and
+    ///        start connecting it.
+    DaemonLink(AdoptKey key,
+               Id id,
+               DaemonLinkConfig config,
+               std::unique_ptr<NativeController> observing,
+               IDaemonLinkHost& host,
+               session::TerminalSessionManager& sessions);
+
+    /// A link built around an observer the presence handed over, promoted to show @p request.workspace:
+    /// wired as the constructor wires a link, then promoted (NativeController::promote()) instead of
+    /// connected. A promotion that lands makes the link attached (its arrival then told as for any link a
+    /// switch started); one refused or failed tells the arrival why, and hands the observer, demoted back,
+    /// to @p giveBack.
+    /// @param id The link's name among the application's.
+    /// @param config Its locality, address, upkeep and askpass route; its controller configuration is the
+    ///        siblings' only, as the adopted controller keeps its own.
+    /// @param observing The connected observer; never null.
+    /// @param request What to show, and the adopting window's geometry.
+    /// @param interactive What later dials go through, prompting in the window; never null.
+    /// @param giveBack Where the connection goes as the link leaves its daemon, or gives up; called exactly
+    ///        once, with null when the connection was stopped instead.
+    /// @param host The application. Borrowed; it must outlive the link.
+    /// @param sessions The manager the link's windows live in. Borrowed.
+    /// @return The link, owned by the caller.
+    [[nodiscard]] static std::unique_ptr<DaemonLink> adopt(
+        Id id,
+        DaemonLinkConfig config,
+        std::unique_ptr<NativeController> observing,
+        PromotionRequest request,
+        std::shared_ptr<vthost::ITransportFactory> interactive,
+        GiveBack giveBack,
+        IDaemonLinkHost& host,
+        session::TerminalSessionManager& sessions);
     /// Releases the windows it serves (session::TerminalSessionManager::releaseBinding) unless it stopped
     /// already: a manager outliving the link must not keep naming it. The manager must still exist then.
     ~DaemonLink() override;
@@ -184,8 +241,19 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @return The link's name among the application's.
     [[nodiscard]] Id id() const noexcept { return _id; }
 
-    /// @return The controller, until the attach was given up (pollAttached()); null after.
+    /// @return The controller, until the attach was given up (pollAttached()) or the connection was handed
+    ///         back (leaveDaemon()); null after.
     [[nodiscard]] NativeController* liveController() noexcept { return _controller.get(); }
+
+    /// The window leaves the daemon: KeepAsObserver demotes the connection on the wire at once (withdrawing a
+    /// promotion still under way) and hands it to @p giveBack once the link ended and the last pane unbound,
+    /// if still Connected and an observer; End stops it as today, as does KeepAsObserver for a connection
+    /// that cannot be demoted now (one reconnecting). Either way @p giveBack is told exactly once, with null
+    /// when the connection was stopped. Idempotent; the last call's kind wins, unless the connection was
+    /// stopped already.
+    /// @param kind What becomes of the connection.
+    /// @param giveBack Where it goes; empty for the one adopt() was given.
+    void leaveDaemon(LeaveKind kind, GiveBack giveBack);
 
     /// @return Whether pollAttached() succeeded: the attach settled connected, was not given up, and the
     ///         link has not stopped since.
@@ -203,7 +271,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     void resumeAsLaunch();
 
     /// @return Whether the link stopped because its last window went (@see lastWindowReleased), its
-    ///         controller has wound down and binds no pane any more: nothing needs it, and it may be
+    ///         controller has wound down and binds no pane any more, and no connection waits in it to be
+    ///         handed back (leaveDaemon(LeaveKind::KeepAsObserver)): nothing needs it, and it may be
     ///         destroyed.
     [[nodiscard]] bool isFinished() const;
 
@@ -216,6 +285,7 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     [[nodiscard]] std::string_view hostLabel() const noexcept override;
     [[nodiscard]] std::string_view chromeLabel() const noexcept override;
     [[nodiscard]] std::optional<session::SwitchTarget> daemonTarget() const override;
+    [[nodiscard]] std::optional<window::DaemonRef> daemonRef() const override;
     [[nodiscard]] window::DaemonLocality daemonLocality() const noexcept override { return _locality; }
 
     /// The last window the link served went (closed, or bound elsewhere): nothing is left for the connection
@@ -231,7 +301,6 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @param window The closed window.
     void windowClosed(vtworkspace::WorkspaceId window) override;
 
-    void reportFocus(vthost::proto::WindowFocus focus) override;
     /// @return Whether its window raises, as its daemon last said; Raise for a link that has given up, whose
     ///         window has no daemon's panes left to ring for.
     [[nodiscard]] vthost::proto::RaiseRole raiseRole() const noexcept override;
@@ -243,9 +312,25 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// @return Every workspace of its daemon, as its connection holds them; none while it holds no
     ///         connection.
     [[nodiscard]] window::WorkspaceDirectory directory() const override;
+    /// @return Its daemon's marks of every pane (NativeController::daemonMarks()), read without listing a
+    ///         workspace; none while it holds no connection.
+    [[nodiscard]] std::unordered_map<uint64_t, window::SessionAttention> daemonMarks() const override;
+    /// @return Who keeps its panes' attention flags: its daemon, when its connection shares them
+    ///         (NativeController::flagSource()); the window while it holds no connection.
+    [[nodiscard]] window::FlagSource flagSource() const override;
+    /// Hands what its window saw of @p pane to its daemon (NativeController::markSeen()). No-op once given up
+    /// or stopped.
+    /// @param pane The pane, by its daemon session.
+    /// @param seen What the window saw of it.
+    void markSeen(window::PaneKey pane, window::PaneSeen seen) override;
+    /// Tells its daemon its window's focus and shown panes (NativeController::reportShown()), which the
+    /// controller states again to every connection after. No-op once given up or stopped.
+    /// @param focus The window's focus now.
+    /// @param panes The panes the window shows, by their daemon sessions.
+    void reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes) override;
     /// Has its window show @p workspace of its daemon (selectWorkspace()); a refusal is logged, as the
-    /// window has no one to tell,
-    /// and a refusal by the daemon cancels the window's pending jump (WindowController::cancelPendingJump()).
+    /// window has no one to tell, and a refusal by the daemon cancels what the window's request was made for
+    /// -- unless a later request replaced it (WindowController::cancelPendingJumpOf()).
     /// @param workspace The daemon's workspace id.
     /// @return Refused when the selection could not be sent.
     window::SelectResult select(uint64_t workspace) override;
@@ -326,7 +411,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     [[nodiscard]] std::expected<void, std::string> canAdoptWindow(vtworkspace::WorkspaceId window) const;
 
     /// A link a switch started that is not wanted any more: it ends, and with its connection goes its
-    /// selection.
+    /// selection. An adopted link's connection is not stopped but given back
+    /// (leaveDaemon(LeaveKind::KeepAsObserver)), its promotion withdrawn if still under way.
     void abandon();
 
     /// @return What the link's drift badge shows.
@@ -405,11 +491,34 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
         return _state == AttachState::Stopped || _state == AttachState::Ended;
     }
 
-    /// @return The live controller, else the given-up one: the one the link's ptys were made by.
-    [[nodiscard]] NativeController& anyController() const noexcept
+    /// @return The live controller, else the given-up one: the one the link's ptys were made by; null once
+    ///         the connection was handed back, when the link is stopped and binds nothing.
+    [[nodiscard]] NativeController* anyController() const noexcept
     {
-        return _controller ? *_controller : *_givenUp;
+        return _controller ? _controller.get() : _givenUp.get();
     }
+
+    /// How the link came by its connection.
+    enum class LinkOrigin : uint8_t
+    {
+        Dialled = 0, ///< It dialled one of its own.
+        Adopted,     ///< It took over the presence's observer (adopt()).
+    };
+
+    /// An adopted link's promotion ended: attached once landed; else its arrival is told why, and the
+    /// observer handed back.
+    void promotionLanded(std::expected<uint64_t, std::string> landed);
+    /// Stops the ended link's controller off the GUI thread, and has the link destroyed once it wound down
+    /// and binds no pane (@see end()).
+    void stopEnded();
+    /// An ended link leaving as an observer: once no pane is bound, hands the connection to the give-back if
+    /// still Connected and an observer, else stops it and gives back nothing.
+    void handBackOnceUnbound();
+    /// Tells the give-back, if not told yet, what becomes of the connection.
+    void tellGiveBack(std::unique_ptr<NativeController> controller);
+    /// Activates what the link's role names (SwitchArrival::focus, WindowOpening::activeTab/activePane) in
+    /// @p local, once, as the window shows its workspace for the first time.
+    void applyLandingFocus(vtworkspace::WorkspaceId local);
 
     /// @return Whether the live or the given-up controller still binds a pane (NativeController::bindsPanes).
     [[nodiscard]] bool bindsPanes() const;
@@ -459,7 +568,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// Ends a wait for a first tab, if one was latched, and logs how it ended.
     void endSwitchWait(std::string_view how);
     /// @return The workspace the window is to display: what the connection selects, unless a switch that was
-    ///         given up still waits for its revert (@see cancelSwitch()).
+    ///         given up still waits for its revert (@see cancelSwitch()), or it is what a switch the one
+    ///         under way replaced selected (PendingSwitch::replaced).
     [[nodiscard]] uint64_t followedSelection();
     /// @return Whether the connection's last settled layout of @p daemonWorkspace holds a tab: only then has
     ///         a window switched to it something to show. One that holds none would empty the window, which
@@ -486,11 +596,20 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// held the raise role (NativeController::takeRaised) -- a bell, a desktop notification, a command that
     /// finished -- as a pane out of sight would (IDaemonLinkHost::elsewhereNotices); each once.
     void raiseElsewhere();
-    /// Rings the bell, and alerts, on the link's window, as @p bell says.
-    void ringWindowBell(config::Bell const& bell);
-    /// What a link a switch started, or a switch under way, makes of the connection's state: anything but
-    /// connected or connecting before the workspace was shown fails it.
-    void noteConnectionForSwitch();
+    /// Whether the connection went since the link last looked at its state.
+    enum class ConnectionLoss : uint8_t
+    {
+        None = 0, ///< Not lost since.
+        Lost, ///< Lost meanwhile, and possibly found again: what was asked of the lost one is not answered.
+    };
+    /// Looks at the controller's count of lost connections (NativeController::connectionLosses()): a state
+    /// change is heard queued, by when a lost connection may be up again.
+    /// @return Whether one was lost since the last look.
+    [[nodiscard]] ConnectionLoss noteConnectionLosses();
+    /// What a link a switch started, or a switch under way, makes of the connection's state: a loss, or
+    /// anything but connected or connecting, before the workspace was shown fails it.
+    /// @param loss Whether the connection went since the link last looked.
+    void noteConnectionForSwitch(ConnectionLoss loss);
     /// Stops, as the link no longer serves a window, and asks the host to destroy it (@see
     /// lastWindowReleased()).
     void end();
@@ -522,7 +641,11 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     std::string _clientRelease;
     AttachState _state = AttachState::Connecting;
 
-    /// The live controller; null once given up. Remote-backed sessions hold ptys that unregister from it.
+    /// Whether it dialled its connection or adopted one (adopt()); fixed at construction. Declared before
+    /// the controller, which its constructor argument becomes.
+    LinkOrigin _origin = LinkOrigin::Dialled;
+    /// The live controller; null once given up, or handed back. Remote-backed sessions hold ptys that
+    /// unregister from it.
     std::unique_ptr<NativeController> _controller;
     /// The controller given up on, stopped: kept rather than destroyed, because its destruction waits for a
     /// daemon start still under way (@see abandonConnect()). Null otherwise.
@@ -560,6 +683,10 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     DaemonLinkConfig _siblingTemplate;
     /// Why the link was started (@see LinkRole); fixed at construction, its report state aside.
     LinkRole _role;
+    /// What becomes of the connection as the link ends (leaveDaemon()); none: it is stopped.
+    std::optional<LeaveKind> _leaving;
+    /// Where the connection goes as the link leaves its daemon; emptied as it is told, so told once.
+    GiveBack _giveBack;
     /// A switch of the window to another workspace of its daemon, waiting for the daemon's selection to move
     /// there and the workspace to hold a tab (@see selectWorkspace()).
     struct PendingSwitch
@@ -570,6 +697,9 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
         /// not among them.
         std::set<uint64_t> before;
         SwitchLanded landed; ///< Told how it went.
+        /// The workspaces of the window's earlier switches this one replaced: the daemon may state one of
+        /// them selected before it answers this one, and the window does not follow it (followedSelection()).
+        std::set<uint64_t> replaced;
     };
     std::optional<PendingSwitch> _switch;
     /// What the switch under way waits for (switchWait()): decided as the target's settled layout arrives
@@ -578,6 +708,8 @@ class DaemonLink final: public session::WindowBinding, public window::IWorkspace
     /// What a given-up switch selected again (cancelSwitch()): until the daemon states it, a batch still
     /// stating the given-up selection is not followed. Forgotten with the connection.
     std::optional<uint64_t> _revertTo;
+    /// The controller's lost connections the link has heard of (noteConnectionLosses()).
+    uint64_t _connectionLossesSeen = 0;
     /// The move (session::TerminalSessionManager::PendingRemoteMove::request) a window of its own was opened
     /// for, so that a later reconcile opens no second one; 0 for none.
     uint64_t _movedWindowRequest = 0;

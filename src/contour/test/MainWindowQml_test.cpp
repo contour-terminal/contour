@@ -41,6 +41,7 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PickerAccessory.hpp>
 #include <contour/window/SidebarControls.hpp>
+#include <contour/window/SidebarDaemonRow.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
@@ -2003,26 +2004,29 @@ namespace
     }
     for (auto const& row: contour::window::HeaderBarItems)
         add(row.iconName);
+    // An icon bundled by URL: "qrc:/contour/…" → ":/contour/…".
+    auto const addUrl = [&icons](std::string_view url) {
+        auto const path = QString::fromUtf8(url.data(), static_cast<qsizetype>(url.size())).mid(3);
+        if (!path.isEmpty() && !icons.contains(path))
+            icons.append(path);
+    };
     // The sidebar's own buttons name their bundled copies by URL (qrc:/contour/icons/<name>.svg).
     for (auto const& row: contour::window::SidebarControlRows)
         for (auto const& face: row.faces)
-            if (auto const url = QString::fromUtf8(face.bundledIcon.data(),
-                                                   static_cast<qsizetype>(face.bundledIcon.size()));
-                !url.isEmpty() && !icons.contains(url.mid(3)))
-                icons.append(url.mid(3)); // "qrc:/contour/…" → ":/contour/…"
+            addUrl(face.bundledIcon);
     // The sidebar's disclosure chevron, which its look traits name by URL as well.
-    if (auto const chevron =
-            QString::fromUtf8(contour::config::SidebarChevronIcon.data(),
-                              static_cast<qsizetype>(contour::config::SidebarChevronIcon.size()));
-        !icons.contains(chevron.mid(3)))
-        icons.append(chevron.mid(3));
+    addUrl(contour::config::SidebarChevronIcon);
     // A picker row's "open in new window" button, the same way.
     for (auto const& row: contour::window::PickerAccessoryRows)
-        if (auto const url =
-                QString::fromUtf8(row.openInNewWindow.bundledIcon.data(),
-                                  static_cast<qsizetype>(row.openInNewWindow.bundledIcon.size()));
-            !url.isEmpty() && !icons.contains(url.mid(3)))
-            icons.append(url.mid(3));
+        addUrl(row.openInNewWindow.bundledIcon);
+    // A daemon row's locality icons and its buttons' icon-only forms, by URL too.
+    for (auto const& face: contour::window::DaemonRowFaces)
+    {
+        addUrl(face.localIcon);
+        addUrl(face.remoteIcon);
+    }
+    for (auto const& face: contour::window::DaemonRowButtonFaces)
+        addUrl(face.icon);
     // The secure-input lock names its icon in SecureInputLock.qml, not in a table.
     add("lock-symbolic");
     return icons;
@@ -4047,7 +4051,7 @@ TEST_CASE("the Fluent band is cleared over Mica, and tinted without it (offscree
     }
 }
 
-TEST_CASE("the Terminal row's band keeps the palette and one cell (offscreen)",
+TEST_CASE("the Terminal row's band is its bar, one cell high (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
     QQmlEngine engine;
@@ -4056,7 +4060,10 @@ TEST_CASE("the Terminal row's band keeps the palette and one cell (offscreen)",
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
     showWindow(*root);
     REQUIRE(controller.titleBandHeight() == 0);
-    CHECK(bandBackgroundOf(*root) == QGuiApplication::palette().color(QPalette::Window));
+    // The scheme's bar colour, as the row's sidebar and tabs are, whose ink everything on the band takes.
+    auto const* colors = chromeStyleOf(engine).property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    CHECK(bandBackgroundOf(*root) == colors->property("bannerFill").value<QColor>());
     CHECK(named(*root, QStringLiteral("titleBar")).height()
           == chromeStyleOf(engine).property("cellHeight").toReal());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -4950,6 +4957,49 @@ TEST_CASE("Main.qml notices: the toast sits in a band that holds it, else in the
         REQUIRE(style != nullptr);
         CHECK(toast->height()
               == Catch::Approx(style->property("size").value<QObject*>()->property("toast").toDouble()));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    // Review (Phase 6 round 2, item 4): the band's centre -- the title, or the breadcrumb beside a sidebar --
+    // stuck out beside the pill ("…aude"); it gives way while the toast holds the centre.
+    SECTION("the macOS row: the band's centre gives way to the toast")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        showWindow(*root);
+        auto const* title = root->findChild<QQuickItem*>(QStringLiteral("bandTitleRow"));
+        auto const* breadcrumb = root->findChild<QQuickItem*>(QStringLiteral("breadcrumb"));
+        REQUIRE(title != nullptr);
+        REQUIRE(breadcrumb != nullptr);
+        // Whichever the row's centre is now, both give way alike.
+        CHECK(title->opacity() == 1);
+        CHECK(breadcrumb->opacity() == 1);
+
+        controller.notices().post(copiedNotice());
+        QCoreApplication::processEvents();
+        auto const* toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(toast->property("host").toString() == "titleBand");
+        CHECK(QTest::qWaitFor([&] { return title->opacity() == 0 && breadcrumb->opacity() == 0; }, 2000));
+        // Review (Phase 7, M6): gone, not only faded -- no click target beside the pill, nothing read out.
+        CHECK_FALSE(title->isEnabled());
+        CHECK_FALSE(breadcrumb->isEnabled());
+        auto const ignored = [](QQuickItem const* item) {
+            for (auto const* child: item->findChildren<QObject*>(Qt::FindDirectChildrenOnly))
+                if (child->inherits("QQuickAccessibleAttached"))
+                    return child->property("ignored").toBool();
+            return false;
+        };
+        for (auto const* part: { "bandTitle", "bandJump" })
+        {
+            INFO(part);
+            auto const* item = root->findChild<QQuickItem*>(QString::fromLatin1(part));
+            REQUIRE(item != nullptr);
+            CHECK(ignored(item));
+        }
+        CHECK(ignored(breadcrumb));
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 
@@ -5950,4 +6000,171 @@ TEST_CASE("Main.qml shows the ssh prompts of its window and answers them (offscr
     CHECK(answers.front().outcome == contour::askpass::AskpassOutcome::Answered);
     CHECK(answers.front().answer == "hunter2");
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the chip says Connecting and its tooltip names the CancelSwitch chord (offscreen)",
+          "[contour][gui][qml][mainwindow][chip][jump]")
+{
+    // Correction 17: with the sidebar hidden, a jump under way is said by the chip in the band -- where it
+    // goes, that it is connecting -- and a click on it cancels the jump, so its tooltip names CancelSwitch's
+    // chord rather than the switcher's.
+    using contour::config::TabPlacement;
+    auto const style =
+        GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(style));
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3,
+                                                      .tabBarVisibility = TabBarVisibility::Always,
+                                                      .daemonName = QStringLiteral("local") } };
+    controller.setTabPlacement(TabPlacement::Sidebar);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+    showWindow(*root);
+    auto* chip = root->findChild<QQuickItem*>(QStringLiteral("workspaceChip"));
+    REQUIRE(chip != nullptr);
+    auto const tooltipCommand = [&] {
+        for (auto* child: chip->findChildren<QObject*>())
+            if (child->property("toolTipName").toString() == QStringLiteral("workspaceChipToolTip"))
+                return child->property("shortcutCommand").toString();
+        return QString {};
+    };
+    CHECK(tooltipCommand() == QStringLiteral("ShowSwitcher"));
+
+    controller.pendingDaemon = QStringLiteral("starfive");
+    controller.refreshChip();
+    QCoreApplication::processEvents();
+
+    CHECK(chip->isVisible());
+    CHECK(part(*chip, QStringLiteral("workspaceChipDaemon")).property("text").toString()
+          == QStringLiteral("starfive"));
+    CHECK(tooltipCommand() == QStringLiteral("CancelSwitch"));
+    CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
+          == QStringLiteral("Connecting to starfive…"));
+    // It names no workspace yet, so no separator dangles after the daemon; the dot is a connection's under
+    // way. Nor does it draw the dropdown's caret: a click on it cancels the jump, and drops nothing down.
+    CHECK_FALSE(part(*chip, QStringLiteral("workspaceChipSeparator")).isVisible());
+    CHECK_FALSE(part(*chip, QStringLiteral("workspaceChipCaret")).isVisible());
+    CHECK(controller.chip()->connectionState()
+          == static_cast<int>(contour::window::HostChipState::Reconnecting));
+
+    // Landed: the chip is the window's again.
+    controller.pendingDaemon.clear();
+    controller.refreshChip();
+    QCoreApplication::processEvents();
+    CHECK(tooltipCommand() == QStringLiteral("ShowSwitcher"));
+    CHECK(part(*chip, QStringLiteral("workspaceChipCaret")).isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the hide toast's Undo is a button on the toast, and taking it ends the toast (offscreen)",
+          "[contour][gui][qml][mainwindow][notices][notice]")
+{
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Fluent, ChromeStyle::Terminal })
+    {
+        INFO("style " << static_cast<int>(style));
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+        showWindow(*root);
+
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        auto* const toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+        auto* const undo = toast->findChild<QQuickItem*>(QStringLiteral("toastAction"));
+        REQUIRE(undo != nullptr);
+        CHECK(undo->isVisible());
+        CHECK(undo->property("accessibleName").toString() == QStringLiteral("Undo"));
+        // Set apart from the toast's words at rest: a fill on the native rows, brackets on the Terminal row,
+        // where a button is a run of cells (Phase 6 review, M6).
+        auto const* const fill = undo->findChild<QQuickItem*>(QStringLiteral("toolbarButtonBackground"));
+        REQUIRE(fill != nullptr);
+        if (style == ChromeStyle::Terminal)
+            CHECK(undo->property("glyph").toString() == QStringLiteral("[Undo]"));
+        else
+        {
+            CHECK(undo->property("glyph").toString() == QStringLiteral("Undo"));
+            CHECK(fill->property("color").value<QColor>().alpha() > 0);
+        }
+        // Inside the pill.
+        CHECK(sceneRectOf(*toast).contains(sceneRectOf(*undo).center()));
+
+        // Its time stands still while the pointer is on its Undo, and runs again once it leaves.
+        QTest::mouseMove(toast->window(), sceneRectOf(*undo).center().toPoint());
+        QCoreApplication::processEvents();
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        QCoreApplication::processEvents();
+        CHECK(controller.notices().toastShown());
+        QTest::mouseMove(toast->window(), QPoint { 2, toast->window()->height() - 2 });
+        QCoreApplication::processEvents();
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        CHECK_FALSE(controller.notices().toastShown());
+
+        // Taken, it ends the toast.
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+
+        QTest::mouseClick(
+            toast->window(), Qt::LeftButton, Qt::NoModifier, sceneRectOf(*undo).center().toPoint());
+        QCoreApplication::processEvents();
+        CHECK_FALSE(controller.notices().toastShown());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+// Review (pass 2, N4): the keyboard holds the hide toast as the pointer does, so a user who tabbed to its
+// Undo does not lose it to the timeout; Return then takes it.
+TEST_CASE("the hide toast stays while the keyboard is on its Undo (offscreen)",
+          "[contour][gui][qml][mainwindow][notices][notice]")
+{
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Fluent, ChromeStyle::Terminal })
+    {
+        INFO("style " << static_cast<int>(style));
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+        showWindow(*root);
+
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        auto* const toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+        auto* const undo = toast->findChild<QQuickItem*>(QStringLiteral("toastAction"));
+        REQUIRE(undo != nullptr);
+        CHECK(undo->activeFocusOnTab());
+
+        undo->forceActiveFocus(Qt::TabFocusReason);
+        REQUIRE(QTest::qWaitFor([&] { return undo->hasActiveFocus(); }, 1000));
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        QCoreApplication::processEvents();
+        CHECK(controller.notices().toastShown());
+
+        // Return takes it, and ends the toast.
+        QTest::keyClick(toast->window(), Qt::Key_Return);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(controller.notices().toastShown());
+
+        // A focused toast let go of runs its whole time again.
+        controller.notices().post(contour::window::daemonHiddenNotice("starfive", "host:starfive"));
+        QCoreApplication::processEvents();
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, 2000));
+        undo->forceActiveFocus(Qt::TabFocusReason);
+        REQUIRE(QTest::qWaitFor([&] { return undo->hasActiveFocus(); }, 1000));
+        undo->setFocus(false);
+        REQUIRE(QTest::qWaitFor([&] { return !undo->hasActiveFocus(); }, 1000));
+        controller.noticeClock.advance(std::chrono::seconds { 10 });
+        controller.notices().expireDue();
+        CHECK_FALSE(controller.notices().toastShown());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
 }

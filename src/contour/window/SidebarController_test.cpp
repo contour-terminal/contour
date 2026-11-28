@@ -14,6 +14,7 @@
 #include <contour/test/ContextMenuRows.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/SidebarFakes.hpp>
 #include <contour/window/SwitcherController.hpp>
 #include <contour/window/SwitcherPresenter.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -61,30 +62,14 @@ void useNativeSidebarDefaults(contour::test::TestApp& app)
     return static_cast<int>(visibility);
 }
 
+using contour::test::FakeDirectorySource;
 using contour::window::DirectoryPane;
 using contour::window::DirectoryTab;
 using contour::window::DirectoryWorkspace;
-using contour::window::IWorkspaceDirectorySource;
 using contour::window::PaneKey;
 using contour::window::SelectResult;
 using contour::window::SidebarPresence;
 using contour::window::SidebarRowKind;
-using contour::window::WorkspaceDirectory;
-
-/// A directory a test scripts, with ids of its own as a daemon's are, and answers it chooses.
-struct ScriptedSource final: IWorkspaceDirectorySource
-{
-    WorkspaceDirectory listed;
-    SelectResult answer = SelectResult::Requested;
-    std::vector<uint64_t> selected;
-
-    [[nodiscard]] WorkspaceDirectory directory() const override { return listed; }
-    SelectResult select(uint64_t workspace) override
-    {
-        selected.push_back(workspace);
-        return answer;
-    }
-};
 
 [[nodiscard]] DirectoryTab tabHolding(uint64_t id, std::vector<uint64_t> const& panes)
 {
@@ -156,7 +141,7 @@ TEST_CASE("a sidebar action whose pane is not there waits and never runs on the 
     std::ignore = contour::test::createSessionTabs(app.manager(), *window, 2);
 
     // The directory lists two tabs whose panes this window has no session for.
-    auto source = ScriptedSource {};
+    auto source = FakeDirectorySource {};
     auto const shown = window->directorySource()->directory().selected;
     REQUIRE(shown.has_value());
     source.listed.selected = shown;
@@ -184,7 +169,7 @@ TEST_CASE("a refused workspace selection drops the sidebar action that waited fo
         contour::test::ScopedController { app.manager(), contour::config::MenuPresentation::InScene };
     std::ignore = contour::test::createSessionTabs(app.manager(), *window, 2);
 
-    auto source = ScriptedSource {};
+    auto source = FakeDirectorySource {};
     auto const shown = window->directorySource()->directory().selected.value_or(1);
     source.listed.selected = shown;
     source.listed.workspaces = {
@@ -226,7 +211,7 @@ TEST_CASE("a sidebar menu's Mark seen, Move and Rename act on a background row w
     std::ignore = contour::test::createSessionTabs(app.manager(), *window, 1);
 
     // A background workspace whose second tab's pane finished a command nobody has seen.
-    auto source = ScriptedSource {};
+    auto source = FakeDirectorySource {};
     auto const shown = window->directorySource()->directory().selected.value_or(1);
     source.listed.selected = shown;
     auto there = DirectoryWorkspace { .id = 777,
@@ -309,7 +294,7 @@ TEST_CASE("the displayed tab is the one holding the active pane, whatever id the
     SECTION("a daemon's source: its tab ids are its own")
     {
         auto const active = app.manager().paneKeyOf(window->activeSession()->modelSessionId());
-        auto source = ScriptedSource {};
+        auto source = FakeDirectorySource {};
         auto const shown = window->directorySource()->directory().selected.value_or(1);
         source.listed.selected = shown;
         source.listed.workspaces = { DirectoryWorkspace {
@@ -609,19 +594,18 @@ TEST_CASE("a sidebar menu's Close Tab… asks first and closes the row it was op
         return session->terminal().device().isClosed();
     };
     REQUIRE(asked.count() == 1);
-    CHECK(asked.front().at(0).toInt() == static_cast<int>(contour::window::CloseKind::Tab));
-    CHECK(asked.front().at(2).toULongLong() == made.tabs[0].value);
+    auto const node = asked.front().at(0);
+    REQUIRE(node.metaType() == QMetaType::fromType<contour::window::CloseNode>());
+    CHECK(node.value<contour::window::CloseNode>().kind == contour::window::CloseKind::Tab);
+    CHECK(node.value<contour::window::CloseNode>().row.tab == made.tabs[0].value);
     CHECK(window->count() == 3);
     CHECK_FALSE(closedSession(0));
 
     // The destructive answer ends the tab the menu was opened on, not the one the window shows.
-    auto const wording = window->closeConfirmation(
-        static_cast<int>(contour::window::CloseKind::Tab), 0, made.tabs[0].value, "t", {});
+    auto const wording = window->closeConfirmation(node, "t", {});
     CHECK(wording.value("acceptText").toString() == "Close Tab");
-    window->confirmClose(static_cast<int>(contour::window::CloseKind::Tab),
-                         asked.front().at(1).toULongLong(),
-                         made.tabs[0].value,
-                         0);
+    CHECK(window->closeConfirmation(QVariant { 7 }, "t", {}).isEmpty());
+    window->confirmClose(node);
     CHECK(closedSession(0));
     CHECK_FALSE(closedSession(1));
     CHECK_FALSE(closedSession(2));
@@ -865,6 +849,25 @@ TEST_CASE("a one-tab workspace's menu merges its tab into another tab", "[contou
     CHECK(window->displayedWorkspace() == firstWorkspace);
 }
 
+namespace
+{
+/// @return The row key a colour pick request (workspaceColorPickRequested(), sidebarTabColorPickRequested())
+///         carries for the picker to hand back.
+[[nodiscard]] contour::window::SidebarRowKey pickedRow(QList<QVariant> const& request)
+{
+    auto const& key = request.at(1);
+    REQUIRE(key.metaType() == QMetaType::fromType<contour::window::SidebarRowKey>());
+    return key.value<contour::window::SidebarRowKey>();
+}
+
+/// @return Row @p row of @p window's sidebar's key, as a picker carries it.
+[[nodiscard]] QVariant rowKeyAt(contour::window::WindowController& window, int row)
+{
+    REQUIRE(row >= 0);
+    return QVariant::fromValue(window.sidebar().rows()[static_cast<std::size_t>(row)].key);
+}
+} // namespace
+
 TEST_CASE("SetWorkspaceColor colours the displayed workspace's rows, ResetWorkspaceColor clears them",
           "[contour][sidebar][controller]")
 {
@@ -906,7 +909,8 @@ TEST_CASE("SetWorkspaceColor colours the displayed workspace's rows, ResetWorksp
     auto picks = QSignalSpy { &*window, &contour::window::WindowController::workspaceColorPickRequested };
     CHECK((*session)(contour::actions::SetWorkspaceColor {}));
     REQUIRE(picks.count() == 1);
-    CHECK(picks.at(0).at(0).value<quint64>() == shown.value);
+    CHECK(picks.at(0).at(0).toInt() == workspaceRowOf(*window, shown.value));
+    CHECK(pickedRow(picks.at(0)) == window->sidebar().rows()[static_cast<std::size_t>(shownRow)].key);
 }
 
 namespace
@@ -988,15 +992,16 @@ TEST_CASE("the workspace menu's Workspace Color colours its workspace without sh
         REQUIRE(custom.has_value());
         window->triggerSidebarContextMenuAction(*custom);
         REQUIRE(picks.count() == 1);
-        CHECK(picks.at(0).at(0).value<quint64>() == other.value);
+        CHECK(picks.at(0).at(0).toInt() == otherRow());
+        CHECK(pickedRow(picks.at(0)).workspace == other.value);
         CHECK(window->displayedWorkspace() == shown);
     }
-    SECTION("the picker's choice and its reset colour it by id")
+    SECTION("the picker's choice and its reset colour the row it was opened for")
     {
-        window->setWorkspaceColor(other.value, QColor { 0x12, 0x34, 0x56 });
+        window->setRowColor(rowKeyAt(*window, otherRow()), QColor { 0x12, 0x34, 0x56 });
         QCoreApplication::processEvents();
         CHECK(colorOfOther() == QColor { 0x12, 0x34, 0x56 });
-        window->resetWorkspaceColor(other.value);
+        window->resetRowColor(rowKeyAt(*window, otherRow()));
         QCoreApplication::processEvents();
         CHECK(colorOfOther().alpha() == 0);
         CHECK(window->displayedWorkspace() == shown);
@@ -1071,16 +1076,16 @@ TEST_CASE("a sidebar tab menu's Tab Color colours its own tab, not the focused o
         window->triggerSidebarContextMenuAction(*custom);
         REQUIRE(picks.count() == 1);
         CHECK(picks.at(0).at(0).toInt() == tabRowOf(*window, right.value));
-        CHECK(picks.at(0).at(1).value<quint64>() == right.value);
+        CHECK(pickedRow(picks.at(0)).tab == right.value);
         CHECK(stripPicks.count() == 0); // not the tab strip's picker, which a sidebar placement does not draw
         CHECK(activeTab() == focused);
     }
-    SECTION("the picker's choice and its reset colour that tab by id")
+    SECTION("the picker's choice and its reset colour the tab row it was opened for")
     {
-        window->setTabColorOf(right.value, QColor { 0x12, 0x34, 0x56 });
+        window->setRowColor(rowKeyAt(*window, tabRowOf(*window, right.value)), QColor { 0x12, 0x34, 0x56 });
         CHECK(userColorOf(right) == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
         CHECK_FALSE(userColorOf(focused).has_value());
-        window->resetTabColorOf(right.value);
+        window->resetRowColor(rowKeyAt(*window, tabRowOf(*window, right.value)));
         CHECK_FALSE(userColorOf(right).has_value());
         CHECK(activeTab() == focused);
     }
@@ -1091,9 +1096,11 @@ TEST_CASE("a sidebar tab menu's Tab Color colours its own tab, not the focused o
         auto const theirs = contour::test::createSessionTabs(manager, *other, 1).tabs.at(0);
         manager.model().setTabColor(
             theirs, vtworkspace::TabColorSource::User, vtbackend::RGBColor { 4, 5, 6 });
-        window->setTabColorOf(theirs.value, QColor { 0x12, 0x34, 0x56 });
+        auto const theirsHere = QVariant::fromValue(
+            window->sidebar().ownRowKey(contour::window::SidebarRowKind::Tab, 0, theirs.value));
+        window->setRowColor(theirsHere, QColor { 0x12, 0x34, 0x56 });
         CHECK(userColorOf(theirs) == vtbackend::RGBColor { 4, 5, 6 });
-        window->resetTabColorOf(theirs.value);
+        window->resetRowColor(theirsHere);
         CHECK(userColorOf(theirs) == vtbackend::RGBColor { 4, 5, 6 });
     }
 }
@@ -1135,7 +1142,7 @@ TEST_CASE("SetTabColor without a colour opens the sidebar's picker where no tab 
         CHECK(stripPicks.count() == 0);
         REQUIRE(picks.count() == 1);
         CHECK(picks.at(0).at(0).toInt() == tabRowOf(*window, focused.value));
-        CHECK(picks.at(0).at(1).value<quint64>() == focused.value);
+        CHECK(pickedRow(picks.at(0)).tab == focused.value);
     }
 }
 

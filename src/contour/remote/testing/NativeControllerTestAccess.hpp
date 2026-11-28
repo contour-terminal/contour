@@ -13,6 +13,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -48,6 +49,23 @@ struct NativeControllerTestAccess
         auto const drained = std::make_shared<std::promise<void>>();
         controller._reactor.post([drained] { drained->set_value(); });
         return drained->get_future().wait_for(timeout) == std::future_status::ready;
+    }
+
+    /// Asks the reactor how many sessions' screens the connection holds, and waits for its answer: a look at
+    /// what a demoted connection keeps. Never from the reactor thread.
+    /// @return The count; none when the reactor did not answer within two seconds.
+    [[nodiscard]] static std::optional<std::size_t> heldScreenCount(
+        contour::remote::NativeController& controller)
+    {
+        // Shared, so a reactor that answers after a timed-out wait still sets a live promise.
+        auto const counted = std::make_shared<std::promise<std::size_t>>();
+        auto answer = counted->get_future();
+        controller._reactor.post([&controller, counted] {
+            counted->set_value(controller._client != nullptr ? controller._client->screens().size() : 0);
+        });
+        if (answer.wait_for(std::chrono::seconds { 2 }) != std::future_status::ready)
+            return std::nullopt;
+        return answer.get();
     }
 
     /// Makes the reactor's run end with an exception, as a decode error escaping the root task would.

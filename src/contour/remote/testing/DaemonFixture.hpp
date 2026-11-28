@@ -54,6 +54,7 @@
 #include <variant>
 #include <vector>
 
+#include <QtTest/QTest>
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/ExtensionHosting.hpp>
@@ -121,6 +122,10 @@ struct ControllerOptions
     std::string homeDirectory = {};
     /// This machine, as the daemon's stated one is compared with; the default proves no machine.
     vtbackend::HostIdentity localIdentity = {};
+    /// What its connections are to the daemon; a window's attach by default.
+    vthost::proto::ConnectionRole role = vthost::proto::ConnectionRole::Attach;
+    /// What it dials through; null for a TLS transport to the fixture's endpoint (makeTestTlsTransport).
+    std::shared_ptr<vthost::ITransportFactory> transport = nullptr;
 };
 
 /// A TLS transport to @p endpoint, trusting what the endpoint's expected fingerprint says and keeping its
@@ -155,7 +160,8 @@ struct ControllerOptions
     vthost::TcpEndpoint endpoint, TestTimeline& timeline, ControllerOptions options = {})
 {
     return contour::remote::NativeController::Config {
-        .transport = makeTestTlsTransport(std::move(endpoint)),
+        .transport =
+            options.transport ? std::move(options.transport) : makeTestTlsTransport(std::move(endpoint)),
         .intent = options.intent,
         .profileName = std::string {},
         .workingDirectory = std::move(options.workingDirectory),
@@ -170,6 +176,7 @@ struct ControllerOptions
         .emptyWorkspace = options.emptyWorkspace,
         .homeDirectory = std::move(options.homeDirectory),
         .localIdentity = std::move(options.localIdentity),
+        .role = options.role,
     };
 }
 
@@ -258,11 +265,12 @@ class ClientFrameCounts
 {
   public:
     /// The PDU kinds counted.
-    static constexpr auto Kinds = std::array { vthost::proto::PduType::ResizeRequest,
-                                               vthost::proto::PduType::Heartbeat,
-                                               vthost::proto::PduType::ResizePane,
-                                               vthost::proto::PduType::OpenFirstTab,
-                                               vthost::proto::PduType::SetWorkspaceColor };
+    static constexpr auto Kinds =
+        std::array { vthost::proto::PduType::ResizeRequest,     vthost::proto::PduType::Heartbeat,
+                     vthost::proto::PduType::ResizePane,        vthost::proto::PduType::OpenFirstTab,
+                     vthost::proto::PduType::SetWorkspaceColor, vthost::proto::PduType::MarkSeen,
+                     vthost::proto::PduType::ReportFocus,       vthost::proto::PduType::SelectWorkspace,
+                     vthost::proto::PduType::ObserveOnly };
 
     /// @param type A counted kind.
     /// @return How many PDUs of @p type arrived so far; 0 for a kind that is not counted.
@@ -290,6 +298,11 @@ class ClientFrameCounts
         {
             auto const lock = std::lock_guard { _areasMutex };
             _paneCells.push_back(pane->cellPixelSize);
+        }
+        if (auto const* select = std::get_if<vthost::proto::SelectWorkspace>(&pdu))
+        {
+            auto const lock = std::lock_guard { _areasMutex };
+            _selects.push_back(*select);
         }
         if (auto const* hello = std::get_if<vthost::proto::ClientHello>(&pdu))
         {
@@ -324,6 +337,14 @@ class ClientFrameCounts
         checkDecoded();
         auto const lock = std::lock_guard { _areasMutex };
         return _helloCells;
+    }
+
+    /// @return Every SelectWorkspace received so far, in arrival order.
+    [[nodiscard]] std::vector<vthost::proto::SelectWorkspace> selects() const
+    {
+        checkDecoded();
+        auto const lock = std::lock_guard { _areasMutex };
+        return _selects;
     }
 
     /// @return Every ClientHello received so far, in arrival order.
@@ -371,6 +392,7 @@ class ClientFrameCounts
     mutable std::mutex _areasMutex {};
     std::vector<vtpty::PageSize> _areas {};                                        ///< Under _areasMutex.
     std::vector<vthost::proto::ClientHello> _hellos {};                            ///< Under _areasMutex.
+    std::vector<vthost::proto::SelectWorkspace> _selects {};                       ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _requestCells {}; ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _paneCells {};    ///< Under _areasMutex.
     std::vector<std::optional<vthost::proto::WireCellPixelSize>> _helloCells {};   ///< Under _areasMutex.
@@ -456,6 +478,10 @@ class GatedSocket final: public core::net::testing::SocketDecorator
     /// Lets every frame through up to and including the next LayoutState of @p window, and holds the rest.
     void holdAfterLayoutOf(uint64_t window) { _holdAfter = window; }
 
+    /// Lets every frame through up to and including the next LayoutBatchEnd stating @p workspace selected,
+    /// and holds the rest: the client hears a selection the daemon made, and not yet the one it made next.
+    void holdAfterSelectionOf(uint64_t workspace) { _holdAfterSelection = workspace; }
+
     /// Lets every frame through up to the next LayoutState, and holds it and the rest: the connection is up,
     /// and no layout of it has come in.
     void holdAtNextLayout() { _holdAtLayout = true; }
@@ -471,6 +497,7 @@ class GatedSocket final: public core::net::testing::SocketDecorator
     void release(core::net::EventLoop& loop)
     {
         _holdAfter.reset();
+        _holdAfterSelection.reset();
         _holdAtLayout = false;
         _holding = false;
         _flushing = true;
@@ -498,7 +525,7 @@ class GatedSocket final: public core::net::testing::SocketDecorator
   private:
     [[nodiscard]] bool passesStraight() const noexcept { return !armed() && !_flushing && _stream.empty(); }
 
-    [[nodiscard]] bool armed() const noexcept { return _holdAfter || _holdAtLayout; }
+    [[nodiscard]] bool armed() const noexcept { return _holdAfter || _holdAfterSelection || _holdAtLayout; }
 
     /// Takes one write: what may pass is written on, the rest kept.
     [[nodiscard]] core::async::Task<Written> take(std::vector<std::byte> bytes)
@@ -522,7 +549,10 @@ class GatedSocket final: public core::net::testing::SocketDecorator
                 break;
             }
             passing += decoded->consumed;
-            if (layout != nullptr && layout->workspace == *_holdAfter)
+            if (layout != nullptr && _holdAfter && layout->workspace == *_holdAfter)
+                _holding = true;
+            if (auto const* end = std::get_if<vthost::proto::LayoutBatchEnd>(&decoded->pdu);
+                end != nullptr && _holdAfterSelection && end->selected == *_holdAfterSelection)
                 _holding = true;
         }
         auto chunk = std::vector<std::byte>(_stream.begin(), _stream.begin() + static_cast<long>(passing));
@@ -555,9 +585,10 @@ class GatedSocket final: public core::net::testing::SocketDecorator
     std::unique_ptr<core::net::ISocket> _inner;
     std::set<GatedSocket*>& _live;
     std::optional<uint64_t> _holdAfter;
-    bool _holdAtLayout = false; ///< Holds from the next LayoutState on, that one included.
-    bool _holding = false;      ///< The gate tripped: everything since is kept.
-    bool _flushing = false;     ///< What was kept is being written on; what comes meanwhile queues behind it.
+    std::optional<uint64_t> _holdAfterSelection; ///< Holds after the batch stating this selection.
+    bool _holdAtLayout = false;                  ///< Holds from the next LayoutState on, that one included.
+    bool _holding = false;                       ///< The gate tripped: everything since is kept.
+    bool _flushing = false; ///< What was kept is being written on; what comes meanwhile queues behind it.
     std::vector<std::byte> _stream;
 };
 
@@ -586,7 +617,9 @@ struct DaemonFixture
     std::string fingerprint;
     std::thread thread;
     bool cancelled = false; ///< Whether teardown unwound the accept loop.
-    uint64_t instance = 1;  ///< Which run of the daemon @c host is; 0 states none.
+    /// The creation tokens promotionOf() handed out so far; each fills the next one. Test thread.
+    uint8_t creationTokensHandedOut = 0;
+    uint64_t instance = 1; ///< Which run of the daemon @c host is; 0 states none.
     /// The host's profiles, by name; none resolves every spawn to the host's own settings.
     std::shared_ptr<vthost::ProfileCatalog const> profiles;
     /// The workspace the first host restores as it starts; none restores nothing.
@@ -742,6 +775,13 @@ struct DaemonFixture
         return future.get();
     }
 
+    /// @param workspace A workspace of the daemon.
+    /// @return Whether @p workspace is shown, left or hidden on the daemon.
+    [[nodiscard]] vthost::WorkspaceVisibility visibilityOf(uint64_t workspace)
+    {
+        return onDaemon([this, workspace] { return host->visibility(workspace); });
+    }
+
     /// Drops every connection, as a daemon that went away would, and keeps serving: what a client reconnects
     /// to finds the same host, sessions and all.
     void dropConnections()
@@ -751,6 +791,32 @@ struct DaemonFixture
                 socket->close();
             return 0;
         });
+    }
+
+    /// @param workspace The daemon workspace; 0 for a new one.
+    /// @param area The adopting window's area.
+    /// @param cell Its cell size, when known.
+    /// @return A promotion to @p workspace of the daemon's current run (any run for workspace 0, which
+    ///         carries a creation token no other promotion of this fixture carries).
+    [[nodiscard]] contour::remote::PromotionRequest promotionOf(uint64_t workspace,
+                                                                vtpty::PageSize area,
+                                                                std::optional<vtpty::ImageSize> cell)
+    {
+        auto request = contour::remote::PromotionRequest { .workspace = workspace,
+                                                           .daemonInstance = 0,
+                                                           .directoryFromSession = std::nullopt,
+                                                           .area = area,
+                                                           .cell = cell,
+                                                           .creation = std::nullopt };
+        if (workspace != 0)
+            request.daemonInstance = onDaemon([this] { return instance; });
+        else
+        {
+            auto token = vthost::proto::CreationToken {};
+            token.fill(std::byte { ++creationTokensHandedOut });
+            request.creation = token;
+        }
+        return request;
     }
 
     /// Replaces the host with a new run's, as a restarted daemon: every window and session gone, ids counting
@@ -831,6 +897,17 @@ struct DaemonFixture
         onDaemon([this, window] {
             for (auto* socket: gated)
                 socket->holdAfterLayoutOf(window);
+            return 0;
+        });
+    }
+
+    /// Has every connection let frames through up to and including the next batch stating @p workspace
+    /// selected, and hold the rest until releaseHeld().
+    void holdAfterSelectionOf(uint64_t workspace)
+    {
+        onDaemon([this, workspace] {
+            for (auto* socket: gated)
+                socket->holdAfterSelectionOf(workspace);
             return 0;
         });
     }
@@ -967,6 +1044,16 @@ inline void drainGuiEvents()
     QCoreApplication::processEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QCoreApplication::processEvents();
+}
+
+/// Lets the GUI thread run what was queued for a while: long enough for what the daemon would send to land.
+inline void settleGui()
+{
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 10))
+    {
+        drainGuiEvents();
+        QTest::qWait(10);
+    }
 }
 
 /// Looks at @p link's attach as the launch does -- without waiting -- until it settled.

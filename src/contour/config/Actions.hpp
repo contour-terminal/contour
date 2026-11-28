@@ -226,7 +226,10 @@ struct FocusToolbar{};        // move keyboard focus to the window's toolbar
 struct ToggleSidebar{};       // show the workspace sidebar when it is hidden, hide it when it is shown
 struct FocusSidebar{};        // show the workspace sidebar if needed and move keyboard focus into it
 struct FilterWorkspaces{};    // show the workspace sidebar if needed and put the keyboard in its filter
+struct ToggleSidebarNeedsMe{}; // list only what needs the user in the sidebar, or everything again
 struct JumpToNextAttention{}; // show the next pane that needs you
+struct JumpBack{};            // go back to where the window was before its last jump or switch
+struct CancelSwitch{};        // end a sidebar jump still under way, leaving the window as it was
 struct MarkSeen{};            // mark the active pane's output as seen
 struct RenameWorkspace{};     // rename the current workspace inline
 struct MoveWorkspaceUp{};     // move the current workspace one place up in the list
@@ -240,6 +243,12 @@ struct MoveTabToWorkspace{ uint32_t index = 0; }; // move the current tab into t
 struct MoveToTab{ uint32_t workspace = 0; uint32_t tab = 0; }; // join the current pane into a tab, by 1-based places
 struct MoveToNewTab{};        // move the current pane into a tab of its own, at the end of its workspace
 struct MoveToNewWorkspace{};  // move the current pane into a workspace of its own
+struct OpenInNewWindow{};     // open what a sidebar row names in a window of its own
+struct ConnectDaemon{};       // connect to a sidebar daemon row's daemon (its Connect button)
+struct StartDaemon{};         // start a sidebar daemon row's local daemon (its Start button)
+struct RemoveDaemon{};        // unlist a sidebar daemon row's daemon for the rest of the run (its Remove button)
+struct HideDaemon{};          // unlist a sidebar daemon row's daemon, kept in the GUI state (Hide from Sidebar)
+struct ShowHiddenDaemon{ uint32_t index = 0; }; // list the Nth (1-based) daemon the Hidden row names again
 // clang-format on
 
 /// The variant of every action alternative, listed once; Action is a class over it.
@@ -377,7 +386,10 @@ using ActionVariant = std::variant<CancelSelection,
                                    ToggleSidebar,
                                    FocusSidebar,
                                    FilterWorkspaces,
+                                   ToggleSidebarNeedsMe,
                                    JumpToNextAttention,
+                                   JumpBack,
+                                   CancelSwitch,
                                    MarkSeen,
                                    RenameWorkspace,
                                    MoveWorkspaceUp,
@@ -390,6 +402,12 @@ using ActionVariant = std::variant<CancelSelection,
                                    MoveToTab,
                                    MoveToNewTab,
                                    MoveToNewWorkspace,
+                                   OpenInNewWindow,
+                                   ConnectDaemon,
+                                   StartDaemon,
+                                   RemoveDaemon,
+                                   HideDaemon,
+                                   ShowHiddenDaemon,
                                    SwitchToWorkspace,
                                    OpenWorkspace,
                                    CycleWorkspace,
@@ -567,7 +585,9 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     MoveToNewWorkspace,
                                                     ToggleSidebar,
                                                     FilterWorkspaces,
+                                                    ToggleSidebarNeedsMe,
                                                     JumpToNextAttention,
+                                                    JumpBack,
                                                     LaunchLayout,
                                                     SaveLayout,
                                                     AttachToHost,
@@ -639,6 +659,8 @@ concept DaemonActionConcept = core::oneOf<T,
 /// reach the palette through the saved-layout source. AttachToHost likewise, through the saved-host source.
 /// SwitchToWorkspace, SwitchToDaemon and OpenDaemon likewise name nothing bare; their rows come from the
 /// daemon source. GoToPane names no pane bare: it is a row of the sidebar's pane menu, which knows which.
+/// The SidebarRowActionConcept members name no row bare either: each is a row of the sidebar's row menus,
+/// which run it on the row they were opened over.
 template <typename T>
 concept ParameterizedActionConcept = core::oneOf<T,
                                                  ChangeProfile,
@@ -655,10 +677,12 @@ concept ParameterizedActionConcept = core::oneOf<T,
                                                  OpenWorkspace,
                                                  MoveTabToWorkspace,
                                                  MoveToTab,
+                                                 ShowHiddenDaemon,
                                                  GoToPane,
                                                  SwitchToDaemon,
                                                  OpenDaemon,
-                                                 ToggleFoldAt>;
+                                                 ToggleFoldAt>
+                                     || SidebarRowActionConcept<T>;
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
 /// ParameterizedActionConcept member), false if it is runnable as-is.
@@ -928,8 +952,21 @@ namespace documentation
         "Opens the workspace sidebar's filter with the keyboard in it, showing the sidebar first when it is "
         "hidden."
     };
+    constexpr inline std::string_view ToggleSidebarNeedsMe {
+        "Lists only what needs you in the workspace sidebar, showing the sidebar first when it is hidden; "
+        "again "
+        "lists everything."
+    };
+    constexpr inline std::string_view CancelSwitch {
+        "Ends a jump the sidebar started that is still under way, leaving the window where it was; nothing "
+        "while none is."
+    };
     constexpr inline std::string_view JumpToNextAttention {
         "Shows the next pane that needs you: one that waits for input, or whose command failed."
+    };
+    constexpr inline std::string_view JumpBack {
+        "Goes back to where the window was before its last jump, workspace switch, sidebar activation or "
+        "switcher pick; each press goes one place further back. A run of JumpToNextAttention counts as one."
     };
     constexpr inline std::string_view MarkSeen { "Marks the output of the active pane as seen." };
     constexpr inline std::string_view RenameWorkspace { "Renames the current workspace inline." };
@@ -963,6 +1000,32 @@ namespace documentation
     };
     constexpr inline std::string_view MoveToNewWorkspace {
         "Moves the current pane into a workspace of its own, named as a new workspace is."
+    };
+    constexpr inline std::string_view OpenInNewWindow {
+        "Opens what a sidebar row names in a window of its own: a daemon's default workspace, a workspace, "
+        "or "
+        "a tab or pane in its workspace. A window that shows it already is raised instead. A row of the "
+        "sidebar's row menus."
+    };
+    constexpr inline std::string_view ConnectDaemon {
+        "Connects to the daemon a sidebar daemon row names, as its Connect button does. A row of the daemon "
+        "row's menu."
+    };
+    constexpr inline std::string_view StartDaemon {
+        "Starts the local daemon a sidebar daemon row names, as its Start button does. A row of the daemon "
+        "row's menu."
+    };
+    constexpr inline std::string_view RemoveDaemon {
+        "Takes the daemon a sidebar daemon row names off the sidebar for the rest of the run, as its Remove "
+        "button does. A row of the daemon row's menu."
+    };
+    constexpr inline std::string_view HideDaemon {
+        "Takes the daemon a sidebar daemon row names off the sidebar, and keeps that choice: its Hidden row "
+        "offers it back. A row of the daemon row's menu."
+    };
+    constexpr inline std::string_view ShowHiddenDaemon {
+        "Lists the daemon the sidebar's Hidden row names at the 1-based position `index` again. A row of the "
+        "Hidden row's menu."
     };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "

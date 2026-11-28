@@ -540,6 +540,8 @@ class ChromeTypeTokens: public QObject
     Q_PROPERTY(QFont bodyMedium READ bodyMedium CONSTANT)
     Q_PROPERTY(QFont footnoteStrong READ footnoteStrong CONSTANT)
     Q_PROPERTY(QFont footnoteSemibold READ footnoteSemibold CONSTANT)
+    /// A sidebar section's heading, a daemon row's name: each platform's source-list section style.
+    Q_PROPERTY(QFont sidebarSection READ sidebarSection CONSTANT)
     /// A fixed-pitch face, for text that is code (a command a program asks to run): the system's fixed font
     /// at the body and footnote sizes, and the chrome font itself on a row whose chrome is cells. The
     /// footnote face matches the footnote's x-height rather than its nominal size, so a command set in it
@@ -576,6 +578,8 @@ class ChromeTypeTokens: public QObject
     [[nodiscard]] QFont const& shortcut() const noexcept { return _shortcut; }
     /// @return The body font, bold: a dialog's heading.
     [[nodiscard]] QFont const& bodyStrong() const noexcept { return _bodyStrong; }
+    /// @return A sidebar section's heading font (TypeTokens::sidebarSection): a daemon's name in the sidebar.
+    [[nodiscard]] QFont const& sidebarSection() const noexcept { return _sidebarSection; }
     /// @return The body font, medium: the band's title.
     [[nodiscard]] QFont const& bodyMedium() const noexcept { return _bodyMedium; }
     /// @return The footnote font, bold: the host chip's name, a permission line that can run commands.
@@ -600,6 +604,7 @@ class ChromeTypeTokens: public QObject
     QFont _bodyMedium {};
     QFont _footnoteStrong {};
     QFont _footnoteSemibold {};
+    QFont _sidebarSection {};
     QFont _monospace {};
     QFont _monospaceFootnote {};
 };
@@ -886,6 +891,9 @@ class ChromeSidebarTokens: public QObject
     Q_PROPERTY(bool addInFooter READ addInFooter CONSTANT)
     /// Whether the title row says "Workspaces" (SidebarHeading::Named).
     Q_PROPERTY(bool named READ named CONSTANT)
+    /// Whether the Needs-me toggle stands beside the filter field (SidebarNeedsMePlace::FilterRow) rather
+    /// than in the title row.
+    Q_PROPERTY(bool needsMeInFilterRow READ needsMeInFilterRow CONSTANT)
     /// The icon a workspace row's disclosure draws, pointing down (config::SidebarChevronIcon); empty where
     /// it draws a cell glyph instead (SidebarDisclosure::CellGlyph).
     Q_PROPERTY(QString disclosureIcon READ disclosureIcon CONSTANT)
@@ -986,6 +994,11 @@ class ChromeSidebarTokens: public QObject
     [[nodiscard]] bool named() const noexcept
     {
         return config::sidebarLookTraits(_look).heading == config::SidebarHeading::Named;
+    }
+    /// @return Whether the Needs-me toggle stands beside the filter field.
+    [[nodiscard]] bool needsMeInFilterRow() const noexcept
+    {
+        return config::sidebarLookTraits(_look).needsMe == config::SidebarNeedsMePlace::FilterRow;
     }
     /// @return The icon of a workspace row's disclosure; empty for a cell glyph.
     [[nodiscard]] QString disclosureIcon() const
@@ -1492,6 +1505,11 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor sidebarAccentPill READ sidebarAccentPill NOTIFY changed)
     Q_PROPERTY(QColor sidebarSelectionFillInactive READ sidebarSelectionFillInactive NOTIFY changed)
     Q_PROPERTY(QColor sidebarSelectionInkInactive READ sidebarSelectionInkInactive NOTIFY changed)
+    Q_PROPERTY(QColor sidebarLastKnownInk READ sidebarLastKnownInk NOTIFY changed)
+    Q_PROPERTY(QColor toastActionFill READ toastActionFill NOTIFY changed)
+    Q_PROPERTY(QColor toastActionHoverFill READ toastActionHoverFill NOTIFY changed)
+    Q_PROPERTY(QColor toastActionPressedFill READ toastActionPressedFill NOTIFY changed)
+    Q_PROPERTY(QColor toastActionActiveInk READ toastActionActiveInk NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -1662,6 +1680,27 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor sidebarSelectionInkInactive() const
     {
         return color(config::ChromeColorRole::SidebarSelectionInkInactive);
+    }
+    [[nodiscard]] QColor sidebarLastKnownInk() const
+    {
+        return color(config::ChromeColorRole::SidebarLastKnownInk);
+    }
+
+    /// A toast's action button's fills, at rest, hovered and pressed.
+    [[nodiscard]] QColor toastActionFill() const { return color(config::ChromeColorRole::ToastActionFill); }
+    [[nodiscard]] QColor toastActionHoverFill() const
+    {
+        return color(config::ChromeColorRole::ToastActionHoverFill);
+    }
+    [[nodiscard]] QColor toastActionPressedFill() const
+    {
+        return color(config::ChromeColorRole::ToastActionPressedFill);
+    }
+    /// @return A toast action's words under the pointer, holding the keyboard or pressed
+    ///         (config::ChromeColorRole::ToastActionActiveInk).
+    [[nodiscard]] QColor toastActionActiveInk() const
+    {
+        return color(config::ChromeColorRole::ToastActionActiveInk);
     }
 
     /// The Settings window's roles, by the palette's tone.

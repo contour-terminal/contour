@@ -31,6 +31,9 @@ Item {
     property bool checkable: false
     /// Whether what it toggles is on.
     property bool checked: false
+    /// Whether a checked button wears the pressed fill while it is checked, as a toggle in a header bar does.
+    /// Off for a toggle whose surface shows its state already (the sidebar's toggle).
+    property bool drawsChecked: false
     /// What assistive technology announces the button as.
     property string accessibleName
     /// What else the button does, such as what its secondary click opens; empty for nothing more.
@@ -39,10 +42,21 @@ Item {
     property font glyphFont: chromeStyle.newTabFont
     /// The colour the glyph is drawn in: the band's tab text unless the host has a surface of its own.
     property color glyphColor: root.colors.tabText
+    /// The colour the glyph is drawn in while the button is hovered, holds the keyboard or is pressed: the
+    /// rest colour, unless the host's lit fill asks for another (a toast's action inverts on the Terminal row).
+    property color activeGlyphColor: root.glyphColor
+    /// The glyph's colour now.
+    readonly property color shownGlyphColor: primary.pressed || secondary.pressed || hover.hovered || root.activeFocus
+                                             ? root.activeGlyphColor : root.glyphColor
     /// The edge of the button's square.
     property real extent: chromeStyle.size.toolbarButton
     /// The fill under a hovered or focused button: the band's unless the host sits on a surface of its own.
     property color hoverFill: root.colors.tabHoverFill
+    /// The fill under a pressed button: the band's unless the host sits on a surface of its own.
+    property color pressedFill: root.colors.controlPressedFill
+    /// The fill at rest: none, as a toolbar's buttons are, unless the host's button must read as one among
+    /// words (a toast's action).
+    property color restFill: "transparent"
 
     /// The tooltip's label: the accessible name unless the host says more; empty shows no tooltip.
     property string toolTipText: root.accessibleName
@@ -107,9 +121,10 @@ Item {
         objectName: "toolbarButtonBackground"   // findChild() handle for the GUI test
         anchors.fill: parent
         radius: chromeStyle.radii.control
-        color: primary.pressed || secondary.pressed ? root.colors.controlPressedFill
+        color: primary.pressed || secondary.pressed ? root.pressedFill
+             : root.drawsChecked && root.checked ? root.pressedFill
              : hover.hovered || root.activeFocus ? root.hoverFill
-             : "transparent"
+             : root.restFill
     }
 
     KitToolTipHost {
@@ -127,7 +142,7 @@ Item {
         objectName: "toolbarButtonIcon"
         visible: root.iconSource !== ""
         anchors.centerIn: parent
-        icon: ({ name: root.iconName, source: root.iconSource, color: root.glyphColor,
+        icon: ({ name: root.iconName, source: root.iconSource, color: root.shownGlyphColor,
                  width: root.iconSize, height: root.iconSize })
     }
 
@@ -137,6 +152,6 @@ Item {
         anchors.centerIn: parent
         text: root.glyph
         font: root.glyphFont
-        color: root.glyphColor
+        color: root.shownGlyphColor
     }
 }

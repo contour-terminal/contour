@@ -18,12 +18,14 @@
 /// terminal, which does not exist when `createPty` hands out the pty, so
 /// `bindTerminal` closes the cycle and primes the mirror.
 
+#include <contour/remote/ObserveSupport.hpp>
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
 #include <contour/remote/SelectAnswer.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/window/TabAttention.hpp>
 #include <contour/window/WorkspaceDirectory.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
@@ -59,6 +61,7 @@
 #include <utility>
 #include <vector>
 
+#include <vthost/AttentionLedger.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/WorkspaceVisibility.hpp>
 #include <vthost/client/ClientSupervisor.hpp>
@@ -75,6 +78,35 @@ class TerminalSessionManager;
 
 namespace contour::remote
 {
+
+/// Why a promotion or a demotion was not asked of the daemon.
+enum class SelectError : uint8_t
+{
+    NotConnected = 0, ///< The connection is not up.
+    /// The daemon does not share what the change needs (vthost::proto::sharesObserving, and LayoutBatch for a
+    /// promotion), or the connection holds no role the change applies to: only an observer is promoted.
+    Unsupported,
+    Busy, ///< A promotion is still under way.
+    /// The promotion names a workspace of an earlier run of the daemon: its id names another, or none.
+    DaemonRestarted,
+};
+
+/// Told, on the GUI thread, how a promotion ended: the workspace the connection selects now, or why it
+/// selects none.
+using PromotionLanded = std::function<void(std::expected<uint64_t, std::string>)>;
+
+/// What a window asks of the observer it adopts (NativeController::promote()).
+struct PromotionRequest
+{
+    uint64_t workspace = 0;      ///< 0 asks the daemon to make one.
+    uint64_t daemonInstance = 0; ///< The run @c workspace is an id of; 0 only for workspace 0.
+    std::optional<uint64_t> directoryFromSession; ///< Where a new workspace starts.
+    vtpty::PageSize area;                         ///< The adopting window's area.
+    std::optional<vtpty::ImageSize> cell;         ///< Its cell size, when known.
+    /// Required for workspace 0: the daemon makes one workspace per token, so a re-ask after a dropped
+    /// connection selects what the first ask made (vthost::proto::SelectWorkspace::creationToken).
+    std::optional<vthost::proto::CreationToken> creation;
+};
 
 /// The wire operation a hosted operation travels as: the conversion at the protocol boundary, which keeps
 /// the session layer free of the protocol. The two enums name the same operations by the same values, as
@@ -212,6 +244,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
         /// pane's header judges it, however the daemon is reached: an ssh-forwarded socket is not this
         /// machine's daemon. The default proves no machine, so nothing is abbreviated.
         vtbackend::HostIdentity localIdentity = {};
+        /// What every connection is to the daemon until promote() or demote() changes it: a window's attach,
+        /// or an observer listing the daemon's workspaces without showing one. An observer never resumes
+        /// into a launch (ResumeFallback::Nothing).
+        vthost::proto::ConnectionRole role = vthost::proto::ConnectionRole::Attach;
     };
 
     /// @param config What the controller is built with.
@@ -240,6 +276,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @return Where the connection to the daemon stands: Reconnecting while a lost one is sought again, its
     ///         bindings and ptys kept meanwhile. Safe from any thread.
     [[nodiscard]] vthost::client::ConnectionState connectionState() const;
+
+    /// @return How many connections were lost and sought again (Reconnecting or Upgrading) so far: a count
+    ///         that moved tells a listener the connection went meanwhile, even once connectionState() is
+    ///         Connected again. Safe from any thread.
+    [[nodiscard]] uint64_t connectionLosses() const;
 
     /// Whether a prompt of this controller's attach waits for the user to be looking at a window.
     enum class UserAttention : uint8_t
@@ -406,11 +447,90 @@ class NativeController final: public QObject, public contour::session::SessionFa
     [[nodiscard]] std::expected<uint64_t, std::string> select(
         uint64_t workspace, std::optional<uint64_t> directoryFrom = std::nullopt);
 
-    /// GUI thread. Tells the daemon whether this window has the user's focus; it decides from the reports of
-    /// every attached window which one raises for a bell (raiseRole()). Stated again to every connection that
-    /// replaces a lost one.
+    /// GUI thread. Promotes this observing connection to a window's attach of @p request.workspace: states
+    /// the request's area and cell, then selects the workspace, which the daemon answers by running the
+    /// viewer setup an attach runs. The connection stays an observer until that answer: one dropped before it
+    /// reconnects as an observer and asks again (with the same creation token), and the promotion fails if
+    /// the daemon restarted meanwhile. Every dial from now on goes through @p interactive, whose prompts
+    /// reach the window -- or, should the promotion fail, again through the transport it dialled through
+    /// before.
+    /// @param request What to show, where it starts, and the adopting window's geometry. A request for
+    ///        workspace 0 must carry a creation token.
+    /// @param interactive The transport later dials go through; never null.
+    /// @param landed Told on the GUI thread once the daemon answered, the connection ended first, or the
+    ///        promotion was withdrawn (withdrawPromotion()): the workspace selected, or why none.
+    /// @return Nothing once asked; NotConnected, Unsupported (not an observer, or a daemon that cannot
+    ///         promote it), Busy (a promotion under way) or DaemonRestarted (@p request names a run of the
+    ///         daemon other than the one connected) otherwise, nothing then changed.
+    [[nodiscard]] std::expected<void, SelectError> promote(
+        PromotionRequest request,
+        std::shared_ptr<vthost::ITransportFactory> interactive,
+        PromotionLanded landed);
+
+    /// GUI thread. Ends the promotion under way from this side: @c landed is told "withdrawn"; a later answer
+    /// that promoted is answered by ObserveOnly, so the connection observes again. A promotion the daemon
+    /// answered whose @c landed has not been told yet is withdrawn as well: told "withdrawn" in place of its
+    /// workspace, and the next demote() says so to the daemon (ObserveCause::Withdrawn), which takes back
+    /// what the answer did, as for an answer still on its way. Nothing while neither is the case.
+    void withdrawPromotion();
+
+    /// @return The cell size the last ResizeRequest (or hello) stated to the daemon; nullopt for none. Safe
+    ///         from any thread.
+    [[nodiscard]] std::optional<vtpty::ImageSize> lastStatedCell() const;
+
+    /// @return The client area this connection's window shows: composed from the panes it renders, else the
+    ///         area it last stated to the daemon; nullopt for neither. What a connection adopted for the same
+    ///         window is promoted at (PromotionRequest::area). Safe from any thread.
+    [[nodiscard]] std::optional<vtpty::PageSize> clientArea() const;
+
+    /// GUI thread. Demotes this connection to an observer (proto::ObserveOnly): it selects nothing from now
+    /// on, raises nothing it was sent before, and every reconnect dials through @p observer, which prompts
+    /// for nothing and starts no daemon. The panes still bound stay so until their windows unbind them; the
+    /// daemon sends them nothing more.
+    /// @param observer The transport later dials go through; never null.
+    /// @return Nothing once asked (or when already an observer); NotConnected, Unsupported (a daemon that
+    ///         cannot observe: vthost::proto::sharesObserving) or Busy (a promotion under way) otherwise,
+    ///         nothing then changed.
+    [[nodiscard]] std::expected<void, SelectError> demote(
+        std::shared_ptr<vthost::ITransportFactory> observer);
+
+    /// @return What the connection is to the daemon now: Observe from construction (Config::role) or a
+    ///         demotion until a promotion landed; Attach otherwise. Safe from any thread.
+    [[nodiscard]] vthost::proto::ConnectionRole role() const;
+
+    /// @return Whether the daemon can be observed, as the last answered hello told. Safe from any thread.
+    [[nodiscard]] ObserveSupport observeSupport() const;
+
+    /// @return How the attempt that ended the connection failed (ClientSupervisor::failureKind()): Protocol
+    ///         for a daemon that never answered the hello, Refused for one that refused it, else the
+    ///         transport's failure; nullopt while it has not ended so. Safe from any thread.
+    [[nodiscard]] std::optional<vthost::TransportErrorKind> failureKind() const;
+
+    /// GUI thread. Tells the daemon whether this window has the user's focus, keeping the panes it last said
+    /// the window shows (reportShown()).
     /// @param focus The window's focus now.
     void reportFocus(vthost::proto::WindowFocus focus);
+
+    /// GUI thread. Tells the daemon whether this window has the user's focus and which panes it shows: it
+    /// decides from the reports of every attached window which one raises for a bell (raiseRole()), and a
+    /// pane a focused window shows is watched, so it raises nothing for attention. The one producer of the
+    /// connection's ReportFocus; the last report is stated again to every connection that replaces a lost
+    /// one.
+    /// @param focus The window's focus now.
+    /// @param sessions The daemon sessions of the panes the window shows; told only to a daemon sharing
+    ///        Capability::DaemonAttention.
+    void reportShown(vthost::proto::WindowFocus focus, std::vector<uint64_t> sessions);
+
+    /// GUI thread. Tells the daemon the window showed @p session and saw its attention up to @p seen: the
+    /// daemon clears what that covers, and tells every window. Nothing is sent to a daemon that does not
+    /// share Capability::DaemonAttention.
+    /// @param session The pane's daemon session.
+    /// @param seen The serials and status generation the window saw (window::DirectoryPane).
+    void markSeen(uint64_t session, vthost::SeenSerials seen);
+
+    /// @return Who keeps the attention flags of the panes directory() lists: the daemon, when this connection
+    ///         shares Capability::DaemonAttention with it; the window otherwise. Takes _mutex.
+    [[nodiscard]] window::FlagSource flagSource() const;
 
     /// GUI thread.
     /// @return Whether this window rings and raises for a bell or notification, as the daemon decided it for
@@ -428,6 +548,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         is known of them: the layouts the daemon pushes for every workspace, and the status it
     ///         pushes for every pane, mirrored or not. Takes _mutex.
     [[nodiscard]] window::WorkspaceDirectory directory() const;
+
+    /// @return The marks of every pane whose status the daemon stated, by session, while it keeps their flags
+    ///         (flagSource()); none otherwise. Read from the statuses alone, no layout listed. Takes _mutex.
+    [[nodiscard]] std::unordered_map<uint64_t, window::SessionAttention> daemonMarks() const;
 
     /// @return Whether any pty this controller made is still alive, bound to a remote session or detached
     ///         from one: the controller must outlive it, as the pty calls back into it until its destruction
@@ -745,6 +869,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// batch and on the GUI thread for a status flush; connect queued).
     void directoryChanged();
 
+    /// What raiseRole() reads changed (fires on the GUI thread).
+    void raiseRoleChanged();
+
     /// A daemon's status-line extension asks this client's user something (fires on the reactor thread;
     /// connect queued). The GUI takes the questions with takePermissionRequests().
     void extensionPermissionRequested();
@@ -874,6 +1001,43 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///             layouts, landed moves and tab pairings this clears are read by the GUI thread under it.
     void adoptReconnect(std::lock_guard<std::mutex> const& held);
 
+    /// Whether a first attach asked for workspaces the daemon does not have.
+    enum class MissingWorkspaces : uint8_t
+    {
+        No = 0,
+        Yes,
+    };
+
+    /// What adoptConnection() leaves to tell once the lock is released.
+    struct AdoptedConnection
+    {
+        std::vector<uint64_t> lostAtOnce; ///< Workspaces a reconnect lost, told at once.
+        MissingWorkspaces missingWorkspaces = MissingWorkspaces::No; ///< Whether the attach ends at once.
+    };
+
+    /// Reactor-side, under _mutex: a connection was accepted. Readies the controller for its role -- an
+    /// observer, a reconnect (adoptReconnect()), or a first attach -- and reads the daemon's run off it.
+    /// @param held The caller's lock of _mutex.
+    /// @return What the caller tells once it released the lock.
+    [[nodiscard]] AdoptedConnection adoptConnection(std::lock_guard<std::mutex> const& held);
+
+    /// Reactor-side, under _mutex: the connection ended as @p state says (Failed, Refused or Stopped). Ends a
+    /// promotion under way, forgets the client and records the failure, if it is one.
+    /// @param held The caller's lock of _mutex.
+    /// @param state How it ended.
+    /// @param reason Why, as the supervisor said; empty for none.
+    /// @param where The transport's description, for the failure message.
+    /// @return The promotion's answer to tell once the lock is released; empty for none.
+    [[nodiscard]] std::function<void()> endConnection(std::lock_guard<std::mutex> const& held,
+                                                      vthost::client::ConnectionState state,
+                                                      std::string const& reason,
+                                                      std::string const& where);
+
+    /// Reactor-side, under _mutex: a connection was accepted. Takes who keeps the panes' attention flags on
+    /// it (flagSource()), and drops the flags the other keeper stated when that changed.
+    /// @param held The caller's lock of _mutex.
+    void adoptFlagSource(std::lock_guard<std::mutex> const& held);
+
     /// Lets the tests run code on the reactor thread, against the client of the moment, to stage a
     /// connection that is ending before its state change is delivered -- a window no daemon can be made to
     /// open on demand.
@@ -922,6 +1086,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// Reactor thread. Merges what the daemon says changed about a pane field by field into the status store.
     void onPaneSummary(vthost::proto::PaneSummary const& summary);
+
+    /// Reactor thread. Takes what the daemon's attention ledger states of a pane into the status store
+    /// (Capability::DaemonAttention).
+    void onPaneAttention(vthost::proto::PaneAttentionState const& state);
 
     /// Reactor thread. Takes the role the daemon gives this connection.
     void onRaiseRole(vthost::proto::RaiseRole role);
@@ -1016,6 +1184,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// unbind() under _mutex: the pty is counted gone whether or not its binding is still there to forget.
     void forgetBinding(uint64_t session, uint64_t serial);
 
+    /// Has the connection drop every screen it holds once it is an observer with no pane bound
+    /// (NativeClient::forgetScreens()): a demoted connection mirrors nothing from its last unbind on. Takes
+    /// _mutex.
+    void forgetScreensOnceUnmirrored();
+
     /// Drops @p binding and what its pane owned of the composed geometry. Under _mutex.
     void dropBinding(std::unordered_map<uint64_t, Binding>::iterator binding);
 
@@ -1031,10 +1204,104 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param create The creation verb to send.
     void postSessionCreation(std::function<void(vthost::client::NativeClient&)> create);
 
+    /// What promote() and demote() both require first: a connection that is up, with no promotion under way.
+    /// Under _mutex.
+    /// @return NotConnected or Busy when the role cannot change now.
+    [[nodiscard]] std::expected<void, SelectError> admitRoleChange() const;
+
+    /// Ends the promotion under way. Landed (the daemon selects the workspace asked, or the one it made for
+    /// 0), the connection is an attach from now on and re-asserts its geometry. Otherwise it stays an
+    /// observer: the transport it dialled through before the promotion is put back, and one the daemon made
+    /// the viewer of another workspace than asked is demoted again. Reactor thread, under _mutex.
+    /// @param outcome The workspace the connection selects as of the daemon's answer (0 for none), or why no
+    ///        answer comes: the connection ended, the daemon restarted, or cannot be asked.
+    /// @return What tells the promotion's caller, to be posted to the GUI thread once _mutex is released;
+    ///         empty when no promotion was under way, or nobody is to be told.
+    [[nodiscard]] std::function<void()> endPromotion(std::lock_guard<std::mutex> const& held,
+                                                     std::expected<uint64_t, std::string> outcome);
+
+    /// Tells the promotion's caller the landing endPromotion() kept, if withdrawPromotion() did not take it
+    /// back first. GUI thread; takes _mutex.
+    void tellLanding();
+
+    /// Asks the promotion under way again on a new connection, whose hello was an observer's: unless the
+    /// daemon restarted since it was asked (its workspace ids name others), or cannot promote. Reactor
+    /// thread, under _mutex.
+    /// @param client The new connection.
+    /// @return What tells the promotion's caller how it ended, when it ended here; empty while it waits.
+    [[nodiscard]] std::function<void()> resumePromotion(std::lock_guard<std::mutex> const& held,
+                                                        vthost::client::NativeClient& client);
+
+    /// Sends a promotion over @p client: its area, then its select. Reactor thread, under _mutex.
+    /// @param client The connection.
+    /// @param request The promotion: the one under way, or a withdrawn one asked again (@ref _withdrawnAsk).
+    /// @return The select's serial; Unsupported when it was not written.
+    [[nodiscard]] std::expected<uint64_t, SelectError> askPromotion(std::lock_guard<std::mutex> const& held,
+                                                                    vthost::client::NativeClient& client,
+                                                                    PromotionRequest const& request);
+
+    /// Asks a withdrawn promotion to a new workspace again over @p client, whose answer the lost connection
+    /// did not read (@ref _withdrawnAsk): the daemon selects what its token made, and the answer is withdrawn
+    /// as any withdrawn promotion's is, so that the daemon closes the workspace nobody shows. Forgotten for a
+    /// daemon that restarted (the token names nothing there) or cannot promote. Reactor thread, under _mutex.
+    /// @param client The new connection.
+    void askWithdrawnAgain(std::lock_guard<std::mutex> const& held, vthost::client::NativeClient& client);
+
+    /// @return The transport the next dial goes through (@ref _dialTransport). Takes _mutex.
+    [[nodiscard]] std::shared_ptr<vthost::ITransportFactory> dialTransport() const;
+
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
     // _stopped) live in RemoteController; the registry below is attach-specific.
+    /// What the supervisor dials through: told when a connection returns (noteTransportReturned()), and
+    /// forwarding each dial to dialTransport(). Its describe() is the configured transport's: both kinds of
+    /// transport a role uses reach the same daemon.
     std::shared_ptr<vthost::ITransportFactory> _transport;
-    vthost::proto::AttachIntent _intent; ///< What the first connection follows.
+    /// The transport each dial goes through: Config::transport, then whatever promote() or demote() swapped
+    /// in, since an observer dials without prompts and a promoted window with them. A documented rebinding
+    /// seam: runtime state swapped only by those two, read under _mutex once per dial.
+    std::shared_ptr<vthost::ITransportFactory> _dialTransport;
+    /// What the connection is to the daemon, read by every hello. Under _mutex. @see role()
+    vthost::proto::ConnectionRole _role;
+    /// A promotion asked of the daemon and not yet answered: what a reconnect asks again, and whom to tell.
+    struct Promotion
+    {
+        /// What it selects, where a new workspace starts, the area and cell stated ahead of the select, the
+        /// run of the daemon the workspace is an id of, and the token a re-ask makes nothing more by.
+        PromotionRequest request;
+        /// The transport dialled through before, put back should the promotion fail.
+        std::shared_ptr<vthost::ITransportFactory> transportBefore;
+        PromotionLanded landed; ///< Told how it ends.
+    };
+    /// The promotion under way, if any. Under _mutex.
+    std::optional<Promotion> _promotion;
+    /// A promotion the daemon answered: whom to tell, and what, once the GUI thread runs the post
+    /// endPromotion() made (tellLanding()). Under _mutex.
+    struct UntoldLanding
+    {
+        PromotionLanded landed;                      ///< Told how it ended.
+        std::expected<uint64_t, std::string> result; ///< The workspace selected.
+    };
+    /// The landing the GUI thread has not been told yet, if any: what withdrawPromotion() can still take
+    /// back. Under _mutex.
+    std::optional<UntoldLanding> _untoldLanding;
+    /// What the next demote() says to the daemon: Withdrawn once withdrawPromotion() took back an answered
+    /// promotion, Demoted otherwise. Under _mutex.
+    vthost::proto::ObserveCause _demoteCause = vthost::proto::ObserveCause::Demoted;
+    /// The serial the promotion's select went out under on this connection, answered by the batch naming it;
+    /// forgotten as the promotion ends or the connection drops. Reactor thread, under _mutex.
+    std::optional<uint64_t> _promotionSerial;
+    /// The serial of a withdrawn promotion's select (withdrawPromotion()): the batch answering it, should it
+    /// have promoted the connection, is answered by ObserveOnly. Forgotten then, or as the connection drops.
+    /// Under _mutex.
+    std::optional<uint64_t> _withdrawnSerial;
+    /// A withdrawn promotion to a new workspace, asked on a connection that dropped before its answer was
+    /// read: the daemon may have made the workspace, which nobody shows. Asked again on the next connection
+    /// (askWithdrawnAgain()), and forgotten once that answer is read, a new promotion starts, or the
+    /// connection ends for good. Under _mutex.
+    std::optional<PromotionRequest> _withdrawnAsk;
+    ObserveSupport _observeSupport = ObserveSupport::Unknown; ///< @see observeSupport(). Under _mutex.
+    std::optional<vthost::TransportErrorKind> _failureKind;   ///< @see failureKind(). Under _mutex.
+    vthost::proto::AttachIntent _intent;                      ///< What the first connection follows.
     /// @see Config::resumeFallback. Under _mutex: read on the reactor as a reconnect is made, and changed by
     /// resumeAsLaunch() on the GUI thread.
     ResumeFallback _resumeFallback;
@@ -1205,6 +1472,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
         vthost::client::ConnectionState::Connecting; ///< Under _mutex.
     /// Which run of the daemon the last accepted connection reached; 0 for unknown. Under _mutex.
     uint64_t _daemonInstance = 0;
+    /// How many connections were lost and sought again (connectionLosses()). Under _mutex.
+    uint64_t _connectionLosses = 0;
     /// How many connections were accepted so far; reactor-owned.
     uint64_t _acceptedConnections = 0;
     /// The connection input may be written to: its number among the accepted ones, or 0 while none is up.
@@ -1270,6 +1539,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::vector<vthost::proto::PaneSummary> _raised;
     /// The focus last reported, stated again to each connection that replaces a lost one. Under _mutex.
     vthost::proto::WindowFocus _focus = vthost::proto::WindowFocus::Unfocused;
+    /// The daemon sessions the window last said it shows (reportShown()), stated again with @ref _focus.
+    /// Under _mutex.
+    std::vector<uint64_t> _shown;
+    /// Who keeps the panes' attention flags on the connection up now, or the last one. Under _mutex.
+    window::FlagSource _flagSource = window::FlagSource::Window;
     /// ResumeFallback::Nothing: the workspaces a reconnect resumed whose first layout is still to come. One
     /// that comes with no tab is lost, as Resume would have judged it: its session ended meanwhile. Under
     /// _mutex.

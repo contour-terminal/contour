@@ -19,6 +19,8 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/test/RecordingAnnouncer.hpp>
+#include <contour/test/SidebarFakes.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
@@ -27,6 +29,8 @@
 #include <contour/window/TabBadge.hpp>
 
 #include <vtbackend/core/Search.hpp>
+
+#include <core/platform/Clock.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QAccessible>
@@ -42,11 +46,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <ranges>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <QtTest/QTest>
@@ -110,6 +116,58 @@ namespace
     REQUIRE(root != nullptr);
     QCoreApplication::processEvents();
     return root;
+}
+
+/// The properties SidebarRow.qml requires, as a model hands them: a plain workspace row, @p overrides
+/// replacing its defaults.
+[[nodiscard]] QVariantMap sidebarRowProperties(QVariantMap const& overrides)
+{
+    auto properties = QVariantMap {
+        { "index", 0 },
+        { "kind", 0 },
+        { "depth", 0 },
+        { "title", QString {} },
+        { "reason", QString {} },
+        { "fullReason", QString {} },
+        { "gitText", QString {} },
+        { "timeText", QString {} },
+        { "timeKind", 0 },
+        { "progress", -1 },
+        { "glyph", 0 },
+        { "expansion", static_cast<int>(contour::window::RowExpansion::Expanded) },
+        { "selected", false },
+        { "selection", 0 },
+        { "treeText", QString {} },
+        { "treeTextContinued", QString {} },
+        { "railText", QString {} },
+        { "railTextContinued", QString {} },
+        { "meterText", QString {} },
+        { "accessibleName", QString {} },
+        { "accessibleDescription", QString {} },
+        { "program", QString {} },
+        { "folder", QString {} },
+        { "reasonLabel", QString {} },
+        { "reasonCommand", QString {} },
+        { "fullReasonLabel", QString {} },
+        { "fullReasonCommand", QString {} },
+        { "hoverDetail", QString {} },
+        { "progressFraction", 0.0 },
+        { "secondLine", 0 },
+        { "idleLine", QString {} },
+        { "tabColor", QColor { Qt::transparent } },
+        { "workspaceColor", QColor { Qt::transparent } },
+        { "icon", QVariantMap {} },
+        { "linkState", 0 },
+        { "linkReason", QString {} },
+        { "locality", 0 },
+        { "staleness", 0 },
+        { "statusSlot", 0 },
+        { "daemonButtons", QVariantList {} },
+        { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
+        { "controller", QVariant::fromValue<QObject*>(nullptr) },
+    };
+    properties.insert(overrides);
+    return properties;
 }
 
 } // namespace
@@ -320,6 +378,24 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                                                   { "accessibleName", QStringLiteral("Filter workspaces") } },
                .swatches = 0,
                .name = QStringLiteral("Filter workspaces"),
+               .role = QAccessible::Button },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarNeedsMeButton.qml"),
+               .initialProperties =
+                   QVariantMap { { "controller", QVariant::fromValue<QObject*>(&chipController) } },
+               .swatches = 0,
+               .name = QStringLiteral("Show only what needs me"),
+               .role = QAccessible::Button },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarSwitcherButton.qml"),
+               .initialProperties =
+                   QVariantMap { { "controller", QVariant::fromValue<QObject*>(&chipController) } },
+               .swatches = 0,
+               .name = QStringLiteral("Switch workspace or daemon"),
+               .role = QAccessible::Button },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarDaemonButton.qml"),
+               .initialProperties =
+                   QVariantMap { { "button", static_cast<int>(contour::window::DaemonRowButton::Start) } },
+               .swatches = 0,
+               .name = QStringLiteral("Start"),
                .role = QAccessible::Button },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml"),
                .initialProperties = { { QStringLiteral("model"), QVariant::fromValue<QObject*>(&drift) } },
@@ -813,44 +889,15 @@ TEST_CASE(
     contour::window::registerSidebarQmlTypes();
     contour::test::QmlMessageCapture const warnings;
     auto const row = [](int kind, int expansion) {
-        return QVariantMap {
-            { "index", 0 },
+        return sidebarRowProperties({
             { "kind", kind },
             { "depth", kind == 0 ? 0 : 1 },
             { "title", QStringLiteral("billing") },
-            { "reason", QString {} },
-            { "fullReason", QString {} },
-            { "gitText", QString {} },
-            { "timeText", QString {} },
-            { "timeKind", 0 },
-            { "progress", -1 },
-            { "glyph", 0 },
             { "expansion", expansion },
-            { "selected", false },
-            { "selection", 0 },
-            { "treeText", QString {} },
-            { "treeTextContinued", QString {} },
-            { "railText", QString {} },
-            { "railTextContinued", QString {} },
-            { "meterText", QString {} },
             { "accessibleName", QStringLiteral("billing") },
             { "accessibleDescription", QStringLiteral("Workspace, expanded, 1 pane needs you") },
-            { "program", QString {} },
-            { "folder", QString {} },
-            { "reasonLabel", QString {} },
-            { "reasonCommand", QString {} },
-            { "fullReasonLabel", QString {} },
-            { "fullReasonCommand", QString {} },
-            { "hoverDetail", QString {} },
-            { "progressFraction", 0.0 },
             { "secondLine", kind == 0 ? 0 : 1 },
-            { "idleLine", QString {} },
-            { "tabColor", QColor { Qt::transparent } },
-            { "workspaceColor", QColor { Qt::transparent } },
-            { "icon", QVariantMap {} },
-            { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
-            { "controller", QVariant::fromValue<QObject*>(nullptr) },
-        };
+        });
     };
     auto item = loadComponent(engine,
                               QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarRow.qml"),
@@ -864,6 +911,185 @@ TEST_CASE(
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("accessibility: a daemon row is a tree item named by its daemon, its state in the description",
+          "[contour][gui][qml][a11y][sidebar]")
+{
+    using namespace contour::window;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    registerSidebarQmlTypes();
+    contour::test::QmlMessageCapture const warnings;
+
+    // The row is what a model lists for another daemon that waits for the user, handed to the row as the
+    // sidebar's ListView hands it.
+    auto source = contour::test::FakeDirectorySource {};
+    auto host = contour::test::FakeSidebarHost {};
+    host.source = &source;
+    host.own = OwnDaemon { .daemon = localDaemonRef("default"),
+                           .instance = DaemonInstance { 1 },
+                           .name = "default",
+                           .locality = DaemonLocality::Local,
+                           .state = DaemonLinkState::Connected };
+    auto sections = contour::test::FakeDaemonSections {};
+    auto starfive = DaemonSection {};
+    starfive.daemon = hostDaemonRef("starfive");
+    starfive.instance = DaemonInstance { 9 };
+    starfive.name = "starfive";
+    starfive.state = DaemonLinkState::NeedsInput;
+    starfive.feed = SectionFeed::Observer;
+    sections.listed = { starfive };
+    auto const attention = TabAttention {};
+    auto const clock = core::platform::ManualWallClock { std::chrono::system_clock::time_point {} };
+    auto announcer = contour::test::RecordingAnnouncer {};
+    auto model = SidebarModel { host, sections, attention, clock, announcer };
+    model.refreshNow();
+    auto const daemon = model.rowIndexOf(SidebarRowKey { .kind = SidebarRowKind::Daemon,
+                                                         .daemon = starfive.daemon,
+                                                         .instance = {},
+                                                         .workspace = 0,
+                                                         .tab = 0,
+                                                         .pane = {} });
+    REQUIRE(daemon >= 0);
+    auto served = QVariantMap { { "index", daemon } };
+    auto const names = model.roleNames();
+    for (auto const role: { SidebarModel::KindRole,
+                            SidebarModel::DepthRole,
+                            SidebarModel::TitleRole,
+                            SidebarModel::ExpansionRole,
+                            SidebarModel::AccessibleNameRole,
+                            SidebarModel::AccessibleDescriptionRole,
+                            SidebarModel::LinkStateRole,
+                            SidebarModel::LocalityRole,
+                            SidebarModel::StatusSlotRole,
+                            SidebarModel::DaemonButtonsRole })
+        served.insert(QString::fromUtf8(names.value(role)), model.index(daemon).data(role));
+
+    auto item = loadComponent(
+        engine, QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarRow.qml"), sidebarRowProperties(served));
+    auto* attached = accessibleAttachedOf(item.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::TreeItem);
+    CHECK(attached->property("name").toString() == QStringLiteral("starfive"));
+    CHECK(attached->property("description").toString() == QStringLiteral("Daemon, needs you"));
+    // Its heading's marks and words are the description's already: decoration to assistive technology.
+    for (auto const* name: { "sidebarDaemonName", "sidebarDaemonLinkMark", "sidebarDaemonLinkWords" })
+    {
+        INFO(name);
+        auto* part = item->findChild<QQuickItem*>(QString::fromLatin1(name));
+        REQUIRE(part != nullptr);
+        auto const* partAttached = accessibleAttachedOf(part);
+        REQUIRE(partAttached != nullptr);
+        CHECK(partAttached->property("ignored").toBool());
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: Connect, Start, Cancel and Remove are named buttons with press actions",
+          "[contour][gui][qml][a11y][sidebar]")
+{
+    using namespace contour::window;
+    using contour::test::DaemonSectionsCall;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    registerSidebarQmlTypes();
+    contour::test::QmlMessageCapture const warnings;
+
+    auto source = contour::test::FakeDirectorySource {};
+    auto host = contour::test::FakeSidebarHost {};
+    host.source = &source;
+    host.own = OwnDaemon { .daemon = localDaemonRef("default"),
+                           .instance = DaemonInstance { 1 },
+                           .name = "default",
+                           .locality = DaemonLocality::Local,
+                           .state = DaemonLinkState::Connected };
+    auto sections = contour::test::FakeDaemonSections {};
+    auto const attention = TabAttention {};
+    auto const clock = core::platform::ManualWallClock { std::chrono::system_clock::time_point {} };
+    auto announcer = contour::test::RecordingAnnouncer {};
+    auto model = SidebarModel { host, sections, attention, clock, announcer };
+    // A daemon of this machine: Start and Remove are its verbs, a host's never.
+    auto const starfiveRef = localDaemonRef("work");
+
+    // Each state's buttons, by the words they say, and the verb each press asks of the daemons.
+    struct Expected
+    {
+        DaemonLinkState state;
+        std::vector<QString> names;
+    };
+    for (auto const& [state, expectedNames]:
+         { Expected { DaemonLinkState::NotConnected, { QStringLiteral("Connect") } },
+           Expected { DaemonLinkState::NotRunning, { QStringLiteral("Start"), QStringLiteral("Remove") } },
+           Expected { DaemonLinkState::Connecting, { QStringLiteral("Cancel") } } })
+    {
+        INFO("state " << static_cast<int>(state));
+        auto starfive = DaemonSection {};
+        starfive.daemon = starfiveRef;
+        starfive.instance = DaemonInstance { 9 };
+        starfive.name = "work";
+        starfive.locality = DaemonLocality::Local;
+        starfive.state = state;
+        starfive.feed = SectionFeed::Observer;
+        sections.listed = { starfive };
+        sections.calls.clear();
+        model.refreshNow();
+        auto const daemon = model.rowIndexOf(SidebarRowKey { .kind = SidebarRowKind::Daemon,
+                                                             .daemon = starfiveRef,
+                                                             .instance = {},
+                                                             .workspace = 0,
+                                                             .tab = 0,
+                                                             .pane = {} });
+        REQUIRE(daemon >= 0);
+        auto served =
+            QVariantMap { { "index", daemon }, { "sidebar", QVariant::fromValue<QObject*>(&model) } };
+        auto const names = model.roleNames();
+        for (auto const role: { SidebarModel::KindRole,
+                                SidebarModel::TitleRole,
+                                SidebarModel::ExpansionRole,
+                                SidebarModel::LinkStateRole,
+                                SidebarModel::StatusSlotRole,
+                                SidebarModel::DaemonButtonsRole })
+            served.insert(QString::fromUtf8(names.value(role)), model.index(daemon).data(role));
+        auto item = loadComponent(
+            engine, QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarRow.qml"), sidebarRowProperties(served));
+        // Room for every part in any font: a row too narrow for them gives its secondary button way, and
+        // which width is too narrow is the font's call (a platform font's substitute is wider).
+        qobject_cast<QQuickItem*>(item.get())->setWidth(4000);
+        QCoreApplication::processEvents();
+
+        // A Repeater's items are the visual tree's, not the object tree's.
+        auto buttons = contour::test::itemsNamed(*qobject_cast<QQuickItem*>(item.get()),
+                                                 QStringLiteral("sidebarDaemonButton"));
+        REQUIRE(buttons.size() == expectedNames.size());
+        std::ranges::sort(buttons, {}, [](QQuickItem const* button) { return button->x(); });
+        for (auto const index: std::views::iota(std::size_t { 0 }, expectedNames.size()))
+        {
+            auto* button = buttons[index];
+            auto* attached = accessibleAttachedOf(button);
+            REQUIRE(attached != nullptr);
+            CHECK(attached->property("role").toInt() == QAccessible::Button);
+            CHECK(attached->property("name").toString() == expectedNames[index]);
+            // The press action assistive technology performs: Accessible.onPressAction's signal.
+            CHECK(QMetaObject::invokeMethod(attached, "pressAction"));
+        }
+        QCoreApplication::processEvents();
+        REQUIRE(sections.calls.size() == expectedNames.size());
+        switch (state)
+        {
+            case DaemonLinkState::NotConnected:
+                CHECK(std::holds_alternative<DaemonSectionsCall::Connect>(sections.calls[0].verb));
+                break;
+            case DaemonLinkState::NotRunning:
+                CHECK(std::holds_alternative<DaemonSectionsCall::Start>(sections.calls[0].verb));
+                CHECK(std::holds_alternative<DaemonSectionsCall::Remove>(sections.calls[1].verb));
+                break;
+            default:
+                CHECK(std::holds_alternative<DaemonSectionsCall::Disconnect>(sections.calls[0].verb));
+                break;
+        }
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("accessibility: a coloured workspace's row says what it is handed, and its paint is decoration",
           "[contour][gui][qml][a11y][sidebar]")
 {
@@ -872,44 +1098,12 @@ TEST_CASE("accessibility: a coloured workspace's row says what it is handed, and
     contour::window::registerSidebarQmlTypes();
     contour::test::QmlMessageCapture const warnings;
     auto const rowWith = [](QColor const& workspaceColor) {
-        return QVariantMap {
-            { "index", 0 },
-            { "kind", 0 },
-            { "depth", 0 },
+        return sidebarRowProperties({
             { "title", QStringLiteral("contour") },
-            { "reason", QString {} },
-            { "fullReason", QString {} },
-            { "gitText", QString {} },
-            { "timeText", QString {} },
-            { "timeKind", 0 },
-            { "progress", -1 },
-            { "glyph", 0 },
-            { "expansion", static_cast<int>(contour::window::RowExpansion::Expanded) },
-            { "selected", false },
-            { "selection", 0 },
-            { "treeText", QString {} },
-            { "treeTextContinued", QString {} },
-            { "railText", QString {} },
-            { "railTextContinued", QString {} },
-            { "meterText", QString {} },
             { "accessibleName", QStringLiteral("contour") },
             { "accessibleDescription", QStringLiteral("Workspace, expanded") },
-            { "program", QString {} },
-            { "folder", QString {} },
-            { "reasonLabel", QString {} },
-            { "reasonCommand", QString {} },
-            { "fullReasonLabel", QString {} },
-            { "fullReasonCommand", QString {} },
-            { "hoverDetail", QString {} },
-            { "progressFraction", 0.0 },
-            { "secondLine", 0 },
-            { "idleLine", QString {} },
-            { "tabColor", QColor { Qt::transparent } },
             { "workspaceColor", workspaceColor },
-            { "icon", QVariantMap {} },
-            { "sidebar", QVariant::fromValue<QObject*>(nullptr) },
-            { "controller", QVariant::fromValue<QObject*>(nullptr) },
-        };
+        });
     };
     auto plain = loadComponent(
         engine, QStringLiteral("qrc:/qt/qml/Contour/Ui/SidebarRow.qml"), rowWith(Qt::transparent));

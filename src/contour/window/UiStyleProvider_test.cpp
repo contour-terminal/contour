@@ -848,7 +848,8 @@ TEST_CASE("UiStyleProvider resolves the colour roles", "[contour][uistyle]")
     auto const mac = UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::MacOS, font));
     auto const toastFill = tokenOf(mac, "colors", "toastFill").value<QColor>();
     CHECK(toastFill.rgb() == QColor(0x28, 0x28, 0x2C).rgb());
-    CHECK(toastFill.alphaF() == Catch::Approx(0.92).margin(0.005));
+    // Opaque: nothing it floats over reads through it (Phase 6 review, M6).
+    CHECK(toastFill.alpha() == 255);
 
     // A palette source follows the application palette, and says so.
     auto notified = 0;
@@ -1132,6 +1133,58 @@ TEST_CASE("UiStyleProvider: the active tab and the window buttons read on every 
                         auto const button = over(colors->color(fill), bar);
                         CHECK(contrastOf(over(colors->color(WindowButtonGlyph), button), button)
                               >= MinimumMarkContrast);
+                    }
+                });
+        }
+    }
+}
+
+TEST_CASE("UiStyleProvider: the band's breadcrumb and title read on the band on every row, appearance and "
+          "bundled scheme",
+          "[contour][uistyle]")
+{
+    // The breadcrumb (Breadcrumb.qml, the chrome's TabText) and the band's title (the bar's TabText) on the
+    // band's own fill, windowed and in full screen, in a window whose chrome draws the band. A fill that
+    // paints less than all of the band shows the window's palette through it.
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::config::MinimumTextContrast;
+    using contour::window::UiStyleProvider;
+    using contour::window::WindowFrame;
+    using contour::window::WindowMode;
+
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+        {
+            CAPTURE(index);
+            auto inputs =
+                contour::window::chromeInputsFor(static_cast<ChromeStyle>(index), QGuiApplication::font());
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            auto const* colors =
+                qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
+            auto const* bandColors =
+                qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "bandColors"));
+            REQUIRE(colors != nullptr);
+            REQUIRE(bandColors != nullptr);
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    for (auto const mode: { WindowMode::Windowed, WindowMode::FullScreen })
+                    {
+                        CAPTURE(static_cast<int>(mode));
+                        auto const band = over(provider.bandFill(static_cast<int>(WindowFrame::ClientBand),
+                                                                 static_cast<int>(mode),
+                                                                 QStringLiteral("breadcrumb")),
+                                               window);
+                        auto const breadcrumb = over(colors->color(ChromeColorRole::TabText), band);
+                        auto const title = over(bandColors->color(ChromeColorRole::TabText), band);
+                        CHECK(contrastOf(breadcrumb, band) >= MinimumTextContrast);
+                        CHECK(contrastOf(title, band) >= MinimumTextContrast);
                     }
                 });
         }
@@ -2454,14 +2507,20 @@ TEST_CASE("bandFill follows the material, the mode and the tone", "[contour][uis
             CHECK(mac.bandFill(1, 0, tabs) == paletteWindow());
 
             // Linux unchanged: every frame and mode paints the palette window colour.
-            for (auto const row: { ChromeStyle::ContourLinux, ChromeStyle::Terminal })
-            {
-                CAPTURE(contour::config::chromeStyleName(row));
-                auto const provider = UiStyleProvider(bandInputs(row, pass.background));
-                for (auto const frame: std::views::iota(0, static_cast<int>(WindowFrameCount)))
-                    for (auto const mode: std::views::iota(0, static_cast<int>(WindowModeCount)))
-                        CHECK(provider.bandFill(frame, mode, tabs) == paletteWindow());
-            }
+            auto const contourLinux = UiStyleProvider(bandInputs(ChromeStyle::ContourLinux, pass.background));
+            for (auto const frame: std::views::iota(0, static_cast<int>(WindowFrameCount)))
+                for (auto const mode: std::views::iota(0, static_cast<int>(WindowModeCount)))
+                    CHECK(contourLinux.bandFill(frame, mode, tabs) == paletteWindow());
+
+            // The Terminal row's band is its bar, in the scheme's bar colour in every mode; a native frame
+            // has no band of ours.
+            auto const terminalInputs = bandInputs(ChromeStyle::Terminal, pass.background);
+            auto const terminal = UiStyleProvider(terminalInputs);
+            auto const bar = contour::platform::toQColor(
+                terminalInputs.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Bar)]);
+            for (auto const mode: std::views::iota(0, static_cast<int>(WindowModeCount)))
+                CHECK(terminal.bandFill(0, mode, tabs) == bar);
+            CHECK(terminal.bandFill(1, 0, tabs) == paletteWindow());
 
             // Windows: the band is cleared over Mica, the tint without it, and the palette under a native
             // frame.
@@ -3396,6 +3455,40 @@ TEST_CASE(
             CHECK(sidebar->twoLineRowHeight(stray) == sidebar->twoLineRowHeight(comfortable));
             CHECK(sidebar->lineGap(stray) == sidebar->lineGap(comfortable));
         }
+    }
+}
+
+TEST_CASE("UiStyleProvider widens the sidebar's default width to hold its heading in a wide font",
+          "[contour][uistyle][sidebar]")
+{
+    using contour::config::ChromeStyle;
+    // A face that sets each letter twice as wide as the application's: wider than any UI face ships.
+    auto wide = QGuiApplication::font();
+    wide.setLetterSpacing(QFont::PercentageSpacing, 200.0);
+    for (auto const style:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        CAPTURE(static_cast<int>(style));
+        auto const look = contour::config::uiStyleTokens(style);
+        auto const row = contour::config::ChromeTokenRows[static_cast<size_t>(style)].sidebar;
+        for (auto const& font: { QGuiApplication::font(), wide })
+        {
+            auto const provider = contour::window::UiStyleProvider(style, font);
+            auto const metrics = provider.sidebarMetrics();
+            auto const* sidebar = groupOf(provider, "sidebar");
+            REQUIRE(sidebar != nullptr);
+            // The token QML reads and the width a window starts at are one.
+            CHECK(sidebar->property("width").toReal() == metrics.tokens.width * metrics.scale.unitPixels);
+            CHECK(metrics.tokens.width >= row.width);
+            CHECK(metrics.tokens.width <= row.maxWidth);
+        }
+        auto const widened = contour::window::UiStyleProvider(style, wide).sidebarMetrics().tokens.width;
+        // macOS names no heading, so nothing widens it; a native row's widens past its own width. (On the
+        // Terminal row the cell widens with the letters, so the row's width in cells may hold the heading.)
+        if (style == ChromeStyle::MacOS)
+            CHECK(widened == row.width);
+        if (look.unit == contour::config::LengthUnit::Pixel && style != ChromeStyle::MacOS)
+            CHECK(widened > row.width);
     }
 }
 

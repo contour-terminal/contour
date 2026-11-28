@@ -5,6 +5,7 @@
 #include <array>
 #include <format>
 #include <ranges>
+#include <string_view>
 
 namespace vthost
 {
@@ -12,7 +13,18 @@ namespace vthost
 namespace
 {
     /// Every line the relay may begin with.
-    constexpr auto PreambleStarts = std::array { StdioPreambleReady, StdioPreambleErrorPrefix };
+    constexpr auto PreambleStarts =
+        std::array { StdioPreambleReady, StdioPreambleReadyNoStart, StdioPreambleErrorPrefix };
+
+    /// @return What the words after the ready prefix (@p words, up to the end of the line) state of
+    ///         `--no-start`; words this client does not know are ignored.
+    [[nodiscard]] RelayNoStart noStartOf(std::string_view words)
+    {
+        auto const said = std::ranges::any_of(std::views::split(words, ' '), [](auto const& word) {
+            return std::string_view { word.begin(), word.end() } == StdioNoStartWord;
+        });
+        return said ? RelayNoStart::Honoured : RelayNoStart::Unstated;
+    }
 
     /// @return The length of the longest tail of @p received that a preamble line could still begin with.
     [[nodiscard]] std::size_t partialPreambleLength(std::string_view received)
@@ -41,15 +53,22 @@ namespace
 
 PreambleScan scanPreamble(std::string_view received)
 {
-    auto const ready = received.find(StdioPreambleReady);
+    auto const ready = received.find(StdioPreambleReadyPrefix);
     auto const error = received.find(StdioPreambleErrorPrefix);
 
     if (ready != std::string_view::npos && ready < error)
     {
-        auto const extra = received.size() - ready - StdioPreambleReady.size();
+        auto const wordsStart = ready + StdioPreambleReadyPrefix.size();
+        auto const newline = received.find('\n', wordsStart);
+        if (newline == std::string_view::npos)
+            return withinLimit(ready, PreambleIncomplete {});
+        auto const extra = received.size() - newline - 1;
         if (extra != 0)
             return withinLimit(ready, PreambleTrailing { .extra = extra });
-        return withinLimit(ready, PreambleReady { .skipped = ready });
+        return withinLimit(
+            ready,
+            PreambleReady { .skipped = ready,
+                            .noStart = noStartOf(received.substr(wordsStart, newline - wordsStart)) });
     }
 
     if (error != std::string_view::npos)

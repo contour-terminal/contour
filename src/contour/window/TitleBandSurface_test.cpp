@@ -132,10 +132,11 @@ TEST_CASE("surface.otherRowsKeepToday", "[titlebandsurface]")
 {
     for (auto const style: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
     {
-        // The rows with a band material of their own are tested above; the Terminal row has none.
+        // The rows with a band material of their own are tested above, the Terminal row's bar below.
         if (static_cast<ChromeStyle>(style) == ChromeStyle::MacOS
             || static_cast<ChromeStyle>(style) == ChromeStyle::ContourLinux
-            || static_cast<ChromeStyle>(style) == ChromeStyle::Fluent)
+            || static_cast<ChromeStyle>(style) == ChromeStyle::Fluent
+            || static_cast<ChromeStyle>(style) == ChromeStyle::Terminal)
             continue;
         for (auto const material: std::views::iota(size_t { 0 }, contour::config::MaterialCount))
             for (auto const frame: std::views::iota(size_t { 0 }, WindowFrameCount))
@@ -149,6 +150,23 @@ TEST_CASE("surface.otherRowsKeepToday", "[titlebandsurface]")
                           == TitleBandSurface {});
                 }
     }
+}
+
+TEST_CASE("surface.terminalBandIsItsBar", "[titlebandsurface]")
+{
+    // The Terminal row's band paints the scheme's bar in a band of its own, windowed and in full screen, as
+    // its sidebar and tabs do: everything on it is inked for the bar. A native frame has no band of ours.
+    for (auto const mode: std::views::iota(size_t { 0 }, WindowModeCount))
+    {
+        CAPTURE(mode);
+        CHECK(
+            surfaceOf(
+                ChromeStyle::Terminal, Material::None, WindowFrame::ClientBand, static_cast<WindowMode>(mode))
+                .fill
+            == contour::config::BandFill::Bar);
+    }
+    CHECK(surfaceOf(ChromeStyle::Terminal, Material::None, WindowFrame::NativeFrame, WindowMode::Windowed)
+          == TitleBandSurface {});
 }
 
 TEST_CASE("surface.linuxRowsBlurBehindATranslucentBand", "[titlebandsurface]")

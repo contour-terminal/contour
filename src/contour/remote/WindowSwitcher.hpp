@@ -6,12 +6,16 @@
 /// another daemon: resolve first, detach last, and never block the GUI thread.
 
 #include <contour/remote/DaemonLink.hpp>
+#include <contour/remote/ObserverPool.hpp>
 #include <contour/remote/SwitchHost.hpp>
 #include <contour/remote/SwitchPlan.hpp>
 #include <contour/remote/SwitchingService.hpp>
 #include <contour/remote/WorkspaceLister.hpp>
 #include <contour/session/WindowSwitching.hpp>
 
+#include <core/Random.hpp>
+
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -61,20 +65,30 @@ using SwitchPicker = std::function<std::expected<void, std::string>(SwitchPickRe
 /// leaves the window free for the next switch. A switch that must land by a time (session::SwitchLandBy) is
 /// refused when that time passed before it selected or connected anything, and gives up at that time at the
 /// latest. GUI thread only; nothing it does waits.
+///
+/// Through the presence (IObserverPool): a daemon the sidebar lists, connected, is resolved from the
+/// directory its observer holds, and a switch to it takes that observer over rather than dialling; the daemon
+/// the window leaves keeps the window's connection as its observer while no other window is on it. The user's
+/// newer switch, a cancel and the window's close end a switch at any stage (supersessionOf()).
 class WindowSwitcher final: public SwitchingService
 {
   public:
     /// @param sessions The manager the windows live in. Borrowed, and not used here: it may still be under
     ///        construction, but must outlive every request.
     /// @param host The application. Borrowed; it must outlive the switcher.
+    /// @param pool The presence's observers. Borrowed; it must outlive the switcher.
     /// @param lister Lists a daemon's workspaces.
     /// @param picker Shows the switcher popup for a pick.
     /// @param deadline How long a switch waits for its target to show, and what tells it the time is up.
+    /// @param random Draws the creation token of a new workspace an adopted observer is promoted to.
+    ///        Borrowed; it must outlive the switcher.
     WindowSwitcher(session::TerminalSessionManager& sessions,
                    ISwitchHost& host,
+                   IObserverPool& pool,
                    std::unique_ptr<IWorkspaceLister> lister,
                    SwitchPicker picker,
-                   SwitchDeadline deadline);
+                   SwitchDeadline deadline,
+                   core::IRandom& random);
     ~WindowSwitcher() override;
 
     WindowSwitcher(WindowSwitcher const&) = delete;
@@ -85,12 +99,16 @@ class WindowSwitcher final: public SwitchingService
     void request(vtworkspace::WorkspaceId window,
                  session::SwitchTarget target,
                  session::SwitchMode mode,
-                 session::SwitchLandBy landBy,
+                 session::SwitchWaiter waiter,
                  session::SwitchCompletion done) override;
 
     /// Ends the switch @p window waits in, if any: whatever it started goes with the window, which a deadline
     /// no longer bounds while it waits for a tab.
     void windowClosed(vtworkspace::WorkspaceId window) override;
+
+    /// Ends the switch of @p mode @p window waits in, if any, as the user cancelled it: whatever it started
+    /// is undone, an observer it took over goes back to the presence, and the window shows what it showed.
+    void cancel(vtworkspace::WorkspaceId window, session::SwitchMode mode) override;
 
     /// Reaches the daemon the way the switch would (a host not yet connected is connected to for this),
     /// and marks each row with the window here that shows it.
@@ -145,7 +163,7 @@ class WindowSwitcher final: public SwitchingService
         vtworkspace::WorkspaceId window;
         session::SwitchTarget target;
         session::SwitchMode mode;
-        session::SwitchLandBy landBy; ///< When it must have landed by, if it must.
+        session::SwitchWaiter waiter; ///< Until when it must have landed, and when done is told it switched.
         session::SwitchCompletion done;
         SameDaemon sameDaemon = SameDaemon::No;
         uint64_t serial = 0;                    ///< Which request of its window this is (@see _busy).
@@ -166,8 +184,6 @@ class WindowSwitcher final: public SwitchingService
     void resolve(Request request, std::vector<WorkspaceRow> const& rows);
     /// Shows the workspace @p to names: over the window's own connection, or a link of its own.
     void land(Request request, SwitchTo const& to);
-    /// Gives @p window's switch @p serial up once the deadline passed -- the switch's own, or its landing
-    /// time @p landBy when that comes first -- unless it ended before.
     /// What a switch's deadline did when it passed.
     enum class Expiry : uint8_t
     {
@@ -175,30 +191,37 @@ class WindowSwitcher final: public SwitchingService
         Disarmed,   ///< The switch waits on: its target holds no tab, which is for the user to end.
     };
 
-    /// What a switch under way is ended by, ahead of its own outcome.
-    enum class SupersedeCause : uint8_t
+    /// Where a window's switch under way waits: one slot for a switch in place, one for an Open, so that
+    /// neither kind ends the other.
+    struct SwitchSlot
     {
-        NewerRequest = 0, ///< Another switch of the window: only one that waits for a tab ends for it.
-        WindowClosed,     ///< The window is gone: whatever the switch started goes with it.
+        uint64_t window = 0;                                    ///< The window's workspace id.
+        session::SwitchMode mode = session::SwitchMode::Switch; ///< Which kind of switch.
+        auto operator<=>(SwitchSlot const&) const = default;
     };
-    /// Whether a switch ended for a SupersedeCause.
-    enum class Supersession : uint8_t
+
+    /// Every switch mode, each a slot of its own.
+    static constexpr auto SwitchModes = std::array { session::SwitchMode::Switch, session::SwitchMode::Open };
+
+    /// @return The slot a switch of @p mode of @p window waits in.
+    [[nodiscard]] static constexpr SwitchSlot slotOf(vtworkspace::WorkspaceId window,
+                                                     session::SwitchMode mode) noexcept
     {
-        Kept = 0, ///< The switch goes on.
-        Ended,    ///< The switch was undone and told it was cancelled; its window is free.
-    };
-    /// A window's switch under way: its request's serial, and how a newer request or the window's close ends
-    /// it.
+        return SwitchSlot { .window = window.value, .mode = mode };
+    }
+
+    /// A window's switch under way: its request's serial, and how a newer request, a cancel or the window's
+    /// close ends it (supersessionOf()).
     struct Busy
     {
         uint64_t serial = 0;
-        std::function<Supersession(SupersedeCause)> supersede; ///< Empty while the switch is being resolved.
+        std::function<Supersession(SupersedeCause)> supersede; ///< Set from the request's start on.
     };
 
     /// Takes a switch's request out of the callbacks that share it; empty once another took it.
     using TakeRequest = std::function<std::optional<Request>()>;
-    /// Ends the switch of @p window over its own connection for @p cause, unless it is not waiting for a tab
-    /// and a newer request is the cause.
+    /// Ends the switch of @p window over its own connection for @p cause, if supersessionOf() says so at the
+    /// stage its link is at.
     /// @param take Takes the switch's request.
     [[nodiscard]] Supersession supersedeOwn(vtworkspace::WorkspaceId window,
                                             SupersedeCause cause,
@@ -209,16 +232,39 @@ class WindowSwitcher final: public SwitchingService
                                                SupersedeCause cause,
                                                TakeRequest const& take);
 
-    /// Lets @p window's switch @p serial be ended by @p supersede (@see Busy).
-    void onSupersede(vtworkspace::WorkspaceId window,
-                     uint64_t serial,
-                     std::function<Supersession(SupersedeCause)> supersede);
+    /// Ends the switch under way in @p slot for @p cause, if it ends for it. Nothing while none is under way.
+    void supersede(SwitchSlot slot, SupersedeCause cause);
+    /// @param link The link a switch selected or connected through, if it is still there.
+    /// @return The stage a switch through it is at: waiting for a tab, or connecting.
+    [[nodiscard]] static SwitchStage stageOf(DaemonLink const* link);
+
+    /// The presence's section of the daemon @p request goes to, if it lists it, connected.
+    [[nodiscard]] std::optional<window::DaemonSection> connectedSectionOf(Request const& request) const;
+    /// Builds the link of a switch to another daemon, or of an Open, around the presence's observer of it, if
+    /// it has one -- which it has only while no window of this process is on the daemon.
+    /// @param request The switch, or the Open.
+    /// @param workspace The daemon's workspace to show; 0 for a new one.
+    /// @param config What the link is built with, its arrival set.
+    /// @return The link; null when the presence has no observer to hand over, or no area is known for the
+    ///         window it shows the workspace in.
+    [[nodiscard]] DaemonLink* adoptLink(Request const& request, uint64_t workspace, DaemonLinkConfig& config);
+    /// @param daemon The daemon a link leaves.
+    /// @param handOff The hand-over the connection's return ends; 0 for one the presence never marked.
+    /// @return Where its connection goes as it leaves: back to the presence while the switcher lives.
+    [[nodiscard]] GiveBack giveBackTo(window::DaemonRef daemon, HandOffId handOff) const;
+    /// Shows the row's tab and pane in @p window (WindowController::land()), once it shows the workspace.
+    void applyFocus(vtworkspace::WorkspaceId window, session::LandingFocus const& focus);
+
+    /// Lets the switch @p serial in @p slot be ended by @p supersede (@see Busy).
+    void onSupersede(SwitchSlot slot, uint64_t serial, std::function<Supersession(SupersedeCause)> supersede);
     /// Ends @p request as cancelled: logged, told to the caller, said nowhere in the window.
     void cancel(Request const& request, std::string const& reason);
 
+    /// Gives the switch @p serial in @p slot up once the deadline passed -- the switch's own, or its landing
+    /// time @p landBy when that comes first -- unless it ended before.
     /// @param expire Undoes what the switch started and ends it as failed, unless it waits for a tab in a
     ///        workspace that holds none (expiryOf()); then it says so.
-    void armDeadline(vtworkspace::WorkspaceId window,
+    void armDeadline(SwitchSlot slot,
                      uint64_t serial,
                      session::SwitchLandBy landBy,
                      std::function<Expiry()> expire);
@@ -248,12 +294,14 @@ class WindowSwitcher final: public SwitchingService
 
     session::TerminalSessionManager& _sessions;
     ISwitchHost& _host;
+    IObserverPool& _pool;
     std::unique_ptr<IWorkspaceLister> _lister;
     SwitchPicker _picker;
     SwitchDeadline _deadline;
-    /// The windows with a switch under way, by id, each with its request's serial: a second request for one
-    /// is refused until it ended, and a deadline for a request that ended finds another serial or none.
-    std::map<uint64_t, Busy> _busy;
+    core::IRandom& _random;
+    /// The switches under way, by window and kind, each with its request's serial: a deadline for a request
+    /// that ended finds another serial or none.
+    std::map<SwitchSlot, Busy> _busy;
     uint64_t _nextSerial = 1; ///< The serial of the next request.
     /// Held by the switcher alone: a link's callback that outlives it finds it gone.
     std::shared_ptr<WindowSwitcher*> _alive;

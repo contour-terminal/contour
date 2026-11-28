@@ -3125,6 +3125,41 @@ input_mapping:
     }));
 }
 
+TEST_CASE("Config: ShowHiddenDaemon takes its 1-based index as the workspace index actions do", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: F1, action: ShowHiddenDaemon, index: 2 }
+    - { mods: [Control], key: F2, action: ShowHiddenDaemon, index: 0 }
+    - { mods: [Control], key: F3, action: ShowHiddenDaemon, position: 2 }
+    - { mods: [Control], key: F4, action: ShowHiddenDaemon }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+    auto const shown = [&](vtbackend::Key key) -> std::optional<uint32_t> {
+        auto const found = std::ranges::find_if(mappings.keyMappings, [&](auto const& m) {
+            return m.input == key
+                   && std::holds_alternative<contour::actions::ShowHiddenDaemon>(m.binding.at(0));
+        });
+        if (found == mappings.keyMappings.end())
+            return std::nullopt;
+        return std::get<contour::actions::ShowHiddenDaemon>(found->binding.at(0)).index;
+    };
+    CHECK(shown(vtbackend::Key::F1) == 2);
+    // Positions count from 1, and which hidden daemon has no default: the binding is dropped.
+    CHECK_FALSE(shown(vtbackend::Key::F2).has_value());
+    CHECK_FALSE(shown(vtbackend::Key::F3).has_value());
+    CHECK_FALSE(shown(vtbackend::Key::F4).has_value());
+    // What the config writer writes back is what this reads.
+    CHECK(std::format("{}", contour::actions::Action { contour::actions::ShowHiddenDaemon { .index = 2 } })
+              .contains("index: 2"));
+}
+
 TEST_CASE("Config: SetWorkspaceColor's color is optional, and ResetWorkspaceColor binds", "[config]")
 {
     // The workspace's mirror of SetTabColor: no color means "open the workspace's color picker".

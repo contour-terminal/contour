@@ -33,9 +33,9 @@ namespace vthost::handover
 
 /// @param host The host.
 /// @return The host's structure: the model with its ids, the object registry, the color preference new
-///         sessions are built under, the cell size a client stated, and every session as sessionStructureOf()
-///         names it. Nothing names the run (daemonInstance, fromRelease, upgradeGeneration), a listener or a
-///         lease: the caller does. Locks no terminal. Loop thread.
+///         sessions are built under, the cell size a client stated, the attention ledger, and every session
+///         as sessionStructureOf() names it. Nothing names the run (daemonInstance, fromRelease,
+///         upgradeGeneration), a listener or a lease: the caller does. Locks no terminal. Loop thread.
 [[nodiscard]] HandoverImage hostStructureOf(SessionHost const& host);
 
 /// Asks, without stopping anything, whether a capture of @p host would be refused as things stand: what a

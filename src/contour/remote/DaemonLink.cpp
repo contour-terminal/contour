@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
-#include <contour/platform/FinishNotification.hpp>
-#include <contour/platform/Notifier.hpp>
 #include <contour/remote/DaemonDriftFollower.hpp>
 #include <contour/remote/DaemonLink.hpp>
+#include <contour/remote/ElsewhereRaise.hpp>
+#include <contour/remote/PresencePlan.hpp>
 #include <contour/remote/SwitchGrants.hpp>
 #include <contour/remote/SwitchGuard.hpp>
+#include <contour/remote/WindowWire.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/NoticeQueue.hpp>
@@ -20,14 +21,12 @@
 #include <QtCore/QThread>
 
 #include <algorithm>
-#include <chrono>
 #include <format>
 #include <ranges>
 #include <set>
 #include <span>
 #include <utility>
 
-#include <vthost/NotifyWire.hpp>
 #include <vthost/RestoredCounts.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/ViewRouting.hpp>
@@ -63,92 +62,44 @@ namespace
         return found != layouts.end() ? LayoutSnapshot { *found } : LayoutSnapshot {};
     }
 
-    /// @return A command that finished in a pane this client does not mirror, as a finish notice reads one.
-    [[nodiscard]] vtbackend::CommandBlockSummary summaryOf(vthost::proto::FinishedCommand const& finished)
+    /// What a connection leaving for the presence dials through until it is given back: nothing. A drop
+    /// meanwhile ends it, and the hand-back then finds it not Connected and gives back nothing.
+    class LeavingTransport final: public vthost::ITransportFactory
     {
-        auto summary = vtbackend::CommandBlockSummary {};
-        summary.commandLine = vtbackend::CommandLineText { finished.commandLine };
-        summary.exitCode = finished.exitCode;
-        summary.duration = finished.durationMs.transform([](uint64_t ms) {
-            return std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::milliseconds { ms });
-        });
-        return summary;
-    }
+      public:
+        [[nodiscard]] core::async::Task<
+            std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+        connect(core::net::EventLoop& /*loop*/) override
+        {
+            return refused();
+        }
 
-    /// What every finish notice of a pane of another workspace is raised under: the pane's daemon session id
-    /// follows, so a pane's later finish replaces its earlier one.
-    constexpr auto FinishedElsewhereIdentifier = std::string_view { "contour-daemon-finished-{}" };
+        [[nodiscard]] std::string describe() const override { return "a daemon the window left"; }
 
-    /// Whether a window rings for what was raised.
-    enum class RingBell : uint8_t
-    {
-        No = 0,
-        Yes,
+      private:
+        /// A coroutine of its own, so that the loop is no reference parameter of one.
+        [[nodiscard]] static core::async::Task<
+            std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+        refused()
+        {
+            co_return std::unexpected(vthost::TransportError {
+                .kind = vthost::TransportErrorKind::Refused,
+                .message = "the window left the daemon",
+            });
+        }
     };
 
-    /// @param directory What the window lists.
-    /// @param pane A daemon session.
-    /// @return The name of the tab holding @p pane; empty for none.
-    [[nodiscard]] std::string tabLabelOf(window::WorkspaceDirectory const& directory, uint64_t pane)
+    /// @return Why a promotion was not asked of the daemon, in words for the user.
+    [[nodiscard]] std::string promotionRefusalText(SelectError error)
     {
-        for (auto const& workspace: directory.workspaces)
-            for (auto const& tab: workspace.tabs)
-                if (std::ranges::contains(tab.panes, window::PaneKey { pane }, &window::DirectoryPane::key))
-                    return tab.name;
-        return {};
-    }
-
-    /// Notifies a command that finished in a pane of a workspace the window does not select, as a hidden
-    /// pane's finish is decided.
-    /// @param pane The pane's daemon session.
-    /// @param finished How the command finished.
-    /// @param tabName The name of the pane's tab.
-    /// @param notices What the finish is decided and raised with.
-    /// @return Whether the finish asks the window to ring too.
-    [[nodiscard]] RingBell noticeFinishedElsewhere(uint64_t pane,
-                                                   vthost::proto::FinishedCommand const& finished,
-                                                   std::string const& tabName,
-                                                   ElsewhereNotices const& notices)
-    {
-        auto const summary = summaryOf(finished);
-        auto const ending =
-            platform::finishNoticeKind(summary, notices.policy, platform::SessionVisibility::Hidden);
-        if (!ending)
-            return RingBell::No;
-        auto const request = platform::finishNotificationText(
-            summary, *ending, tabName, notices.homeDirectory, notices.policy.action);
-        auto const effects = platform::effectsOf(request.action);
-        if (effects.test(platform::FinishEffect::Notification))
+        switch (error)
         {
-            auto notification = vtbackend::DesktopNotification {};
-            notification.identifier = std::format(FinishedElsewhereIdentifier, pane);
-            notification.title = request.title;
-            notification.body = request.body;
-            notification.sound = platform::finishNoticeSound(
-                request.action, platform::bellAudibilityOf(notices.bell.sound, notices.bell.volume));
-            notices.notifier.notify(notification);
+            case SelectError::NotConnected: return "the connection to the daemon is not up";
+            case SelectError::Unsupported: return "the daemon cannot show this connection a workspace";
+            case SelectError::Busy: return "the connection is busy showing another workspace";
+            case SelectError::DaemonRestarted: return "the daemon restarted";
         }
-        return effects.test(platform::FinishEffect::Bell) ? RingBell::Yes : RingBell::No;
-    }
-
-    /// Raises a desktop notification of a pane of a workspace the window does not select, as a hidden pane's.
-    /// @param notice What the pane notified.
-    /// @param notifier Where it is raised.
-    void notifyElsewhere(vthost::proto::PaneNotification const& notice, platform::Notifier& notifier)
-    {
-        // As a mirrored pane raises one (ScreenMirror::applyEvent): one that stated no occasion takes the OSC
-        // 9 / OSC 777 rule.
-        auto const occasion =
-            vthost::displayOccasionOf(notice.occasion).value_or(platform::UnstatedNotificationOccasion);
-        if (!platform::isNoticeWanted(platform::notifyWhenOf(occasion), platform::SessionVisibility::Hidden))
-            return;
-        auto notification = vtbackend::DesktopNotification {};
-        notification.title = notice.title;
-        notification.body = notice.body;
-        notification.occasion = occasion;
-        notification.focusOnActivation = false;
-        notifier.notify(notification);
+        return "the daemon refused";
     }
 
     /// @return @p failure, or what a connection lost without a word says.
@@ -209,6 +160,16 @@ DaemonLink::DaemonLink(Id id,
                        DaemonLinkConfig config,
                        IDaemonLinkHost& host,
                        session::TerminalSessionManager& sessions):
+    DaemonLink(AdoptKey {}, id, std::move(config), nullptr, host, sessions)
+{
+}
+
+DaemonLink::DaemonLink(AdoptKey /*key*/,
+                       Id id,
+                       DaemonLinkConfig config,
+                       std::unique_ptr<NativeController> observing,
+                       IDaemonLinkHost& host,
+                       session::TerminalSessionManager& sessions):
     _id(id),
     _host(host),
     _sessions(sessions),
@@ -216,7 +177,8 @@ DaemonLink::DaemonLink(Id id,
     _locality(config.locality),
     _upkeep(config.upkeep),
     _clientRelease(config.clientRelease),
-    _controller(std::make_unique<NativeController>(config.controller)),
+    _origin(observing ? LinkOrigin::Adopted : LinkOrigin::Dialled),
+    _controller(observing ? std::move(observing) : std::make_unique<NativeController>(config.controller)),
     _siblingTemplate(std::move(config)),
     _role(roleOf(_siblingTemplate))
 {
@@ -228,12 +190,131 @@ DaemonLink::DaemonLink(Id id,
     connectController();
 }
 
+std::unique_ptr<DaemonLink> DaemonLink::adopt(Id id,
+                                              DaemonLinkConfig config,
+                                              std::unique_ptr<NativeController> observing,
+                                              PromotionRequest request,
+                                              std::shared_ptr<vthost::ITransportFactory> interactive,
+                                              GiveBack giveBack,
+                                              IDaemonLinkHost& host,
+                                              session::TerminalSessionManager& sessions)
+{
+    Require(observing != nullptr);
+    auto link = std::make_unique<DaemonLink>(
+        AdoptKey {}, id, std::move(config), std::move(observing), host, sessions);
+    link->_giveBack = std::move(giveBack);
+    // Told on the GUI thread, posted to the controller: only while the link is there to hear it, for the
+    // controller may outlive it, handed back.
+    auto promoted =
+        link->_controller->promote(request,
+                                   std::move(interactive),
+                                   [guard = QPointer<QObject> { &link->_receiver },
+                                    self = link.get()](std::expected<uint64_t, std::string> landed) {
+                                       if (guard)
+                                           self->promotionLanded(std::move(landed));
+                                   });
+    // Not from inside adopt(): its caller is yet to keep the link its arrival may end.
+    if (!promoted)
+        QMetaObject::invokeMethod(
+            &link->_receiver,
+            [self = link.get(), reason = promotionRefusalText(promoted.error())] {
+                self->promotionLanded(std::unexpected(reason));
+            },
+            Qt::QueuedConnection);
+    return link;
+}
+
 DaemonLink::~DaemonLink()
 {
     // Before the controller's destructor waits for a stop end() began, which tells this link when done.
     _postTarget->withdraw();
     if (!isStopped())
         _sessions.releaseBinding(*this);
+    // Told once, whatever path the link took: a give-back never told is told the connection goes with it.
+    tellGiveBack(nullptr);
+}
+
+void DaemonLink::promotionLanded(std::expected<uint64_t, std::string> landed)
+{
+    // A link that is leaving, or stopped, has decided what becomes of its connection already.
+    if (_leaving || !isLive())
+        return;
+    if (landed)
+    {
+        // An adopted controller was Connected all along: attached as its promotion lands, not as it connects.
+        attachLog()("switch: the adopted connection shows workspace {}.", *landed);
+        _state = AttachState::Attached;
+        offerDaemonRestartIfDrifted();
+        _host.linkChanged(*this);
+        followLayout();
+        return;
+    }
+    attachLog()("switch: the adopted connection shows no workspace: {}.", landed.error());
+    reportArrival(std::unexpected(landed.error()));
+    // Still an observer, demoted back by the promotion's end: the presence takes it back.
+    if (isLive())
+    {
+        _leaving = LeaveKind::KeepAsObserver;
+        end();
+    }
+}
+
+void DaemonLink::tellGiveBack(std::unique_ptr<NativeController> controller)
+{
+    if (auto giveBack = std::exchange(_giveBack, GiveBack {}))
+        giveBack(std::move(controller));
+}
+
+void DaemonLink::leaveDaemon(LeaveKind kind, GiveBack giveBack)
+{
+    requireGuiThread();
+    if (giveBack)
+        _giveBack = std::move(giveBack);
+    // Stopped already, or handed back: nothing is left to keep.
+    auto const stopping = isStopped() && _leaving != LeaveKind::KeepAsObserver;
+    if (_controller == nullptr || stopping)
+    {
+        tellGiveBack(nullptr);
+        return;
+    }
+    _leaving = kind;
+    if (kind == LeaveKind::KeepAsObserver)
+    {
+        // Off the wire at once: a promotion under way is withdrawn, a promoted connection demoted. Until it
+        // is given back it dials nothing; the presence gives it its own transport then.
+        _controller->withdrawPromotion();
+        if (_controller->demote(std::make_shared<LeavingTransport>()))
+            return;
+        // Not demoted -- reconnecting, say: kept, it would reconnect through the window's transport, may
+        // prompt, and attach as a viewer until its panes let it go. It ends instead.
+        _leaving = LeaveKind::End;
+    }
+    // An ended link waiting to hand its connection back stops it instead; any other stops it as it ends.
+    if (_state == AttachState::Ended)
+    {
+        stopEnded();
+        tellGiveBack(nullptr);
+    }
+}
+
+void DaemonLink::handBackOnceUnbound()
+{
+    if (_state != AttachState::Ended || _leaving != LeaveKind::KeepAsObserver || _controller == nullptr
+        || _controller->bindsPanes())
+        return;
+    if (_controller->connectionState() == vthost::client::ConnectionState::Connected
+        && _controller->role() == vthost::proto::ConnectionRole::Observe)
+    {
+        // Nothing of the link listens to it any more: it is the presence's.
+        QObject::disconnect(_controller.get(), nullptr, &_receiver, nullptr);
+        tellGiveBack(std::move(_controller));
+        _host.linkEnded();
+        return;
+    }
+    // Lost meanwhile, or never an observer: stopped, as a link that ends stops its connection.
+    _leaving = LeaveKind::End;
+    stopEnded();
+    tellGiveBack(nullptr);
 }
 
 void DaemonLink::requireGuiThread() const
@@ -245,7 +326,9 @@ void DaemonLink::requireGuiThread() const
 
 session::SessionFactory& DaemonLink::sessions() noexcept
 {
-    return anyController();
+    // Asked only of a link a window is bound to: one that handed its connection back serves no window.
+    Require(anyController() != nullptr);
+    return *anyController();
 }
 
 std::string_view DaemonLink::hostLabel() const noexcept
@@ -271,9 +354,15 @@ std::optional<session::SwitchTarget> DaemonLink::daemonTarget() const
     return switchTargetOf(address());
 }
 
+std::optional<window::DaemonRef> DaemonLink::daemonRef() const
+{
+    return daemonRefOf(address(), id());
+}
+
 NativeController::ResumeFallback DaemonLink::resumeFallback() const
 {
-    return anyController().resumeFallback();
+    auto const* const controller = anyController();
+    return controller != nullptr ? controller->resumeFallback() : NativeController::ResumeFallback::Nothing;
 }
 
 void DaemonLink::resumeAsLaunch()
@@ -285,12 +374,19 @@ void DaemonLink::resumeAsLaunch()
 
 bool DaemonLink::bindsPanes() const
 {
-    return anyController().bindsPanes();
+    auto const* const controller = anyController();
+    return controller != nullptr && controller->bindsPanes();
 }
 
 bool DaemonLink::isFinished() const
 {
-    return _state == AttachState::Ended && !anyController().isWindingDown() && !bindsPanes();
+    // A connection still to be handed back is not done with: its hand-back is queued after the last pane
+    // unbound, and a link destroyed before it ran would take the connection with it.
+    if (_leaving == LeaveKind::KeepAsObserver && _controller != nullptr)
+        return false;
+    auto const* const controller = anyController();
+    return _state == AttachState::Ended && (controller == nullptr || !controller->isWindingDown())
+           && !bindsPanes();
 }
 
 void DaemonLink::lastWindowReleased()
@@ -303,13 +399,39 @@ void DaemonLink::end()
 {
     if (isStopped())
         return;
+    _state = AttachState::Ended;
+    _sessions.releaseBinding(*this);
+    if (_leaving == LeaveKind::KeepAsObserver && _controller != nullptr)
+    {
+        // Kept running, demoted: handed back once the panes of its window let it go, one by one as their
+        // new link detaches them -- or at once, from the event loop, should none be bound.
+        QObject::connect(
+            _controller.get(),
+            &NativeController::paneUnbound,
+            &_receiver,
+            [this] { handBackOnceUnbound(); },
+            Qt::QueuedConnection);
+        QMetaObject::invokeMethod(&_receiver, [this] { handBackOnceUnbound(); }, Qt::QueuedConnection);
+        _host.linkEnded();
+        return;
+    }
+    stopEnded();
+    tellGiveBack(nullptr);
+}
+
+void DaemonLink::stopEnded()
+{
+    auto* const controller = anyController();
+    if (controller == nullptr)
+    {
+        _host.linkEnded();
+        return;
+    }
     // stop(), with the controller's stop off the GUI thread: it waits up to DefaultDetachBound for the daemon
     // to see this client detach, which a daemon that stopped reading makes it wait in full, and the
     // application lives on meanwhile (the quick terminal, a local window). The link is not finished until
     // the controller has wound down, so it outlives the stop, and is told when that is.
-    _state = AttachState::Ended;
-    _sessions.releaseBinding(*this);
-    anyController().stopInBackground([target = _postTarget, this] {
+    controller->stopInBackground([target = _postTarget, this] {
         target->post([this] {
             if (isFinished())
                 _host.linkEnded();
@@ -318,7 +440,7 @@ void DaemonLink::end()
     // From now on only: the panes of its closed windows let its controller go one by one, and the last one
     // has the link destroyed.
     QObject::connect(
-        &anyController(),
+        controller,
         &NativeController::paneUnbound,
         &_receiver,
         [this] {
@@ -342,6 +464,8 @@ void DaemonLink::installAttachWindowBinder()
 void DaemonLink::connectController()
 {
     requireGuiThread();
+    // An adopted observer's losses are the presence's: only those from now on are this link's to hear.
+    _connectionLossesSeen = _controller->connectionLosses();
     // The launch's link, for the boot window; one taking a workspace over, or opening one for a switch,
     // installs it as it opens its window.
     if (isBootLink())
@@ -351,7 +475,8 @@ void DaemonLink::connectController()
         &NativeController::layoutChanged,
         &_receiver,
         [this] {
-            if (isStopped())
+            // A link leaving its daemon shows nothing more of it: its window is another link's to fill.
+            if (isStopped() || _leaving)
                 return;
             // First: a Reconnect from a footer has the panes lost with the connection take their sessions
             // back before the layout is reconciled, which would otherwise find no live pane for them and
@@ -392,6 +517,7 @@ void DaemonLink::connectController()
             // connection's own words. @see TerminalSessionManager::connectionClosed
             _sessions.connectionClosed(*this, _controller->failure());
             _controller->stop();
+            tellGiveBack(nullptr);
             // One that never got a window has nothing left to serve.
             if (!isBootLink() && _sessions.windowsBoundTo(*this).empty())
             {
@@ -441,6 +567,7 @@ void DaemonLink::connectController()
             raiseElsewhere();
             _sessions.refreshTaskbarAttention();
             _sessions.notifyWorkspaceDirectoryChanged(*this);
+            _host.linkChanged(*this);
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -463,6 +590,9 @@ void DaemonLink::connectController()
         },
         Qt::QueuedConnection);
 #endif
+    // An adopted connection is up already: adopt() promotes it instead.
+    if (_origin == LinkOrigin::Adopted)
+        return;
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots; the
     // application waits for them through pollAttached() just before the first window. The signals above are
     // connected first, so nothing the connection emits meanwhile is lost. A cold start's daemon start is part
@@ -501,7 +631,9 @@ void DaemonLink::stop()
     // Also once ended: lastWindowReleased() posts this stop, and the application's teardown may stop the
     // link before that event runs. Left running, the reactor would go on writing the mirrors of the sessions
     // the teardown deletes. Idempotent, as is a given-up controller's stop.
-    anyController().stop();
+    if (auto* const controller = anyController())
+        controller->stop();
+    tellGiveBack(nullptr);
 }
 
 void DaemonLink::onConfigurationReloaded()
@@ -647,6 +779,10 @@ std::optional<uint64_t> DaemonLink::arrivalWorkspace() const
 uint64_t DaemonLink::followedSelection()
 {
     auto const selected = _controller->selectedWorkspace();
+    // A batch stating what a replaced switch selected is not followed: the switch that replaced it is
+    // answered later, and following the one in between would show a workspace nobody asked for any more.
+    if (_switch && _shown && _switch->replaced.contains(selected))
+        return _shown->daemonWorkspace;
     if (!_revertTo)
         return selected;
     // What the switch was given up for has ended since: the daemon selects another in its place, and no batch
@@ -719,7 +855,12 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
     auto const sent = _controller->select(workspace, workspace == 0 ? activePaneSession() : std::nullopt);
     if (!sent)
         return std::unexpected(sent.error());
-    // Only the latest switch of the window lands.
+    // Only the latest switch of the window lands, and only its selection is followed: the daemon states each
+    // selection it makes, and one it made for a replaced switch first is not where the window is going.
+    auto replaced = _switch ? std::move(_switch->replaced) : std::set<uint64_t> {};
+    if (_switch && _switch->to != 0)
+        replaced.insert(_switch->to);
+    replaced.erase(workspace);
     failSwitch("another switch of this window replaced it");
     _revertTo.reset();
     _switch = PendingSwitch {
@@ -727,6 +868,7 @@ std::expected<void, std::string> DaemonLink::selectWorkspace(uint64_t workspace,
         .request = *sent,
         .before = std::move(before),
         .landed = std::move(landed),
+        .replaced = std::move(replaced),
     };
     return {};
 }
@@ -799,11 +941,19 @@ void DaemonLink::failSwitch(std::string const& reason)
         pending.landed(std::unexpected(reason));
 }
 
-void DaemonLink::noteConnectionForSwitch()
+DaemonLink::ConnectionLoss DaemonLink::noteConnectionLosses()
+{
+    auto const losses = _controller->connectionLosses();
+    return std::exchange(_connectionLossesSeen, losses) == losses ? ConnectionLoss::None
+                                                                  : ConnectionLoss::Lost;
+}
+
+void DaemonLink::noteConnectionForSwitch(ConnectionLoss loss)
 {
     using vthost::client::ConnectionState;
     auto const state = _controller->connectionState();
-    if (state == ConnectionState::Connected || state == ConnectionState::Connecting)
+    if (loss == ConnectionLoss::None
+        && (state == ConnectionState::Connected || state == ConnectionState::Connecting))
         return;
     failSwitch(failureOrLost(_controller->failure()));
     if (!arrivalDue())
@@ -812,6 +962,7 @@ void DaemonLink::noteConnectionForSwitch()
     // stays as it was, and nothing here needs the link any more.
     reportArrival(std::unexpected(failureOrLost(_controller->failure())));
     _controller->stop();
+    tellGiveBack(nullptr);
     if (_sessions.windowsBoundTo(*this).empty())
         end();
 }
@@ -861,6 +1012,9 @@ void DaemonLink::abandon()
     endSwitchWait("the switch was given up");
     if (auto* const switched = arrival())
         switched->landed = {};
+    // An adopted connection was the presence's: it goes back there, its promotion withdrawn.
+    if (_origin == LinkOrigin::Adopted)
+        leaveDaemon(LeaveKind::KeepAsObserver, {});
     end();
 }
 
@@ -874,11 +1028,26 @@ void DaemonLink::windowClosed(vtworkspace::WorkspaceId window)
     _shown.reset();
 }
 
-void DaemonLink::reportFocus(vthost::proto::WindowFocus focus)
+window::FlagSource DaemonLink::flagSource() const
+{
+    return isLive() ? _controller->flagSource() : window::FlagSource::Window;
+}
+
+void DaemonLink::markSeen(window::PaneKey pane, window::PaneSeen seen)
 {
     requireGuiThread();
     if (isLive())
-        _controller->reportFocus(focus);
+        _controller->markSeen(pane.value, wireSeenOf(seen));
+}
+
+void DaemonLink::reportShown(window::WindowFocusState focus, std::vector<window::PaneKey> panes)
+{
+    requireGuiThread();
+    if (!isLive())
+        return;
+    _controller->reportShown(
+        wireFocusOf(focus),
+        std::ranges::to<std::vector>(panes | std::views::transform(&window::PaneKey::value)));
 }
 
 vthost::proto::RaiseRole DaemonLink::raiseRole() const noexcept
@@ -891,15 +1060,25 @@ window::WorkspaceDirectory DaemonLink::directory() const
     return _controller != nullptr ? _controller->directory() : window::WorkspaceDirectory {};
 }
 
+std::unordered_map<uint64_t, window::SessionAttention> DaemonLink::daemonMarks() const
+{
+    return _controller != nullptr ? _controller->daemonMarks()
+                                  : std::unordered_map<uint64_t, window::SessionAttention> {};
+}
+
 window::SelectResult DaemonLink::select(uint64_t workspace)
 {
     auto const local = _shown ? std::optional { _shown->local } : std::nullopt;
-    auto const selected =
-        selectWorkspace(workspace, [this, local](std::expected<uint64_t, std::string> const& outcome) {
+    // The window's request this is: a refusal ends what it was made for, never what a later request -- which
+    // replaced it, and whose own switch failed this one -- left waiting.
+    auto const* const asking = local ? _sessions.controllerOwning(*local) : nullptr;
+    auto const navigation = asking != nullptr ? asking->navigationSerial() : window::NavigationSerial {};
+    auto const selected = selectWorkspace(
+        workspace, [this, local, navigation](std::expected<uint64_t, std::string> const& outcome) {
             if (outcome || !local)
                 return;
             if (auto* const controller = _sessions.controllerOwning(*local))
-                controller->cancelPendingJump();
+                controller->cancelPendingJumpOf(navigation);
         });
     if (!selected)
     {
@@ -1096,16 +1275,29 @@ void DaemonLink::applyShownLayout()
     if (seeding)
     {
         _shown->selection = TabSelection::Keep;
-        // A window a tab was torn off to activates that tab, once.
-        if (auto* const own = std::get_if<OpeningRole>(&_role); own != nullptr && own->opening.activeTab)
-            if (auto const tab =
-                    _controller->tabPairedWith(*std::exchange(own->opening.activeTab, std::nullopt)))
-                _sessions.model().activateTab(local, *tab);
+        applyLandingFocus(local);
     }
     _sessions.deliverRestoreSummaryTo(local);
     // A jump that selected this workspace shows its pane now that the layout is here.
     if (auto* const controller = _sessions.controllerDisplaying(local))
         controller->completePendingJump();
+}
+
+void DaemonLink::applyLandingFocus(vtworkspace::WorkspaceId local)
+{
+    // Taken out, so a later seeding activates nothing: a window a tab was torn off to activates that tab, a
+    // window a switch lands in what its row named.
+    auto focus = session::LandingFocus {};
+    if (auto* const own = std::get_if<OpeningRole>(&_role))
+        focus = session::LandingFocus { .tab = std::exchange(own->opening.activeTab, std::nullopt),
+                                        .pane = std::exchange(own->opening.activePane, std::nullopt) };
+    else if (auto* const switched = arrival())
+        focus = std::exchange(switched->focus, session::LandingFocus {});
+    if (focus.tab)
+        if (auto const tab = _controller->tabPairedWith(*focus.tab))
+            _sessions.model().activateTab(local, *tab);
+    if (focus.pane)
+        std::ignore = _sessions.showPane(local, *focus.pane);
 }
 
 void DaemonLink::openWindowForMovedPanes()
@@ -1189,13 +1381,16 @@ void DaemonLink::connectReconnectSignals()
             if (!isLive())
                 return;
             _sessions.setHostConnection(*this, _controller->connectionState());
+            // Heard queued: a connection lost meanwhile may be up again by now, and only the count says so.
+            auto const loss = noteConnectionLosses();
             // What a given-up switch selected again is the connection's own: the one sought now resumes it.
-            if (_controller->connectionState() != vthost::client::ConnectionState::Connected)
+            if (loss == ConnectionLoss::Lost
+                || _controller->connectionState() != vthost::client::ConnectionState::Connected)
                 _revertTo.reset();
             // A switch fails when the connection goes before the workspace it waits for is shown.
             if (_switch || arrivalDue())
             {
-                noteConnectionForSwitch();
+                noteConnectionForSwitch(loss);
                 if (!isLive())
                     return;
             }
@@ -1212,11 +1407,23 @@ void DaemonLink::connectReconnectSignals()
                 end();
                 return;
             }
-            if (_controller->connectionState() == vthost::client::ConnectionState::Connected)
+            // An adopted link is attached as its promotion lands (promotionLanded()).
+            if (_controller->connectionState() == vthost::client::ConnectionState::Connected
+                && _origin == LinkOrigin::Dialled)
             {
                 _state = AttachState::Attached;
                 offerDaemonRestartIfDrifted();
             }
+        },
+        Qt::QueuedConnection);
+    // After the handler above has settled the link's own state: the application reads it.
+    QObject::connect(
+        _controller.get(),
+        &NativeController::connectionStateChanged,
+        &_receiver,
+        [this] {
+            if (!isStopped())
+                _host.linkChanged(*this);
         },
         Qt::QueuedConnection);
     QObject::connect(
@@ -1259,10 +1466,6 @@ void DaemonLink::bindDaemonWorkspace(std::uint64_t daemonWorkspace, vtworkspace:
         own->opening.askedBy.reset();
     _sessions.bindWindow(local, *this);
     applyShownLayout();
-    // The daemon names the window that raises by the focus each one reports: a window focused as it comes
-    // says so at once.
-    if (_shown && _sessions.focusedWindow() == local)
-        _controller->reportFocus(vthost::proto::WindowFocus::Focused);
 }
 
 void DaemonLink::noteOpeningFailed(std::string const& reason)
@@ -1287,37 +1490,14 @@ void DaemonLink::raiseElsewhere()
     if (raised.empty())
         return;
     auto const notices = _host.elsewhereNotices();
-    auto const directory = _controller->directory();
-    auto ring = RingBell::No;
-    // Out of every window's sight by definition: decided as a hidden pane's are.
-    for (auto const& summary: raised)
-    {
-        if (summary.bell == vthost::proto::PaneBell::Rang)
-            ring = RingBell::Yes;
-        for (auto const& notice: summary.notifications)
-            notifyElsewhere(notice, notices.notifier);
-        if (summary.finished
-            && noticeFinishedElsewhere(
-                   summary.session, *summary.finished, tabLabelOf(directory, summary.session), notices)
-                   == RingBell::Yes)
-            ring = RingBell::Yes;
-    }
-    // Once per turn, however many rang, as a pane coalesces its own bells.
-    if (ring == RingBell::Yes)
-        ringWindowBell(notices.bell);
-}
-
-void DaemonLink::ringWindowBell(config::Bell const& bell)
-{
-    auto* const controller = _shown ? _sessions.controllerDisplaying(_shown->local) : nullptr;
-    if (controller == nullptr)
+    auto const daemon =
+        RaisingDaemon { .daemon = daemonRefOf(address(), _id),
+                        .instance = window::DaemonInstance { _controller->daemonInstance().value_or(0) },
+                        .name = {} };
+    if (remote::raiseElsewhere(raised, _controller->directory(), notices, daemon) != RingBell::Yes)
         return;
-    // The window rings, as it does for a finish in one of its own background tabs: the pane has no
-    // SessionChrome here to ring it.
-    controller->requestBell(QString::fromStdString(platform::bellSourceOf(bell.sound)),
-                            static_cast<double>(bell.volume));
-    if (bell.alert)
-        controller->requestAlert();
+    if (auto* const controller = _shown ? _sessions.controllerDisplaying(_shown->local) : nullptr)
+        ringWindowBell(*controller, notices.bell);
 }
 
 void DaemonLink::expireRestoreSummaryAfterLayout()

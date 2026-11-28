@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -158,7 +159,10 @@ struct FocusToolbar;
 struct ToggleSidebar;
 struct FocusSidebar;
 struct FilterWorkspaces;
+struct ToggleSidebarNeedsMe;
 struct JumpToNextAttention;
+struct JumpBack;
+struct CancelSwitch;
 struct MarkSeen;
 struct RenameWorkspace;
 struct MoveWorkspaceUp;
@@ -171,6 +175,12 @@ struct MoveTabToWorkspace;
 struct MoveToTab;
 struct MoveToNewTab;
 struct MoveToNewWorkspace;
+struct OpenInNewWindow;
+struct ConnectDaemon;
+struct StartDaemon;
+struct RemoveDaemon;
+struct HideDaemon;
+struct ShowHiddenDaemon;
 
 /// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
 ///
@@ -225,5 +235,13 @@ class ActionList
   private:
     std::vector<Action> _actions;
 };
+
+/// The sidebar's row actions: each names no row bare, so its menus run it on the row they were opened over
+/// (WindowController::runSidebarAction()), and a session that runs one bound does nothing. Here rather than
+/// in Actions.hpp so a header that only dispatches actions can constrain on it.
+template <typename T>
+concept SidebarRowActionConcept =
+    std::same_as<T, OpenInNewWindow> || std::same_as<T, ConnectDaemon> || std::same_as<T, StartDaemon>
+    || std::same_as<T, RemoveDaemon> || std::same_as<T, HideDaemon> || std::same_as<T, ShowHiddenDaemon>;
 
 } // namespace contour::actions

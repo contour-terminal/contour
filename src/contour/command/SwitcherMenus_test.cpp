@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <variant>
 #include <vector>
@@ -38,10 +39,14 @@ TEST_CASE("the switcher's row menu leads with switch and open, then the sidebar'
     for (auto const style: { ShortcutStyle::MacGlyphs, ShortcutStyle::Text })
     {
         auto const menu = buildSwitcherRowMenu(state, style);
+        // The sidebar's rows but its own Open in New Window, which the leading choice already is.
+        auto sidebar = state.workspace;
+        sidebar.open = OpenOffer::NotOffered;
         auto expected = std::vector<std::string> { "Switch to docs", "Open in New Window", "" };
-        for (auto const& entry: buildWorkspaceMenu(state.workspace))
+        for (auto const& entry: buildWorkspaceMenu(sidebar))
             expected.push_back(entry.title);
         CHECK(titlesOf(menu) == expected);
+        CHECK(std::ranges::count(titlesOf(menu), std::string { "Open in New Window" }) == 1);
 
         REQUIRE(menu.size() > 3);
         CHECK(std::get<SwitcherChoiceRow>(menu[0])
@@ -107,4 +112,24 @@ TEST_CASE("a window without a daemon is offered no Open in New Window", "[switch
                                                     .newWindow = SwitcherMenuNewWindow::Withheld },
                              ShortcutStyle::MacGlyphs);
     CHECK(titlesOf(menu) == std::vector<std::string> { "Switch to docs" });
+}
+
+TEST_CASE("a daemon row's menu toggles Show in Sidebar", "[switcher][sidebarmenu]")
+{
+    for (auto const listing: { SidebarListing::Listed, SidebarListing::Unlisted })
+    {
+        INFO(static_cast<int>(listing));
+        auto const menu = buildSwitcherDaemonMenu(SwitcherDaemonMenuState { .listing = listing });
+        REQUIRE(menu.size() == 1);
+        auto const& choice = std::get<SwitcherChoiceRow>(menu.front());
+        CHECK(choice.choice == SwitcherMenuChoice::ShowInSidebar);
+        CHECK(choice.title == "Show in Sidebar");
+        CHECK(choice.availability == RowAvailability::Enabled);
+        CHECK(choice.check == (listing == SidebarListing::Listed ? RowCheck::Checked : RowCheck::Unchecked));
+    }
+}
+
+TEST_CASE("the window's own daemon offers no toggle", "[switcher][sidebarmenu]")
+{
+    CHECK(buildSwitcherDaemonMenu(SwitcherDaemonMenuState { .listing = std::nullopt }).empty());
 }

@@ -280,6 +280,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* settingsTraits READ settingsTraits CONSTANT)
     /// The workspace sidebar's extents: widths, row heights, indent and the selection's shape.
     Q_PROPERTY(QObject* sidebar READ sidebar CONSTANT)
+    /// The sidebar's heading ("Workspaces"): what its title row shows, and its default width holds whole.
+    Q_PROPERTY(QString sidebarHeading READ sidebarHeading CONSTANT)
     /// The chrome colour roles. The object is CONSTANT; its own properties notify.
     Q_PROPERTY(QObject* colors READ colors CONSTANT)
     /// The same roles as what is drawn on the tab bar reads them: inked for `tab_style.bar_fill` where it
@@ -313,6 +315,9 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QVariantList headerBarItems READ headerBarItems CONSTANT)
     /// The workspace sidebar's own buttons on this row (window::SidebarControlRows), by name.
     Q_PROPERTY(QVariantMap sidebarControls READ sidebarControls CONSTANT)
+    /// How a daemon row is drawn on this row (window::DaemonRowFaces): `{ localityIcons, pendingMark,
+    /// trailingDisclosure, secondaryName, pendingWords }`, the icons indexed by window::DaemonLocality.
+    Q_PROPERTY(QVariantMap sidebarDaemonRowFace READ sidebarDaemonRowFace CONSTANT)
     /// A picker row's "open in new window" button on this row (window::PickerAccessoryRows).
     Q_PROPERTY(QVariantMap pickerAccessory READ pickerAccessory CONSTANT)
 
@@ -765,11 +770,77 @@ class UiStyleProvider: public QObject
     ///         status ink and the accessible name; empty for a kind outside the table.
     [[nodiscard]] Q_INVOKABLE QVariantMap badgeLook(int kind) const;
 
+    /// The sidebar footer's counts in this row's status glyphs (window::sidebarFooterGlyphText()).
+    /// @param needYou Panes that need the user.
+    /// @param working Panes at work.
+    /// @return `! 1 · ◑ 2`, counts that are zero left out; empty when both are.
+    [[nodiscard]] Q_INVOKABLE QString sidebarFooterGlyphText(int needYou, int working) const;
+
     /// How the location chip's connection looks in @p state.
     /// @param state A window::HostChipState as its underlying value.
     /// @return `{ dot, status, accessibleState }`: the dot's ink and the two texts; empty for a state
     ///         outside the table.
     [[nodiscard]] Q_INVOKABLE QVariantMap hostChipLook(int state) const;
+
+    /// How a daemon's link looks on this row, as a daemon row draws it (window::linkLookOf()).
+    /// @param state A window::DaemonLinkState as its underlying value.
+    /// @return `{ glyph, dot, words }`: the mark, its status ink and the state's words, translated; empty for
+    ///         a state outside the table.
+    [[nodiscard]] Q_INVOKABLE QVariantMap daemonLinkLook(int state) const;
+
+    /// How a daemon row's button looks (window::DaemonRowButtonFaces).
+    /// @param button A window::DaemonRowButton as its underlying value.
+    /// @param pending A window::RowPending as its underlying value: whether a jump into the row's section is
+    ///        under way, which decides whether Cancel runs its action (window::daemonRowButtonCommand()).
+    /// @return `{ words, toolTip, label, icon, glyph, command }`: its words, translated; its verb in full, as
+    ///         the row's menu names it (command::daemonRowVerbTitle(): "Cancel Jump" while a jump is under
+    ///         way, else "Cancel Connecting"); what it shows with its words (in brackets on the Terminal row,
+    ///         CellButtonFormat); its icon-only form, a bundled icon on the native rows and a glyph in cells
+    ///         on the Terminal row, empty for a words-only button; and the action it runs now, whose chord
+    ///         its tooltip names, empty for none. Empty for None or a value outside.
+    [[nodiscard]] Q_INVOKABLE QVariantMap daemonRowButton(int button, int pending) const;
+
+    /// @param words A text button's words, translated.
+    /// @return What the button shows: its words; in brackets on the Terminal row, where a button is a run of
+    ///         cells (CellButtonFormat), as a daemon row's are.
+    [[nodiscard]] Q_INVOKABLE QString buttonWords(QString const& words) const;
+
+    /// How much of a daemon row fits (window::daemonRowFitOf()). Each argument is a window::DaemonRowRoom
+    /// field, in its order.
+    /// @return A window::DaemonRowFit as its underlying value.
+    [[nodiscard]] Q_INVOKABLE static int daemonRowFit(qreal available,
+                                                      qreal fixed,
+                                                      qreal locality,
+                                                      qreal name,
+                                                      qreal elidedName,
+                                                      qreal shortName,
+                                                      qreal words,
+                                                      qreal buttonText,
+                                                      qreal buttonIcon,
+                                                      qreal secondaryText,
+                                                      qreal secondaryIcon);
+
+    /// What a daemon row shows at a fit (window::daemonRowFitStep()).
+    /// @param fit A window::DaemonRowFit as its underlying value.
+    /// @return `{ wordsShown, iconButtons, secondaryShown, localityShown }`: whether the link's words stand
+    ///         beside the mark, whether the buttons that have an icon show it alone, whether the secondary
+    ///         button stays, and whether the locality icon does; every part shown for a value outside.
+    [[nodiscard]] Q_INVOKABLE static QVariantMap daemonRowFitStep(int fit);
+
+    /// What the tooltip of a daemon row's link mark says (window::daemonRowToolTipOf()).
+    /// @param words The link's words, as the row shows them.
+    /// @param reason Why the link failed; empty otherwise.
+    /// @param fit A window::DaemonRowFit as its underlying value.
+    /// @return The reason, with the words before it once they have left the row.
+    [[nodiscard]] Q_INVOKABLE static QString daemonRowToolTip(QString const& words,
+                                                              QString const& reason,
+                                                              int fit);
+
+    /// A daemon's name as its row shows it at @p fit (window::daemonRowNameText()).
+    /// @param name The daemon's name.
+    /// @param fit  A window::DaemonRowFit as its underlying value; anything else keeps the name whole.
+    /// @return The name, whole or elided in the middle.
+    [[nodiscard]] Q_INVOKABLE static QString daemonRowNameText(QString const& name, int fit);
 
     /// Where the title band and the tabs go, for this row's tab shape (window::resolveTitleBand).
     ///
@@ -850,6 +921,10 @@ class UiStyleProvider: public QObject
     /// @return The sidebar's own buttons on this row: `{ toggle, newWorkspace, filter }`, each
     ///         `{ iconName, bundledIcon, glyph }` (window::sidebarControlFace).
     [[nodiscard]] QVariantMap sidebarControls() const;
+
+    /// @return How a daemon row is drawn on this row: `{ localityIcons, pendingMark, trailingDisclosure,
+    ///         secondaryName, pendingWords }`.
+    [[nodiscard]] QVariantMap sidebarDaemonRowFace() const;
 
     /// @return A picker row's "open in new window" button on this row: `{ iconName, bundledIcon, glyph }`
     ///         (window::pickerAccessoryFace).
@@ -944,6 +1019,19 @@ class UiStyleProvider: public QObject
     /// @param pixels The requested width, in logical pixels.
     /// @return The width in logical pixels.
     [[nodiscard]] Q_INVOKABLE qreal snappedSidebarWidth(qreal pixels) const;
+
+    /// Which of the sidebar title row's controls give way to its room (window::sidebarControlFitOf()).
+    /// @param available  The width the row's controls may take.
+    /// @param perControl What one control takes, its gap included.
+    /// @param shown      How many controls want to stand.
+    /// @return Which of the two that give way stand: `{ switcher: bool, needsMe: bool }`.
+    [[nodiscard]] Q_INVOKABLE static QVariantMap sidebarControlFit(qreal available,
+                                                                   qreal perControl,
+                                                                   int shown);
+
+    /// @return The sidebar's heading, which its title row shows; the sidebar's default width (the
+    ///         `sidebar.width` token, and sidebarMetrics()) is widened to hold it whole in the chrome font.
+    [[nodiscard]] QString sidebarHeading() const;
 
     /// Whether the header bar draws the sidebar's title row ("Workspaces", ☰ and +): the look puts it there
     /// (config::SidebarTitle::InHeaderBar) and the band that is the header bar is on screen. Otherwise the

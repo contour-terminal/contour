@@ -76,14 +76,16 @@ AttachPlan planAttach(proto::AttachIntent const& intent, AttachContext const& co
         case proto::AttachIntentKind::NewWorkspace:
             return { .select = std::nullopt, .creation = AttachCreation::NewWorkspace };
         case proto::AttachIntentKind::Select: {
-            // A connection selects something: a workspace that is not there is a launch's choice.
+            // Exactly the workspace named, or none: what a client that names one asks for is that window, and
+            // a launch's choice in its place would be another window's workspace, or a new one nobody shows.
+            // The client says the workspace is gone instead.
             auto const named =
                 std::ranges::any_of(context.workspaces, [&](WorkspaceSummary const& workspace) {
                     return workspace.id == intent.workspace;
                 });
             if (named && namesThisRun(intent, context))
                 return { .select = intent.workspace, .creation = AttachCreation::None };
-            return launch(context);
+            return { .select = std::nullopt, .creation = AttachCreation::None };
         }
         case proto::AttachIntentKind::Resume: {
             // The workspace is gone (a restarted daemon), so this is a fresh launch. A workspace holding no

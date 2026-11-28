@@ -11,6 +11,13 @@
         <file alias="lock-symbolic.svg">res/icons/lock-symbolic.svg</file>
         <file alias="edit-find-symbolic.svg">res/icons/edit-find-symbolic.svg</file>
         <file alias="folder-new-symbolic.svg">res/icons/folder-new-symbolic.svg</file>
+        <file alias="flag-symbolic.svg">res/icons/flag-symbolic.svg</file>
+        <file alias="computer-symbolic.svg">res/icons/computer-symbolic.svg</file>
+        <file alias="network-server-symbolic.svg">res/icons/network-server-symbolic.svg</file>
+        <file alias="network-connect-symbolic.svg">res/icons/network-connect-symbolic.svg</file>
+        <file alias="media-playback-start-symbolic.svg">res/icons/media-playback-start-symbolic.svg</file>
+        <file alias="process-stop-symbolic.svg">res/icons/process-stop-symbolic.svg</file>
+        <file alias="view-swap-symbolic.svg">res/icons/view-swap-symbolic.svg</file>
         <file alias="window-new-symbolic.svg">res/icons/window-new-symbolic.svg</file>
         <file alias="open-menu-symbolic.svg">res/icons/open-menu-symbolic.svg</file>
         <file alias="pan-down-symbolic.svg">res/icons/pan-down-symbolic.svg</file>
