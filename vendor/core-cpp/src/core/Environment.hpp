@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/BaseExport.hpp>
+
 #include <expected>
 #include <functional>
 #include <map>
@@ -59,7 +61,7 @@ class Environment
 /// this class's readers against each other; it cannot protect them from a `setenv()` issued outside
 /// it, which is why no first-party code may call `setenv()`: a program that must change its
 /// environment on Windows (around CreateProcess(), say) uses the Win32 API for exactly this reason.
-class LiveEnvironment final: public Environment
+class CORE_BASE_API LiveEnvironment final: public Environment
 {
   public:
     /// @param name Name of the variable to look up.
@@ -76,7 +78,7 @@ class LiveEnvironment final: public Environment
 /// value that changed halfway through would leave that configuration internally inconsistent.
 ///
 /// Thread safe: every lookup, hit or miss, runs under this object's own mutex.
-class CachingEnvironment final: public Environment
+class CORE_BASE_API CachingEnvironment final: public Environment
 {
   public:
     /// @param source The environment to read a name from the first time it is asked for. It must
@@ -101,7 +103,7 @@ class CachingEnvironment final: public Environment
 /// a collaborator in. Anything with a lifetime takes a @c core::Environment reference at
 /// construction instead; a test can then supply its own answers, which this cannot.
 /// @return A reference to a function-local-static @c CachingEnvironment over a @c LiveEnvironment.
-[[nodiscard]] Environment& defaultEnvironment();
+[[nodiscard]] CORE_BASE_API Environment& defaultEnvironment();
 
 /// Sets a variable in the process's own environment, where @c LiveEnvironment reads it and child
 /// processes inherit it.
@@ -127,8 +129,8 @@ class CachingEnvironment final: public Environment
 /// @return Nothing, or why the variable could not be set: @c std::errc::invalid_argument for a
 ///         name or value no environment can hold -- on Windows also one that is not UTF-8 -- or
 ///         the operating system's error on Windows.
-[[nodiscard]] std::expected<void, std::error_code> setProcessEnvironmentVariable(std::string_view name,
-                                                                                 std::string_view value);
+[[nodiscard]] CORE_BASE_API std::expected<void, std::error_code> setProcessEnvironmentVariable(
+    std::string_view name, std::string_view value);
 
 /// Removes a variable from the process's own environment, with the guarantees of
 /// @c setProcessEnvironmentVariable(). Removing a variable that is not set succeeds, and publishes
@@ -141,6 +143,7 @@ class CachingEnvironment final: public Environment
 /// @param name Name of the variable to remove: not empty, and without '=' or NUL.
 /// @return Nothing, or why the variable could not be removed: @c std::errc::invalid_argument for a
 ///         name no environment can hold, or the operating system's error on Windows.
-[[nodiscard]] std::expected<void, std::error_code> unsetProcessEnvironmentVariable(std::string_view name);
+[[nodiscard]] CORE_BASE_API std::expected<void, std::error_code> unsetProcessEnvironmentVariable(
+    std::string_view name);
 
 } // namespace core

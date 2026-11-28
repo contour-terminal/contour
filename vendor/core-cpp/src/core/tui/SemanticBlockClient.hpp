@@ -3,6 +3,7 @@
 
 #include <core/Clock.hpp>
 #include <core/Defines.hpp>
+#include <core/tui/TuiExport.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -50,7 +51,7 @@ struct SemanticBlockResult
 /// Uses DCS sequences for communication.
 ///
 /// @note This extension is specific to Contour terminal emulator.
-class SemanticBlockClient
+class CORE_TUI_API SemanticBlockClient
 {
   public:
     /// @brief Constructs a SemanticBlockClient with the given terminal I/O handles.

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/tui/TuiCoreExport.hpp>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -45,13 +47,14 @@ struct StandaloneImage
 /// @brief Removes leading and trailing ASCII whitespace (spaces, tabs, carriage returns).
 /// @param text The text to trim.
 /// @return The trimmed view.
-[[nodiscard]] auto trimAscii(std::string_view text) -> std::string_view;
+[[nodiscard]] CORE_TUI_CORE_API auto trimAscii(std::string_view text) -> std::string_view;
 
 /// @brief Case-insensitive search for @p needle in @p haystack.
 /// @param haystack The text to search.
 /// @param needle The text to find.
 /// @return Index of the match, or std::string_view::npos.
-[[nodiscard]] auto findCaseInsensitive(std::string_view haystack, std::string_view needle) -> std::size_t;
+[[nodiscard]] CORE_TUI_CORE_API auto findCaseInsensitive(std::string_view haystack, std::string_view needle)
+    -> std::size_t;
 
 /// @brief Parses an HTML tag beginning at @p pos, which must be '<'.
 ///
@@ -61,7 +64,8 @@ struct StandaloneImage
 /// @param text The text being parsed.
 /// @param pos Index of the opening '<'.
 /// @return The parsed tag, or std::nullopt when the syntax is not a tag.
-[[nodiscard]] auto parseHtmlTag(std::string_view text, std::size_t pos) -> std::optional<HtmlTag>;
+[[nodiscard]] CORE_TUI_CORE_API auto parseHtmlTag(std::string_view text, std::size_t pos)
+    -> std::optional<HtmlTag>;
 
 /// @brief Extracts an attribute value from a tag's raw attribute text.
 ///
@@ -72,17 +76,18 @@ struct StandaloneImage
 /// @param attrs The raw attribute text.
 /// @param name The attribute name to find (lowercase).
 /// @return The value, or std::nullopt when absent.
-[[nodiscard]] auto htmlAttr(std::string_view attrs, std::string_view name) -> std::optional<std::string_view>;
+[[nodiscard]] CORE_TUI_CORE_API auto htmlAttr(std::string_view attrs, std::string_view name)
+    -> std::optional<std::string_view>;
 
 /// @brief Maps an HTML `align` attribute value to an alignment.
 /// @param value The attribute value, in any case.
 /// @return The alignment, or std::nullopt when the value is unrecognised.
-[[nodiscard]] auto parseHtmlAlign(std::string_view value) -> std::optional<HtmlAlign>;
+[[nodiscard]] CORE_TUI_CORE_API auto parseHtmlAlign(std::string_view value) -> std::optional<HtmlAlign>;
 
 /// @brief Looks up a block tag definition by lowercased name.
 /// @param name The tag name.
 /// @return The definition, or nullptr when the tag is not an alignment block.
-[[nodiscard]] auto findHtmlBlockTag(std::string_view name) -> HtmlBlockTagDef const*;
+[[nodiscard]] CORE_TUI_CORE_API auto findHtmlBlockTag(std::string_view name) -> HtmlBlockTagDef const*;
 
 /// @brief Parses an HTML `width` attribute value in pixels.
 ///
@@ -91,7 +96,7 @@ struct StandaloneImage
 ///
 /// @param value The attribute value.
 /// @return The width in pixels, or std::nullopt.
-[[nodiscard]] auto parseWidthPx(std::string_view value) -> std::optional<int>;
+[[nodiscard]] CORE_TUI_CORE_API auto parseWidthPx(std::string_view value) -> std::optional<int>;
 
 /// @brief Detects a line whose entire content is a single image.
 ///
@@ -101,7 +106,8 @@ struct StandaloneImage
 ///
 /// @param line The source line.
 /// @return The image, or std::nullopt when the line is not a lone image.
-[[nodiscard]] auto detectStandaloneImage(std::string_view line) -> std::optional<StandaloneImage>;
+[[nodiscard]] CORE_TUI_CORE_API auto detectStandaloneImage(std::string_view line)
+    -> std::optional<StandaloneImage>;
 
 /// @brief Rewrites the inline HTML GitHub READMEs use into equivalent markdown.
 ///
@@ -111,6 +117,6 @@ struct StandaloneImage
 ///
 /// @param text The inner HTML text.
 /// @return The equivalent markdown.
-[[nodiscard]] auto translateInlineHtml(std::string_view text) -> std::string;
+[[nodiscard]] CORE_TUI_CORE_API auto translateInlineHtml(std::string_view text) -> std::string;
 
 } // namespace core::tui

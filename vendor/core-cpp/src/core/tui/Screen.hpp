@@ -11,6 +11,7 @@
 #include <core/tui/HoverState.hpp>
 #include <core/tui/Theme.hpp>
 #include <core/tui/Tooltip.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <memory>
 #include <unordered_map>
@@ -93,9 +94,9 @@ struct InlineCursorMovement
 /// @param previousCursorRow Cursor row at end of previous render.
 /// @param newContentHeight Height of content for current render.
 /// @return Cursor movement instructions.
-[[nodiscard]] InlineCursorMovement calculateInlineCursorMovement(int previousContentHeight,
-                                                                 int previousCursorRow,
-                                                                 int newContentHeight);
+[[nodiscard]] CORE_TUI_CORE_API InlineCursorMovement calculateInlineCursorMovement(int previousContentHeight,
+                                                                                   int previousCursorRow,
+                                                                                   int newContentHeight);
 
 /// Central coordinator for the TUI component system.
 ///
@@ -123,7 +124,7 @@ struct InlineCursorMovement
 ///         screen.dispatchEvent(event);
 /// }
 /// @endcode
-class Screen
+class CORE_TUI_CORE_API Screen
 {
   public:
     /// Constructs a Screen that draws on the given surface.

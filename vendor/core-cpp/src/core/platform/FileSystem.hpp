@@ -3,6 +3,7 @@
 
 #include <core/Generator.hpp>
 #include <core/Utf8Path.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -41,7 +42,7 @@ enum class OverwritePolicy : std::uint8_t
 ///
 /// This interface abstracts all filesystem I/O, so code that takes it can be unit-tested
 /// in isolation over testing::InMemoryFileSystem.
-class FileSystem
+class CORE_PLATFORM_API FileSystem
 {
   public:
     virtual ~FileSystem() = default;

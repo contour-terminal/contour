@@ -229,8 +229,13 @@ if(CORE_CPP_PLATFORM_WASI)
     list(APPEND _coreCppLibunicodePlatformOptions "LIBUNICODE_SIMD_IMPLEMENTATION none")
 endif()
 
-## @brief WRAP of the libunicode row: under WASI, where the row turns libunicode's SIMD off, a libunicode
-## core-cpp built from source compiles without -Wunused-template.
+## @brief WRAP of the libunicode row: position-independent code in a shared build, and under WASI,
+## where the row turns libunicode's SIMD off, a libunicode core-cpp built from source compiles without
+## -Wunused-template.
+##
+## A shared `core::tui_core` links libunicode's static archives into itself, and a shared object
+## cannot take code that is not position-independent. The property is set on the two targets of a
+## libunicode core-cpp built from source (a find_package()d one is whatever its installation is).
 ##
 ## With no SIMD, libunicode 0.9.3's `scan.cpp` leaves its `ascending()` template unused, so a consumer
 ## that compiles everything beneath it with -Werror -- tests/consumer-tui-core does -- fails on a choice
@@ -238,7 +243,7 @@ endif()
 ## that causes it; the source fix (`ascending()` under the SIMD branch) belongs in libunicode. An
 ## IMPORTED libunicode was built by someone else and is left alone.
 function(core_cpp_libunicode_without_simd name)
-    if(NOT CORE_CPP_PLATFORM_WASI OR NOT TARGET unicode::unicode)
+    if(NOT TARGET unicode::unicode)
         return()
     endif()
     get_target_property(real unicode::unicode ALIASED_TARGET)
@@ -249,7 +254,16 @@ function(core_cpp_libunicode_without_simd name)
     if(imported)
         return()
     endif()
-    target_compile_options(${real} PRIVATE -Wno-unused-template)
+    if(CORE_CPP_BUILD_SHARED)
+        foreach(target IN ITEMS ${real} unicode_ucd)
+            if(TARGET ${target})
+                set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+            endif()
+        endforeach()
+    endif()
+    if(CORE_CPP_PLATFORM_WASI)
+        target_compile_options(${real} PRIVATE -Wno-unused-template)
+    endif()
 endfunction()
 core_cpp_dependency(libunicode
     WHEN CORE_CPP_WITH_TUI_CORE

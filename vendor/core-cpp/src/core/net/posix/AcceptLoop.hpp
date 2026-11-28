@@ -9,6 +9,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/IListener.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <sys/socket.h>
 
@@ -49,7 +50,7 @@ class IAcceptCall
 /// The kernel's accept: `accept4` with `SOCK_NONBLOCK | SOCK_CLOEXEC` on Linux, `accept` and then
 /// `O_NONBLOCK` elsewhere.
 /// @return The process-wide instance; it holds no state.
-[[nodiscard]] IAcceptCall& systemAcceptCall() noexcept;
+[[nodiscard]] CORE_NET_API IAcceptCall& systemAcceptCall() noexcept;
 
 namespace detail
 {
@@ -88,7 +89,7 @@ namespace detail
     /// reports is `AcceptErrorPolicy`'s (`core/net/AcceptPolicy.hpp`), for every transport.
     /// @param err The `errno` a failed `accept(2)` left.
     /// @return What the accept loop does about it, and for `Report` the category it reports.
-    [[nodiscard]] AcceptFailure acceptFailureOf(int err) noexcept;
+    [[nodiscard]] CORE_NET_API AcceptFailure acceptFailureOf(int err) noexcept;
 
 } // namespace detail
 
@@ -113,10 +114,10 @@ namespace detail
 ///        expired, @p fd and @p closed dangle, and the accept answers Cancelled without them.
 /// @param acceptCall The system call, the kernel's unless a test scripts it. A pointer, like the
 ///        others, and outliving the accept task.
-[[nodiscard]] async::Task<AcceptResult> acceptOne(EventLoop* loop,
-                                                  int const* fd,
-                                                  bool const* closed,
-                                                  std::weak_ptr<void const> listener,
-                                                  IAcceptCall* acceptCall = &systemAcceptCall());
+[[nodiscard]] CORE_NET_API async::Task<AcceptResult> acceptOne(EventLoop* loop,
+                                                               int const* fd,
+                                                               bool const* closed,
+                                                               std::weak_ptr<void const> listener,
+                                                               IAcceptCall* acceptCall = &systemAcceptCall());
 
 } // namespace core::net

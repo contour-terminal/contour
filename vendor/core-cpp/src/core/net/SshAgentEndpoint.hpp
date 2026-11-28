@@ -6,6 +6,7 @@
 /// is in `core::net_tls` (SshAgent.hpp), which includes this.
 
 #include <core/Environment.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <string>
 
@@ -15,6 +16,6 @@ namespace core::net
 /// Where this process's agent listens.
 /// @param environment The environment to read `SSH_AUTH_SOCK` from (unused on Windows).
 /// @return `SSH_AUTH_SOCK` on POSIX, empty when unset; `\\.\pipe\openssh-ssh-agent` on Windows.
-[[nodiscard]] std::string defaultSshAgentEndpoint(core::Environment const& environment);
+[[nodiscard]] CORE_NET_API std::string defaultSshAgentEndpoint(core::Environment const& environment);
 
 } // namespace core::net

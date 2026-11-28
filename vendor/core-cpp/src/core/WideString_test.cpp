@@ -68,6 +68,13 @@ class ScopedThreadLanguages
            != 0;
 }
 
+/// @return Whether the process runs under wine, whose ntdll alone exports `wine_get_version`.
+[[nodiscard]] bool runsUnderWine()
+{
+    auto* const ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
 } // namespace
 
 TEST_CASE("toUtf8 converts empty text to empty text", "[WideString][windows]")
@@ -141,6 +148,9 @@ TEST_CASE("toUtf16 refuses text that is not UTF-8", "[WideString][windows]")
 
 TEST_CASE("systemErrorMessage spells the system's message without its line break", "[WideString][windows]")
 {
+    if (runsUnderWine())
+        SKIP("wine's message tables word the system's messages otherwise (File not found. for "
+             "ERROR_FILE_NOT_FOUND)");
     if (!hasMessagesIn(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US)))
         SKIP("the system has no US English messages to compare with");
     auto const english = ScopedThreadLanguages { L"en-US\0" };
@@ -151,6 +161,8 @@ TEST_CASE("systemErrorMessage spells the system's message without its line break
 
 TEST_CASE("systemErrorMessage spells a message beyond ASCII in UTF-8", "[WideString][windows]")
 {
+    if (runsUnderWine())
+        SKIP("wine's German message table words ERROR_INVALID_HANDLE otherwise");
     // The German message holds a U+00FC, which FormatMessageA() spells in the ANSI code page: on a
     // CP-1252 host as the byte 0xFC, which UTF-8 has no reading for. The thread asks for German, as
     // a German user's does, and gets it where the system has it.

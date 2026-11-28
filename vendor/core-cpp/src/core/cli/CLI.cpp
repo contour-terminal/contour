@@ -80,6 +80,15 @@ using namespace std::string_literals;
 namespace core::cli
 {
 
+namespace about
+{
+    std::vector<Project>& store()
+    {
+        static std::vector<Project> instance;
+        return instance;
+    }
+} // namespace about
+
 namespace // {{{ helper
 {
     struct ParseContext

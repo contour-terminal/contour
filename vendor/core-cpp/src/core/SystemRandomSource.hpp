@@ -7,6 +7,8 @@
 ///
 /// Private to core::base: listed under SOURCES, not HEADERS, and not for a consumer to include.
 
+#include <core/BaseExport.hpp>
+
 #include <cstddef>
 #include <span>
 
@@ -18,6 +20,6 @@ namespace core::detail
 /// Retries what the system allows to be retried (a short read, an interrupted call); a hard failure
 /// ends the process, since there is no safe way to go on without randomness.
 /// @param out The bytes to fill.
-void fillFromSystemRandom(std::span<std::byte> out);
+CORE_BASE_API void fillFromSystemRandom(std::span<std::byte> out);
 
 } // namespace core::detail

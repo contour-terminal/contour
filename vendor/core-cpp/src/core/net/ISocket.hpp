@@ -19,14 +19,19 @@
 /// Merged from contour's `net::ISocket` and fastcached's `FastCache::ISocket`
 /// (`FastCache/Net/ISocket.hpp` at `0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21`).
 
+#include <core/net/ITlsSession.hpp>
 #include <core/net/IoAwaitable.hpp>
 #include <core/net/IoResult.hpp>
 #include <core/net/KeepAlive.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
+#include <core/net/SocketAddress.hpp>
 #include <core/net/SocketContract.hpp>
+#include <core/net/SocketOption.hpp>
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <span>
@@ -49,7 +54,7 @@ struct ReadWithFd
 /// resumes.** The operation may park and resume on a later turn of the loop, and a completion-based
 /// backend writes into the buffer while it is parked — so it is a requirement rather than a
 /// convention, and it is IOCP that makes it one.
-class ISocket
+class CORE_NET_API ISocket
 {
   public:
     ISocket() = default;
@@ -327,6 +332,51 @@ class ISocket
     /// @return The remote peer's printable address ("127.0.0.1", "::1"), or "" if unknown (an
     ///         in-memory transport).
     [[nodiscard]] virtual std::string peerAddress() const { return {}; }
+
+    /// This end's own address and port -- `getsockname` -- as a raw endpoint (@c toIpSocketAddress
+    /// reads it). For a dialled socket, the port is the ephemeral one the kernel chose; for an
+    /// accepted one, the listener's.
+    ///
+    /// **The default answers @c NetErrorCode::Unsupported**, for @c armKeepAlive's reason: a transport
+    /// with no socket under it has no address to give, and an empty endpoint would read as one. Every
+    /// decorator in this library forwards it; the TLS layer and @c SplitSocket answer from the
+    /// transport they read from. Call it on the socket's loop thread, as every other member.
+    /// @return The endpoint; @c NetErrorCode::BadHandle on a closed socket; otherwise the classified
+    ///         OS error. An AF_UNIX socket answers an AF_UNIX endpoint, which is no IP address.
+    [[nodiscard]] virtual std::expected<ResolvedEndpoint, NetError> localEndpoint() const;
+
+    /// @return The peer's address and port -- `getpeername` -- as a raw endpoint; the port
+    ///         @c peerAddress leaves out. Otherwise as @c localEndpoint, default included: a socket
+    ///         whose peer has reset the connection may answer the OS's error rather than the address.
+    [[nodiscard]] virtual std::expected<ResolvedEndpoint, NetError> remoteEndpoint() const;
+
+    /// Reads @p option -- `getsockopt` through the option's row (@c socketOptionTable).
+    ///
+    /// **The default answers @c NetErrorCode::Unsupported**, for @c armKeepAlive's reason: a
+    /// transport with no socket under it has no option to give. Every decorator in this library
+    /// forwards it; the TLS layer and @c SplitSocket answer from the transport they read from. Call
+    /// it on the socket's loop thread, as every other member.
+    /// @param option The option.
+    /// @return Its value in the row's unit; @c NetErrorCode::BadHandle on a closed socket;
+    ///         otherwise the classified OS error. An AF_UNIX socket answers
+    ///         @c NetErrorCode::Unsupported: the rows are IP ones.
+    [[nodiscard]] virtual std::expected<std::uint64_t, NetError> option(SocketOption option) const;
+
+    /// Sets @p option to @p value, in the unit of the option's row; otherwise as @c option, default
+    /// included. A value above the row's maximum is clamped to it, as @c ITcpSocket::setOption.
+    /// @param option The option.
+    /// @param value The value.
+    /// @return Nothing, or as @c option.
+    [[nodiscard]] virtual std::expected<void, NetError> setOption(SocketOption option, std::uint64_t value);
+
+    /// The TLS session this socket carries, so code that reads a TLS failure or the negotiated ALPN
+    /// protocol needs no link to `core::net_tls`.
+    ///
+    /// **The default answers null**: a transport that is not TLS has no session. The TLS layer
+    /// answers its own; every decorator in this library forwards it, so a TLS socket under a
+    /// decorator is still seen as one (@c SplitSocket answers from its read half, as @c option).
+    /// @return The session, valid for as long as this socket lives; null for a plaintext socket.
+    [[nodiscard]] virtual ITlsSession const* tlsSession() const noexcept { return nullptr; }
 
     /// Closes the socket. Idempotent; a subsequent read or write resolves with
     /// @c NetErrorCode::BadHandle.

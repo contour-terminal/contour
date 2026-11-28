@@ -7,6 +7,7 @@
 
 #include <core/net/KeepAlive.hpp>
 #include <core/net/NetError.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/SocketBuffers.hpp>
 #include <core/platform/Types.hpp>
 
@@ -45,7 +46,7 @@ struct StreamSocketOptions
 /// a connection that is otherwise up.
 /// @param socket The connected socket.
 /// @param keepAlive Whether this socket probes a silent peer.
-void applyStreamSocketOptions(platform::NativeHandle socket, KeepAlive keepAlive) noexcept;
+CORE_NET_API void applyStreamSocketOptions(platform::NativeHandle socket, KeepAlive keepAlive) noexcept;
 
 /// Arms TCP keepalive on a connected stream socket, with the intervals @p settings names.
 ///
@@ -57,8 +58,8 @@ void applyStreamSocketOptions(platform::NativeHandle socket, KeepAlive keepAlive
 /// @param socket The connected socket.
 /// @param settings The intervals to apply; @c KeepAliveSettings::count is ignored on Windows.
 /// @return Nothing on success, or the classified OS error of the option that was refused.
-[[nodiscard]] std::expected<void, NetError> armKeepAlive(platform::NativeHandle socket,
-                                                         KeepAliveSettings const& settings);
+[[nodiscard]] CORE_NET_API std::expected<void, NetError> armKeepAlive(platform::NativeHandle socket,
+                                                                      KeepAliveSettings const& settings);
 
 /// Asks the kernel for the send and receive buffers @p sizes names, on a socket that is NOT
 /// connected yet: a dialled one before `connect`, and a listening one before `listen` -- the
@@ -74,7 +75,8 @@ void applyStreamSocketOptions(platform::NativeHandle socket, KeepAlive keepAlive
 /// dial or a bind. An unset size leaves the kernel's value alone.
 /// @param socket The unconnected socket.
 /// @param sizes The sizes to ask for.
-void applySocketBufferSizes(platform::NativeHandle socket, SocketBufferSizes const& sizes) noexcept;
+CORE_NET_API void applySocketBufferSizes(platform::NativeHandle socket,
+                                         SocketBufferSizes const& sizes) noexcept;
 
 /// What the kernel reports for the options the two functions above set, for tests and
 /// diagnostics: asked of the socket rather than trusted from the call.
@@ -91,6 +93,7 @@ struct StreamSocketReport
 
 /// @param socket A stream socket.
 /// @return What its options read back as; a zero for any option the kernel would not report.
-[[nodiscard]] StreamSocketReport reportStreamSocketOptions(platform::NativeHandle socket) noexcept;
+[[nodiscard]] CORE_NET_API StreamSocketReport
+reportStreamSocketOptions(platform::NativeHandle socket) noexcept;
 
 } // namespace core::net::detail

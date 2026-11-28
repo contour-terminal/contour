@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/net/NetExport.hpp>
+
 /// @file
 /// The one way this module takes a Winsock readiness indication off an event.
 
@@ -30,6 +32,6 @@ namespace core::net
 /// @return The FD_* bitmask consumed; 0 when nothing was recorded, when either argument is
 ///         invalid, or when the enumeration itself failed (in which case the caller parks, and
 ///         the ordinary readiness path resolves it).
-[[nodiscard]] long consumeNetworkEvents(SOCKET socket, WSAEVENT event) noexcept;
+[[nodiscard]] CORE_NET_API long consumeNetworkEvents(SOCKET socket, WSAEVENT event) noexcept;
 
 } // namespace core::net

@@ -4,6 +4,8 @@
 /// @file
 /// The operating system's random source, behind an interface so that a test can replace it.
 
+#include <core/BaseExport.hpp>
+
 #include <cstddef>
 #include <span>
 
@@ -37,6 +39,6 @@ class IRandom
 /// (`core::detail::fail`, as a failed @c Require does) rather than hand back bytes that are not random. Safe
 /// to call from any thread.
 /// @return The process-wide source, valid for the life of the process.
-[[nodiscard]] IRandom& systemRandom();
+[[nodiscard]] CORE_BASE_API IRandom& systemRandom();
 
 } // namespace core

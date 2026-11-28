@@ -17,6 +17,7 @@
 /// this module: an abstract interface, a native implementation, and a test double.
 
 #include <core/Clock.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -168,12 +169,9 @@ class ManualWallClock final: public IWallClock
 /// Process-wide @c SystemWallClock for callers that want a wall-clock source without requiring
 /// every test to inject one (e.g. a default constructor argument). Tests that need determinism
 /// construct a @c ManualWallClock locally and pass it in.
+/// The instance is defined in the library, so every image linking core-cpp shares one.
 /// @return A reference to a function-local-static @c SystemWallClock.
-[[nodiscard]] inline IWallClock& defaultSystemWallClock() noexcept
-{
-    static SystemWallClock instance;
-    return instance;
-}
+[[nodiscard]] CORE_PLATFORM_API IWallClock& defaultSystemWallClock() noexcept;
 
 /// A borrowed @c IWallClock that cannot be built from a temporary.
 ///

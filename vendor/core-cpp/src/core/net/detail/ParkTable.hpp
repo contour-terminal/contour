@@ -25,6 +25,7 @@
 
 #include <core/async/ParkedWork.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/detail/ParkId.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/Types.hpp>
@@ -108,7 +109,7 @@ using ReadyCallback = void (*)(void* state, ParkWake wake);
 /// @c EventLoop::cancelTimer and @c EventLoop::requestCancel cannot be handed each other's
 /// arguments: the first retires a callback, the second unwinds a coroutine, and only one of them
 /// is meaningful for any given id.
-struct TimerId
+struct CORE_NET_API TimerId
 {
     ParkId park {}; ///< The park this timer is filed as; @c ParkId::invalid() means none.
 

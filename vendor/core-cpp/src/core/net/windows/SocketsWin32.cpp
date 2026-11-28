@@ -9,15 +9,23 @@
 // clang-format on
 
 #include <core/net/ICompletionPort.hpp>
+#include <core/net/SocketAddress.hpp>
 #include <core/net/Sockets.hpp>
+#include <core/net/detail/SocketEndpoint.hpp>
 #include <core/net/windows/InvalidSocket.hpp>
 #include <core/net/windows/IocpSocket.hpp>
 #include <core/net/windows/UnixSocketPath.hpp>
+#include <core/net/windows/WinsockError.hpp>
 #include <core/platform/WinsockInit.hpp>
 
+#include <array>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <expected>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -177,5 +185,71 @@ std::expected<std::unique_ptr<ISocket>, NetError> adoptFd(EventLoop& /*loop*/, i
 {
     return std::unexpected(makeNetError(NetErrorCode::Unsupported, 0, "adoptFd on Windows"));
 }
+
+namespace
+{
+    /// Every code Winsock's `getaddrinfo` returns, classified: its documented return values, which
+    /// its `EAI_*` macros spell, plus `WSANO_DATA` (a name with no address, which it answers in
+    /// practice) and `WSANOTINITIALISED`. `windows/ResolverErrors_test.cpp` holds the table to that
+    /// list, whole.
+    constexpr auto ResolverErrors = std::array {
+        // No such name, or no address for it: WASI's `name-unresolvable`.
+        ResolverErrorRow { .gaiCode = WSAHOST_NOT_FOUND, .code = NetErrorCode::NameNotFound },
+        ResolverErrorRow { .gaiCode = WSANO_DATA, .code = NetErrorCode::NameNotFound },
+        // The name server did not answer now: WASI's `temporary-resolver-failure`.
+        ResolverErrorRow { .gaiCode = WSATRY_AGAIN, .code = NetErrorCode::ResolverTemporaryFailure },
+        // The name server answered that it cannot: WASI's `permanent-resolver-failure`.
+        ResolverErrorRow { .gaiCode = WSANO_RECOVERY, .code = NetErrorCode::AddressError },
+        // Refusals of the request itself (`EAI_BADFLAGS`, `EAI_SERVICE`), and the two secure-name
+        // answers (`EAI_NOSECURENAME`, `EAI_IPSECPOLICY`): permanent.
+        ResolverErrorRow { .gaiCode = WSAEINVAL, .code = NetErrorCode::AddressError },
+        ResolverErrorRow { .gaiCode = WSATYPE_NOT_FOUND, .code = NetErrorCode::AddressError },
+        ResolverErrorRow { .gaiCode = WSA_SECURE_HOST_NOT_FOUND, .code = NetErrorCode::AddressError },
+        ResolverErrorRow { .gaiCode = WSA_IPSEC_NAME_POLICY_ERROR, .code = NetErrorCode::AddressError },
+        // A family or socket type refused (`EAI_FAMILY`, `EAI_SOCKTYPE`): the hints are this
+        // library's own, so permanent, as on POSIX.
+        ResolverErrorRow { .gaiCode = WSAEAFNOSUPPORT, .code = NetErrorCode::AddressError },
+        ResolverErrorRow { .gaiCode = WSAESOCKTNOSUPPORT, .code = NetErrorCode::AddressError },
+        ResolverErrorRow { .gaiCode = WSA_NOT_ENOUGH_MEMORY, .code = NetErrorCode::ResourceExhausted },
+        ResolverErrorRow { .gaiCode = WSANOTINITIALISED, .code = NetErrorCode::SystemError },
+    };
+} // namespace
+
+std::span<ResolverErrorRow const> resolverErrorTable() noexcept
+{
+    return ResolverErrors;
+}
+
+namespace detail
+{
+    int resolverSystemCode(int gaiCode) noexcept
+    {
+        // Winsock's resolver codes are WSAGetLastError values.
+        return gaiCode;
+    }
+
+    std::expected<ResolvedEndpoint, NetError> socketEndpoint(platform::NativeHandle socket, SocketSide side)
+    {
+        /// The call each side is asked with, indexed by @c SocketSide.
+        struct EndpointCall
+        {
+            decltype(&::getsockname) call; ///< `getsockname` or `getpeername`.
+            char const* name;              ///< Its name, for the error's context.
+        };
+        // Not constexpr: Winsock's functions are imported from ws2_32.dll, and an imported
+        // function's address is not a constant expression.
+        static auto const calls = std::array {
+            EndpointCall { .call = &::getsockname, .name = "getsockname" },
+            EndpointCall { .call = &::getpeername, .name = "getpeername" },
+        };
+        auto const& [call, name] = calls.at(static_cast<std::size_t>(side));
+
+        auto storage = sockaddr_storage {};
+        auto length = static_cast<int>(sizeof(storage));
+        if (call(reinterpret_cast<SOCKET>(socket), reinterpret_cast<sockaddr*>(&storage), &length) != 0)
+            return std::unexpected(fromWinsockError(::WSAGetLastError(), name));
+        return endpointFromSockaddr(&storage, static_cast<std::uint32_t>(length));
+    }
+} // namespace detail
 
 } // namespace core::net

@@ -107,19 +107,40 @@ async::Task<SocketResult> dialCompletion(EventLoop* loop,
                                          StreamSocketOptions options)
 {
     platform::ensureWinsockInitialized();
-    auto* const port = loop->completionPort();
-    if (port == nullptr)
+    if (loop->completionPort() == nullptr)
         co_return std::unexpected(
             makeNetError(NetErrorCode::Unsupported, 0, "the loop's backend lends no completion port"));
 
-    auto socket = ::WSASocketW(endpoint.family,
-                               SOCK_STREAM,
-                               endpoint.protocol,
-                               nullptr,
-                               0,
-                               WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+    auto const socket = ::WSASocketW(endpoint.family,
+                                     SOCK_STREAM,
+                                     endpoint.protocol,
+                                     nullptr,
+                                     0,
+                                     WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
     if (socket == detail::InvalidSocket)
         co_return std::unexpected(fromWinsockError(::WSAGetLastError(), "socket"));
+
+    // A statement of its own, for the reason `dialReadiness` gives (C4737).
+    auto dial = dialCompletionOn(
+        loop,
+        DialSocket { loop, DialHandles { .socket = reinterpret_cast<platform::NativeHandle>(socket) } },
+        LocalBinding::Unbound,
+        endpoint,
+        deadline,
+        options);
+    co_return co_await std::move(dial);
+}
+
+async::Task<SocketResult> dialCompletionOn(EventLoop* loop,
+                                           DialSocket owned,
+                                           LocalBinding binding,
+                                           ResolvedEndpoint endpoint,
+                                           platform::SteadyTimePoint deadline,
+                                           StreamSocketOptions options)
+{
+    platform::ensureWinsockInitialized();
+    auto socket = reinterpret_cast<SOCKET>(owned.release().socket);
+    auto* const port = loop->completionPort();
 
     // Closes whatever is LEFT when this frame goes -- an `OperationCancelled` thrown out of the wait
     // included. Closing is also what aborts a `ConnectEx` nothing will wait for; its completion
@@ -132,11 +153,15 @@ async::Task<SocketResult> dialCompletion(EventLoop* loop,
             port->forget(reinterpret_cast<platform::NativeHandle>(socket));
         ::closesocket(socket);
     } };
+    if (port == nullptr)
+        co_return std::unexpected(
+            makeNetError(NetErrorCode::Unsupported, 0, "the loop's backend lends no completion port"));
 
     // Before the connect, while the window scale can still take the receive buffer into account.
     applySocketBufferSizes(reinterpret_cast<platform::NativeHandle>(socket), options.buffers);
-    if (auto bound = bindWildcard(socket, endpoint.family); !bound)
-        co_return std::unexpected(std::move(bound.error()));
+    if (binding == LocalBinding::Unbound)
+        if (auto bound = bindWildcard(socket, endpoint.family); !bound)
+            co_return std::unexpected(std::move(bound.error()));
     auto* const connectEx = connectExFor(socket);
     if (connectEx == nullptr)
         co_return std::unexpected(fromWinsockError(::WSAGetLastError(), "WSAIoctl(ConnectEx)"));

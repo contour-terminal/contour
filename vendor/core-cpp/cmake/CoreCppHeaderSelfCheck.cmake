@@ -169,11 +169,16 @@ endfunction()
 
 ## @brief Compiles @p sources for diagnostics only, with @p usageTarget's usage requirements.
 ## @param name A suffix for the generated object library's name.
+##
+## PART_OF names the compiled library the sources belong to on the platform that builds them. They
+## are compiled as that library's own code: its export macro exports rather than imports, so a
+## definition of a function its headers declare exported is not one MSVC refuses as a definition of
+## an imported function.
 function(core_cpp_add_unbuilt_source_check name)
     if(NOT CORE_CPP_TESTING)
         return()
     endif()
-    cmake_parse_arguments(arg "" "USAGE" "SOURCES" ${ARGN})
+    cmake_parse_arguments(arg "" "USAGE;PART_OF" "SOURCES" ${ARGN})
     if(NOT arg_SOURCES OR NOT arg_USAGE)
         message(FATAL_ERROR "core_cpp_add_unbuilt_source_check(${name}): SOURCES and USAGE required")
     endif()
@@ -191,6 +196,10 @@ function(core_cpp_add_unbuilt_source_check name)
     # Never linked into anything, so the duplicate definitions it necessarily contains -- it is the
     # OTHER arm of a factory the real build already picked one of -- cannot collide.
     target_link_libraries(${checkTarget} PRIVATE ${arg_USAGE})
+    if(arg_PART_OF)
+        string(TOUPPER "${arg_PART_OF}" partOf)
+        target_compile_definitions(${checkTarget} PRIVATE "CORE_${partOf}_API_BUILDING")
+    endif()
     core_cpp_apply_toolchain(${checkTarget})
     set_target_properties(${checkTarget} PROPERTIES CXX_CLANG_TIDY "")
     set_target_properties(${checkTarget} PROPERTIES FOLDER "core-cpp/unbuilt-source-check")

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/log/LogExport.hpp>
+
 #include <ctime>
 
 /// @file
@@ -19,6 +21,6 @@ namespace core::log::detail
 ///
 /// @param time The time point to convert.
 /// @return Its broken-down fields, or a zeroed `std::tm` if the platform could not convert it.
-[[nodiscard]] std::tm localTime(std::time_t time) noexcept;
+[[nodiscard]] CORE_LOG_API std::tm localTime(std::time_t time) noexcept;
 
 } // namespace core::log::detail

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiOutputExport.hpp>
 
 #include <string>
 
@@ -19,7 +20,7 @@ namespace core::tui
 ///
 /// @param style The visual style to encode.
 /// @return The SGR escape sequence string, or empty if no attributes are set.
-[[nodiscard]] std::string buildSgrSequence(Style const& style);
+[[nodiscard]] CORE_TUI_OUTPUT_API std::string buildSgrSequence(Style const& style);
 
 /// Builds the bare SGR reset, `CSI m`, which returns every attribute to the terminal's default.
 ///
@@ -28,6 +29,6 @@ namespace core::tui
 /// writes. Before it existed the reset was private to @c TerminalOutput, and a caller that needed
 /// one spelled it itself.
 /// @return The SGR reset sequence.
-[[nodiscard]] std::string buildSgrReset();
+[[nodiscard]] CORE_TUI_OUTPUT_API std::string buildSgrReset();
 
 } // namespace core::tui

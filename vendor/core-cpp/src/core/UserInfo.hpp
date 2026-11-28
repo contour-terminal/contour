@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/BaseExport.hpp>
+
 #include <optional>
 #include <string>
 
@@ -21,11 +23,11 @@ struct PasswordEntry
 /// static buffer that concurrent callers would race on.
 ///
 /// @return The entry, or std::nullopt if the user has none or it could not be read.
-[[nodiscard]] std::optional<PasswordEntry> currentUserPasswordEntry();
+[[nodiscard]] CORE_BASE_API std::optional<PasswordEntry> currentUserPasswordEntry();
 
 /// Convenience wrapper around currentUserPasswordEntry().
 ///
 /// @return The calling user's home directory, or an empty string if it is unknown.
-[[nodiscard]] std::string userHomeDirectory();
+[[nodiscard]] CORE_BASE_API std::string userHomeDirectory();
 
 } // namespace core

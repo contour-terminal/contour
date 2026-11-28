@@ -3,6 +3,7 @@
 
 #include <core/Environment.hpp>
 #include <core/cli/CLI.hpp>
+#include <core/cli/CliExport.hpp>
 #include <core/log/LogSink.hpp>
 
 #include <expected>
@@ -18,7 +19,7 @@ namespace core::cli
 {
 
 /// General purpose Application main with CLI parameter handling and stuff.
-class App
+class CORE_CLI_API App
 {
   public:
     /// @param env    The process environment to read from. It must outlive this object, and is the

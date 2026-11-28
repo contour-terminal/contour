@@ -50,6 +50,7 @@
 #include <core/async/Task.hpp>
 #include <core/async/UniqueCoroHandle.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/net/detail/CompletionHook.hpp>
 #include <core/net/detail/ParkTable.hpp>
 #include <core/net/detail/RingQueue.hpp>
@@ -184,7 +185,7 @@ class WaitHandleAwaiter;
 ///
 /// Construct with an @c IoBackend, `spawn` background flows and/or `blockOn` a root flow; the
 /// turn runs on the calling thread.
-class EventLoop: public async::IExecutor
+class CORE_NET_API EventLoop: public async::IExecutor
 {
   public:
     /// @param backend The multiplexed wait the turn drives (not owned; outlives the loop, because
@@ -1456,9 +1457,9 @@ class WaitHandleAwaiter
 /// @param predicate Checked before each wait; the poll returns once it holds.
 /// @param interval How long to suspend between checks.
 /// @return A task that completes once @p predicate holds.
-[[nodiscard]] async::Task<void> pollUntil(EventLoop* loop,
-                                          std::function<bool()> predicate,
-                                          std::chrono::milliseconds interval = std::chrono::milliseconds {
-                                              1 });
+[[nodiscard]] CORE_NET_API async::Task<void> pollUntil(
+    EventLoop* loop,
+    std::function<bool()> predicate,
+    std::chrono::milliseconds interval = std::chrono::milliseconds { 1 });
 
 } // namespace core::net

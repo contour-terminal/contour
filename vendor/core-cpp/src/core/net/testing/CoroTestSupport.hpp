@@ -39,15 +39,37 @@ async::Task<void> anyOf(Tasks... tasks)
     std::ignore = co_await async::whenAny(std::move(tasks)...);
 }
 
-/// Polls @p ready one loop tick (1ms) at a time, bounded by @p maxTicks.
+/// Runs @p task on @p loop and gives up once @p limit has passed, stopping the task then: what
+/// bounds a test's kernel wait, so a socket that never becomes ready fails one case rather than
+/// hanging the binary into its TIMEOUT.
+/// @param loop The loop.
+/// @param task The flow to run.
+/// @param limit How long it may take.
+/// @return Whether @p task finished within @p limit.
+[[nodiscard]] inline bool blockOnWithin(EventLoop& loop,
+                                        async::Task<void> task,
+                                        std::chrono::milliseconds limit)
+{
+    auto finished = false;
+    auto run = [](async::Task<void> inner, bool* done) -> async::Task<void> {
+        co_await std::move(inner);
+        *done = true;
+    };
+    loop.blockOn(anyOf(run(std::move(task), &finished), sleepFor(&loop, limit)));
+    return finished;
+}
+
+/// Polls @p ready about once a millisecond, bounded by @p maxMilliseconds of the loop's clock rather
+/// than by a count of polls: a 1 ms delay lasts a timer tick, 15.6 ms on Windows, and a thousand of
+/// them outlasted the bounds the callers run under.
 /// @return True when @p ready held before the budget ran out.
 template <typename Predicate>
-async::Task<bool> waitUntil(EventLoop* loop, Predicate ready, int maxTicks = 1000)
+async::Task<bool> waitUntil(EventLoop* loop, Predicate ready, int maxMilliseconds = 1000)
 {
-    auto ticks = 0;
+    auto const deadline = loop->clock().now() + std::chrono::milliseconds { maxMilliseconds };
     while (!ready())
     {
-        if (++ticks > maxTicks)
+        if (loop->clock().now() >= deadline)
             co_return false;
         co_await loop->delay(std::chrono::milliseconds { 1 });
     }

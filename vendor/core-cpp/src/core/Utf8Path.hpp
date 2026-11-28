@@ -5,6 +5,7 @@
 /// A path from the UTF-8 text core-cpp's strings are spelled in, and that text back from a path.
 
 #include <core/Assert.hpp>
+#include <core/BaseExport.hpp>
 
 #include <expected>
 #include <filesystem>
@@ -35,7 +36,8 @@ namespace core
 /// @param text The path, in UTF-8.
 /// @return The path @p text spells; @c std::errc::illegal_byte_sequence on Windows where @p text
 ///         is not UTF-8.
-[[nodiscard]] std::expected<std::filesystem::path, std::error_code> pathFromUtf8(std::string_view text);
+[[nodiscard]] CORE_BASE_API std::expected<std::filesystem::path, std::error_code> pathFromUtf8(
+    std::string_view text);
 
 /// @brief The path that UTF-8 @p text spells, where the program spelled the text itself.
 ///
@@ -74,6 +76,6 @@ namespace core
 ///
 /// @param path The path.
 /// @return @p path in UTF-8, with the platform's own separators.
-[[nodiscard]] std::string pathToUtf8(std::filesystem::path const& path);
+[[nodiscard]] CORE_BASE_API std::string pathToUtf8(std::filesystem::path const& path);
 
 } // namespace core

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/tui/TerminalOutput.hpp>
+#include <core/tui/TuiCoreExport.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +33,7 @@ struct LogEntry
 /// Supports toggling between collapsed (1 header row) and expanded (header + entries)
 /// states. In expanded state, supports scrolling through entries via mouse scroll
 /// or keyboard navigation.
-class LogPanel
+class CORE_TUI_CORE_API LogPanel
 {
   public:
     /// @brief Adds a log entry to the panel.

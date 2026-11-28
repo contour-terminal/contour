@@ -12,6 +12,7 @@
 
 #include <core/net/IListener.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/platform/Types.hpp>
 
 #include <cstddef>
@@ -23,7 +24,7 @@ namespace core::net::testing
 
 /// Closes @p handle, if it is one; @c platform::InvalidHandle is ignored.
 /// @param handle A socket handle this test owns.
-void closeRawSocket(platform::NativeHandle handle) noexcept;
+CORE_NET_API void closeRawSocket(platform::NativeHandle handle) noexcept;
 
 /// A socket handle a test owns, closed when this goes unless it was released.
 class RawSocket
@@ -55,7 +56,7 @@ class RawSocket
 };
 
 /// @return A fresh IPv4 TCP socket nothing has configured, or @c platform::InvalidHandle.
-[[nodiscard]] platform::NativeHandle openRawTcpSocket() noexcept;
+[[nodiscard]] CORE_NET_API platform::NativeHandle openRawTcpSocket() noexcept;
 
 /// Both ends of one loopback TCP connection, made with blocking platform calls and no core-cpp.
 struct RawConnection
@@ -65,27 +66,28 @@ struct RawConnection
 };
 
 /// @return A loopback connection the caller owns both ends of, or two invalid handles.
-[[nodiscard]] RawConnection rawLoopbackConnection() noexcept;
+[[nodiscard]] CORE_NET_API RawConnection rawLoopbackConnection() noexcept;
 
 /// Sends all of @p payload with one blocking call.
 /// @param handle A connected socket.
 /// @param payload What to send.
 /// @return Whether every byte went.
-[[nodiscard]] bool rawSendAll(platform::NativeHandle handle, std::string_view payload) noexcept;
+[[nodiscard]] CORE_NET_API bool rawSendAll(platform::NativeHandle handle, std::string_view payload) noexcept;
 
 /// Receives into @p into with one blocking call.
 /// @param handle A connected socket.
 /// @param into Where the bytes go.
 /// @return How many arrived; zero or less at EOF or on an error.
-[[nodiscard]] std::ptrdiff_t rawReceive(platform::NativeHandle handle, std::span<char> into) noexcept;
+[[nodiscard]] CORE_NET_API std::ptrdiff_t rawReceive(platform::NativeHandle handle,
+                                                     std::span<char> into) noexcept;
 
 /// @param socket A socket core-cpp built.
 /// @return Its OS handle, or @c platform::InvalidHandle for a transport that has none (an
 ///         in-memory one).
-[[nodiscard]] platform::NativeHandle nativeHandleOf(ISocket const& socket) noexcept;
+[[nodiscard]] CORE_NET_API platform::NativeHandle nativeHandleOf(ISocket const& socket) noexcept;
 
 /// @param listener A TCP listener core-cpp built.
 /// @return Its listening OS handle, or @c platform::InvalidHandle for one that has none.
-[[nodiscard]] platform::NativeHandle nativeHandleOf(IListener const& listener) noexcept;
+[[nodiscard]] CORE_NET_API platform::NativeHandle nativeHandleOf(IListener const& listener) noexcept;
 
 } // namespace core::net::testing

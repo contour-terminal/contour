@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
+
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -168,7 +170,7 @@ class ICpuCounterSource
 /// was opened, and miss the ones that were already running.
 /// @return A source; never null, never throws. Where the platform cannot count, every measure is
 ///         unsupported and says why.
-[[nodiscard]] std::unique_ptr<ICpuCounterSource> makeDefaultCpuCounterSource();
+[[nodiscard]] CORE_PLATFORM_API std::unique_ptr<ICpuCounterSource> makeDefaultCpuCounterSource();
 
 /// Runs work and returns the counters it spent.
 /// @param source Where the counts come from.

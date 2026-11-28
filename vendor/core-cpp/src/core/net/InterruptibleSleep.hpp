@@ -16,6 +16,7 @@
 #include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <cstdint>
@@ -50,9 +51,8 @@ enum class WakeReason : std::uint8_t
 /// @return Why the wait ended.
 /// @throws async::OperationCancelled if the awaiting flow's own token was stopped while parked and
 ///         @p token was not.
-[[nodiscard]] async::Task<WakeReason> interruptibleSleepUntil(EventLoop* loop,
-                                                              async::StopToken token,
-                                                              platform::SteadyTimePoint deadline);
+[[nodiscard]] CORE_NET_API async::Task<WakeReason> interruptibleSleepUntil(
+    EventLoop* loop, async::StopToken token, platform::SteadyTimePoint deadline);
 
 /// The four-argument form fastcached callers wrote, kept for one release.
 ///
@@ -75,9 +75,10 @@ enum class WakeReason : std::uint8_t
 /// @param deadline The absolute instant to wake at.
 /// @param wakeBound Ignored; see above.
 /// @return Why the wait ended.
-[[nodiscard]] async::Task<WakeReason> interruptibleSleepUntil(EventLoop* loop,
-                                                              async::StopToken token,
-                                                              platform::SteadyTimePoint deadline,
-                                                              platform::SteadyDuration wakeBound);
+[[nodiscard]] CORE_NET_API async::Task<WakeReason> interruptibleSleepUntil(
+    EventLoop* loop,
+    async::StopToken token,
+    platform::SteadyTimePoint deadline,
+    platform::SteadyDuration wakeBound);
 
 } // namespace core::net

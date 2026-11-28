@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/platform/UserPaths.hpp>
+#include <core/platform/UserPathsTestSupport.hpp>
 #include <core/testing/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -153,3 +154,12 @@ TEST_CASE("userName.none_set", "[platform]")
 static_assert(requires { homeDirectory(); });
 static_assert(requires { configHome(); });
 static_assert(requires { userName(); });
+
+TEST_CASE("cacheHome follows XDG_CACHE_HOME, LOCALAPPDATA, then the OS row", "[platform]")
+{
+    for (auto const& row: core::platform::test::cacheHomeCases())
+    {
+        INFO(row.name);
+        CHECK(core::platform::cacheHome(FakeEnvironment { row.environment }) == row.expected);
+    }
+}

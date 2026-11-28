@@ -22,7 +22,7 @@ namespace core::log
 /// @param location Where; defaults to the caller.
 [[noreturn]] inline void fatal(std::string_view message, SourceLocation location = SourceLocation::current())
 {
-    auto static fatalLog = Category("fatal", "Fatal error Logger", Category::State::Enabled);
+    auto& fatalLog = fatalCategory();
 
     if (!message.empty())
         fatalLog(location)("Fatal error. {}", message);

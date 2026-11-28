@@ -9,6 +9,7 @@
 
 #include <core/tui/Error.hpp>
 #include <core/tui/ImageProvider.hpp>
+#include <core/tui/TuiExport.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -22,7 +23,7 @@ namespace core::tui
 /// Gates on the same isImageExtension() predicate and decodes with the same
 /// loadImage() function that the `cat` builtin already uses for image files, so
 /// the supported format set can never drift between the two.
-class FilesystemImageProvider final: public ImageProvider
+class CORE_TUI_API FilesystemImageProvider final: public ImageProvider
 {
   public:
     /// @param config Base directory, cell metrics and maximum width.
@@ -46,6 +47,6 @@ class FilesystemImageProvider final: public ImageProvider
 ///
 /// @param src The image source as written in the document.
 /// @return true for `http://`, `https://`, any scheme with `://`, `data:` and protocol-relative `//`.
-[[nodiscard]] auto isRemoteImageSource(std::string_view src) -> bool;
+[[nodiscard]] CORE_TUI_API auto isRemoteImageSource(std::string_view src) -> bool;
 
 } // namespace core::tui

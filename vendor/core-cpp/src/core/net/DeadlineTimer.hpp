@@ -23,13 +23,14 @@
 /// before the callback runs, so the destructor it triggers finds nothing left to retire.
 
 #include <core/net/EventLoop.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/platform/Clock.hpp>
 
 namespace core::net
 {
 
 /// A one-shot deadline on an @c EventLoop, disarmed by @c disarm() or by destruction.
-class DeadlineTimer
+class CORE_NET_API DeadlineTimer
 {
   public:
     /// Invoked at most once, on the loop's thread, when the deadline elapses without a

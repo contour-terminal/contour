@@ -19,6 +19,7 @@
 
 #include <core/net/ISocket.hpp>
 #include <core/net/IoAwaitable.hpp>
+#include <core/net/NetExport.hpp>
 #include <core/platform/Types.hpp>
 
 #include <chrono>
@@ -37,7 +38,7 @@ namespace core::net
 /// @c setSendDeadline set them, and a dial arms both before handing the socket over
 /// (@c BlockingConnectorOptions::ioTimeout). A deadline that expires is an error
 /// @c isDeadlineExpiry recognises.
-class BlockingSocket final: public ISocket
+class CORE_NET_API BlockingSocket final: public ISocket
 {
   public:
     /// Takes ownership of a connected, BLOCKING stream socket and arms its SIGPIPE suppression.
@@ -87,6 +88,8 @@ class BlockingSocket final: public ISocket
     void setSendDeadline(std::chrono::milliseconds deadline) const noexcept;
 
     [[nodiscard]] std::string peerAddress() const override { return _peerAddress; }
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> localEndpoint() const override;
+    [[nodiscard]] std::expected<ResolvedEndpoint, NetError> remoteEndpoint() const override;
 
     void close() noexcept override;
 

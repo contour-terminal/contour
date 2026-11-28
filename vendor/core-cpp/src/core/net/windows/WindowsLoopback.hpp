@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/net/NetExport.hpp>
+
 /// @file
 /// The shared Windows loopback-socketpair helper. Windows lacks socketpair(2),
 /// so both the platform::SystemPipe and the in-memory test transport need a connected TCP
@@ -21,6 +23,6 @@ namespace core::net
 /// @param out The two connected sockets {accepted-server, client} on success.
 /// @return True on success (both sockets valid); false otherwise, with nothing
 ///         left open (every partial path closes what it opened).
-[[nodiscard]] bool makeLoopbackPair(std::array<SOCKET, 2>& out) noexcept;
+[[nodiscard]] CORE_NET_API bool makeLoopbackPair(std::array<SOCKET, 2>& out) noexcept;
 
 } // namespace core::net

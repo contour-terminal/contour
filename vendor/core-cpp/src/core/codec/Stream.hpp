@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/codec/CodecExport.hpp>
 #include <core/codec/DecodeError.hpp>
 
 #include <cstddef>
@@ -17,7 +18,7 @@ namespace core::codec
 /// Writes a byte stream of LEB128 varints, zigzag signed varints and length-prefixed frames.
 ///
 /// The stream has no header: a format that wants a magic or a version writes them itself, first.
-class Writer
+class CORE_CODEC_API Writer
 {
   public:
     /// A frame opened by beginFrame(), closed by endFrame().
@@ -76,7 +77,7 @@ class Writer
 };
 
 /// Reads what Writer wrote. Every read can fail, and a failed read leaves the reader unusable.
-class Reader
+class CORE_CODEC_API Reader
 {
   public:
     /// @param data The bytes to read; they must outlive the reader and everything it returns.

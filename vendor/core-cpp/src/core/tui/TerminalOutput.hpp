@@ -3,6 +3,7 @@
 
 #include <core/tui/CursorShape.hpp>
 #include <core/tui/Error.hpp>
+#include <core/tui/TuiOutputExport.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -103,7 +104,7 @@ class TerminalOutput;
 /// once, when it is made, and on any other destination writes no sequence at all while still
 /// flushing at both ends. So a caller takes a guard unconditionally, and piped output carries the
 /// frame without the markers, as it carries text without colour.
-class SyncGuard
+class CORE_TUI_OUTPUT_API SyncGuard
 {
   public:
     /// @brief Constructs a no-op guard (no synchronized output).
@@ -148,7 +149,7 @@ enum class OutputKind : std::uint8_t
 /// and sixel image output.
 ///
 /// All public methods are virtual to allow subclassing for testing (e.g., MockTerminalOutput).
-class TerminalOutput
+class CORE_TUI_OUTPUT_API TerminalOutput
 {
   public:
     TerminalOutput() = default;

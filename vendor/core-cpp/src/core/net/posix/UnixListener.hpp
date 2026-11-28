@@ -4,6 +4,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IListener.hpp>
+#include <core/net/NetExport.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -21,13 +22,13 @@ namespace core::net
 /// reference behaviour rather than inventing a stricter one).
 /// @param directory The directory to create/verify.
 /// @return Nothing on success, or a @c NetError describing the refusal.
-[[nodiscard]] std::expected<void, NetError> ensureOwnedPrivateDirectory(
+[[nodiscard]] CORE_NET_API std::expected<void, NetError> ensureOwnedPrivateDirectory(
     std::filesystem::path const& directory);
 
 /// A reactor-driven, non-blocking AF_UNIX stream listener. accept() parks on the
 /// loop's waitReadable until a connection is pending, then accepts it as a
 /// non-blocking PosixSocket.
-class UnixListener final: public IListener
+class CORE_NET_API UnixListener final: public IListener
 {
   public:
     ~UnixListener() override;

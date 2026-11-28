@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/BaseExport.hpp>
+
 /// @file
 /// Text between the UTF-8 core-cpp's strings are spelled in and the UTF-16 the wide Win32 API
 /// takes and answers. Windows only: a `wchar_t` is UTF-16 there and UTF-32 elsewhere, so on any
@@ -33,7 +35,7 @@ namespace core
 /// @param text UTF-8 text.
 /// @return @p text in UTF-16, empty when @p text is; @c std::errc::illegal_byte_sequence where it
 ///         is not UTF-8.
-[[nodiscard]] std::expected<std::wstring, std::error_code> toUtf16(std::string_view text);
+[[nodiscard]] CORE_BASE_API std::expected<std::wstring, std::error_code> toUtf16(std::string_view text);
 
 /// @brief Converts UTF-16, as a wide Win32 API answers, to the UTF-8 core-cpp's strings are spelled in.
 ///
@@ -47,7 +49,7 @@ namespace core
 ///      text a wide Win32 API answers is.
 /// @param text UTF-16 text.
 /// @return @p text in UTF-8; empty when @p text is.
-[[nodiscard]] std::string toUtf8(std::wstring_view text);
+[[nodiscard]] CORE_BASE_API std::string toUtf8(std::wstring_view text);
 
 /// @brief The system's message for a Win32 error, in UTF-8.
 ///
@@ -63,7 +65,7 @@ namespace core
 /// @param errorCode The error, as `GetLastError()` reports it: a `DWORD`, spelled without
 ///        `<windows.h>`.
 /// @return The message; `unknown error <errorCode>`, in decimal, where the system has none.
-[[nodiscard]] std::string systemErrorMessage(unsigned long errorCode);
+[[nodiscard]] CORE_BASE_API std::string systemErrorMessage(unsigned long errorCode);
 
 } // namespace core
 

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/platform/FileSystem.hpp>
+#include <core/platform/PlatformExport.hpp>
 
 #include <initializer_list>
 #include <map>
@@ -42,7 +43,7 @@ struct FileEntry
 ///     { "/tmp/data", "", { .isDirectory = true } },
 /// });
 /// @endcode
-class InMemoryFileSystem final: public FileSystem
+class CORE_PLATFORM_API InMemoryFileSystem final: public FileSystem
 {
   public:
     InMemoryFileSystem() = default;

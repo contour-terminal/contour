@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/detail/StreamSocketOptions.hpp>
 
+#include <core/net/IpSocketAddress.hpp>
+#include <core/net/SocketOption.hpp>
 #include <core/net/detail/SocketErrors.hpp>
+#include <core/net/detail/SocketOptionAccess.hpp>
 
 #include <sys/socket.h>
 
@@ -9,6 +12,7 @@
 #include <chrono>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <tuple>
@@ -23,15 +27,6 @@ namespace core::net::detail
 
 namespace
 {
-    /// macOS spells the idle time `TCP_KEEPALIVE`; it is `TCP_KEEPIDLE` everywhere else.
-#ifdef __APPLE__
-    constexpr int KeepAliveIdleOption = TCP_KEEPALIVE;
-    constexpr char const* KeepAliveIdleName = "setsockopt(TCP_KEEPALIVE)";
-#else
-    constexpr int KeepAliveIdleOption = TCP_KEEPIDLE;
-    constexpr char const* KeepAliveIdleName = "setsockopt(TCP_KEEPIDLE)";
-#endif
-
     /// Whole seconds, and never zero.
     ///
     /// The keepalive options take seconds, and a zero is not "immediately" — it is rejected, or
@@ -59,16 +54,17 @@ std::expected<void, NetError> armKeepAlive(platform::NativeHandle socket, KeepAl
     // not be applied would be left probing on the system default -- two hours on Linux --
     // which is indistinguishable from no keepalive at all for every deadline this protects,
     // while reading back as armed to anything that checks the flag.
-    auto const apply =
-        [socket](int level, int option, int value, char const* what) -> std::expected<void, NetError> {
-        if (::setsockopt(socket, level, option, &value, sizeof(value)) != 0)
-            return std::unexpected(socketError(lastSocketError(), what));
-        return {};
+    //
+    // Through the option table's rows, which name the platform's spelling of each (macOS calls the
+    // idle time `TCP_KEEPALIVE`). They are TCP-level and the same for both families, so the IPv4
+    // rows serve an IPv6 socket too.
+    auto const apply = [socket](SocketOption option, int value) {
+        return writeSocketOption(socket, AddressFamily::Ipv4, option, static_cast<std::uint64_t>(value));
     };
-    return apply(IPPROTO_TCP, KeepAliveIdleOption, idle, KeepAliveIdleName)
-        .and_then([&] { return apply(IPPROTO_TCP, TCP_KEEPINTVL, interval, "setsockopt(TCP_KEEPINTVL)"); })
-        .and_then([&] { return apply(IPPROTO_TCP, TCP_KEEPCNT, count, "setsockopt(TCP_KEEPCNT)"); })
-        .and_then([&] { return apply(SOL_SOCKET, SO_KEEPALIVE, 1, "setsockopt(SO_KEEPALIVE)"); });
+    return apply(SocketOption::KeepAliveIdleTime, idle)
+        .and_then([&] { return apply(SocketOption::KeepAliveInterval, interval); })
+        .and_then([&] { return apply(SocketOption::KeepAliveCount, count); })
+        .and_then([&] { return apply(SocketOption::KeepAliveEnabled, 1); });
 }
 
 namespace
@@ -96,6 +92,12 @@ namespace
         if (::getsockopt(fd, level, option, &value, &length) != 0)
             return 0;
         return value;
+    }
+
+    /// @return A keepalive option through its row, as @c armKeepAlive sets it; 0 if unreadable.
+    [[nodiscard]] int keepAliveRow(int fd, SocketOption option) noexcept
+    {
+        return static_cast<int>(readSocketOption(fd, AddressFamily::Ipv4, option).value_or(0));
     }
 } // namespace
 
@@ -135,9 +137,9 @@ StreamSocketReport reportStreamSocketOptions(platform::NativeHandle socket) noex
         .sendBuffer = clampedSize(readOption(socket, SOL_SOCKET, SO_SNDBUF)),
         .receiveBuffer = clampedSize(readOption(socket, SOL_SOCKET, SO_RCVBUF)),
         .keepAlive = readOption(socket, SOL_SOCKET, SO_KEEPALIVE) != 0,
-        .keepAliveIdleSeconds = readOption(socket, IPPROTO_TCP, KeepAliveIdleOption),
-        .keepAliveIntervalSeconds = readOption(socket, IPPROTO_TCP, TCP_KEEPINTVL),
-        .keepAliveCount = readOption(socket, IPPROTO_TCP, TCP_KEEPCNT),
+        .keepAliveIdleSeconds = keepAliveRow(socket, SocketOption::KeepAliveIdleTime),
+        .keepAliveIntervalSeconds = keepAliveRow(socket, SocketOption::KeepAliveInterval),
+        .keepAliveCount = keepAliveRow(socket, SocketOption::KeepAliveCount),
     };
 }
 

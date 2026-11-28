@@ -2,24 +2,24 @@
 #include <core/async/Cancellation.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/NetError.hpp>
 #include <core/net/SocketAddress.hpp>
 #include <core/net/ThreadedAddressResolver.hpp>
 #include <core/net/detail/ScopeGuard.hpp>
+#include <core/net/testing/ScriptedAddressResolver.hpp>
 #include <core/net/testing/TestLoop.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <mutex>
 #include <ranges>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -29,83 +29,23 @@ using core::net::EventLoop;
 using core::net::ResolvedEndpoint;
 using core::net::ResolveResult;
 using core::net::ThreadedAddressResolver;
+using core::net::testing::ScriptedAddressResolver;
 
 namespace
 {
 
-/// A blocking resolver with no DNS behind it: it answers from a script and records who asked.
+/// How long a case waits for a held lookup to reach the resolver before it gives up.
+constexpr auto EnterBudget = std::chrono::seconds { 10 };
+
+/// Scripts @p inner to answer `example.test`; any other name is not found.
 ///
 /// The whole point of the seam is that a test can say what resolution costs and observe which
 /// thread paid for it, so every property below is provable without a name server anywhere.
-class ScriptedResolver final: public core::net::IAddressResolver
+/// @param inner The resolver to script.
+void scriptExample(ScriptedAddressResolver& inner)
 {
-  public:
-    [[nodiscard]] std::expected<std::vector<ResolvedEndpoint>, std::string> resolve(
-        std::string_view host, std::uint16_t /*port*/) override
-    {
-        {
-            auto const guard = std::scoped_lock { _mutex };
-            _callers.push_back(std::this_thread::get_id());
-            ++_calls;
-        }
-        _entered.notify_all();
-
-        // Held here until a case releases it, so "the queue is full" and "a lookup is still in
-        // flight" are arranged states rather than races.
-        auto lock = std::unique_lock { _mutex };
-        _release.wait(lock, [this] { return !_hold; });
-        lock.unlock();
-
-        if (host == "unresolvable.invalid")
-            return std::unexpected(std::string { "scripted failure" });
-        return std::vector<ResolvedEndpoint> { ResolvedEndpoint {
-            .length = 16, .family = 2, .protocol = 6 } };
-    }
-
-    /// Makes every later lookup block inside @c resolve until @c release is called.
-    void hold() noexcept
-    {
-        auto const guard = std::scoped_lock { _mutex };
-        _hold = true;
-    }
-
-    void release() noexcept
-    {
-        {
-            auto const guard = std::scoped_lock { _mutex };
-            _hold = false;
-        }
-        _release.notify_all();
-    }
-
-    /// Blocks until @p count lookups have entered @c resolve.
-    void awaitEntered(std::size_t count)
-    {
-        auto lock = std::unique_lock { _mutex };
-        _entered.wait(lock, [&] { return _calls >= count; });
-    }
-
-    [[nodiscard]] std::size_t calls() const
-    {
-        auto const guard = std::scoped_lock { _mutex };
-        return _calls;
-    }
-
-    /// @return The thread each lookup ran on, in call order.
-    [[nodiscard]] std::vector<std::thread::id> callers() const
-    {
-        auto const guard = std::scoped_lock { _mutex };
-        return _callers;
-    }
-
-  private:
-    mutable std::mutex _mutex;
-    std::condition_variable _release;
-    std::condition_variable _entered;
-    std::vector<std::thread::id> _callers;
-    std::size_t _calls = 0;
-    bool _hold = false;
-};
+    inner.answer("example.test", { ResolvedEndpoint { .length = 16, .family = 2, .protocol = 6 } });
+}
 
 /// Resolves through @p resolver on @p loop and records what came back.
 Task<void> resolveOn(EventLoop* loop,
@@ -143,7 +83,8 @@ TEST_CASE("a literal never reaches the resolver pool", "[net]")
     // to a literal, and paying a thread hand-off plus two context switches for `inet_pton` would
     // be a real regression on the hot path. It is also what lets the whole connect path be
     // exercised with no thread existing at all.
-    auto inner = ScriptedResolver {};
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
     auto resolver = ThreadedAddressResolver { inner };
 
     auto clock = core::platform::ManualClock {};
@@ -165,7 +106,8 @@ TEST_CASE("a name is resolved on another thread and resumes on the loop's", "[ne
     // The property the whole task exists for, asserted at the seam rather than through a dial:
     // the lookup runs somewhere that is NOT the thread driving the loop, and the coroutine that
     // asked for it continues where it was — on the loop.
-    auto inner = ScriptedResolver {};
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
     auto resolver = ThreadedAddressResolver { inner };
 
     auto backend = core::net::makeBackend(core::net::preferredBackendKind());
@@ -187,7 +129,8 @@ TEST_CASE("a null loop resolves inline, because there is nowhere to hand a resul
 {
     // A correctness requirement rather than a second optimisation: with nothing to submit the
     // result to, offloading would park a coroutine that nothing could ever resume.
-    auto inner = ScriptedResolver {};
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
     auto resolver = ThreadedAddressResolver { inner };
 
     auto clock = core::platform::ManualClock {};
@@ -207,9 +150,10 @@ TEST_CASE("a full resolver queue is refused rather than waited on", "[net]")
 {
     // An unbounded queue is a memory-exhaustion hole reachable by whatever provokes dials, and
     // blocking the caller to wait for room would reintroduce, on the loop thread, exactly the
-    // stall this class exists to remove. `WouldBlock` and not `SystemError`, because a caller can
-    // retry the first and can do nothing at all with the second.
-    auto inner = ScriptedResolver {};
+    // stall this class exists to remove. `ResourceExhausted`, which a caller may retry once a lookup
+    // has returned, and never `WouldBlock`, which an accept loop reads as a deadline's tick.
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
     inner.hold();
     auto resolver = ThreadedAddressResolver { inner, { .threads = 1, .maxQueueDepth = 1 } };
 
@@ -226,14 +170,15 @@ TEST_CASE("a full resolver queue is refused rather than waited on", "[net]")
 
     loop.spawn(resolveOn(&loop, &resolver, "one.test", &first, &where));
     loop.runUntilIdle();
-    inner.awaitEntered(1);
+    REQUIRE(inner.awaitEntered(1, EnterBudget) >= 1);
     loop.spawn(resolveOn(&loop, &resolver, "two.test", &second, &where));
     loop.runUntilIdle();
 
     // The third has nowhere to go: the worker is busy and the queue slot is taken.
     loop.blockOn(resolveOn(&loop, &resolver, "three.test", &third, &where));
     REQUIRE_FALSE(third.has_value());
-    CHECK(third.error().code == core::net::NetErrorCode::WouldBlock);
+    CHECK(third.error().code == core::net::NetErrorCode::ResourceExhausted);
+    CHECK_FALSE(core::net::isDeadlineExpiry(third.error().code));
     CHECK(resolver.refused() == 1);
 
     inner.release();
@@ -245,7 +190,8 @@ TEST_CASE("stopping the resolver resumes a queued lookup rather than stranding i
     // A queued lookup whose coroutine is never resumed is a leaked frame, so `stop` fails
     // everything queued instead of dropping it. A lookup already inside the blocking call cannot
     // be interrupted — there is no portable way — so the join waits for that one.
-    auto inner = ScriptedResolver {};
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
     inner.hold();
     auto resolver = ThreadedAddressResolver { inner, { .threads = 1, .maxQueueDepth = 8 } };
 
@@ -259,7 +205,7 @@ TEST_CASE("stopping the resolver resumes a queued lookup rather than stranding i
 
     loop.spawn(resolveOn(&loop, &resolver, "in-flight.test", &inFlight, &where));
     loop.runUntilIdle();
-    inner.awaitEntered(1);
+    REQUIRE(inner.awaitEntered(1, EnterBudget) >= 1);
     loop.spawn(resolveOn(&loop, &resolver, "queued.test", &queued, &where));
     loop.runUntilIdle();
 
@@ -298,7 +244,8 @@ TEST_CASE("a stop ends a lookup that never returns and the answer that arrives l
     // returns. It is released only after the flow is gone, which is the second half: the worker
     // then publishes an answer for a frame that no longer exists, and that answer must go
     // nowhere. A hand-back queued to the loop is what delivering it would look like.
-    auto inner = ScriptedResolver {};
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
     inner.hold();
     auto resolver = ThreadedAddressResolver { inner, { .threads = 1, .maxQueueDepth = 8 } };
 
@@ -309,7 +256,7 @@ TEST_CASE("a stop ends a lookup that never returns and the answer that arrives l
     auto cancelled = false;
     loop.spawn(resolveOrUnwind(&loop, &resolver, "silent.test", &answer, &cancelled));
     loop.drain();
-    inner.awaitEntered(1);
+    REQUIRE(inner.awaitEntered(1, EnterBudget) >= 1);
 
     loop.rootStopSource().request_stop();
     loop.drain();
@@ -331,7 +278,8 @@ TEST_CASE("a stop from another thread ends a lookup that never returns", "[net]"
     // request it: off the loop. The stop callback then runs on THAT thread, beside a worker
     // thread that may be publishing at the same moment, which is the arrangement
     // ThreadSanitizer needs to see.
-    auto inner = ScriptedResolver {};
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
     inner.hold();
     auto resolver = ThreadedAddressResolver { inner, { .threads = 1, .maxQueueDepth = 8 } };
 
@@ -349,7 +297,9 @@ TEST_CASE("a stop from another thread ends a lookup that never returns", "[net]"
     // release is what finally resumes the flow — with an ANSWER, which the CHECK below reports as
     // a red instead of the case hanging until ctest's TIMEOUT says nothing about why.
     auto stopper = std::thread { [&loop, &inner, &flowDone] {
-        inner.awaitEntered(1);
+        // Not asserted: Catch2 is not thread-safe, and a lookup that never entered leaves the flow
+        // parked, which the CHECK on the test's thread reports.
+        static_cast<void>(inner.awaitEntered(1, EnterBudget));
         loop.rootStopSource().request_stop();
         for ([[maybe_unused]] auto const tick: std::views::iota(0, 5000))
         {
@@ -373,4 +323,89 @@ TEST_CASE("a stop from another thread ends a lookup that never returns", "[net]"
     if (stopper.joinable())
         stopper.join();
     resolver.stop();
+}
+
+TEST_CASE("a classified resolver failure survives the hop to and from the resolver thread", "[net]")
+{
+    // A name that does not exist and a resolver that could not answer are two different things to
+    // the flow that asked, and the pool must not flatten them into one `AddressError` on the way
+    // back. Both arms: the offloaded one, and the inline one a null loop takes.
+    auto script = ScriptedAddressResolver {};
+    script.failWithCode(core::net::makeNetError(core::net::NetErrorCode::NameNotFound, 0, "NXDOMAIN"));
+    auto resolver = ThreadedAddressResolver { script, { .threads = 1, .maxQueueDepth = 8 } };
+
+    auto backend = core::net::makeBackend(core::net::preferredBackendKind());
+    REQUIRE(backend != nullptr);
+    auto loop = EventLoop { *backend };
+
+    auto offloaded = ResolveResult {};
+    auto inlined = ResolveResult {};
+    auto where = std::thread::id {};
+    loop.blockOn(resolveOn(&loop, &resolver, "missing.test", &offloaded, &where));
+    loop.blockOn(resolveOn(nullptr, &resolver, "missing.test", &inlined, &where));
+
+    CHECK(resolver.offloaded() == 1);
+    REQUIRE_FALSE(offloaded.has_value());
+    CHECK(offloaded.error().code == core::net::NetErrorCode::NameNotFound);
+    CHECK(offloaded.error().context == "cannot resolve missing.test:80: NXDOMAIN");
+    REQUIRE_FALSE(inlined.has_value());
+    CHECK(inlined.error().code == core::net::NetErrorCode::NameNotFound);
+}
+
+TEST_CASE("a held scripted lookup parks the flow until it is released", "[net]")
+{
+    // The scripted resolver's hold, driven across the thread it is for: the flow stays parked while
+    // the worker is held inside the lookup, and resumes with the scripted answer once released.
+    auto script = ScriptedAddressResolver {};
+    script.answer("db.test", { ResolvedEndpoint { .length = 16, .family = 2, .protocol = 6 } });
+    script.hold();
+    auto resolver = ThreadedAddressResolver { script, { .threads = 1, .maxQueueDepth = 8 } };
+    auto const releaseOnExit = core::net::detail::ScopeGuard { [&script]() noexcept { script.release(); } };
+
+    auto backend = core::net::makeBackend(core::net::preferredBackendKind());
+    REQUIRE(backend != nullptr);
+    auto loop = EventLoop { *backend };
+
+    auto answer = ResolveResult { std::unexpected(core::net::makeNetError(core::net::NetErrorCode::Ok)) };
+    auto resumedOn = std::thread::id {};
+    loop.spawn(resolveOn(&loop, &resolver, "db.test", &answer, &resumedOn));
+    loop.runUntilIdle();
+    REQUIRE(script.awaitEntered(1, EnterBudget) == 1);
+    loop.runUntilIdle();
+    CHECK(resumedOn == std::thread::id {}); // still parked: the worker is held
+
+    script.release();
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 5000))
+    {
+        if (resumedOn != std::thread::id {})
+            break;
+        loop.runUntilIdle();
+        std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+    }
+    CHECK(resumedOn == std::this_thread::get_id());
+    REQUIRE(answer.has_value());
+    CHECK(answer->size() == 1);
+    resolver.stop();
+}
+
+TEST_CASE("a host no name can be is refused before any resolver thread sees it", "[net]")
+{
+    // The same refusal as ExecutorAddressResolver's: an empty host (getaddrinfo's wildcard), a NUL,
+    // or more than 253 bytes.
+    auto const tooLong = std::string(254, 'a');
+    auto const host = GENERATE_COPY(std::string {}, std::string { "example.test\0evil", 17 }, tooLong);
+    auto const viaLoop = GENERATE(true, false);
+    CAPTURE(host.size(), viaLoop);
+    auto inner = ScriptedAddressResolver {};
+    scriptExample(inner);
+    auto resolver = ThreadedAddressResolver { inner };
+    auto clock = core::platform::ManualClock {};
+    auto loop = core::net::testing::TestLoop { clock };
+    auto answer = ResolveResult {};
+    auto resumedOn = std::thread::id {};
+    loop.blockOn(resolveOn(viaLoop ? &loop : nullptr, &resolver, host, &answer, &resumedOn));
+    REQUIRE_FALSE(answer.has_value());
+    CHECK(answer.error().code == core::net::NetErrorCode::AddressError);
+    CHECK(resolver.offloaded() == 0);
+    CHECK(inner.calls() == 0);
 }

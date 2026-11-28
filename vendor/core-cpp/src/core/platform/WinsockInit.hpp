@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/platform/PlatformExport.hpp>
+
 /// @file WinsockInit.hpp
 /// @brief Process-wide, idempotent WinSock initialization.
 ///
@@ -15,6 +17,6 @@ namespace core::platform
 
 /// Ensures WinSock is initialized for the lifetime of the process. Idempotent and
 /// thread-safe (initialization happens once, on first call). No-op on POSIX.
-void ensureWinsockInitialized() noexcept;
+CORE_PLATFORM_API void ensureWinsockInitialized() noexcept;
 
 } // namespace core::platform
